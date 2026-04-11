@@ -11,6 +11,7 @@ use crate::probe;
 pub enum ProviderKind {
     Mock,
     Claude,
+    Codex,
 }
 
 impl ProviderKind {
@@ -18,21 +19,47 @@ impl ProviderKind {
         match self {
             Self::Mock => "mock",
             Self::Claude => "claude",
+            Self::Codex => "codex",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
             Self::Mock => Self::Claude,
-            Self::Claude => Self::Mock,
+            Self::Claude => Self::Codex,
+            Self::Codex => Self::Mock,
         }
     }
+
+    pub fn all() -> [ProviderKind; 3] {
+        [ProviderKind::Mock, ProviderKind::Claude, ProviderKind::Codex]
+    }
+}
+
+/// Session handle for multi-turn conversation continuity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionHandle {
+    ClaudeSession { session_id: String },
+    CodexThread { thread_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderEvent {
     Status(String),
     AssistantChunk(String),
+    ThinkingChunk(String),
+    ToolCallStarted {
+        name: String,
+        call_id: Option<String>,
+        input_preview: Option<String>,
+    },
+    ToolCallFinished {
+        name: String,
+        call_id: Option<String>,
+        output_preview: Option<String>,
+        success: bool,
+    },
+    SessionHandle(SessionHandle),
     Error(String),
     Finished,
 }
@@ -40,6 +67,8 @@ pub enum ProviderEvent {
 pub fn default_provider() -> ProviderKind {
     if probe::is_provider_available("claude") {
         ProviderKind::Claude
+    } else if probe::is_provider_available("codex") {
+        ProviderKind::Codex
     } else {
         ProviderKind::Mock
     }
@@ -48,11 +77,13 @@ pub fn default_provider() -> ProviderKind {
 pub fn start_provider(
     provider: ProviderKind,
     prompt: String,
+    session_handle: Option<SessionHandle>,
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
     match provider {
         ProviderKind::Mock => start_mock_provider(prompt, event_tx),
-        ProviderKind::Claude => crate::providers::claude::start(prompt, event_tx),
+        ProviderKind::Claude => crate::providers::claude::start(prompt, session_handle, event_tx),
+        ProviderKind::Codex => crate::providers::codex::start(prompt, session_handle, event_tx),
     }
 }
 
@@ -86,7 +117,7 @@ mod tests {
     fn mock_provider_emits_assistant_chunks_and_finishes() {
         let (tx, rx) = mpsc::channel();
 
-        start_provider(ProviderKind::Mock, "hello".to_string(), tx).expect("start provider");
+        start_provider(ProviderKind::Mock, "hello".to_string(), None, tx).expect("start provider");
 
         let mut saw_chunk = false;
         let mut saw_finished = false;
@@ -102,7 +133,12 @@ mod tests {
                     saw_finished = true;
                     break;
                 }
-                ProviderEvent::Status(_) | ProviderEvent::Error(_) => {}
+                ProviderEvent::Status(_)
+                | ProviderEvent::ThinkingChunk(_)
+                | ProviderEvent::ToolCallStarted { .. }
+                | ProviderEvent::ToolCallFinished { .. }
+                | ProviderEvent::SessionHandle(_)
+                | ProviderEvent::Error(_) => {}
             }
         }
 

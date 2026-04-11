@@ -8,4 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 agile-agent-core = { path = "../agile-agent-core" }
 crossterm.workspace = true
+pulldown-cmark.workspace = true
 ratatui.workspace = true
+textwrap.workspace = true
+unicode-width.workspace = true

@@ -47,8 +47,9 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
                     InputOutcome::Submit(user_input) => {
                         let (event_tx, event_rx) = mpsc::channel();
                         let provider_kind = state.selected_provider;
+                        let session_handle = state.current_session_handle();
                         if let Err(err) =
-                            provider::start_provider(provider_kind, user_input, event_tx)
+                            provider::start_provider(provider_kind, user_input, session_handle, event_tx)
                         {
                             state.push_error_message(format!("failed to start provider: {err}"));
                         } else {
@@ -68,6 +69,19 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
                 match event {
                     ProviderEvent::Status(text) => state.push_status_message(text),
                     ProviderEvent::AssistantChunk(chunk) => state.append_assistant_chunk(&chunk),
+                    ProviderEvent::ThinkingChunk(chunk) => state.append_thinking_chunk(&chunk),
+                    ProviderEvent::ToolCallStarted {
+                        name,
+                        call_id,
+                        input_preview,
+                    } => state.push_tool_call_started(name, call_id, input_preview),
+                    ProviderEvent::ToolCallFinished {
+                        name,
+                        call_id,
+                        output_preview,
+                        success,
+                    } => state.push_tool_call_finished(name, call_id, output_preview, success),
+                    ProviderEvent::SessionHandle(handle) => state.apply_session_handle(handle),
                     ProviderEvent::Error(error) => state.push_error_message(error),
                     ProviderEvent::Finished => {
                         state.finish_provider_response();

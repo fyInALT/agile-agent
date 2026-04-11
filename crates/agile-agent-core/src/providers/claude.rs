@@ -11,14 +11,19 @@ use serde::Deserialize;
 
 use crate::probe::CLAUDE_PATH_ENV;
 use crate::provider::ProviderEvent;
+use crate::provider::SessionHandle;
 
-pub fn start(prompt: String, event_tx: Sender<ProviderEvent>) -> Result<()> {
+pub fn start(
+    prompt: String,
+    session_handle: Option<SessionHandle>,
+    event_tx: Sender<ProviderEvent>,
+) -> Result<()> {
     let executable = resolve_claude_executable()?;
 
     thread::Builder::new()
         .name("agile-agent-claude-provider".to_string())
         .spawn(move || {
-            let run_result = run_claude(prompt, executable, &event_tx);
+            let run_result = run_claude(prompt, session_handle, executable, &event_tx);
             if let Err(err) = run_result {
                 let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
             }
@@ -28,8 +33,13 @@ pub fn start(prompt: String, event_tx: Sender<ProviderEvent>) -> Result<()> {
         .map_err(Into::into)
 }
 
-fn run_claude(prompt: String, executable: String, event_tx: &Sender<ProviderEvent>) -> Result<()> {
-    let args = build_claude_args();
+fn run_claude(
+    prompt: String,
+    session_handle: Option<SessionHandle>,
+    executable: String,
+    event_tx: &Sender<ProviderEvent>,
+) -> Result<()> {
+    let args = build_claude_args(session_handle);
     let mut command = Command::new(&executable);
     command.args(&args);
     command.stdin(Stdio::piped());
@@ -107,19 +117,27 @@ fn resolve_claude_executable_from(configured: &str) -> Result<std::path::PathBuf
         .with_context(|| format!("claude executable not found at `{configured}`"))
 }
 
-fn build_claude_args() -> [&'static str; 10] {
-    [
-        "-p",
-        "--bare",
-        "--output-format",
-        "stream-json",
-        "--input-format",
-        "stream-json",
-        "--verbose",
-        "--strict-mcp-config",
-        "--permission-mode",
-        "bypassPermissions",
-    ]
+fn build_claude_args(session_handle: Option<SessionHandle>) -> Vec<String> {
+    let mut args = vec![
+        "-p".to_string(),
+        "--bare".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--input-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--strict-mcp-config".to_string(),
+        "--permission-mode".to_string(),
+        "bypassPermissions".to_string(),
+    ];
+
+    // Add --resume for multi-turn conversation
+    if let Some(SessionHandle::ClaudeSession { session_id }) = session_handle {
+        args.push("--resume".to_string());
+        args.push(session_id);
+    }
+
+    args
 }
 
 fn build_claude_input(prompt: &str) -> Result<String> {
@@ -201,6 +219,9 @@ fn parse_assistant_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEven
 fn parse_system_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
     if let Some(session_id) = message.session_id.filter(|value| !value.is_empty()) {
+        events.push(ProviderEvent::SessionHandle(SessionHandle::ClaudeSession {
+            session_id: session_id.clone(),
+        }));
         events.push(ProviderEvent::Status(format!(
             "claude session: {session_id}"
         )));
@@ -209,13 +230,21 @@ fn parse_system_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
 }
 
 fn parse_result_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
-    if message.is_error {
-        vec![ProviderEvent::Error(message.result.unwrap_or_else(|| {
-            "claude returned an error result".to_string()
-        }))]
-    } else {
-        Vec::new()
+    let mut events = Vec::new();
+
+    if let Some(session_id) = message.session_id.filter(|value| !value.is_empty()) {
+        events.push(ProviderEvent::SessionHandle(SessionHandle::ClaudeSession {
+            session_id,
+        }));
     }
+
+    if message.is_error {
+        events.push(ProviderEvent::Error(message.result.unwrap_or_else(|| {
+            "claude returned an error result".to_string()
+        })));
+    }
+
+    events
 }
 
 fn parse_log_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
@@ -269,7 +298,10 @@ struct ClaudeContentBlock {
 
 #[cfg(test)]
 mod tests {
+    use crate::provider::SessionHandle;
+
     use super::ProviderEvent;
+    use super::build_claude_args;
     use super::build_claude_input;
     use super::parse_output_line;
     use super::resolve_claude_executable_from;
@@ -280,6 +312,15 @@ mod tests {
         assert!(input.contains("\"type\":\"user\""));
         assert!(input.contains("\"text\":\"hello\""));
         assert!(input.ends_with('\n'));
+    }
+
+    #[test]
+    fn includes_resume_arguments_when_session_handle_is_present() {
+        let args = build_claude_args(Some(SessionHandle::ClaudeSession {
+            session_id: "abc123".to_string(),
+        }));
+
+        assert!(args.windows(2).any(|window| window == ["--resume", "abc123"]));
     }
 
     #[test]
@@ -323,6 +364,37 @@ mod tests {
         assert_eq!(
             events,
             vec![ProviderEvent::Status("claude info: starting".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_session_updates_from_system_messages() {
+        let line = r#"{"type":"system","session_id":"sess-1"}"#;
+
+        let events = parse_output_line(line).expect("parse system line");
+
+        assert_eq!(
+            events,
+            vec![
+                ProviderEvent::SessionHandle(SessionHandle::ClaudeSession {
+                    session_id: "sess-1".to_string()
+                }),
+                ProviderEvent::Status("claude session: sess-1".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_session_updates_from_result_messages() {
+        let line = r#"{"type":"result","session_id":"sess-2","is_error":false}"#;
+
+        let events = parse_output_line(line).expect("parse result line");
+
+        assert_eq!(
+            events,
+            vec![ProviderEvent::SessionHandle(SessionHandle::ClaudeSession {
+                session_id: "sess-2".to_string()
+            })]
         );
     }
 
