@@ -193,7 +193,7 @@ fn parse_output_line(line: &str) -> Result<Vec<ProviderEvent>> {
         "system" => Ok(parse_system_message(message)),
         "result" => Ok(parse_result_message(message)),
         "log" => Ok(parse_log_message(message)),
-        "user" => Ok(Vec::new()),
+        "user" => parse_user_message(message),
         other => Ok(vec![ProviderEvent::Status(format!(
             "ignored claude event type: {other}"
         ))]),
@@ -209,8 +209,62 @@ fn parse_assistant_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEven
 
     let mut events = Vec::new();
     for block in content.content {
-        if block.r#type == "text" && !block.text.is_empty() {
-            events.push(ProviderEvent::AssistantChunk(block.text));
+        match block.r#type.as_str() {
+            "text" if !block.text.is_empty() => {
+                events.push(ProviderEvent::AssistantChunk(block.text));
+            }
+            "thinking" => {
+                let thinking_text = if !block.text.is_empty() {
+                    block.text
+                } else {
+                    block.thinking
+                };
+                if !thinking_text.is_empty() {
+                    events.push(ProviderEvent::ThinkingChunk(thinking_text));
+                }
+            }
+            "tool_use" => {
+                let input_preview = block
+                    .input
+                    .as_ref()
+                    .and_then(|value| serde_json::to_string(value).ok());
+                events.push(ProviderEvent::ToolCallStarted {
+                    name: if block.name.is_empty() {
+                        "tool_use".to_string()
+                    } else {
+                        block.name
+                    },
+                    call_id: if block.id.is_empty() {
+                        None
+                    } else {
+                        Some(block.id)
+                    },
+                    input_preview,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(events)
+}
+
+fn parse_user_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEvent>> {
+    let Some(payload) = message.message else {
+        return Ok(Vec::new());
+    };
+    let content: ClaudeMessageContent =
+        serde_json::from_value(payload).context("failed to decode user message content")?;
+
+    let mut events = Vec::new();
+    for block in content.content {
+        if block.r#type == "tool_result" {
+            let output_preview = block.content.as_ref().map(render_json_value);
+            events.push(ProviderEvent::ToolCallFinished {
+                name: "tool_result".to_string(),
+                call_id: block.tool_use_id.clone(),
+                output_preview,
+                success: true,
+            });
         }
     }
     Ok(events)
@@ -296,6 +350,25 @@ struct ClaudeContentBlock {
     r#type: String,
     #[serde(default)]
     text: String,
+    #[serde(default)]
+    thinking: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    input: Option<serde_json::Value>,
+    #[serde(default)]
+    tool_use_id: Option<String>,
+    #[serde(default)]
+    content: Option<serde_json::Value>,
+}
+
+fn render_json_value(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string())
 }
 
 #[cfg(test)]
@@ -340,6 +413,42 @@ mod tests {
                 ProviderEvent::AssistantChunk("hello".to_string()),
                 ProviderEvent::AssistantChunk(" world".to_string())
             ]
+        );
+    }
+
+    #[test]
+    fn parses_assistant_thinking_and_tool_use() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":"plan first"},{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"README.md"}}]}}"#;
+
+        let events = parse_output_line(line).expect("parse assistant line");
+
+        assert_eq!(
+            events,
+            vec![
+                ProviderEvent::ThinkingChunk("plan first".to_string()),
+                ProviderEvent::ToolCallStarted {
+                    name: "read_file".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    input_preview: Some("{\"path\":\"README.md\"}".to_string())
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_user_tool_result() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"{\"ok\":true}"}]}}"#;
+
+        let events = parse_output_line(line).expect("parse user line");
+
+        assert_eq!(
+            events,
+            vec![ProviderEvent::ToolCallFinished {
+                name: "tool_result".to_string(),
+                call_id: Some("call_1".to_string()),
+                output_preview: Some("{\"ok\":true}".to_string()),
+                success: true
+            }]
         );
     }
 
