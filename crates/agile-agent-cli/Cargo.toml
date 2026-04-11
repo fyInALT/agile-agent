@@ -9,6 +9,8 @@ name = "agile-agent"
 path = "src/main.rs"
 
 [dependencies]
+agile-agent-core = { path = "../agile-agent-core" }
 anyhow.workspace = true
 clap.workspace = true
+serde_json.workspace = true
 agile-agent-tui = { path = "../agile-agent-tui" }
