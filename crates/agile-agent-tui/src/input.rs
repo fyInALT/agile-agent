@@ -27,13 +27,16 @@ pub fn handle_key_event(state: &mut AppState, key_event: KeyEvent) -> InputOutco
         return InputOutcome::Quit;
     }
 
+    if matches!(key_event.code, KeyCode::Char('q')) && state.input.is_empty() {
+        return InputOutcome::Quit;
+    }
+
     if state.status == AppStatus::Responding {
         return InputOutcome::None;
     }
 
     match key_event.code {
         KeyCode::Tab => InputOutcome::ToggleProvider,
-        KeyCode::Char('q') if state.input.is_empty() => InputOutcome::Quit,
         KeyCode::Char(ch) if !has_non_shift_modifiers(key_event.modifiers) => {
             state.insert_char(ch);
             InputOutcome::None
