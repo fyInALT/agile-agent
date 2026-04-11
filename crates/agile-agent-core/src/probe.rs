@@ -54,6 +54,15 @@ pub fn probe_report() -> ProbeReport {
     }
 }
 
+pub fn is_provider_available(name: &str) -> bool {
+    probe_report()
+        .providers
+        .into_iter()
+        .find(|provider| provider.name == name)
+        .map(|provider| provider.available)
+        .unwrap_or(false)
+}
+
 fn probe_provider(spec: &ProviderSpec) -> ProviderProbe {
     let configured_command = env::var(spec.env_key)
         .ok()

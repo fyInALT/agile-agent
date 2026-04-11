@@ -28,7 +28,8 @@ pub fn render_app(frame: &mut Frame<'_>, state: &AppState) {
         AppStatus::Responding => "responding",
     };
     let header = Paragraph::new(Line::from(format!(
-        "agile-agent | provider: mock | status: {status_text} | q/esc: quit"
+        "agile-agent | provider: {} | status: {status_text} | tab: switch | q/esc: quit",
+        state.selected_provider.label()
     )))
     .style(Style::default().add_modifier(Modifier::BOLD));
     frame.render_widget(header, areas[0]);

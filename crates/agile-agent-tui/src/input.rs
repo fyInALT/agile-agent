@@ -8,6 +8,7 @@ use crossterm::event::KeyModifiers;
 pub enum InputOutcome {
     None,
     Submit(String),
+    ToggleProvider,
     Quit,
 }
 
@@ -31,6 +32,7 @@ pub fn handle_key_event(state: &mut AppState, key_event: KeyEvent) -> InputOutco
     }
 
     match key_event.code {
+        KeyCode::Tab => InputOutcome::ToggleProvider,
         KeyCode::Char('q') if state.input.is_empty() => InputOutcome::Quit,
         KeyCode::Char(ch) if !has_non_shift_modifiers(key_event.modifiers) => {
             state.insert_char(ch);
@@ -60,13 +62,14 @@ mod tests {
     use super::InputOutcome;
     use super::handle_key_event;
     use agile_agent_core::app::AppState;
+    use agile_agent_core::provider::ProviderKind;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
 
     #[test]
     fn enter_submits_user_input() {
-        let mut state = AppState::default();
+        let mut state = AppState::new(ProviderKind::Mock);
         handle_key_event(
             &mut state,
             KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
@@ -82,5 +85,14 @@ mod tests {
         );
 
         assert!(matches!(outcome, InputOutcome::Submit(text) if text == "hi"));
+    }
+
+    #[test]
+    fn tab_requests_provider_toggle() {
+        let mut state = AppState::new(ProviderKind::Mock);
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::ToggleProvider));
     }
 }
