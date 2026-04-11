@@ -1,19 +1,24 @@
 use std::env;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Write;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use anyhow::Context;
+use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::probe::CODEX_PATH_ENV;
-use crate::provider::{ProviderEvent, SessionHandle};
+use crate::provider::ProviderEvent;
+use crate::provider::SessionHandle;
 
-/// Starts a Codex provider turn.
-///
-/// For the first turn, uses `thread/start` to create a new thread.
-/// For subsequent turns, uses `thread/resume` with the existing thread_id.
 pub fn start(
     prompt: String,
     session_handle: Option<SessionHandle>,
@@ -50,40 +55,131 @@ fn run_codex(
         .spawn()
         .with_context(|| format!("failed to start codex executable `{executable}`"))?;
 
-    let stdin = child.stdin.take().context("codex stdin pipe unavailable")?;
+    let mut stdin = child.stdin.take().context("codex stdin pipe unavailable")?;
     let stdout = child.stdout.take().context("codex stdout pipe unavailable")?;
     let stderr = child.stderr.take().context("codex stderr pipe unavailable")?;
 
-    thread::scope(|scope| -> Result<()> {
-        let stdin_handle = scope.spawn(|| -> Result<()> {
-            let mut stdin = stdin;
-            run_jsonrpc_handshake(&mut stdin, prompt, session_handle)?;
-            stdin.flush().context("failed to flush codex stdin")?;
-            Ok(())
-        });
+    let stderr_handle = thread::spawn(move || read_stderr(stderr));
+    let mut stdout_lines = BufReader::new(stdout).lines();
 
-        let stderr_handle = scope.spawn(|| read_stderr(stderr));
-        let stdout_handle = scope.spawn(|| -> Result<()> {
-            let _ = event_tx.send(ProviderEvent::Status("codex provider started".to_string()));
-            read_jsonrpc_responses(stdout, event_tx)
-        });
+    let _ = event_tx.send(ProviderEvent::Status("codex provider started".to_string()));
 
-        stdin_handle.join().expect("codex stdin thread panicked")?;
-        stdout_handle.join().expect("codex stdout thread panicked")?;
-        let stderr_output = stderr_handle.join().expect("codex stderr thread panicked");
+    send_request(
+        &mut stdin,
+        &JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize".to_string(),
+            params: serde_json::json!({
+                "clientInfo": {
+                    "name": "agile-agent",
+                    "title": "agile-agent",
+                    "version": "0.1.0"
+                },
+                "capabilities": {
+                    "experimentalApi": true
+                }
+            }),
+        },
+    )?;
+    wait_for_response(&mut stdout_lines, &mut stdin, 1, event_tx, None)?;
+    send_notification(&mut stdin, "initialized")?;
 
-        let status = child.wait().context("failed to wait on codex process")?;
-        if !status.success() {
-            let stderr_output = stderr_output.trim();
-            if stderr_output.is_empty() {
-                anyhow::bail!("codex exited with status {status}");
-            } else {
-                anyhow::bail!("codex exited with status {status}: {stderr_output}");
-            }
+    let existing_thread = match session_handle {
+        Some(SessionHandle::CodexThread { thread_id }) => Some(thread_id),
+        _ => None,
+    };
+
+    let thread_request = if let Some(thread_id) = existing_thread.clone() {
+        JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "thread/resume".to_string(),
+            params: serde_json::json!({
+                "threadId": thread_id,
+                "persistExtendedHistory": true
+            }),
+        }
+    } else {
+        JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "thread/start".to_string(),
+            params: serde_json::json!({
+                "model": serde_json::Value::Null,
+                "modelProvider": serde_json::Value::Null,
+                "profile": serde_json::Value::Null,
+                "cwd": env::current_dir()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|_| ".".to_string()),
+                "approvalPolicy": serde_json::Value::Null,
+                "sandbox": "workspace-write",
+                "config": serde_json::Value::Null,
+                "baseInstructions": serde_json::Value::Null,
+                "developerInstructions": serde_json::Value::Null,
+                "compactPrompt": serde_json::Value::Null,
+                "includeApplyPatchTool": serde_json::Value::Null,
+                "experimentalRawEvents": false,
+                "persistExtendedHistory": true
+            }),
+        }
+    };
+    send_request(&mut stdin, &thread_request)?;
+    let thread_response = wait_for_response(&mut stdout_lines, &mut stdin, 2, event_tx, None)?;
+
+    let thread_id = existing_thread
+        .or_else(|| thread_id_from_result(thread_response.result.as_ref()))
+        .context("codex thread response did not include a thread id")?;
+    let _ = event_tx.send(ProviderEvent::SessionHandle(SessionHandle::CodexThread {
+        thread_id: thread_id.clone(),
+    }));
+
+    send_request(
+        &mut stdin,
+        &JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 3,
+            method: "turn/start".to_string(),
+            params: serde_json::json!({
+                "threadId": thread_id,
+                "input": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }),
+        },
+    )?;
+    let _ = wait_for_response(&mut stdout_lines, &mut stdin, 3, event_tx, None)?;
+
+    let mut turn_started = false;
+    let mut turn_completed = false;
+    while let Some(line) = stdout_lines.next() {
+        let line = line.context("failed to read line from codex stdout")?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
         }
 
-        Ok(())
-    })
+        let message = parse_jsonrpc_message(trimmed)?;
+        if handle_message(message, &mut stdin, event_tx, &mut turn_started, &mut turn_completed)? {
+            break;
+        }
+    }
+
+    drop(stdin);
+    wait_for_child_shutdown(&mut child)?;
+
+    let stderr_output = stderr_handle.join().expect("codex stderr thread panicked");
+    if !stderr_output.trim().is_empty() {
+        let _ = event_tx.send(ProviderEvent::Status(format!(
+            "codex stderr: {}",
+            stderr_output.trim()
+        )));
+    }
+
+    Ok(())
 }
 
 fn resolve_codex_executable() -> Result<String> {
@@ -98,11 +194,27 @@ fn resolve_codex_executable() -> Result<String> {
 }
 
 fn resolve_codex_executable_from(configured: &str) -> Result<std::path::PathBuf> {
-    which::which(configured)
-        .with_context(|| format!("codex executable not found at `{configured}`"))
+    which::which(configured).with_context(|| format!("codex executable not found at `{configured}`"))
 }
 
-/// JSON-RPC 2.0 request structure
+fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait().context("failed to poll codex process")? {
+            if status.success() {
+                return Ok(());
+            }
+            anyhow::bail!("codex exited with status {status}");
+        }
+        if Instant::now() >= deadline {
+            child.kill().context("failed to kill codex process")?;
+            let _ = child.wait();
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct JsonRpcRequest {
     jsonrpc: &'static str,
@@ -111,9 +223,8 @@ struct JsonRpcRequest {
     params: serde_json::Value,
 }
 
-/// JSON-RPC 2.0 response structure
 #[derive(Debug, Deserialize)]
-struct JsonRpcResponse {
+struct JsonRpcMessage {
     #[serde(default)]
     id: Option<u64>,
     #[serde(default)]
@@ -134,262 +245,318 @@ struct JsonRpcError {
     message: String,
 }
 
-/// Codex-specific event structures
-#[derive(Debug, Deserialize)]
-struct CodexThreadStarted {
-    #[serde(rename = "threadId")]
-    thread_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexTurnStarted {
-    #[serde(default)]
-    turn_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexItemCreated {
-    #[serde(default)]
-    item: Option<CodexItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexItem {
-    #[serde(default)]
-    id: String,
-    #[serde(rename = "type")]
-    item_type: String,
-    #[serde(default)]
-    status: String,
-    #[serde(default)]
-    content: Vec<CodexContentBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexContentBlock {
-    #[serde(default)]
-    id: String,
-    #[serde(rename = "type")]
-    content_type: String,
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    thinking: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    arguments: Option<serde_json::Value>,
-    #[serde(default)]
-    output: Option<String>,
-}
-
-fn run_jsonrpc_handshake(
-    stdin: &mut impl Write,
-    prompt: String,
-    session_handle: Option<SessionHandle>,
-) -> Result<()> {
-    // Step 1: Initialize
-    let init_request = JsonRpcRequest {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize".to_string(),
-        params: serde_json::json!({
-            "clientName": "agile-agent",
-            "clientVersion": "0.1.0",
-            "capabilities": {}
-        }),
-    };
-    write_jsonrpc_request(stdin, &init_request)?;
-
-    // Step 2: Start or resume thread
-    let thread_request = match session_handle {
-        Some(SessionHandle::CodexThread { thread_id }) => JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/resume".to_string(),
-            params: serde_json::json!({
-                "threadId": thread_id
-            }),
-        },
-        _ => JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/start".to_string(),
-            params: serde_json::json!({
-                "cwd": env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| ".".to_string()),
-                "mode": "auto"
-            }),
-        },
-    };
-    write_jsonrpc_request(stdin, &thread_request)?;
-
-    // Step 3: Start turn with user prompt
-    let turn_request = JsonRpcRequest {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "turn/start".to_string(),
-        params: serde_json::json!({
-            "prompt": prompt
-        }),
-    };
-    write_jsonrpc_request(stdin, &turn_request)?;
-
-    Ok(())
-}
-
-fn write_jsonrpc_request(stdin: &mut impl Write, request: &JsonRpcRequest) -> Result<()> {
-    let json = serde_json::to_string(request).context("failed to serialize JSON-RPC request")?;
+fn send_request(stdin: &mut impl Write, request: &JsonRpcRequest) -> Result<()> {
+    let json = serde_json::to_string(request).context("failed to serialize codex request")?;
     stdin
         .write_all(json.as_bytes())
-        .context("failed to write JSON-RPC request")?;
+        .context("failed to write codex request")?;
     stdin.write_all(b"\n").context("failed to write newline")?;
+    stdin.flush().context("failed to flush codex stdin")?;
     Ok(())
 }
 
-fn read_jsonrpc_responses(stdout: impl std::io::Read, event_tx: &Sender<ProviderEvent>) -> Result<()> {
-    let reader = BufReader::new(stdout);
+fn send_notification(stdin: &mut impl Write, method: &str) -> Result<()> {
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method
+    });
+    let json = serde_json::to_string(&payload).context("failed to serialize codex notification")?;
+    stdin
+        .write_all(json.as_bytes())
+        .context("failed to write codex notification")?;
+    stdin.write_all(b"\n").context("failed to write notification newline")?;
+    stdin.flush().context("failed to flush codex notification")?;
+    Ok(())
+}
 
-    for line in reader.lines() {
+fn send_response(stdin: &mut impl Write, id: u64, result: serde_json::Value) -> Result<()> {
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    });
+    let json = serde_json::to_string(&payload).context("failed to serialize codex response")?;
+    stdin
+        .write_all(json.as_bytes())
+        .context("failed to write codex response")?;
+    stdin.write_all(b"\n").context("failed to write response newline")?;
+    stdin.flush().context("failed to flush codex response")?;
+    Ok(())
+}
+
+fn parse_jsonrpc_message(line: &str) -> Result<JsonRpcMessage> {
+    serde_json::from_str(line).with_context(|| format!("invalid codex JSON-RPC message: {line}"))
+}
+
+fn wait_for_response(
+    stdout_lines: &mut impl Iterator<Item = std::io::Result<String>>,
+    stdin: &mut impl Write,
+    target_id: u64,
+    event_tx: &Sender<ProviderEvent>,
+    turn_completed: Option<&mut bool>,
+) -> Result<JsonRpcMessage> {
+    let mut turn_completed = turn_completed;
+    while let Some(line) = stdout_lines.next() {
         let line = line.context("failed to read line from codex stdout")?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-
-        for event in parse_jsonrpc_response(trimmed, event_tx)? {
-            if event_tx.send(event).is_err() {
-                return Ok(());
+        let message = parse_jsonrpc_message(trimmed)?;
+        if message.id == Some(target_id) && (message.result.is_some() || message.error.is_some()) {
+            if let Some(error) = &message.error {
+                anyhow::bail!("JSON-RPC error {}: {}", error.code, error.message);
             }
+            return Ok(message);
+        }
+
+        let mut local_turn_started = false;
+        if handle_message(
+            message,
+            stdin,
+            event_tx,
+            &mut local_turn_started,
+            turn_completed.as_deref_mut().unwrap_or(&mut false),
+        )? {
+            continue;
         }
     }
 
-    Ok(())
+    anyhow::bail!("codex closed stdout while waiting for response {target_id}")
 }
 
-fn parse_jsonrpc_response(line: &str, event_tx: &Sender<ProviderEvent>) -> Result<Vec<ProviderEvent>> {
-    let response: JsonRpcResponse = serde_json::from_str(line)
-        .with_context(|| format!("invalid JSON-RPC response: {line}"))?;
+fn thread_id_from_result(result: Option<&serde_json::Value>) -> Option<String> {
+    let result = result?;
+    result
+        .get("thread")
+        .and_then(|thread| thread.get("id"))
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+}
 
-    // Check for JSON-RPC error
-    if let Some(error) = response.error {
-        return Ok(vec![ProviderEvent::Error(format!(
+fn handle_message(
+    message: JsonRpcMessage,
+    stdin: &mut impl Write,
+    event_tx: &Sender<ProviderEvent>,
+    turn_started: &mut bool,
+    turn_completed: &mut bool,
+) -> Result<bool> {
+    if let Some(method) = message.method {
+        if let Some(id) = message.id {
+            handle_server_request(method, id, stdin, event_tx)?;
+            return Ok(false);
+        }
+        return handle_notification(method, message.params, event_tx, turn_started, turn_completed);
+    }
+
+    if let Some(error) = message.error {
+        let _ = event_tx.send(ProviderEvent::Error(format!(
             "JSON-RPC error {}: {}",
             error.code, error.message
-        ))]);
+        )));
     }
 
-    // Handle notifications (methods without id)
-    if let Some(method) = response.method {
-        return parse_codex_notification(method, response.params, event_tx);
-    }
-
-    Ok(Vec::new())
+    Ok(false)
 }
 
-fn parse_codex_notification(
+fn handle_server_request(
+    method: String,
+    id: u64,
+    stdin: &mut impl Write,
+    event_tx: &Sender<ProviderEvent>,
+) -> Result<()> {
+    let _ = event_tx.send(ProviderEvent::Status(format!(
+        "codex server request: {method}"
+    )));
+
+    let decision = match method.as_str() {
+        "item/commandExecution/requestApproval" | "execCommandApproval" => {
+            serde_json::json!({ "decision": "accept" })
+        }
+        "item/fileChange/requestApproval" | "applyPatchApproval" => {
+            serde_json::json!({ "decision": "accept" })
+        }
+        _ => serde_json::json!({}),
+    };
+
+    send_response(stdin, id, decision)
+}
+
+fn handle_notification(
     method: String,
     params: Option<serde_json::Value>,
-    _event_tx: &Sender<ProviderEvent>,
-) -> Result<Vec<ProviderEvent>> {
-    let params = params.unwrap_or(serde_json::json!(null));
+    event_tx: &Sender<ProviderEvent>,
+    turn_started: &mut bool,
+    turn_completed: &mut bool,
+) -> Result<bool> {
+    let params = params.unwrap_or(serde_json::Value::Null);
 
     match method.as_str() {
         "thread/started" => {
-            let started: CodexThreadStarted = serde_json::from_value(params)
-                .context("failed to parse thread/started")?;
-            if !started.thread_id.is_empty() {
-                Ok(vec![
-                    ProviderEvent::SessionHandle(SessionHandle::CodexThread {
-                        thread_id: started.thread_id,
-                    }),
-                    ProviderEvent::Status("codex thread started".to_string()),
-                ])
-            } else {
-                Ok(vec![ProviderEvent::Status("codex thread started (no id)".to_string())])
+            if let Some(thread_id) = params
+                .get("thread")
+                .and_then(|thread| thread.get("id"))
+                .and_then(|value| value.as_str())
+            {
+                let _ = event_tx.send(ProviderEvent::SessionHandle(SessionHandle::CodexThread {
+                    thread_id: thread_id.to_string(),
+                }));
             }
+            let _ = event_tx.send(ProviderEvent::Status("codex thread started".to_string()));
         }
         "turn/started" => {
-            let started: CodexTurnStarted = serde_json::from_value(params)
-                .context("failed to parse turn/started")?;
-            Ok(vec![ProviderEvent::Status(format!(
-                "codex turn started: {}",
-                started.turn_id
-            ))])
+            *turn_started = true;
+            let _ = event_tx.send(ProviderEvent::Status("codex turn started".to_string()));
         }
         "turn/completed" => {
-            Ok(vec![ProviderEvent::Status("codex turn completed".to_string())])
+            *turn_completed = true;
+            let _ = event_tx.send(ProviderEvent::Status("codex turn completed".to_string()));
+            return Ok(true);
         }
-        "item/created" => {
-            let created: CodexItemCreated = serde_json::from_value(params)
-                .context("failed to parse item/created")?;
-            if let Some(item) = created.item {
-                parse_codex_item(item)
-            } else {
-                Ok(Vec::new())
+        "thread/status/changed" => {
+            if params
+                .get("status")
+                .and_then(|status| status.get("type"))
+                .and_then(|value| value.as_str())
+                == Some("idle")
+                && *turn_started
+            {
+                *turn_completed = true;
+                return Ok(true);
             }
         }
-        "item/updated" => {
-            // Item updates contain incremental content
-            let item: CodexItem = serde_json::from_value(params)
-                .context("failed to parse item/updated")?;
-            parse_codex_item(item)
-        }
-        "log" => {
-            if let Some(message) = params.get("message").and_then(|m| m.as_str()) {
-                Ok(vec![ProviderEvent::Status(format!("codex: {}", message))])
-            } else {
-                Ok(Vec::new())
+        "item/started" | "item/completed" => {
+            let item = params.get("item").unwrap_or(&params);
+            for event in parse_item_event(method.as_str(), item) {
+                let _ = event_tx.send(event);
             }
         }
-        other => Ok(vec![ProviderEvent::Status(format!(
-            "ignored codex event: {}",
-            other
-        ))]),
+        other => {
+            let _ = event_tx.send(ProviderEvent::Status(format!(
+                "ignored codex event: {other}"
+            )));
+        }
+    }
+
+    Ok(false)
+}
+
+fn parse_item_event(method: &str, item: &serde_json::Value) -> Vec<ProviderEvent> {
+    let item_type = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let item_id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned);
+
+    match (method, item_type) {
+        ("item/started", "commandExecution") => {
+            let command = item
+                .get("command")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned);
+            vec![ProviderEvent::ToolCallStarted {
+                name: "exec_command".to_string(),
+                call_id: item_id,
+                input_preview: command,
+            }]
+        }
+        ("item/completed", "commandExecution") => {
+            let output = item
+                .get("aggregatedOutput")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned);
+            vec![ProviderEvent::ToolCallFinished {
+                name: "exec_command".to_string(),
+                call_id: item_id,
+                output_preview: output,
+                success: true,
+            }]
+        }
+        ("item/started", "fileChange") => vec![ProviderEvent::ToolCallStarted {
+            name: "patch_apply".to_string(),
+            call_id: item_id,
+            input_preview: None,
+        }],
+        ("item/completed", "fileChange") => vec![ProviderEvent::ToolCallFinished {
+            name: "patch_apply".to_string(),
+            call_id: item_id,
+            output_preview: None,
+            success: true,
+        }],
+        ("item/completed", "agentMessage") => item
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(|text| vec![ProviderEvent::AssistantChunk(text.to_string())])
+            .unwrap_or_default(),
+        (_, _) => parse_content_blocks(item),
     }
 }
 
-fn parse_codex_item(item: CodexItem) -> Result<Vec<ProviderEvent>> {
+fn parse_content_blocks(item: &serde_json::Value) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
+    let item_status = item
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("completed");
 
-    for block in item.content {
-        match block.content_type.as_str() {
-            "text" => {
-                if !block.text.is_empty() {
-                    events.push(ProviderEvent::AssistantChunk(block.text));
+    if let Some(content) = item.get("content").and_then(|value| value.as_array()) {
+        for block in content {
+            let block_type = block.get("type").and_then(|value| value.as_str()).unwrap_or("");
+            match block_type {
+                "text" => {
+                    if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
+                        if !text.is_empty() {
+                            events.push(ProviderEvent::AssistantChunk(text.to_string()));
+                        }
+                    }
                 }
-            }
-            "thinking" => {
-                if !block.thinking.is_empty() {
-                    events.push(ProviderEvent::ThinkingChunk(block.thinking));
+                "thinking" => {
+                    if let Some(thinking) = block.get("thinking").and_then(|value| value.as_str()) {
+                        if !thinking.is_empty() {
+                            events.push(ProviderEvent::ThinkingChunk(thinking.to_string()));
+                        }
+                    }
                 }
-            }
-            "tool_use" => {
-                events.push(ProviderEvent::ToolCallStarted {
-                    name: block.name,
-                    call_id: Some(block.id),
-                    input_preview: block.arguments.and_then(|a| serde_json::to_string(&a).ok()),
-                });
-            }
-            "tool_result" => {
-                events.push(ProviderEvent::ToolCallFinished {
-                    name: block.name,
-                    call_id: Some(block.id),
-                    output_preview: block.output,
-                    success: item.status != "error",
-                });
-            }
-            other => {
-                events.push(ProviderEvent::Status(format!(
-                    "ignored content type: {}",
-                    other
-                )));
+                "tool_use" => {
+                    events.push(ProviderEvent::ToolCallStarted {
+                        name: block
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("tool_use")
+                            .to_string(),
+                        call_id: block
+                            .get("id")
+                            .and_then(|value| value.as_str())
+                            .map(ToOwned::to_owned),
+                        input_preview: block
+                            .get("arguments")
+                            .and_then(|value| serde_json::to_string(value).ok()),
+                    });
+                }
+                "tool_result" => {
+                    events.push(ProviderEvent::ToolCallFinished {
+                        name: block
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("tool_result")
+                            .to_string(),
+                        call_id: block
+                            .get("id")
+                            .and_then(|value| value.as_str())
+                            .map(ToOwned::to_owned),
+                        output_preview: block
+                            .get("output")
+                            .and_then(|value| value.as_str())
+                            .map(ToOwned::to_owned),
+                        success: item_status != "error",
+                    });
+                }
+                _ => {}
             }
         }
     }
 
-    Ok(events)
+    events
 }
 
 fn read_stderr(stderr: impl std::io::Read) -> String {
@@ -401,7 +568,14 @@ fn read_stderr(stderr: impl std::io::Read) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::JsonRpcMessage;
+    use super::JsonRpcRequest;
+    use super::ProviderEvent;
+    use super::parse_jsonrpc_message;
+    use super::parse_item_event;
+    use super::resolve_codex_executable_from;
+    use super::thread_id_from_result;
+    use crate::provider::SessionHandle;
 
     #[test]
     fn resolves_missing_executable_with_clear_error() {
@@ -422,47 +596,84 @@ mod tests {
             id: 1,
             method: "initialize".to_string(),
             params: serde_json::json!({
-                "clientName": "agile-agent",
-                "clientVersion": "0.1.0"
+                "clientInfo": {
+                    "name": "agile-agent",
+                    "title": "agile-agent",
+                    "version": "0.1.0"
+                },
+                "capabilities": {
+                    "experimentalApi": true
+                }
             }),
         };
 
         let json = serde_json::to_string(&request).expect("serialize");
         assert!(json.contains("\"jsonrpc\":\"2.0\""));
         assert!(json.contains("\"method\":\"initialize\""));
+        assert!(json.contains("\"clientInfo\""));
     }
 
     #[test]
-    fn parses_thread_started_notification() {
-        let line = r#"{"method":"thread/started","params":{"threadId":"abc123"}}"#;
+    fn extracts_thread_id_from_response_result() {
+        let result = serde_json::json!({
+            "thread": {
+                "id": "thr_123"
+            }
+        });
 
-        let response: JsonRpcResponse = serde_json::from_str(line).expect("parse response");
-        assert_eq!(response.method, Some("thread/started".to_string()));
-
-        let started: CodexThreadStarted =
-            serde_json::from_value(response.params.unwrap()).expect("parse params");
-        assert_eq!(started.thread_id, "abc123");
-    }
-
-    #[test]
-    fn parses_assistant_text_item() {
-        let line = r#"{"method":"item/updated","params":{"id":"msg1","type":"message","status":"completed","content":[{"type":"text","text":"hello world"}]}}"#;
-
-        let response: JsonRpcResponse = serde_json::from_str(line).expect("parse response");
-
-        let item: CodexItem = serde_json::from_value(response.params.unwrap()).expect("parse item");
-        assert_eq!(item.content.len(), 1);
-        assert_eq!(item.content[0].content_type, "text");
-        assert_eq!(item.content[0].text, "hello world");
+        assert_eq!(thread_id_from_result(Some(&result)), Some("thr_123".to_string()));
     }
 
     #[test]
     fn parses_jsonrpc_error() {
         let line = r#"{"id":1,"error":{"code":-32600,"message":"Invalid Request"}}"#;
 
-        let response: JsonRpcResponse = serde_json::from_str(line).expect("parse response");
+        let response = parse_jsonrpc_message(line).expect("parse response");
         let error = response.error.expect("must have error");
         assert_eq!(error.code, -32600);
         assert_eq!(error.message, "Invalid Request");
+    }
+
+    #[test]
+    fn parses_thread_started_notification() {
+        let line = r#"{"method":"thread/started","params":{"thread":{"id":"thr_123"}}}"#;
+
+        let response: JsonRpcMessage = parse_jsonrpc_message(line).expect("parse response");
+        let params = response.params.expect("params");
+        let thread_id = params
+            .get("thread")
+            .and_then(|thread| thread.get("id"))
+            .and_then(|value| value.as_str());
+        assert_eq!(thread_id, Some("thr_123"));
+    }
+
+    #[test]
+    fn parses_assistant_text_item() {
+        let item = serde_json::json!({
+            "type": "message",
+            "status": "completed",
+            "content": [
+                { "type": "text", "text": "hello world" }
+            ]
+        });
+
+        let events = parse_item_event("item/completed", &item);
+        assert_eq!(
+            events,
+            vec![ProviderEvent::AssistantChunk("hello world".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_codex_session_handle_event_shape() {
+        let handle = SessionHandle::CodexThread {
+            thread_id: "thr_123".to_string(),
+        };
+        assert_eq!(
+            handle,
+            SessionHandle::CodexThread {
+                thread_id: "thr_123".to_string()
+            }
+        );
     }
 }
