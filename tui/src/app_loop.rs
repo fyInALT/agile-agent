@@ -20,11 +20,22 @@ use crate::render::render_app;
 use crate::terminal::AppTerminal;
 
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
-    let cwd = env::current_dir()?;
-    let mut state =
-        AppState::with_skills(provider::default_provider(), SkillRegistry::discover(&cwd));
+    let launch_cwd = env::current_dir()?;
+    let mut state = AppState::with_skills(
+        provider::default_provider(),
+        launch_cwd.clone(),
+        SkillRegistry::discover(&launch_cwd),
+    );
     if resume_last {
         if let Ok(session) = session_store::load_recent_session() {
+            let restored_cwd = std::path::PathBuf::from(&session.cwd);
+            let effective_cwd = if restored_cwd.is_dir() {
+                restored_cwd
+            } else {
+                launch_cwd.clone()
+            };
+            state.cwd = effective_cwd.clone();
+            state.skills = SkillRegistry::discover(&effective_cwd);
             session.apply_to_app_state(&mut state);
             state.push_status_message("restored recent session");
         } else {
@@ -81,6 +92,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         if let Err(err) = provider::start_provider(
                             provider_kind,
                             augmented_prompt,
+                            state.cwd.clone(),
                             session_handle,
                             event_tx,
                         ) {
@@ -130,7 +142,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
 
-    session_store::save_recent_session(&state, &cwd)?;
+    session_store::save_recent_session(&state)?;
     Ok(state)
 }
 

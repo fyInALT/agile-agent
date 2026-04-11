@@ -1,5 +1,6 @@
 use std::env;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::mpsc::Sender;
@@ -15,6 +16,7 @@ use crate::provider::SessionHandle;
 
 pub fn start(
     prompt: String,
+    cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
@@ -23,7 +25,7 @@ pub fn start(
     thread::Builder::new()
         .name("agent-claude-provider".to_string())
         .spawn(move || {
-            let run_result = run_claude(prompt, session_handle, executable, &event_tx);
+            let run_result = run_claude(prompt, cwd, session_handle, executable, &event_tx);
             if let Err(err) = run_result {
                 let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
             }
@@ -35,6 +37,7 @@ pub fn start(
 
 fn run_claude(
     prompt: String,
+    cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     executable: String,
     event_tx: &Sender<ProviderEvent>,
@@ -42,6 +45,7 @@ fn run_claude(
     let args = build_claude_args(session_handle);
     let mut command = Command::new(&executable);
     command.args(&args);
+    command.current_dir(&cwd);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());

@@ -30,10 +30,10 @@ struct RecentSessionPointer {
 }
 
 impl PersistedSession {
-    pub fn from_app_state(state: &AppState, cwd: &Path) -> Self {
+    pub fn from_app_state(state: &AppState) -> Self {
         Self {
             saved_at: Utc::now().to_rfc3339(),
-            cwd: cwd.display().to_string(),
+            cwd: state.cwd.display().to_string(),
             selected_provider: state.selected_provider,
             claude_session_id: state.claude_session_id.clone(),
             codex_thread_id: state.codex_thread_id.clone(),
@@ -43,6 +43,7 @@ impl PersistedSession {
     }
 
     pub fn apply_to_app_state(&self, state: &mut AppState) {
+        state.cwd = PathBuf::from(&self.cwd);
         state.selected_provider = self.selected_provider;
         state.claude_session_id = self.claude_session_id.clone();
         state.codex_thread_id = self.codex_thread_id.clone();
@@ -64,9 +65,9 @@ impl PersistedSession {
     }
 }
 
-pub fn save_recent_session(state: &AppState, cwd: &Path) -> Result<()> {
+pub fn save_recent_session(state: &AppState) -> Result<()> {
     let root = default_session_root()?;
-    save_recent_session_to_root(state, cwd, &root)
+    save_recent_session_to_root(state, &root)
 }
 
 pub fn load_recent_session() -> Result<PersistedSession> {
@@ -74,10 +75,10 @@ pub fn load_recent_session() -> Result<PersistedSession> {
     load_recent_session_from_root(&root)
 }
 
-fn save_recent_session_to_root(state: &AppState, cwd: &Path, root: &Path) -> Result<()> {
+fn save_recent_session_to_root(state: &AppState, root: &Path) -> Result<()> {
     fs::create_dir_all(root.join("sessions")).context("failed to create session directory")?;
 
-    let session = PersistedSession::from_app_state(state, cwd);
+    let session = PersistedSession::from_app_state(state);
     let file_name = format!("session-{}.json", session.saved_at.replace(':', "-"));
     let session_path = root.join("sessions").join(file_name);
 
@@ -123,6 +124,7 @@ mod tests {
     use crate::provider::ProviderKind;
     use crate::skills::SkillMetadata;
     use crate::skills::SkillRegistry;
+    use std::path::PathBuf;
 
     use tempfile::TempDir;
 
@@ -137,14 +139,14 @@ mod tests {
             body: "body".to_string(),
         });
 
-        let mut state = AppState::with_skills(ProviderKind::Claude, registry);
+        let mut state = AppState::with_skills(ProviderKind::Claude, temp.path().into(), registry);
         state
             .transcript
             .push(TranscriptEntry::User("hello".to_string()));
         state.claude_session_id = Some("sess-1".to_string());
         state.skills.toggle("reviewer");
 
-        save_recent_session_to_root(&state, temp.path(), temp.path()).expect("save session");
+        save_recent_session_to_root(&state, temp.path()).expect("save session");
         let restored = load_recent_session_from_root(temp.path()).expect("load session");
 
         assert_eq!(restored.selected_provider, ProviderKind::Claude);
@@ -162,7 +164,7 @@ mod tests {
             path: "reviewer/SKILL.md".into(),
             body: "body".to_string(),
         });
-        let mut state = AppState::with_skills(ProviderKind::Mock, registry);
+        let mut state = AppState::with_skills(ProviderKind::Mock, ".".into(), registry);
 
         let persisted = PersistedSession {
             saved_at: "2026-01-01T00:00:00Z".to_string(),
@@ -176,6 +178,7 @@ mod tests {
 
         persisted.apply_to_app_state(&mut state);
 
+        assert_eq!(state.cwd, PathBuf::from("."));
         assert_eq!(state.selected_provider, ProviderKind::Codex);
         assert_eq!(state.codex_thread_id.as_deref(), Some("thr-1"));
         assert_eq!(state.transcript.len(), 1);

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use std::path::PathBuf;
 
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
@@ -33,6 +34,7 @@ pub enum TranscriptEntry {
 pub struct AppState {
     pub transcript: Vec<TranscriptEntry>,
     pub input: String,
+    pub cwd: PathBuf,
     pub selected_provider: ProviderKind,
     pub skills: SkillRegistry,
     pub skill_browser_open: bool,
@@ -48,6 +50,7 @@ impl Default for AppState {
         Self {
             transcript: Vec::new(),
             input: String::new(),
+            cwd: PathBuf::from("."),
             selected_provider: ProviderKind::Mock,
             skills: SkillRegistry::default(),
             skill_browser_open: false,
@@ -68,8 +71,13 @@ impl AppState {
         }
     }
 
-    pub fn with_skills(selected_provider: ProviderKind, skills: SkillRegistry) -> Self {
+    pub fn with_skills(
+        selected_provider: ProviderKind,
+        cwd: PathBuf,
+        skills: SkillRegistry,
+    ) -> Self {
         Self {
+            cwd,
             selected_provider,
             skills,
             ..Self::default()
@@ -365,7 +373,7 @@ mod tests {
             path: "planner/SKILL.md".into(),
             body: "body".to_string(),
         });
-        let mut state = AppState::with_skills(ProviderKind::Mock, skills);
+        let mut state = AppState::with_skills(ProviderKind::Mock, ".".into(), skills);
 
         state.open_skill_browser();
         assert!(state.skill_browser_open);

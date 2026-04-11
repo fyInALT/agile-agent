@@ -2,6 +2,7 @@ use std::env;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
@@ -21,6 +22,7 @@ use crate::provider::SessionHandle;
 
 pub fn start(
     prompt: String,
+    cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
@@ -29,7 +31,7 @@ pub fn start(
     thread::Builder::new()
         .name("agent-codex-provider".to_string())
         .spawn(move || {
-            let run_result = run_codex(prompt, session_handle, executable, &event_tx);
+            let run_result = run_codex(prompt, cwd, session_handle, executable, &event_tx);
             if let Err(err) = run_result {
                 let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
             }
@@ -41,12 +43,14 @@ pub fn start(
 
 fn run_codex(
     prompt: String,
+    cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     executable: String,
     event_tx: &Sender<ProviderEvent>,
 ) -> Result<()> {
     let mut command = Command::new(&executable);
     command.args(["app-server", "--listen", "stdio://"]);
+    command.current_dir(&cwd);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -115,9 +119,7 @@ fn run_codex(
                 "model": serde_json::Value::Null,
                 "modelProvider": serde_json::Value::Null,
                 "profile": serde_json::Value::Null,
-                "cwd": env::current_dir()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| ".".to_string()),
+                "cwd": cwd.display().to_string(),
                 "approvalPolicy": serde_json::Value::Null,
                 "sandbox": "workspace-write",
                 "config": serde_json::Value::Null,

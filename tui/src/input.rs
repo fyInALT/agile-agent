@@ -118,7 +118,8 @@ mod tests {
 
     #[test]
     fn dollar_opens_skill_browser_when_input_is_empty() {
-        let mut state = AppState::with_skills(ProviderKind::Mock, SkillRegistry::default());
+        let mut state =
+            AppState::with_skills(ProviderKind::Mock, ".".into(), SkillRegistry::default());
         let outcome = handle_key_event(
             &mut state,
             KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),

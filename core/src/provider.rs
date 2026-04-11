@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
@@ -83,13 +84,18 @@ pub fn default_provider() -> ProviderKind {
 pub fn start_provider(
     provider: ProviderKind,
     prompt: String,
+    cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
     match provider {
         ProviderKind::Mock => start_mock_provider(prompt, event_tx),
-        ProviderKind::Claude => crate::providers::claude::start(prompt, session_handle, event_tx),
-        ProviderKind::Codex => crate::providers::codex::start(prompt, session_handle, event_tx),
+        ProviderKind::Claude => {
+            crate::providers::claude::start(prompt, cwd, session_handle, event_tx)
+        }
+        ProviderKind::Codex => {
+            crate::providers::codex::start(prompt, cwd, session_handle, event_tx)
+        }
     }
 }
 
@@ -123,7 +129,14 @@ mod tests {
     fn mock_provider_emits_assistant_chunks_and_finishes() {
         let (tx, rx) = mpsc::channel();
 
-        start_provider(ProviderKind::Mock, "hello".to_string(), None, tx).expect("start provider");
+        start_provider(
+            ProviderKind::Mock,
+            "hello".to_string(),
+            ".".into(),
+            None,
+            tx,
+        )
+        .expect("start provider");
 
         let mut saw_chunk = false;
         let mut saw_finished = false;
