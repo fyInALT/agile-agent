@@ -1,7 +1,7 @@
 use agile_agent_core::app::AppState;
 use agile_agent_core::app::AppStatus;
 use agile_agent_core::app::TranscriptEntry;
-use pulldown_cmark::{Event, Parser, Tag, TagEnd, CodeBlockKind};
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -16,8 +16,8 @@ use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 use textwrap::wrap;
-use unicode_width::UnicodeWidthStr;
 use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 /// Render the full TUI application
 pub fn render_app(frame: &mut Frame<'_>, state: &AppState) {
@@ -115,7 +115,11 @@ fn render_transcript_entry(entry: &TranscriptEntry, max_width: usize) -> Vec<Lin
             started,
             ..
         } => {
-            let icon = if *started { "🔧" } else { if *success { "✓" } else { "✗" } };
+            let icon = if *started {
+                "🔧"
+            } else {
+                if *success { "✓" } else { "✗" }
+            };
             let color = if *started {
                 Color::Blue
             } else if *success {
@@ -287,7 +291,9 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
                 }
             }
             Event::Start(Tag::Link { dest_url, .. }) => {
-                current_style = Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED);
+                current_style = Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::UNDERLINED);
                 current_line_spans.push(Span::styled(dest_url.to_string(), current_style));
             }
             Event::End(TagEnd::Link) => {
@@ -314,9 +320,12 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
     if let Some(first_line) = lines.first_mut() {
         let original_spans = first_line.spans.clone();
         *first_line = Line::from(
-            std::iter::once(Span::styled("Assistant: ", Style::default().fg(Color::Green)))
-                .chain(original_spans.into_iter())
-                .collect::<Vec<_>>(),
+            std::iter::once(Span::styled(
+                "Assistant: ",
+                Style::default().fg(Color::Green),
+            ))
+            .chain(original_spans.into_iter())
+            .collect::<Vec<_>>(),
         );
     } else {
         lines.push(Line::from(Span::styled(
@@ -380,4 +389,50 @@ fn render_composer(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layou
         .block(Block::default().title("Composer").borders(Borders::ALL))
         .wrap(Wrap { trim: false });
     frame.render_widget(composer, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_markdown;
+
+    fn lines_to_string(lines: Vec<ratatui::text::Line<'static>>) -> String {
+        lines
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn renders_heading_and_paragraph_readably() {
+        let markdown = "# Title\n\nThis is a paragraph.";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("Assistant: # Title"));
+        assert!(rendered.contains("This is a paragraph."));
+    }
+
+    #[test]
+    fn renders_list_items_readably() {
+        let markdown = "- one\n- two";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("- one"));
+        assert!(rendered.contains("- two"));
+    }
+
+    #[test]
+    fn renders_code_blocks_readably() {
+        let markdown = "```rust\nfn main() {}\n```";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("```rust"));
+        assert!(rendered.contains("fn main() {}"));
+        assert!(rendered.contains("```"));
+    }
 }

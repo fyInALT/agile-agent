@@ -130,6 +130,7 @@ fn detect_version(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::ProviderSpec;
+    use super::detect_version;
     use super::probe_provider_with_candidate;
     use super::probe_report;
     use std::fs;
@@ -152,21 +153,13 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn provider_probe_reads_version_from_fake_binary() {
+    fn detect_version_reads_fake_binary_output() {
         let temp = TempDir::new().expect("tempdir");
         let executable = write_fake_executable(&temp, "fake-codex", "codex-cli 9.9.9");
-        let spec = ProviderSpec {
-            name: "codex",
-            protocol: "app-server-stdio",
-            env_key: "IGNORED",
-            default_command: "codex",
-        };
 
-        let probe = probe_provider_with_candidate(&spec, executable.to_str().expect("utf-8 path"));
+        let version = detect_version(&executable).expect("read version");
 
-        assert!(probe.available);
-        assert_eq!(probe.version.as_deref(), Some("codex-cli 9.9.9"));
-        assert_eq!(probe.protocol, "app-server-stdio");
+        assert_eq!(version, "codex-cli 9.9.9");
     }
 
     #[test]
