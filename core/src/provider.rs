@@ -95,7 +95,7 @@ pub fn start_provider(
 
 fn start_mock_provider(prompt: String, event_tx: Sender<ProviderEvent>) -> Result<()> {
     thread::Builder::new()
-        .name("agile-agent-mock-provider".to_string())
+        .name("agent-mock-provider".to_string())
         .spawn(move || {
             let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
             for chunk in mock_provider::build_reply_chunks(&prompt) {

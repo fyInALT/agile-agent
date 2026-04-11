@@ -27,7 +27,7 @@ pub fn start(
     let executable = resolve_codex_executable()?;
 
     thread::Builder::new()
-        .name("agile-agent-codex-provider".to_string())
+        .name("agent-codex-provider".to_string())
         .spawn(move || {
             let run_result = run_codex(prompt, session_handle, executable, &event_tx);
             if let Err(err) = run_result {

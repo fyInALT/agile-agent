@@ -21,7 +21,7 @@ pub fn start(
     let executable = resolve_claude_executable()?;
 
     thread::Builder::new()
-        .name("agile-agent-claude-provider".to_string())
+        .name("agent-claude-provider".to_string())
         .spawn(move || {
             let run_result = run_claude(prompt, session_handle, executable, &event_tx);
             if let Err(err) = run_result {
