@@ -9,6 +9,11 @@ pub enum InputOutcome {
     None,
     Submit(String),
     ToggleProvider,
+    OpenSkills,
+    CloseSkills,
+    SkillUp,
+    SkillDown,
+    ToggleSelectedSkill,
     Quit,
 }
 
@@ -31,12 +36,23 @@ pub fn handle_key_event(state: &mut AppState, key_event: KeyEvent) -> InputOutco
         return InputOutcome::Quit;
     }
 
+    if state.skill_browser_open {
+        return match key_event.code {
+            KeyCode::Esc => InputOutcome::CloseSkills,
+            KeyCode::Up => InputOutcome::SkillUp,
+            KeyCode::Down => InputOutcome::SkillDown,
+            KeyCode::Enter | KeyCode::Char(' ') => InputOutcome::ToggleSelectedSkill,
+            _ => InputOutcome::None,
+        };
+    }
+
     if state.status == AppStatus::Responding {
         return InputOutcome::None;
     }
 
     match key_event.code {
         KeyCode::Tab => InputOutcome::ToggleProvider,
+        KeyCode::Char('$') if state.input.is_empty() => InputOutcome::OpenSkills,
         KeyCode::Char(ch) if !has_non_shift_modifiers(key_event.modifiers) => {
             state.insert_char(ch);
             InputOutcome::None
@@ -66,6 +82,7 @@ mod tests {
     use super::handle_key_event;
     use agile_agent_core::app::AppState;
     use agile_agent_core::provider::ProviderKind;
+    use agile_agent_core::skills::SkillRegistry;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
@@ -97,5 +114,15 @@ mod tests {
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::ToggleProvider));
+    }
+
+    #[test]
+    fn dollar_opens_skill_browser_when_input_is_empty() {
+        let mut state = AppState::with_skills(ProviderKind::Mock, SkillRegistry::default());
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, InputOutcome::OpenSkills));
     }
 }

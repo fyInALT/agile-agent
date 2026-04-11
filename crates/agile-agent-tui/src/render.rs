@@ -6,6 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -33,6 +34,9 @@ pub fn render_app(frame: &mut Frame<'_>, state: &AppState) {
     render_header(frame, state, areas[0]);
     render_transcript(frame, state, areas[1]);
     render_composer(frame, state, areas[2]);
+    if state.skill_browser_open {
+        render_skill_browser(frame, state);
+    }
 }
 
 fn render_header(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layout::Rect) {
@@ -381,7 +385,7 @@ fn truncate_preview(text: &str, max_len: usize) -> String {
 
 fn render_composer(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layout::Rect) {
     let composer_text = if state.input.is_empty() {
-        "> ".to_string()
+        ">  ($: skills)".to_string()
     } else {
         format!("> {}", state.input)
     };
@@ -389,6 +393,79 @@ fn render_composer(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layou
         .block(Block::default().title("Composer").borders(Borders::ALL))
         .wrap(Wrap { trim: false });
     frame.render_widget(composer, area);
+}
+
+fn render_skill_browser(frame: &mut Frame<'_>, state: &AppState) {
+    use ratatui::layout::Alignment;
+    use ratatui::widgets::Clear;
+
+    let area = centered_rect(70, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = format!("Skills ({})", state.skills.enabled_names.len());
+
+    let mut lines = Vec::new();
+    for (index, skill) in state.skills.discovered.iter().enumerate() {
+        let enabled = state.skills.is_enabled(&skill.name);
+        let selected = index == state.skill_browser_selected;
+        let marker = if enabled { "[x]" } else { "[ ]" };
+        let prefix = if selected { ">" } else { " " };
+        let style = if selected {
+            Style::default().fg(Color::Black).bg(Color::White)
+        } else if enabled {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default()
+        };
+
+        lines.push(Line::from(Span::styled(
+            format!("{prefix} {marker} {}", skill.name),
+            style,
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("    {}", skill.description),
+            Style::default().fg(Color::Gray),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("    {}", skill.path.display()),
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from("No skills found."));
+    }
+
+    let browser = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(title)
+                .title_alignment(Alignment::Center)
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(browser, area);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 #[cfg(test)]

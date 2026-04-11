@@ -1,5 +1,6 @@
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
+use crate::skills::SkillRegistry;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AppStatus {
@@ -30,6 +31,9 @@ pub struct AppState {
     pub transcript: Vec<TranscriptEntry>,
     pub input: String,
     pub selected_provider: ProviderKind,
+    pub skills: SkillRegistry,
+    pub skill_browser_open: bool,
+    pub skill_browser_selected: usize,
     pub claude_session_id: Option<String>,
     pub codex_thread_id: Option<String>,
     pub status: AppStatus,
@@ -42,6 +46,9 @@ impl Default for AppState {
             transcript: Vec::new(),
             input: String::new(),
             selected_provider: ProviderKind::Mock,
+            skills: SkillRegistry::default(),
+            skill_browser_open: false,
+            skill_browser_selected: 0,
             claude_session_id: None,
             codex_thread_id: None,
             status: AppStatus::Idle,
@@ -54,6 +61,14 @@ impl AppState {
     pub fn new(selected_provider: ProviderKind) -> Self {
         Self {
             selected_provider,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_skills(selected_provider: ProviderKind, skills: SkillRegistry) -> Self {
+        Self {
+            selected_provider,
+            skills,
             ..Self::default()
         }
     }
@@ -170,6 +185,47 @@ impl AppState {
         self.selected_provider = self.selected_provider.next();
     }
 
+    pub fn open_skill_browser(&mut self) {
+        if self.skills.is_empty() {
+            self.push_status_message("no skills available");
+            return;
+        }
+        self.skill_browser_open = true;
+        self.skill_browser_selected = self
+            .skill_browser_selected
+            .min(self.skills.len().saturating_sub(1));
+    }
+
+    pub fn close_skill_browser(&mut self) {
+        self.skill_browser_open = false;
+    }
+
+    pub fn move_skill_selection_up(&mut self) {
+        if self.skill_browser_selected > 0 {
+            self.skill_browser_selected -= 1;
+        }
+    }
+
+    pub fn move_skill_selection_down(&mut self) {
+        if self.skill_browser_selected + 1 < self.skills.len() {
+            self.skill_browser_selected += 1;
+        }
+    }
+
+    pub fn toggle_selected_skill(&mut self) {
+        let Some(skill) = self.skills.discovered.get(self.skill_browser_selected) else {
+            return;
+        };
+        let name = skill.name.clone();
+        self.skills.toggle(&name);
+        let enabled = self.skills.is_enabled(&name);
+        self.push_status_message(format!(
+            "{} skill: {}",
+            if enabled { "enabled" } else { "disabled" },
+            name
+        ));
+    }
+
     pub fn push_status_message(&mut self, text: impl Into<String>) {
         self.transcript.push(TranscriptEntry::Status(text.into()));
     }
@@ -224,6 +280,7 @@ mod tests {
     use super::TranscriptEntry;
     use crate::provider::ProviderKind;
     use crate::provider::SessionHandle;
+    use crate::skills::SkillRegistry;
 
     #[test]
     fn take_input_clears_buffer() {
@@ -288,5 +345,32 @@ mod tests {
                 thread_id: "t1".to_string()
             })
         );
+    }
+
+    #[test]
+    fn skill_browser_navigation_and_toggle_work() {
+        let mut skills = SkillRegistry::default();
+        skills.discovered.push(crate::skills::SkillMetadata {
+            name: "reviewer".to_string(),
+            description: "Reviews code".to_string(),
+            path: "reviewer/SKILL.md".into(),
+            body: "body".to_string(),
+        });
+        skills.discovered.push(crate::skills::SkillMetadata {
+            name: "planner".to_string(),
+            description: "Plans work".to_string(),
+            path: "planner/SKILL.md".into(),
+            body: "body".to_string(),
+        });
+        let mut state = AppState::with_skills(ProviderKind::Mock, skills);
+
+        state.open_skill_browser();
+        assert!(state.skill_browser_open);
+        state.move_skill_selection_down();
+        assert_eq!(state.skill_browser_selected, 1);
+        state.toggle_selected_skill();
+        assert!(state.skills.is_enabled("planner"));
+        state.close_skill_browser();
+        assert!(!state.skill_browser_open);
     }
 }

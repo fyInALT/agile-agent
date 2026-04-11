@@ -2,9 +2,11 @@ use agile_agent_core::app::AppState;
 use agile_agent_core::app::AppStatus;
 use agile_agent_core::provider;
 use agile_agent_core::provider::ProviderEvent;
+use agile_agent_core::skills::SkillRegistry;
 use anyhow::Result;
 use crossterm::event;
 use crossterm::event::Event;
+use std::env;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -14,7 +16,9 @@ use crate::render::render_app;
 use crate::terminal::AppTerminal;
 
 pub fn run(terminal: &mut AppTerminal) -> Result<()> {
-    let mut state = AppState::new(provider::default_provider());
+    let cwd = env::current_dir()?;
+    let mut state =
+        AppState::with_skills(provider::default_provider(), SkillRegistry::discover(&cwd));
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
 
     loop {
@@ -34,6 +38,11 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
             match event::read()? {
                 Event::Key(key_event) => match handle_key_event(&mut state, key_event) {
                     InputOutcome::None => {}
+                    InputOutcome::OpenSkills => state.open_skill_browser(),
+                    InputOutcome::CloseSkills => state.close_skill_browser(),
+                    InputOutcome::SkillUp => state.move_skill_selection_up(),
+                    InputOutcome::SkillDown => state.move_skill_selection_down(),
+                    InputOutcome::ToggleSelectedSkill => state.toggle_selected_skill(),
                     InputOutcome::ToggleProvider => {
                         if state.status == AppStatus::Idle {
                             state.toggle_provider();
