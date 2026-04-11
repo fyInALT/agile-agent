@@ -94,6 +94,13 @@ pub fn is_provider_available(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+pub fn has_any_real_provider() -> bool {
+    probe_report()
+        .providers
+        .into_iter()
+        .any(|provider| provider.available)
+}
+
 fn probe_provider(spec: &ProviderSpec) -> ProviderProbe {
     let configured_command = env::var(spec.env_key)
         .ok()
