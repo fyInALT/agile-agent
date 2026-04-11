@@ -7,3 +7,5 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 agile-agent-core = { path = "../agile-agent-core" }
+crossterm.workspace = true
+ratatui.workspace = true
