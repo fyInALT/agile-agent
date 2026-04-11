@@ -239,9 +239,11 @@ fn parse_result_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
     }
 
     if message.is_error {
-        events.push(ProviderEvent::Error(message.result.unwrap_or_else(|| {
-            "claude returned an error result".to_string()
-        })));
+        events.push(ProviderEvent::Error(
+            message
+                .result
+                .unwrap_or_else(|| "claude returned an error result".to_string()),
+        ));
     }
 
     events
@@ -320,7 +322,10 @@ mod tests {
             session_id: "abc123".to_string(),
         }));
 
-        assert!(args.windows(2).any(|window| window == ["--resume", "abc123"]));
+        assert!(
+            args.windows(2)
+                .any(|window| window == ["--resume", "abc123"])
+        );
     }
 
     #[test]

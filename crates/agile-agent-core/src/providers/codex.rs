@@ -56,8 +56,14 @@ fn run_codex(
         .with_context(|| format!("failed to start codex executable `{executable}`"))?;
 
     let mut stdin = child.stdin.take().context("codex stdin pipe unavailable")?;
-    let stdout = child.stdout.take().context("codex stdout pipe unavailable")?;
-    let stderr = child.stderr.take().context("codex stderr pipe unavailable")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("codex stdout pipe unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("codex stderr pipe unavailable")?;
 
     let stderr_handle = thread::spawn(move || read_stderr(stderr));
     let mut stdout_lines = BufReader::new(stdout).lines();
@@ -163,7 +169,13 @@ fn run_codex(
         }
 
         let message = parse_jsonrpc_message(trimmed)?;
-        if handle_message(message, &mut stdin, event_tx, &mut turn_started, &mut turn_completed)? {
+        if handle_message(
+            message,
+            &mut stdin,
+            event_tx,
+            &mut turn_started,
+            &mut turn_completed,
+        )? {
             break;
         }
     }
@@ -194,7 +206,8 @@ fn resolve_codex_executable() -> Result<String> {
 }
 
 fn resolve_codex_executable_from(configured: &str) -> Result<std::path::PathBuf> {
-    which::which(configured).with_context(|| format!("codex executable not found at `{configured}`"))
+    which::which(configured)
+        .with_context(|| format!("codex executable not found at `{configured}`"))
 }
 
 fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
@@ -264,8 +277,12 @@ fn send_notification(stdin: &mut impl Write, method: &str) -> Result<()> {
     stdin
         .write_all(json.as_bytes())
         .context("failed to write codex notification")?;
-    stdin.write_all(b"\n").context("failed to write notification newline")?;
-    stdin.flush().context("failed to flush codex notification")?;
+    stdin
+        .write_all(b"\n")
+        .context("failed to write notification newline")?;
+    stdin
+        .flush()
+        .context("failed to flush codex notification")?;
     Ok(())
 }
 
@@ -279,7 +296,9 @@ fn send_response(stdin: &mut impl Write, id: u64, result: serde_json::Value) -> 
     stdin
         .write_all(json.as_bytes())
         .context("failed to write codex response")?;
-    stdin.write_all(b"\n").context("failed to write response newline")?;
+    stdin
+        .write_all(b"\n")
+        .context("failed to write response newline")?;
     stdin.flush().context("failed to flush codex response")?;
     Ok(())
 }
@@ -346,7 +365,13 @@ fn handle_message(
             handle_server_request(method, id, stdin, event_tx)?;
             return Ok(false);
         }
-        return handle_notification(method, message.params, event_tx, turn_started, turn_completed);
+        return handle_notification(
+            method,
+            message.params,
+            event_tx,
+            turn_started,
+            turn_completed,
+        );
     }
 
     if let Some(error) = message.error {
@@ -442,7 +467,10 @@ fn handle_notification(
 }
 
 fn parse_item_event(method: &str, item: &serde_json::Value) -> Vec<ProviderEvent> {
-    let item_type = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let item_type = item
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     let item_id = item
         .get("id")
         .and_then(|value| value.as_str())
@@ -501,7 +529,10 @@ fn parse_content_blocks(item: &serde_json::Value) -> Vec<ProviderEvent> {
 
     if let Some(content) = item.get("content").and_then(|value| value.as_array()) {
         for block in content {
-            let block_type = block.get("type").and_then(|value| value.as_str()).unwrap_or("");
+            let block_type = block
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             match block_type {
                 "text" => {
                     if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
@@ -571,8 +602,8 @@ mod tests {
     use super::JsonRpcMessage;
     use super::JsonRpcRequest;
     use super::ProviderEvent;
-    use super::parse_jsonrpc_message;
     use super::parse_item_event;
+    use super::parse_jsonrpc_message;
     use super::resolve_codex_executable_from;
     use super::thread_id_from_result;
     use crate::provider::SessionHandle;
@@ -621,7 +652,10 @@ mod tests {
             }
         });
 
-        assert_eq!(thread_id_from_result(Some(&result)), Some("thr_123".to_string()));
+        assert_eq!(
+            thread_id_from_result(Some(&result)),
+            Some("thr_123".to_string())
+        );
     }
 
     #[test]

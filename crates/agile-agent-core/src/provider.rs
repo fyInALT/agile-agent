@@ -32,7 +32,11 @@ impl ProviderKind {
     }
 
     pub fn all() -> [ProviderKind; 3] {
-        [ProviderKind::Mock, ProviderKind::Claude, ProviderKind::Codex]
+        [
+            ProviderKind::Mock,
+            ProviderKind::Claude,
+            ProviderKind::Codex,
+        ]
     }
 }
 

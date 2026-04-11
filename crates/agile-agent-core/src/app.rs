@@ -188,12 +188,13 @@ impl AppState {
                         session_id: session_id.clone(),
                     })
             }
-            ProviderKind::Codex => self
-                .codex_thread_id
-                .as_ref()
-                .map(|thread_id| SessionHandle::CodexThread {
-                    thread_id: thread_id.clone(),
-                }),
+            ProviderKind::Codex => {
+                self.codex_thread_id
+                    .as_ref()
+                    .map(|thread_id| SessionHandle::CodexThread {
+                        thread_id: thread_id.clone(),
+                    })
+            }
         }
     }
 

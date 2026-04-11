@@ -48,9 +48,12 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
                         let (event_tx, event_rx) = mpsc::channel();
                         let provider_kind = state.selected_provider;
                         let session_handle = state.current_session_handle();
-                        if let Err(err) =
-                            provider::start_provider(provider_kind, user_input, session_handle, event_tx)
-                        {
+                        if let Err(err) = provider::start_provider(
+                            provider_kind,
+                            user_input,
+                            session_handle,
+                            event_tx,
+                        ) {
                             state.push_error_message(format!("failed to start provider: {err}"));
                         } else {
                             state.begin_provider_response();
