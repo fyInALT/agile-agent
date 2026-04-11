@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod app_loop;
+mod input;
 mod render;
 mod terminal;
 
