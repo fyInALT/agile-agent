@@ -187,6 +187,8 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
     let mut code_block_lang = String::new();
     let mut current_style = Style::default();
     let mut _heading_level = 0;
+    let mut blockquote_depth = 0usize;
+    let mut list_stack: Vec<Option<u64>> = Vec::new();
 
     for event in parser {
         match event {
@@ -209,14 +211,20 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
                 if !current_line_spans.is_empty() {
-                    // Wrap paragraph text
                     let paragraph_text = spans_to_string(&current_line_spans);
-                    let wrapped = wrap_text(&paragraph_text, max_width);
+                    let wrapped =
+                        wrap_text(&paragraph_text, content_width(max_width, blockquote_depth));
                     for wrapped_line in wrapped {
-                        lines.push(Line::from(wrapped_line));
+                        lines.push(line_with_blockquote_prefix(wrapped_line, blockquote_depth));
                     }
                     current_line_spans.clear();
                 }
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                blockquote_depth += 1;
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code_block = true;
@@ -224,38 +232,50 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
                     CodeBlockKind::Fenced(lang) => lang.to_string(),
                     CodeBlockKind::Indented => String::new(),
                 };
-                lines.push(Line::from(Span::styled(
+                lines.push(styled_line_with_blockquote_prefix(
                     format!("```{}", code_block_lang),
                     Style::default().fg(Color::Yellow),
-                )));
+                    blockquote_depth,
+                ));
             }
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
-                // Render code block content
                 for code_line in code_block_content.lines() {
-                    lines.push(Line::from(Span::styled(
+                    lines.push(styled_line_with_blockquote_prefix(
                         format!("  {}", code_line),
                         Style::default().fg(Color::Green),
-                    )));
+                        blockquote_depth,
+                    ));
                 }
-                lines.push(Line::from(Span::styled(
-                    "```",
+                lines.push(styled_line_with_blockquote_prefix(
+                    "```".to_string(),
                     Style::default().fg(Color::Yellow),
-                )));
+                    blockquote_depth,
+                ));
                 code_block_content.clear();
                 code_block_lang.clear();
             }
-            Event::Start(Tag::List { .. }) => {}
+            Event::Start(Tag::List(start)) => {
+                list_stack.push(start);
+            }
             Event::End(TagEnd::List { .. }) => {}
             Event::Start(Tag::Item) => {
-                current_line_spans.push(Span::styled("- ", Style::default().fg(Color::Blue)));
+                let marker = match list_stack.last_mut() {
+                    Some(Some(next_index)) => {
+                        let marker = format!("{}. ", *next_index);
+                        *next_index += 1;
+                        marker
+                    }
+                    _ => "- ".to_string(),
+                };
+                current_line_spans.push(Span::styled(marker, Style::default().fg(Color::Blue)));
             }
             Event::End(TagEnd::Item) => {
                 if !current_line_spans.is_empty() {
                     let item_text = spans_to_string(&current_line_spans);
-                    let wrapped = wrap_text(&item_text, max_width.saturating_sub(2));
+                    let wrapped = wrap_text(&item_text, content_width(max_width, blockquote_depth));
                     for wrapped_line in wrapped {
-                        lines.push(Line::from(format!("  {}", wrapped_line)));
+                        lines.push(line_with_blockquote_prefix(wrapped_line, blockquote_depth));
                     }
                     current_line_spans.clear();
                 }
@@ -288,18 +308,18 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
             Event::SoftBreak | Event::HardBreak => {
                 if !in_code_block && !current_line_spans.is_empty() {
                     let paragraph_text = spans_to_string(&current_line_spans);
-                    let wrapped = wrap_text(&paragraph_text, max_width);
+                    let wrapped =
+                        wrap_text(&paragraph_text, content_width(max_width, blockquote_depth));
                     for wrapped_line in wrapped {
-                        lines.push(Line::from(wrapped_line));
+                        lines.push(line_with_blockquote_prefix(wrapped_line, blockquote_depth));
                     }
                     current_line_spans.clear();
                 }
             }
-            Event::Start(Tag::Link { dest_url, .. }) => {
+            Event::Start(Tag::Link { .. }) => {
                 current_style = Style::default()
                     .fg(Color::Blue)
                     .add_modifier(Modifier::UNDERLINED);
-                current_line_spans.push(Span::styled(dest_url.to_string(), current_style));
             }
             Event::End(TagEnd::Link) => {
                 current_style = Style::default();
@@ -311,9 +331,9 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
     // Handle remaining content
     if !current_line_spans.is_empty() {
         let paragraph_text = spans_to_string(&current_line_spans);
-        let wrapped = wrap_text(&paragraph_text, max_width);
+        let wrapped = wrap_text(&paragraph_text, content_width(max_width, blockquote_depth));
         for wrapped_line in wrapped {
-            lines.push(Line::from(wrapped_line));
+            lines.push(line_with_blockquote_prefix(wrapped_line, blockquote_depth));
         }
     }
 
@@ -344,6 +364,33 @@ fn render_markdown(text: &str, max_width: usize) -> Vec<Line<'static>> {
 
 fn spans_to_string(spans: &[Span<'static>]) -> String {
     spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+}
+
+fn content_width(max_width: usize, blockquote_depth: usize) -> usize {
+    max_width.saturating_sub(blockquote_depth * 2)
+}
+
+fn blockquote_prefix(depth: usize) -> String {
+    "> ".repeat(depth)
+}
+
+fn line_with_blockquote_prefix(text: String, depth: usize) -> Line<'static> {
+    if depth == 0 {
+        Line::from(text)
+    } else {
+        Line::from(format!("{}{}", blockquote_prefix(depth), text))
+    }
+}
+
+fn styled_line_with_blockquote_prefix(text: String, style: Style, depth: usize) -> Line<'static> {
+    if depth == 0 {
+        Line::from(Span::styled(text, style))
+    } else {
+        Line::from(vec![
+            Span::raw(blockquote_prefix(depth)),
+            Span::styled(text, style),
+        ])
+    }
 }
 
 /// Wrap text to fit within max_width, respecting unicode width
@@ -505,6 +552,15 @@ mod tests {
     }
 
     #[test]
+    fn renders_ordered_list_items_readably() {
+        let markdown = "1. one\n2. two";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("1. one"));
+        assert!(rendered.contains("2. two"));
+    }
+
+    #[test]
     fn renders_code_blocks_readably() {
         let markdown = "```rust\nfn main() {}\n```";
         let rendered = lines_to_string(render_markdown(markdown, 80));
@@ -512,5 +568,22 @@ mod tests {
         assert!(rendered.contains("```rust"));
         assert!(rendered.contains("fn main() {}"));
         assert!(rendered.contains("```"));
+    }
+
+    #[test]
+    fn renders_blockquotes_with_prefix() {
+        let markdown = "> quoted text";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("> quoted text"));
+    }
+
+    #[test]
+    fn renders_link_text_instead_of_destination_url() {
+        let markdown = "[OpenAI](https://openai.com)";
+        let rendered = lines_to_string(render_markdown(markdown, 80));
+
+        assert!(rendered.contains("OpenAI"));
+        assert!(!rendered.contains("https://openai.com"));
     }
 }
