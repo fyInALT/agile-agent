@@ -57,9 +57,10 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
                         let (event_tx, event_rx) = mpsc::channel();
                         let provider_kind = state.selected_provider;
                         let session_handle = state.current_session_handle();
+                        let augmented_prompt = state.skills.build_injected_prompt(&user_input);
                         if let Err(err) = provider::start_provider(
                             provider_kind,
-                            user_input,
+                            augmented_prompt,
                             session_handle,
                             event_tx,
                         ) {

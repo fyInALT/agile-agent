@@ -64,10 +64,11 @@ fn render_header(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layout:
     };
 
     let header = Paragraph::new(Line::from(format!(
-        "agile-agent | provider: {} | status: {}{} | tab: switch | ctrl+l: clear | q/esc: quit",
+        "agile-agent | provider: {} | status: {}{} | skills: {} | tab: switch | ctrl+l: clear | q/esc: quit",
         state.selected_provider.label(),
         status_text,
-        session_info
+        session_info,
+        state.skills.enabled_count()
     )))
     .style(Style::default().add_modifier(Modifier::BOLD));
     frame.render_widget(header, area);

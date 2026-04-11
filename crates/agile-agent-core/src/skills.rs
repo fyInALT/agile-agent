@@ -57,6 +57,39 @@ impl SkillRegistry {
             self.enabled_names.insert(name.to_string());
         }
     }
+
+    pub fn enabled_count(&self) -> usize {
+        self.enabled_names.len()
+    }
+
+    pub fn build_injected_prompt(&self, prompt: &str) -> String {
+        let enabled_skills: Vec<&SkillMetadata> = self
+            .discovered
+            .iter()
+            .filter(|skill| self.enabled_names.contains(&skill.name))
+            .collect();
+
+        if enabled_skills.is_empty() {
+            return prompt.to_string();
+        }
+
+        let mut context = String::from(
+            "[Agile Agent Skill Context]\nThe following local skills are enabled for this turn.\n\n",
+        );
+
+        for skill in enabled_skills {
+            context.push_str(&format!(
+                "## Skill: {}\nPath: {}\n{}\n\n",
+                skill.name,
+                skill.path.display(),
+                skill.body
+            ));
+        }
+
+        context.push_str("[End Agile Agent Skill Context]\n\n");
+        context.push_str(prompt);
+        context
+    }
 }
 
 fn default_skill_roots(cwd: &Path) -> Vec<PathBuf> {
@@ -223,5 +256,27 @@ mod tests {
         assert!(registry.is_enabled("reviewer"));
         registry.toggle("reviewer");
         assert!(!registry.is_enabled("reviewer"));
+    }
+
+    #[test]
+    fn injected_prompt_contains_enabled_skill_context() {
+        let temp = TempDir::new().expect("tempdir");
+        let skill_dir = temp.path().join("skills").join("reviewer");
+        fs::create_dir_all(&skill_dir).expect("create skill dir");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: reviewer\ndescription: Reviews code.\n---\n\nReview diffs carefully.",
+        )
+        .expect("write skill");
+
+        let mut registry = SkillRegistry::discover_from_roots(&[temp.path().join("skills")]);
+        registry.toggle("reviewer");
+
+        let injected = registry.build_injected_prompt("Hello");
+
+        assert!(injected.contains("[Agile Agent Skill Context]"));
+        assert!(injected.contains("## Skill: reviewer"));
+        assert!(injected.contains("Review diffs carefully."));
+        assert!(injected.ends_with("Hello"));
     }
 }
