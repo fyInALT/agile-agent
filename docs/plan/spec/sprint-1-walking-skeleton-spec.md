@@ -88,31 +88,30 @@ agile-agent/
 │   └── plan/
 │       └── spec/
 │           └── sprint-1-walking-skeleton-spec.md
-└── crates/
-    ├── agile-agent-cli/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       └── main.rs
-    ├── agile-agent-core/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── lib.rs
-    │       ├── app.rs
-    │       ├── event.rs
-    │       └── mock_provider.rs
-    └── agile-agent-tui/
-        ├── Cargo.toml
-        └── src/
-            ├── lib.rs
-            ├── terminal.rs
-            ├── app_loop.rs
-            ├── render.rs
-            └── input.rs
+├── cli/
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs
+├── core/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── app.rs
+│       ├── event.rs
+│       └── mock_provider.rs
+└── tui/
+    ├── Cargo.toml
+    └── src/
+        ├── lib.rs
+        ├── terminal.rs
+        ├── app_loop.rs
+        ├── render.rs
+        └── input.rs
 ```
 
 Notes:
 
-- `agile-agent-provider` is not required for Sprint 1.
+- A dedicated provider package is not required for Sprint 1.
 - If it is introduced now, it must not delay the walking skeleton demo.
 - Favor fewer crates if the workspace overhead starts slowing execution.
 
@@ -179,7 +178,7 @@ Only the TUI path needs to be fully functional in this sprint.
 ### Engineering Checklist
 
 - Create the workspace `Cargo.toml`.
-- Add `agile-agent-cli` as the binary crate.
+- Add `agent-cli` as the binary crate.
 - Add `clap` with subcommand support.
 - Define a CLI contract similar to:
 
@@ -195,14 +194,14 @@ agile-agent probe --json
 ### Suggested Files
 
 - `Cargo.toml`
-- `crates/agile-agent-cli/Cargo.toml`
-- `crates/agile-agent-cli/src/main.rs`
+- `cli/Cargo.toml`
+- `cli/src/main.rs`
 
 ### Acceptance
 
-- `cargo run -p agile-agent-cli --` launches the TUI.
-- `cargo run -p agile-agent-cli -- doctor` parses successfully.
-- `cargo run -p agile-agent-cli -- probe --json` parses successfully.
+- `cargo run -p agent-cli --` launches the TUI.
+- `cargo run -p agent-cli -- doctor` parses successfully.
+- `cargo run -p agent-cli -- probe --json` parses successfully.
 
 ### Notes
 
@@ -236,8 +235,8 @@ Implement a safe TUI terminal lifecycle:
 
 ### Suggested Files
 
-- `crates/agile-agent-tui/src/terminal.rs`
-- `crates/agile-agent-tui/src/lib.rs`
+- `tui/src/terminal.rs`
+- `tui/src/lib.rs`
 
 ### Acceptance
 
@@ -272,8 +271,8 @@ Render a minimal but usable three-part UI:
 
 ### Suggested Files
 
-- `crates/agile-agent-tui/src/render.rs`
-- `crates/agile-agent-tui/src/app_loop.rs`
+- `tui/src/render.rs`
+- `tui/src/app_loop.rs`
 
 ### Acceptance
 
@@ -309,9 +308,9 @@ Let the user type text, edit basic content, and submit with Enter.
 
 ### Suggested Files
 
-- `crates/agile-agent-tui/src/input.rs`
-- `crates/agile-agent-core/src/app.rs`
-- `crates/agile-agent-core/src/event.rs`
+- `tui/src/input.rs`
+- `core/src/app.rs`
+- `core/src/event.rs`
 
 ### Acceptance
 
@@ -345,8 +344,8 @@ Introduce a fake assistant execution path so the TUI can demonstrate a full inte
 
 ### Suggested Files
 
-- `crates/agile-agent-core/src/mock_provider.rs`
-- `crates/agile-agent-core/src/app.rs`
+- `core/src/mock_provider.rs`
+- `core/src/app.rs`
 
 ### Acceptance
 
@@ -375,8 +374,8 @@ Ensure the app can quit safely and report basic internal failures without leavin
 
 ### Suggested Files
 
-- `crates/agile-agent-tui/src/app_loop.rs`
-- `crates/agile-agent-cli/src/main.rs`
+- `tui/src/app_loop.rs`
+- `cli/src/main.rs`
 
 ### Acceptance
 
@@ -458,7 +457,7 @@ Those belong to later stories and later sprints.
 
 Use this exact demo sequence in Sprint Review:
 
-1. `cargo run -p agile-agent-cli --`
+1. `cargo run -p agent-cli --`
 2. Show the TUI frame
 3. Type `hello`
 4. Press Enter

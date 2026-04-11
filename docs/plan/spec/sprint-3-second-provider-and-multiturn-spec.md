@@ -369,24 +369,23 @@ Ensure the second-provider path is not only manually tested.
 
 ```text
 agile-agent/
-└── crates/
-    ├── agile-agent-core/
-    │   └── src/
-    │       ├── app.rs
-    │       ├── probe.rs
-    │       ├── provider.rs
-    │       ├── transcript.rs
-    │       └── providers/
-    │           ├── claude.rs
-    │           ├── codex.rs
-    │           └── mod.rs
-    └── agile-agent-tui/
-        └── src/
-            ├── app_loop.rs
-            ├── input.rs
-            ├── render.rs
-            ├── transcript_render.rs
-            └── terminal.rs
+├── core/
+│   └── src/
+│       ├── app.rs
+│       ├── probe.rs
+│       ├── provider.rs
+│       ├── transcript.rs
+│       └── providers/
+│           ├── claude.rs
+│           ├── codex.rs
+│           └── mod.rs
+└── tui/
+    └── src/
+        ├── app_loop.rs
+        ├── input.rs
+        ├── render.rs
+        ├── transcript_render.rs
+        └── terminal.rs
 ```
 
 This is a recommendation. Keep the structure small if a leaner layout is enough.

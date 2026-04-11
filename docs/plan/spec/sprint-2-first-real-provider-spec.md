@@ -267,9 +267,9 @@ Spawn Claude, write input, and stream output back into the app.
 
 ### Suggested file targets
 
-- `crates/agile-agent-core/src/provider.rs`
-- `crates/agile-agent-core/src/providers/mock.rs`
-- `crates/agile-agent-core/src/providers/claude.rs`
+- `core/src/provider.rs`
+- `core/src/providers/mock.rs`
+- `core/src/providers/claude.rs`
 
 The exact file layout can vary, but keep Claude-specific code out of the TUI crate.
 
@@ -393,25 +393,24 @@ Ensure Sprint 2 does not rely only on manual TTY tests.
 
 ```text
 agile-agent/
-└── crates/
-    ├── agile-agent-cli/
-    ├── agile-agent-core/
-    │   ├── src/
-    │   │   ├── app.rs
-    │   │   ├── event.rs
-    │   │   ├── probe.rs
-    │   │   ├── provider.rs
-    │   │   └── providers/
-    │   │       ├── mod.rs
-    │   │       ├── mock.rs
-    │   │       └── claude.rs
-    └── agile-agent-tui/
-        └── src/
-            ├── app_loop.rs
-            ├── input.rs
-            ├── render.rs
-            ├── terminal.rs
-            └── lib.rs
+├── cli/
+├── core/
+│   └── src/
+│       ├── app.rs
+│       ├── event.rs
+│       ├── probe.rs
+│       ├── provider.rs
+│       └── providers/
+│           ├── mod.rs
+│           ├── mock.rs
+│           └── claude.rs
+└── tui/
+    └── src/
+        ├── app_loop.rs
+        ├── input.rs
+        ├── render.rs
+        ├── terminal.rs
+        └── lib.rs
 ```
 
 This is a recommendation, not a hard constraint. Keep the file structure small if a simpler layout works better.
@@ -511,7 +510,7 @@ Use this exact demo sequence in Sprint Review:
 
 ### Demo A: Mock path still works
 
-1. `cargo run -p agile-agent-cli --`
+1. `cargo run -p agent-cli --`
 2. Submit a prompt with `mock`
 3. Observe reply
 
