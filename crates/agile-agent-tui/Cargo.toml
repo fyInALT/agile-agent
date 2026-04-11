@@ -1,0 +1,9 @@
+[package]
+name = "agile-agent-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+agile-agent-core = { path = "../agile-agent-core" }

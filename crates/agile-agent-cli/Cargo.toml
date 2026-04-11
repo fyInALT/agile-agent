@@ -1,0 +1,14 @@
+[package]
+name = "agile-agent-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agile-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+agile-agent-tui = { path = "../agile-agent-tui" }
