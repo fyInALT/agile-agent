@@ -2,6 +2,7 @@ use agile_agent_core::app::AppState;
 use agile_agent_core::app::AppStatus;
 use agile_agent_core::provider;
 use agile_agent_core::provider::ProviderEvent;
+use agile_agent_core::session_store;
 use agile_agent_core::skills::SkillRegistry;
 use anyhow::Result;
 use crossterm::event;
@@ -15,10 +16,18 @@ use crate::input::handle_key_event;
 use crate::render::render_app;
 use crate::terminal::AppTerminal;
 
-pub fn run(terminal: &mut AppTerminal) -> Result<()> {
+pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let cwd = env::current_dir()?;
     let mut state =
         AppState::with_skills(provider::default_provider(), SkillRegistry::discover(&cwd));
+    if resume_last {
+        if let Ok(session) = session_store::load_recent_session() {
+            session.apply_to_app_state(&mut state);
+            state.push_status_message("restored recent session");
+        } else {
+            state.push_error_message("failed to restore recent session");
+        }
+    }
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
 
     loop {
@@ -110,5 +119,6 @@ pub fn run(terminal: &mut AppTerminal) -> Result<()> {
         }
     }
 
-    Ok(())
+    session_store::save_recent_session(&state, &cwd)?;
+    Ok(state)
 }

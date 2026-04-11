@@ -1,15 +1,18 @@
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppStatus {
     #[default]
     Idle,
     Responding,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TranscriptEntry {
     User(String),
     Assistant(String),

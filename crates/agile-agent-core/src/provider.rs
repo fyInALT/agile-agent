@@ -3,11 +3,13 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::mock_provider;
 use crate::probe;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderKind {
     Mock,
     Claude,

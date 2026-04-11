@@ -14,6 +14,8 @@ struct Cli {
 enum Command {
     /// Inspect available providers in the current environment.
     Doctor,
+    /// Restore the most recent saved session.
+    ResumeLast,
     /// Print structured provider probe results.
     Probe {
         #[arg(long)]
@@ -26,6 +28,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => agile_agent_tui::run_tui(),
+        Some(Command::ResumeLast) => agile_agent_tui::run_tui_with_resume_last(),
         Some(Command::Doctor) => {
             print!("{}", render_doctor(&probe::probe_report()));
             Ok(())
