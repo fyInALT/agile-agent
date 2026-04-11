@@ -3,18 +3,18 @@
 version = 4
 
 [[package]]
-name = "agile-agent-cli"
+name = "agent-cli"
 version = "0.1.0"
 dependencies = [
- "agile-agent-core",
- "agile-agent-tui",
+ "agent-core",
+ "agent-tui",
  "anyhow",
  "clap",
  "serde_json",
 ]
 
 [[package]]
-name = "agile-agent-core"
+name = "agent-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "agile-agent-tui"
+name = "agent-tui"
 version = "0.1.0"
 dependencies = [
- "agile-agent-core",
+ "agent-core",
  "anyhow",
  "crossterm",
  "pulldown-cmark",

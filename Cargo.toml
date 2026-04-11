@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/agile-agent-cli",
-    "crates/agile-agent-core",
-    "crates/agile-agent-tui",
+    "cli",
+    "core",
+    "tui",
 ]
 resolver = "2"
 
