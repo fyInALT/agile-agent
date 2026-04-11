@@ -1,4 +1,5 @@
 pub mod app;
+pub mod commands;
 pub mod event;
 pub mod mock_provider;
 pub mod probe;

@@ -30,7 +30,7 @@ fn main() -> Result<()> {
         None => agile_agent_tui::run_tui(),
         Some(Command::ResumeLast) => agile_agent_tui::run_tui_with_resume_last(),
         Some(Command::Doctor) => {
-            print!("{}", render_doctor(&probe::probe_report()));
+            print!("{}", probe::render_doctor_text(&probe::probe_report()));
             Ok(())
         }
         Some(Command::Probe { json: true }) => {
@@ -42,35 +42,4 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
-}
-
-fn render_doctor(report: &probe::ProbeReport) -> String {
-    let mut lines = vec![
-        "agile-agent doctor".to_string(),
-        format!("checked_at: {}", report.checked_at),
-        String::new(),
-    ];
-
-    for provider in &report.providers {
-        lines.push(format!("{}:", provider.name));
-        lines.push(format!(
-            "  available: {}",
-            if provider.available { "yes" } else { "no" }
-        ));
-        lines.push(format!(
-            "  path: {}",
-            provider.path.as_deref().unwrap_or("-")
-        ));
-        lines.push(format!(
-            "  version: {}",
-            provider.version.as_deref().unwrap_or("-")
-        ));
-        lines.push(format!("  protocol: {}", provider.protocol));
-        if let Some(error) = &provider.error {
-            lines.push(format!("  error: {error}"));
-        }
-        lines.push(String::new());
-    }
-
-    lines.join("\n")
 }

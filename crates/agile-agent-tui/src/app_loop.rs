@@ -1,5 +1,8 @@
 use agile_agent_core::app::AppState;
 use agile_agent_core::app::AppStatus;
+use agile_agent_core::commands::LocalCommand;
+use agile_agent_core::commands::parse_local_command;
+use agile_agent_core::probe;
 use agile_agent_core::provider;
 use agile_agent_core::provider::ProviderEvent;
 use agile_agent_core::session_store;
@@ -63,6 +66,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     }
                     InputOutcome::Quit => state.request_quit(),
                     InputOutcome::Submit(user_input) => {
+                        if let Some(command_result) = parse_local_command(&user_input) {
+                            match command_result {
+                                Ok(command) => handle_local_command(&mut state, command),
+                                Err(error) => state.push_error_message(error),
+                            }
+                            continue;
+                        }
+
                         let (event_tx, event_rx) = mpsc::channel();
                         let provider_kind = state.selected_provider;
                         let session_handle = state.current_session_handle();
@@ -121,4 +132,39 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
     session_store::save_recent_session(&state, &cwd)?;
     Ok(state)
+}
+
+fn handle_local_command(state: &mut AppState, command: LocalCommand) {
+    match command {
+        LocalCommand::Help => {
+            for line in [
+                "available commands:",
+                "/help",
+                "/provider",
+                "/skills",
+                "/doctor",
+                "/quit",
+            ] {
+                state.push_status_message(line);
+            }
+        }
+        LocalCommand::Provider => {
+            state.push_status_message(format!(
+                "current provider: {} (tab switches providers)",
+                state.selected_provider.label()
+            ));
+        }
+        LocalCommand::Skills => {
+            state.open_skill_browser();
+        }
+        LocalCommand::Doctor => {
+            let report = probe::probe_report();
+            for line in probe::render_doctor_text(&report).lines() {
+                if !line.trim().is_empty() {
+                    state.push_status_message(line);
+                }
+            }
+        }
+        LocalCommand::Quit => state.request_quit(),
+    }
 }

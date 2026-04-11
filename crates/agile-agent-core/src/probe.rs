@@ -54,6 +54,37 @@ pub fn probe_report() -> ProbeReport {
     }
 }
 
+pub fn render_doctor_text(report: &ProbeReport) -> String {
+    let mut lines = vec![
+        "agile-agent doctor".to_string(),
+        format!("checked_at: {}", report.checked_at),
+        String::new(),
+    ];
+
+    for provider in &report.providers {
+        lines.push(format!("{}:", provider.name));
+        lines.push(format!(
+            "  available: {}",
+            if provider.available { "yes" } else { "no" }
+        ));
+        lines.push(format!(
+            "  path: {}",
+            provider.path.as_deref().unwrap_or("-")
+        ));
+        lines.push(format!(
+            "  version: {}",
+            provider.version.as_deref().unwrap_or("-")
+        ));
+        lines.push(format!("  protocol: {}", provider.protocol));
+        if let Some(error) = &provider.error {
+            lines.push(format!("  error: {error}"));
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n")
+}
+
 pub fn is_provider_available(name: &str) -> bool {
     probe_report()
         .providers
@@ -133,6 +164,7 @@ mod tests {
     use super::detect_version;
     use super::probe_provider_with_candidate;
     use super::probe_report;
+    use super::render_doctor_text;
     use std::fs;
     use std::path::PathBuf;
 
@@ -189,5 +221,15 @@ mod tests {
         assert!(json.get("checked_at").is_some());
         assert!(json.get("providers").is_some());
         assert!(json["providers"].is_array());
+    }
+
+    #[test]
+    fn doctor_text_mentions_providers() {
+        let report = probe_report();
+        let rendered = render_doctor_text(&report);
+
+        assert!(rendered.contains("agile-agent doctor"));
+        assert!(rendered.contains("codex:"));
+        assert!(rendered.contains("claude:"));
     }
 }
