@@ -98,9 +98,13 @@ fn resolve_claude_executable() -> Result<String> {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "claude".to_string());
 
-    let resolved = which::which(&configured)
-        .with_context(|| format!("claude executable not found at `{configured}`"))?;
+    let resolved = resolve_claude_executable_from(&configured)?;
     Ok(resolved.display().to_string())
+}
+
+fn resolve_claude_executable_from(configured: &str) -> Result<std::path::PathBuf> {
+    which::which(configured)
+        .with_context(|| format!("claude executable not found at `{configured}`"))
 }
 
 fn build_claude_args() -> [&'static str; 10] {
@@ -268,6 +272,7 @@ mod tests {
     use super::ProviderEvent;
     use super::build_claude_input;
     use super::parse_output_line;
+    use super::resolve_claude_executable_from;
 
     #[test]
     fn builds_stream_json_input() {
@@ -318,6 +323,18 @@ mod tests {
         assert_eq!(
             events,
             vec![ProviderEvent::Status("claude info: starting".to_string())]
+        );
+    }
+
+    #[test]
+    fn missing_executable_is_reported_clearly() {
+        let error = resolve_claude_executable_from("definitely-not-a-real-claude-binary")
+            .expect_err("resolution must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("claude executable not found at `definitely-not-a-real-claude-binary`")
         );
     }
 }

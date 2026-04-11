@@ -72,3 +72,44 @@ fn start_mock_provider(prompt: String, event_tx: Sender<ProviderEvent>) -> Resul
         .map(|_| ())
         .map_err(Into::into)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::ProviderEvent;
+    use super::ProviderKind;
+    use super::start_provider;
+
+    #[test]
+    fn mock_provider_emits_assistant_chunks_and_finishes() {
+        let (tx, rx) = mpsc::channel();
+
+        start_provider(ProviderKind::Mock, "hello".to_string(), tx).expect("start provider");
+
+        let mut saw_chunk = false;
+        let mut saw_finished = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+
+        while std::time::Instant::now() < deadline {
+            let Ok(event) = rx.recv_timeout(Duration::from_millis(250)) else {
+                continue;
+            };
+            match event {
+                ProviderEvent::AssistantChunk(_) => saw_chunk = true,
+                ProviderEvent::Finished => {
+                    saw_finished = true;
+                    break;
+                }
+                ProviderEvent::Status(_) | ProviderEvent::Error(_) => {}
+            }
+        }
+
+        assert!(
+            saw_chunk,
+            "mock provider should emit at least one assistant chunk"
+        );
+        assert!(saw_finished, "mock provider should emit a finished event");
+    }
+}
