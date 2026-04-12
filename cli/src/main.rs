@@ -195,6 +195,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     if resume_last {
         match agent_runtime.restore_state(&mut state) {
             Ok(restored) => {
+                let _ = agent_runtime.restore_transcript(&mut state);
                 for warning in restored.warnings {
                     eprintln!("warning: {warning}");
                 }
@@ -220,7 +221,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         }
     }
     if agent_runtime.sync_from_app_state(&state) {
-        agent_runtime.persist()?;
+        persist_agent_runtime_bundle(&agent_runtime, &state)?;
     }
 
     let initial_transcript_len = state.transcript.len();
@@ -234,8 +235,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         },
         &mut |state: &AppState| {
             if agent_runtime.sync_from_app_state(state) {
-                agent_runtime.persist()?;
-                agent_runtime.persist_state(state)?;
+                persist_agent_runtime_bundle(&agent_runtime, state)?;
             }
             Ok(())
         },
@@ -245,8 +245,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     session_store::save_recent_session_for_workplace(&state, agent_runtime.workplace())?;
     agent_runtime.sync_from_app_state(&state);
     agent_runtime.mark_stopped();
-    agent_runtime.persist()?;
-    agent_runtime.persist_state(&state)?;
+    persist_agent_runtime_bundle(&agent_runtime, &state)?;
 
     println!("iterations: {}", summary.iterations);
     println!("stopped_reason: {}", summary.stopped_reason);
@@ -261,5 +260,14 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn persist_agent_runtime_bundle(agent_runtime: &AgentRuntime, state: &AppState) -> Result<()> {
+    agent_runtime.persist()?;
+    agent_runtime.persist_state(state)?;
+    agent_runtime.persist_transcript(state)?;
+    agent_runtime.persist_messages(state)?;
+    agent_runtime.persist_memory(state)?;
     Ok(())
 }

@@ -61,6 +61,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     if resume_last {
         match bootstrap.runtime.restore_state(&mut app) {
             Ok(restored) => {
+                let _ = bootstrap.runtime.restore_transcript(&mut app);
                 app.push_status_message("restored recent agent state");
                 for warning in restored.warnings {
                     app.push_error_message(warning);
@@ -92,7 +93,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
     let mut state = TuiState::from_app(app, bootstrap.runtime);
     if state.sync_agent_runtime_from_app() {
-        state.agent_runtime.persist()?;
+        persist_agent_runtime_bundle(&mut state)?;
     }
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
 
@@ -279,8 +280,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     state.sync_app_input_from_composer();
     state.agent_runtime.sync_from_app_state(&state.app);
     state.agent_runtime.mark_stopped();
-    state.agent_runtime.persist()?;
-    state.agent_runtime.persist_state(&state.app)?;
+    persist_agent_runtime_bundle(&mut state)?;
     backlog_store::save_backlog_for_workplace(&state.app.backlog, state.agent_runtime.workplace())?;
     session_store::save_recent_session_for_workplace(&state.app, state.agent_runtime.workplace())?;
     Ok(state.into_app_state())
@@ -433,8 +433,16 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
 
 fn persist_agent_runtime_if_changed(state: &mut TuiState) -> Result<()> {
     if state.sync_agent_runtime_from_app() {
-        state.agent_runtime.persist()?;
-        state.agent_runtime.persist_state(&state.app)?;
+        persist_agent_runtime_bundle(state)?;
     }
+    Ok(())
+}
+
+fn persist_agent_runtime_bundle(state: &mut TuiState) -> Result<()> {
+    state.agent_runtime.persist()?;
+    state.agent_runtime.persist_state(&state.app)?;
+    state.agent_runtime.persist_transcript(&state.app)?;
+    state.agent_runtime.persist_messages(&state.app)?;
+    state.agent_runtime.persist_memory(&state.app)?;
     Ok(())
 }

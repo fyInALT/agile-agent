@@ -6,9 +6,12 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::FixedOffset;
 
+use crate::agent_memory::AgentMemory;
+use crate::agent_messages::AgentMessages;
 use crate::agent_runtime::AgentId;
 use crate::agent_runtime::AgentMeta;
 use crate::agent_state::AgentState;
+use crate::agent_transcript::AgentTranscript;
 use crate::workplace_store::WorkplaceStore;
 
 #[derive(Debug, Clone)]
@@ -62,6 +65,50 @@ impl AgentStore {
             .with_context(|| format!("failed to read {}", path.display()))?;
         serde_json::from_str(&payload)
             .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    pub fn save_transcript(
+        &self,
+        agent_id: &AgentId,
+        transcript: &AgentTranscript,
+    ) -> Result<PathBuf> {
+        let agent_dir = self.agent_dir(agent_id);
+        fs::create_dir_all(&agent_dir)
+            .with_context(|| format!("failed to create {}", agent_dir.display()))?;
+        let path = agent_dir.join("transcript.json");
+        let payload =
+            serde_json::to_string_pretty(transcript).context("failed to serialize transcript")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    }
+
+    pub fn load_transcript(&self, agent_id: &AgentId) -> Result<AgentTranscript> {
+        let path = self.transcript_path(agent_id);
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    pub fn save_messages(&self, agent_id: &AgentId, messages: &AgentMessages) -> Result<PathBuf> {
+        let agent_dir = self.agent_dir(agent_id);
+        fs::create_dir_all(&agent_dir)
+            .with_context(|| format!("failed to create {}", agent_dir.display()))?;
+        let path = agent_dir.join("messages.json");
+        let payload =
+            serde_json::to_string_pretty(messages).context("failed to serialize messages")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    }
+
+    pub fn save_memory(&self, agent_id: &AgentId, memory: &AgentMemory) -> Result<PathBuf> {
+        let agent_dir = self.agent_dir(agent_id);
+        fs::create_dir_all(&agent_dir)
+            .with_context(|| format!("failed to create {}", agent_dir.display()))?;
+        let path = agent_dir.join("memory.json");
+        let payload = serde_json::to_string_pretty(memory).context("failed to serialize memory")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
     }
 
     pub fn load_most_recent_meta(&self) -> Result<Option<AgentMeta>> {
@@ -132,6 +179,10 @@ impl AgentStore {
     fn state_path(&self, agent_id: &AgentId) -> PathBuf {
         self.agent_dir(agent_id).join("state.json")
     }
+
+    fn transcript_path(&self, agent_id: &AgentId) -> PathBuf {
+        self.agent_dir(agent_id).join("transcript.json")
+    }
 }
 
 fn meta_sort_key(meta: &AgentMeta) -> (DateTime<FixedOffset>, String) {
@@ -152,6 +203,7 @@ mod tests {
     use crate::agent_runtime::ProviderType;
     use crate::agent_runtime::WorkplaceId;
     use crate::agent_state::AgentState;
+    use crate::agent_transcript::AgentTranscript;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 
@@ -222,7 +274,6 @@ mod tests {
             cwd: ".".to_string(),
             draft_input: "draft".to_string(),
             enabled_skill_names: vec!["reviewer".to_string()],
-            transcript: Vec::new(),
             active_task_id: Some("task-1".to_string()),
             active_task_had_error: false,
             continuation_attempts: 1,
@@ -240,5 +291,24 @@ mod tests {
 
         assert_eq!(loaded.draft_input, "draft");
         assert_eq!(loaded.active_task_id.as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn saves_and_loads_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let store = AgentStore::new(workplace);
+        let transcript = AgentTranscript {
+            entries: Vec::new(),
+        };
+
+        store
+            .save_transcript(&AgentId::new("agent_001"), &transcript)
+            .expect("save transcript");
+        let loaded = store
+            .load_transcript(&AgentId::new("agent_001"))
+            .expect("load transcript");
+
+        assert_eq!(loaded.entries.len(), 0);
     }
 }

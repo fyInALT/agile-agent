@@ -262,6 +262,9 @@ Agent runtime state is stored separately under:
 
 - `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/meta.json`
 - `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/state.json`
+- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/transcript.json`
+- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/messages.json`
+- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/memory.json`
 - `~/.agile-agent/workplaces/{workplace_id}/backlog.json`
 - `~/.agile-agent/workplaces/{workplace_id}/recent-session.json`
 - `~/.agile-agent/workplaces/{workplace_id}/sessions/session-*.json`

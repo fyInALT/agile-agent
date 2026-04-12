@@ -6,7 +6,6 @@ use serde::Serialize;
 
 use crate::app::AppState;
 use crate::app::LoopPhase;
-use crate::app::TranscriptEntry;
 use crate::skills::SkillRegistry;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -14,7 +13,6 @@ pub struct AgentState {
     pub cwd: String,
     pub draft_input: String,
     pub enabled_skill_names: Vec<String>,
-    pub transcript: Vec<TranscriptEntry>,
     pub active_task_id: Option<String>,
     pub active_task_had_error: bool,
     pub continuation_attempts: u8,
@@ -34,7 +32,6 @@ impl AgentState {
             cwd: state.cwd.display().to_string(),
             draft_input: state.input.clone(),
             enabled_skill_names: state.skills.enabled_names.iter().cloned().collect(),
-            transcript: state.transcript.clone(),
             active_task_id: state.active_task_id.clone(),
             active_task_had_error: state.active_task_had_error,
             continuation_attempts: state.continuation_attempts,
@@ -57,7 +54,6 @@ impl AgentState {
         state.cwd = effective_cwd.clone();
         state.skills = SkillRegistry::discover(&effective_cwd);
         state.input = self.draft_input.clone();
-        state.transcript = self.transcript.clone();
         state.active_task_id = self.active_task_id.clone();
         state.active_task_had_error = self.active_task_had_error;
         state.continuation_attempts = self.continuation_attempts;
@@ -88,16 +84,12 @@ mod tests {
     use super::AgentState;
     use crate::app::AppState;
     use crate::app::LoopPhase;
-    use crate::app::TranscriptEntry;
     use crate::provider::ProviderKind;
 
     #[test]
     fn round_trips_basic_runtime_state() {
         let mut state = AppState::new(ProviderKind::Mock);
         state.input = "draft".to_string();
-        state
-            .transcript
-            .push(TranscriptEntry::User("hello".to_string()));
         state.active_task_id = Some("task-1".to_string());
         state.loop_phase = LoopPhase::Executing;
         state.loop_run_active = true;
@@ -111,6 +103,5 @@ mod tests {
         assert_eq!(restored.active_task_id.as_deref(), Some("task-1"));
         assert_eq!(restored.loop_phase, LoopPhase::Executing);
         assert!(restored.loop_run_active);
-        assert_eq!(restored.transcript.len(), 1);
     }
 }

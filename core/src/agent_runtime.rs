@@ -5,9 +5,12 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::agent_memory::AgentMemory;
+use crate::agent_messages::AgentMessages;
 use crate::agent_state::AgentState;
 use crate::agent_state::RestoreAgentStateResult;
 use crate::agent_store::AgentStore;
+use crate::agent_transcript::AgentTranscript;
 use crate::app::AppState;
 use crate::app::AppStatus;
 use crate::app::LoopPhase;
@@ -284,6 +287,30 @@ impl AgentRuntime {
     pub fn restore_state(&self, state: &mut AppState) -> Result<RestoreAgentStateResult> {
         let snapshot = AgentStore::new(self.workplace.clone()).load_state(&self.meta.agent_id)?;
         Ok(snapshot.apply_to_app_state(state))
+    }
+
+    pub fn persist_transcript(&self, state: &AppState) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone())
+            .save_transcript(&self.meta.agent_id, &AgentTranscript::from_app_state(state))
+    }
+
+    pub fn restore_transcript(&self, state: &mut AppState) -> Result<()> {
+        let snapshot =
+            AgentStore::new(self.workplace.clone()).load_transcript(&self.meta.agent_id)?;
+        snapshot.apply_to_app_state(state);
+        Ok(())
+    }
+
+    pub fn persist_messages(&self, state: &AppState) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone())
+            .save_messages(&self.meta.agent_id, &AgentMessages::from_app_state(state))
+    }
+
+    pub fn persist_memory(&self, state: &AppState) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone()).save_memory(
+            &self.meta.agent_id,
+            &AgentMemory::from_runtime_and_app(self, state),
+        )
     }
 
     pub fn bootstrap_for_cwd(cwd: &Path, default_provider: ProviderKind) -> Result<AgentBootstrap> {
