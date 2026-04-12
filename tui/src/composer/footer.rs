@@ -11,21 +11,21 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui_state::TuiState;
 
 pub fn build_footer_line(state: &TuiState, width: u16) -> Line<'static> {
-    let left = if state.app.status == AppStatus::Responding {
+    let left = if state.app().status == AppStatus::Responding {
         format!(
             "  {}  ctrl+t transcript  ctrl+j newline",
-            state.app.selected_provider.label()
+            state.app().selected_provider.label()
         )
     } else {
         "  enter send  ctrl+j newline  tab new agent  ctrl+t transcript".to_string()
     };
 
-    let cwd_label = display_cwd_label(&state.app.cwd);
+    let cwd_label = display_cwd_label(&state.app().cwd);
     let right = format!(
         "{} · {} · {} · {}",
-        state.agent_runtime.codename().as_str(),
-        state.app.selected_provider.label(),
-        loop_phase_label(state.app.loop_phase),
+        state.session.agent_runtime.codename().as_str(),
+        state.app().selected_provider.label(),
+        loop_phase_label(state.app().loop_phase),
         cwd_label
     );
 

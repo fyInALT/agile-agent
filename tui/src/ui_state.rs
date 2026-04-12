@@ -1,7 +1,7 @@
-use agent_core::agent_runtime::AgentRuntime;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
+use agent_core::runtime_session::RuntimeSession;
 use anyhow::Result;
 use std::time::Instant;
 
@@ -11,8 +11,7 @@ use crate::transcript::overlay::TranscriptOverlayState;
 
 #[derive(Debug)]
 pub struct TuiState {
-    pub app: AppState,
-    pub agent_runtime: AgentRuntime,
+    pub session: RuntimeSession,
     pub composer: TextArea,
     pub composer_state: TextAreaState,
     pub transcript_overlay: Option<TranscriptOverlayState>,
@@ -24,11 +23,10 @@ pub struct TuiState {
 }
 
 impl TuiState {
-    pub fn from_app(app: AppState, agent_runtime: AgentRuntime) -> Self {
-        let composer = TextArea::from_text(app.input.clone());
+    pub fn from_session(session: RuntimeSession) -> Self {
+        let composer = TextArea::from_text(session.app.input.clone());
         Self {
-            app,
-            agent_runtime,
+            session,
             composer,
             composer_state: TextAreaState::default(),
             transcript_overlay: None,
@@ -40,17 +38,25 @@ impl TuiState {
         }
     }
 
+    pub fn app(&self) -> &AppState {
+        &self.session.app
+    }
+
+    pub fn app_mut(&mut self) -> &mut AppState {
+        &mut self.session.app
+    }
+
     pub fn sync_app_input_from_composer(&mut self) {
-        self.app.input = self.composer.text().to_string();
+        self.session.app.input = self.composer.text().to_string();
     }
 
     pub fn into_app_state(mut self) -> AppState {
         self.sync_app_input_from_composer();
-        self.app
+        self.session.app
     }
 
-    pub fn sync_agent_runtime_from_app(&mut self) -> bool {
-        self.agent_runtime.sync_from_app_state(&self.app)
+    pub fn persist_if_changed(&mut self) -> Result<()> {
+        self.session.persist_if_changed()
     }
 
     pub fn is_overlay_open(&self) -> bool {
@@ -99,7 +105,8 @@ impl TuiState {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.app.status == AppStatus::Responding || !matches!(self.app.loop_phase, LoopPhase::Idle)
+        self.session.app.status == AppStatus::Responding
+            || !matches!(self.session.app.loop_phase, LoopPhase::Idle)
     }
 
     pub fn switch_to_new_agent(
@@ -107,33 +114,13 @@ impl TuiState {
         provider_kind: agent_core::provider::ProviderKind,
     ) -> Result<String> {
         self.sync_app_input_from_composer();
-        self.agent_runtime.sync_from_app_state(&self.app);
-        self.agent_runtime.mark_stopped();
-        self.agent_runtime.persist()?;
-
-        let next_runtime = self.agent_runtime.create_sibling(provider_kind)?;
-        let cwd = self.app.cwd.clone();
-        let backlog = self.app.backlog.clone();
-        let mut skills = agent_core::skills::SkillRegistry::discover(&cwd);
-        skills.enabled_names = self.app.skills.enabled_names.clone();
-
-        let mut next_app = AppState::with_skills(provider_kind, cwd, skills);
-        next_app.backlog = backlog;
-        for warning in next_runtime.apply_to_app_state(&mut next_app) {
-            next_app.push_error_message(warning);
-        }
-        let summary = next_runtime.summary();
-        next_app.push_status_message(format!("created agent: {summary}"));
-
-        self.app = next_app;
-        self.agent_runtime = next_runtime;
+        let summary = self.session.switch_agent(provider_kind)?;
         self.composer = TextArea::new();
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;
         self.transcript_scroll_offset = 0;
         self.transcript_follow_tail = true;
         self.busy_started_at = None;
-
         Ok(summary)
     }
 }
@@ -141,34 +128,34 @@ impl TuiState {
 #[cfg(test)]
 mod tests {
     use super::TuiState;
-    use agent_core::agent_runtime::AgentRuntime;
-    use agent_core::app::AppState;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
-    use agent_core::workplace_store::WorkplaceStore;
+    use agent_core::runtime_session::RuntimeSession;
     use tempfile::TempDir;
 
     #[test]
     fn switching_provider_creates_new_agent_runtime() {
         let temp = TempDir::new().expect("tempdir");
-        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
-        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Claude);
-        runtime.persist().expect("persist");
-        let mut app = AppState::new(ProviderKind::Claude);
-        app.push_status_message("existing transcript");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+                .expect("bootstrap");
+        session.app.push_status_message("existing transcript");
 
-        let mut state = TuiState::from_app(app, runtime);
-        let previous_agent_id = state.agent_runtime.agent_id().as_str().to_string();
+        let mut state = TuiState::from_session(session);
+        let previous_agent_id = state.session.agent_runtime.agent_id().as_str().to_string();
 
         let summary = state
             .switch_to_new_agent(ProviderKind::Codex)
             .expect("switch");
 
-        assert_ne!(state.agent_runtime.agent_id().as_str(), previous_agent_id);
-        assert_eq!(state.app.selected_provider, ProviderKind::Codex);
+        assert_ne!(
+            state.session.agent_runtime.agent_id().as_str(),
+            previous_agent_id
+        );
+        assert_eq!(state.session.app.selected_provider, ProviderKind::Codex);
         assert!(summary.contains("agent_"));
         assert!(matches!(
-            state.app.transcript.first(),
+            state.session.app.transcript.first(),
             Some(TranscriptEntry::Status(text)) if text.contains("created agent:")
         ));
     }

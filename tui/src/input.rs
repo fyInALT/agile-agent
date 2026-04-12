@@ -24,7 +24,7 @@ pub enum InputOutcome {
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
-    if pasted_text.is_empty() || state.app.skill_browser_open || state.is_overlay_open() {
+    if pasted_text.is_empty() || state.app().skill_browser_open || state.is_overlay_open() {
         return;
     }
 
@@ -45,13 +45,13 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
 
     if matches!(key_event.code, KeyCode::Char('q'))
         && state.composer.is_empty()
-        && !state.app.skill_browser_open
+        && !state.app().skill_browser_open
         && !state.is_overlay_open()
     {
         return InputOutcome::Quit;
     }
 
-    if state.app.skill_browser_open {
+    if state.app().skill_browser_open {
         return match key_event.code {
             KeyCode::Esc => InputOutcome::CloseSkills,
             KeyCode::Up => InputOutcome::SkillUp,
@@ -73,12 +73,12 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::OpenTranscript,
         KeyEvent {
             code: KeyCode::Tab, ..
-        } if state.app.status == AppStatus::Idle => InputOutcome::ToggleProvider,
+        } if state.app().status == AppStatus::Idle => InputOutcome::ToggleProvider,
         KeyEvent {
             code: KeyCode::Char('p'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::CONTROL) && state.app.status == AppStatus::Idle => {
+        } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
             InputOutcome::ToggleProvider
         }
         KeyEvent {
@@ -175,14 +175,14 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Enter,
             ..
         } => {
-            if state.app.status == AppStatus::Responding {
+            if state.app().status == AppStatus::Responding {
                 return InputOutcome::None;
             }
             let Some(submitted) = state.composer.take_submission() else {
                 return InputOutcome::None;
             };
             state.sync_app_input_from_composer();
-            state.app.push_user_message(submitted.clone());
+            state.app_mut().push_user_message(submitted.clone());
             InputOutcome::Submit(submitted)
         }
         KeyEvent {
@@ -211,12 +211,11 @@ mod tests {
     use super::handle_key_event;
     use super::handle_paste_event;
     use crate::ui_state::TuiState;
-    use agent_core::agent_runtime::AgentRuntime;
     use agent_core::app::AppState;
     use agent_core::app::AppStatus;
     use agent_core::provider::ProviderKind;
+    use agent_core::runtime_session::RuntimeSession;
     use agent_core::skills::SkillRegistry;
-    use agent_core::workplace_store::WorkplaceStore;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
@@ -224,9 +223,11 @@ mod tests {
 
     fn state_from_app(app: AppState) -> TuiState {
         let temp = TempDir::new().expect("tempdir");
-        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
-        let runtime = AgentRuntime::new(&workplace, 1, app.selected_provider);
-        TuiState::from_app(app, runtime)
+        let session = RuntimeSession::bootstrap(temp.path().into(), app.selected_provider, false)
+            .expect("bootstrap");
+        let mut session = session;
+        session.app = app;
+        TuiState::from_session(session)
     }
 
     #[test]
@@ -308,7 +309,7 @@ mod tests {
     fn submit_is_blocked_while_responding() {
         let app = AppState::new(ProviderKind::Mock);
         let mut state = state_from_app(app);
-        state.app.status = AppStatus::Responding;
+        state.app_mut().status = AppStatus::Responding;
         state.composer.insert_text("hello");
 
         let outcome = handle_key_event(

@@ -40,7 +40,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     render_composer(frame, state, areas[2]);
     render_footer(frame, state, areas[3]);
 
-    if state.app.skill_browser_open {
+    if state.app().skill_browser_open {
         render_skill_browser(frame, state);
     }
 
@@ -51,7 +51,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.transcript_viewport_height = area.height;
-    let lines = cells::flatten_cells(&cells::build_cells(&state.app.transcript, area.width));
+    let lines = cells::flatten_cells(&cells::build_cells(&state.app().transcript, area.width));
     let max_scroll = lines.len().saturating_sub(area.height as usize);
     if state.transcript_follow_tail {
         state.transcript_scroll_offset = max_scroll;
@@ -117,9 +117,9 @@ fn render_working_line(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
 }
 
 fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
-    let Some(overlay) = state.transcript_overlay.as_mut() else {
+    if state.transcript_overlay.is_none() {
         return;
-    };
+    }
 
     let area = frame.area();
     frame.render_widget(Clear, area);
@@ -143,9 +143,13 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let lines = cells::flatten_cells(&cells::build_cells(&state.app.transcript, chunks[1].width));
+    let lines = cells::flatten_cells(&cells::build_cells(
+        &state.app().transcript,
+        chunks[1].width,
+    ));
     let content_height = lines.len();
     let max_scroll = content_height.saturating_sub(chunks[1].height as usize);
+    let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
     if overlay.scroll_offset > max_scroll {
         overlay.scroll_offset = max_scroll;
     }
@@ -177,12 +181,12 @@ fn render_skill_browser(frame: &mut Frame<'_>, state: &TuiState) {
     let area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, area);
 
-    let title = format!("Skills ({})", state.app.skills.enabled_names.len());
+    let title = format!("Skills ({})", state.app().skills.enabled_names.len());
 
     let mut lines = Vec::new();
-    for (index, skill) in state.app.skills.discovered.iter().enumerate() {
-        let enabled = state.app.skills.is_enabled(&skill.name);
-        let selected = index == state.app.skill_browser_selected;
+    for (index, skill) in state.app().skills.discovered.iter().enumerate() {
+        let enabled = state.app().skills.is_enabled(&skill.name);
+        let selected = index == state.app().skill_browser_selected;
         let marker = if enabled { "[x]" } else { "[ ]" };
         let prefix = if selected { ">" } else { " " };
         let style = if selected {
@@ -254,7 +258,7 @@ fn build_working_line(state: &TuiState, width: u16, now: Instant) -> Line<'stati
     let label = working_label(state);
 
     let mut content = format!("{spinner} {label} ({elapsed}s");
-    if state.app.status == agent_core::app::AppStatus::Responding {
+    if state.app().status == agent_core::app::AppStatus::Responding {
         content.push_str(" • esc to interrupt");
     }
     content.push(')');
@@ -282,7 +286,7 @@ fn animated_spinner(elapsed_millis: u128) -> &'static str {
 }
 
 fn working_label(state: &TuiState) -> &'static str {
-    match state.app.loop_phase {
+    match state.app().loop_phase {
         agent_core::app::LoopPhase::Planning => "Planning",
         agent_core::app::LoopPhase::Verifying => "Verifying",
         agent_core::app::LoopPhase::Escalating => "Escalating",
@@ -292,7 +296,7 @@ fn working_label(state: &TuiState) -> &'static str {
 
 fn background_terminal_summary(state: &TuiState) -> Option<String> {
     let count = state
-        .app
+        .app()
         .transcript
         .iter()
         .filter(|entry| {
@@ -319,12 +323,10 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
 mod tests {
     use super::build_working_line;
     use crate::ui_state::TuiState;
-    use agent_core::agent_runtime::AgentRuntime;
-    use agent_core::app::AppState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
-    use agent_core::workplace_store::WorkplaceStore;
+    use agent_core::runtime_session::RuntimeSession;
     use ratatui::text::Line;
     use std::time::Duration;
     use std::time::Instant;
@@ -340,12 +342,12 @@ mod tests {
     #[test]
     fn working_line_mentions_elapsed_and_exec_count() {
         let temp = TempDir::new().expect("tempdir");
-        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
-        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Mock);
-        let mut state = TuiState::from_app(AppState::new(ProviderKind::Mock), runtime);
-        state.app.status = AppStatus::Responding;
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
-        state.app.transcript.push(TranscriptEntry::ToolCall {
+        state.app_mut().transcript.push(TranscriptEntry::ToolCall {
             name: "exec_command".to_string(),
             call_id: Some("1".to_string()),
             input_preview: None,
@@ -363,9 +365,9 @@ mod tests {
     #[test]
     fn footer_surfaces_agent_codename() {
         let temp = TempDir::new().expect("tempdir");
-        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
-        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Mock);
-        let state = TuiState::from_app(AppState::new(ProviderKind::Mock), runtime);
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let state = TuiState::from_session(session);
 
         let rendered = line_to_string(&crate::composer::footer::build_footer_line(&state, 120));
 

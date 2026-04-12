@@ -16,6 +16,7 @@ pub mod mock_provider;
 pub mod probe;
 pub mod provider;
 pub mod providers;
+pub mod runtime_session;
 pub mod session_store;
 pub mod skills;
 pub mod storage;
