@@ -10,6 +10,7 @@ use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::logging;
 use crate::probe::CLAUDE_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
@@ -21,6 +22,15 @@ pub fn start(
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
     let executable = resolve_claude_executable()?;
+    logging::debug_event(
+        "provider.claude.start",
+        "spawning Claude provider worker",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "session_handle": format!("{:?}", session_handle),
+        }),
+    );
 
     thread::Builder::new()
         .name("agent-claude-provider".to_string())
@@ -53,6 +63,15 @@ fn run_claude(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start claude executable `{executable}`"))?;
+    logging::debug_event(
+        "provider.claude.process_spawned",
+        "spawned Claude process",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "args": args,
+        }),
+    );
 
     let stdin = child
         .stdin
@@ -68,6 +87,13 @@ fn run_claude(
         .context("claude stderr pipe unavailable")?;
 
     let payload = build_claude_input(&prompt)?;
+    logging::debug_event(
+        "provider.claude.stdin_payload",
+        "writing raw Claude stdin payload",
+        serde_json::json!({
+            "payload": payload,
+        }),
+    );
 
     thread::scope(|scope| -> Result<()> {
         let write_handle = scope.spawn(|| -> Result<()> {
@@ -100,6 +126,14 @@ fn run_claude(
                 anyhow::bail!("claude exited with status {status}: {stderr_output}");
             }
         }
+
+        logging::debug_event(
+            "provider.claude.exit",
+            "Claude process exited successfully",
+            serde_json::json!({
+                "status": status.to_string(),
+            }),
+        );
 
         Ok(())
     })
@@ -171,7 +205,21 @@ fn read_stdout(stdout: impl std::io::Read, event_tx: &Sender<ProviderEvent>) -> 
         if trimmed.is_empty() {
             continue;
         }
+        logging::debug_event(
+            "provider.claude.stdout_line",
+            "read raw Claude stdout line",
+            serde_json::json!({
+                "line": trimmed,
+            }),
+        );
         for event in parse_output_line(trimmed)? {
+            logging::debug_event(
+                "provider.claude.event",
+                "parsed Claude provider event",
+                serde_json::json!({
+                    "event_debug": format!("{:?}", event),
+                }),
+            );
             if event_tx.send(event).is_err() {
                 return Ok(());
             }
@@ -185,6 +233,15 @@ fn read_stderr(stderr: impl std::io::Read) -> String {
     let mut buffer = String::new();
     let mut reader = std::io::BufReader::new(stderr);
     let _ = std::io::Read::read_to_string(&mut reader, &mut buffer);
+    if !buffer.trim().is_empty() {
+        logging::debug_event(
+            "provider.claude.stderr",
+            "read Claude stderr output",
+            serde_json::json!({
+                "stderr": buffer,
+            }),
+        );
+    }
     buffer
 }
 
@@ -377,12 +434,16 @@ fn render_json_value(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::logging;
+    use crate::logging::RunMode;
     use crate::provider::SessionHandle;
+    use crate::workplace_store::WorkplaceStore;
 
     use super::ProviderEvent;
     use super::build_claude_args;
     use super::build_claude_input;
     use super::parse_output_line;
+    use super::read_stdout;
     use super::resolve_claude_executable_from;
 
     #[test]
@@ -514,6 +575,41 @@ mod tests {
                 session_id: "sess-2".to_string()
             })]
         );
+    }
+
+    #[test]
+    fn read_stdout_logs_raw_line_and_parsed_events() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        workplace.ensure().expect("ensure");
+        logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
+
+        let input = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}"#;
+        let (tx, rx) = std::sync::mpsc::channel();
+        read_stdout(std::io::Cursor::new(format!("{input}\n")), &tx).expect("read stdout");
+
+        assert_eq!(
+            rx.recv().expect("event"),
+            ProviderEvent::AssistantChunk("hello".to_string())
+        );
+
+        let log_path = logging::current_log_path().expect("log path");
+        let contents = std::fs::read_to_string(log_path).expect("log file");
+        let entries: Vec<serde_json::Value> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid json log line"))
+            .collect();
+        assert!(entries.iter().any(|entry| {
+            entry.get("event").and_then(|value| value.as_str()) == Some("provider.claude.stdout_line")
+                && entry
+                    .get("fields")
+                    .and_then(|fields| fields.get("line"))
+                    .and_then(|value| value.as_str())
+                    == Some(input)
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.get("event").and_then(|value| value.as_str()) == Some("provider.claude.event")
+        }));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::logging;
 use crate::mock_provider;
 use crate::probe;
 
@@ -88,6 +89,16 @@ pub fn start_provider(
     session_handle: Option<SessionHandle>,
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
+    logging::debug_event(
+        "provider.start",
+        "starting provider request",
+        serde_json::json!({
+            "provider": provider.label(),
+            "cwd": cwd.display().to_string(),
+            "prompt": prompt,
+            "session_handle": format!("{:?}", session_handle),
+        }),
+    );
     match provider {
         ProviderKind::Mock => start_mock_provider(prompt, event_tx),
         ProviderKind::Claude => {
