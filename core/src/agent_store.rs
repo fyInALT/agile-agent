@@ -8,6 +8,7 @@ use chrono::FixedOffset;
 
 use crate::agent_runtime::AgentId;
 use crate::agent_runtime::AgentMeta;
+use crate::agent_state::AgentState;
 use crate::workplace_store::WorkplaceStore;
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,25 @@ impl AgentStore {
 
     pub fn load_meta(&self, agent_id: &AgentId) -> Result<AgentMeta> {
         let path = self.meta_path(agent_id);
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    pub fn save_state(&self, agent_id: &AgentId, state: &AgentState) -> Result<PathBuf> {
+        let agent_dir = self.agent_dir(agent_id);
+        fs::create_dir_all(&agent_dir)
+            .with_context(|| format!("failed to create {}", agent_dir.display()))?;
+        let path = agent_dir.join("state.json");
+        let payload =
+            serde_json::to_string_pretty(state).context("failed to serialize agent state")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    }
+
+    pub fn load_state(&self, agent_id: &AgentId) -> Result<AgentState> {
+        let path = self.state_path(agent_id);
         let payload = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         serde_json::from_str(&payload)
@@ -101,12 +121,16 @@ impl AgentStore {
         Ok(count + 1)
     }
 
-    fn agent_dir(&self, agent_id: &AgentId) -> PathBuf {
+    fn meta_path(&self, agent_id: &AgentId) -> PathBuf {
+        self.agent_dir(agent_id).join("meta.json")
+    }
+
+    pub fn agent_dir(&self, agent_id: &AgentId) -> PathBuf {
         self.workplace.agents_dir().join(agent_id.as_str())
     }
 
-    fn meta_path(&self, agent_id: &AgentId) -> PathBuf {
-        self.agent_dir(agent_id).join("meta.json")
+    fn state_path(&self, agent_id: &AgentId) -> PathBuf {
+        self.agent_dir(agent_id).join("state.json")
     }
 }
 
@@ -127,6 +151,7 @@ mod tests {
     use crate::agent_runtime::AgentStatus;
     use crate::agent_runtime::ProviderType;
     use crate::agent_runtime::WorkplaceId;
+    use crate::agent_state::AgentState;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 
@@ -186,5 +211,34 @@ mod tests {
             .expect("save");
 
         assert_eq!(store.next_agent_index().expect("index"), 2);
+    }
+
+    #[test]
+    fn saves_and_loads_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let store = AgentStore::new(workplace);
+        let state = AgentState {
+            cwd: ".".to_string(),
+            draft_input: "draft".to_string(),
+            enabled_skill_names: vec!["reviewer".to_string()],
+            transcript: Vec::new(),
+            active_task_id: Some("task-1".to_string()),
+            active_task_had_error: false,
+            continuation_attempts: 1,
+            loop_phase: crate::app::LoopPhase::Executing,
+            loop_run_active: true,
+            remaining_loop_iterations: 2,
+        };
+
+        store
+            .save_state(&AgentId::new("agent_001"), &state)
+            .expect("save state");
+        let loaded = store
+            .load_state(&AgentId::new("agent_001"))
+            .expect("load state");
+
+        assert_eq!(loaded.draft_input, "draft");
+        assert_eq!(loaded.active_task_id.as_deref(), Some("task-1"));
     }
 }

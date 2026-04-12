@@ -128,6 +128,7 @@ The runtime currently persists:
 - `status`
 
 On startup from the same working directory, `agile-agent` restores the most recent agent for the derived workplace and reattaches provider session continuity when possible.
+When `resume-last` is used, it now prefers the current agent's own `state.json` before falling back to older workplace-scoped session files.
 
 Default headless guardrails:
 
@@ -260,6 +261,7 @@ Current files and folders include:
 Agent runtime state is stored separately under:
 
 - `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/meta.json`
+- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/state.json`
 - `~/.agile-agent/workplaces/{workplace_id}/backlog.json`
 - `~/.agile-agent/workplaces/{workplace_id}/recent-session.json`
 - `~/.agile-agent/workplaces/{workplace_id}/sessions/session-*.json`

@@ -193,11 +193,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     let mut agent_runtime = bootstrap.runtime;
 
     if resume_last {
-        match session_store::restore_recent_session_for_workplace(
-            &mut state,
-            &launch_cwd,
-            agent_runtime.workplace(),
-        ) {
+        match agent_runtime.restore_state(&mut state) {
             Ok(restored) => {
                 for warning in restored.warnings {
                     eprintln!("warning: {warning}");
@@ -206,7 +202,21 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
                     eprintln!("warning: {warning}");
                 }
             }
-            Err(err) => eprintln!("warning: failed to restore recent session: {err}"),
+            Err(err) => match session_store::restore_recent_session_for_workplace(
+                &mut state,
+                &launch_cwd,
+                agent_runtime.workplace(),
+            ) {
+                Ok(restored) => {
+                    for warning in restored.warnings {
+                        eprintln!("warning: {warning}");
+                    }
+                    for warning in agent_runtime.apply_to_app_state(&mut state) {
+                        eprintln!("warning: {warning}");
+                    }
+                }
+                Err(_) => eprintln!("warning: failed to restore recent agent state: {err}"),
+            },
         }
     }
     if agent_runtime.sync_from_app_state(&state) {
@@ -225,6 +235,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         &mut |state: &AppState| {
             if agent_runtime.sync_from_app_state(state) {
                 agent_runtime.persist()?;
+                agent_runtime.persist_state(state)?;
             }
             Ok(())
         },
@@ -235,6 +246,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     agent_runtime.sync_from_app_state(&state);
     agent_runtime.mark_stopped();
     agent_runtime.persist()?;
+    agent_runtime.persist_state(&state)?;
 
     println!("iterations: {}", summary.iterations);
     println!("stopped_reason: {}", summary.stopped_reason);

@@ -38,6 +38,10 @@ pub fn save_task_artifact(record: &TaskArtifact) -> Result<PathBuf> {
     save_task_artifact_to_root(record, &root.join("task-artifacts"))
 }
 
+pub fn save_task_artifact_under(root: &Path, record: &TaskArtifact) -> Result<PathBuf> {
+    save_task_artifact_to_root(record, &root.join("artifacts").join("task-artifacts"))
+}
+
 fn save_task_artifact_to_root(record: &TaskArtifact, root: &Path) -> Result<PathBuf> {
     fs::create_dir_all(root).context("failed to create task artifact directory")?;
     let file_path = root.join(format!(

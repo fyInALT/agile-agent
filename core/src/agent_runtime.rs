@@ -5,6 +5,8 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::agent_state::AgentState;
+use crate::agent_state::RestoreAgentStateResult;
 use crate::agent_store::AgentStore;
 use crate::app::AppState;
 use crate::app::AppStatus;
@@ -201,6 +203,8 @@ impl AgentRuntime {
 
     pub fn apply_to_app_state(&self, state: &mut AppState) -> Vec<String> {
         let mut warnings = Vec::new();
+        let store = AgentStore::new(self.workplace.clone());
+        state.agent_storage_root = Some(store.agent_dir(&self.meta.agent_id));
         if let Some(provider_kind) = self.meta.provider_type.to_provider_kind() {
             state.selected_provider = provider_kind;
             if let Some(session_id) = self.meta.provider_session_id.as_ref() {
@@ -270,6 +274,16 @@ impl AgentRuntime {
 
     pub fn persist(&self) -> Result<std::path::PathBuf> {
         AgentStore::new(self.workplace.clone()).save_meta(&self.meta)
+    }
+
+    pub fn persist_state(&self, state: &AppState) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone())
+            .save_state(&self.meta.agent_id, &AgentState::from_app_state(state))
+    }
+
+    pub fn restore_state(&self, state: &mut AppState) -> Result<RestoreAgentStateResult> {
+        let snapshot = AgentStore::new(self.workplace.clone()).load_state(&self.meta.agent_id)?;
+        Ok(snapshot.apply_to_app_state(state))
     }
 
     pub fn bootstrap_for_cwd(cwd: &Path, default_provider: ProviderKind) -> Result<AgentBootstrap> {

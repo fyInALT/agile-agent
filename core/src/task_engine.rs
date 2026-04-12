@@ -269,7 +269,11 @@ fn save_task_artifact(
         reason,
         escalation_path: escalation_path.map(|path| path.display().to_string()),
     };
-    task_artifacts::save_task_artifact(&artifact)
+    if let Some(root) = state.agent_storage_root.as_ref() {
+        task_artifacts::save_task_artifact_under(root, &artifact)
+    } else {
+        task_artifacts::save_task_artifact(&artifact)
+    }
 }
 
 fn escalate_active_task(
@@ -296,7 +300,14 @@ fn escalate_active_task(
         created_at: Utc::now().to_rfc3339(),
     };
 
-    let artifact_path = escalation::save_escalation(&record).ok();
+    let artifact_path = state
+        .agent_storage_root
+        .as_ref()
+        .map(|root| escalation::save_escalation_under(root, &record))
+        .transpose()
+        .ok()
+        .flatten()
+        .or_else(|| escalation::save_escalation(&record).ok());
     state.block_active_task(reason.clone());
     state.push_error_message(format!("escalated task: {} ({})", task_id, reason));
     if let Some(path) = artifact_path.as_ref() {

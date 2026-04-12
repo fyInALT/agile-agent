@@ -59,13 +59,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
     if resume_last {
-        match session_store::restore_recent_session_for_workplace(
-            &mut app,
-            &launch_cwd,
-            bootstrap.runtime.workplace(),
-        ) {
+        match bootstrap.runtime.restore_state(&mut app) {
             Ok(restored) => {
-                app.push_status_message("restored recent session");
+                app.push_status_message("restored recent agent state");
                 for warning in restored.warnings {
                     app.push_error_message(warning);
                 }
@@ -73,7 +69,24 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     app.push_error_message(warning);
                 }
             }
-            Err(err) => app.push_error_message(format!("failed to restore recent session: {err}")),
+            Err(err) => match session_store::restore_recent_session_for_workplace(
+                &mut app,
+                &launch_cwd,
+                bootstrap.runtime.workplace(),
+            ) {
+                Ok(restored) => {
+                    app.push_status_message("restored recent session");
+                    for warning in restored.warnings {
+                        app.push_error_message(warning);
+                    }
+                    for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
+                        app.push_error_message(warning);
+                    }
+                }
+                Err(_) => {
+                    app.push_error_message(format!("failed to restore recent agent state: {err}"))
+                }
+            },
         }
     }
 
@@ -267,6 +280,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     state.agent_runtime.sync_from_app_state(&state.app);
     state.agent_runtime.mark_stopped();
     state.agent_runtime.persist()?;
+    state.agent_runtime.persist_state(&state.app)?;
     backlog_store::save_backlog_for_workplace(&state.app.backlog, state.agent_runtime.workplace())?;
     session_store::save_recent_session_for_workplace(&state.app, state.agent_runtime.workplace())?;
     Ok(state.into_app_state())
@@ -420,6 +434,7 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
 fn persist_agent_runtime_if_changed(state: &mut TuiState) -> Result<()> {
     if state.sync_agent_runtime_from_app() {
         state.agent_runtime.persist()?;
+        state.agent_runtime.persist_state(&state.app)?;
     }
     Ok(())
 }
