@@ -17,6 +17,14 @@ pub enum InputOutcome {
     Quit,
 }
 
+pub fn handle_paste_event(state: &mut AppState, pasted_text: &str) {
+    if pasted_text.is_empty() || state.skill_browser_open || state.status == AppStatus::Responding {
+        return;
+    }
+
+    state.insert_text(pasted_text);
+}
+
 pub fn handle_key_event(state: &mut AppState, key_event: KeyEvent) -> InputOutcome {
     if key_event.kind != KeyEventKind::Press {
         return InputOutcome::None;
@@ -80,7 +88,9 @@ fn has_non_shift_modifiers(modifiers: KeyModifiers) -> bool {
 mod tests {
     use super::InputOutcome;
     use super::handle_key_event;
+    use super::handle_paste_event;
     use agent_core::app::AppState;
+    use agent_core::app::AppStatus;
     use agent_core::provider::ProviderKind;
     use agent_core::skills::SkillRegistry;
     use crossterm::event::KeyCode;
@@ -125,5 +135,35 @@ mod tests {
             KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
         );
         assert!(matches!(outcome, InputOutcome::OpenSkills));
+    }
+
+    #[test]
+    fn paste_appends_multiline_text_when_idle() {
+        let mut state = AppState::new(ProviderKind::Mock);
+
+        handle_paste_event(&mut state, "hello\nworld");
+
+        assert_eq!(state.input, "hello\nworld");
+    }
+
+    #[test]
+    fn paste_is_ignored_while_responding() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.status = AppStatus::Responding;
+
+        handle_paste_event(&mut state, "hello");
+
+        assert!(state.input.is_empty());
+    }
+
+    #[test]
+    fn paste_is_ignored_when_skill_browser_is_open() {
+        let mut state =
+            AppState::with_skills(ProviderKind::Mock, ".".into(), SkillRegistry::default());
+        state.skill_browser_open = true;
+
+        handle_paste_event(&mut state, "hello");
+
+        assert!(state.input.is_empty());
     }
 }

@@ -122,6 +122,10 @@ impl AppState {
         self.input.push(ch);
     }
 
+    pub fn insert_text(&mut self, text: &str) {
+        self.input.push_str(text);
+    }
+
     pub fn backspace(&mut self) {
         self.input.pop();
     }
@@ -564,6 +568,16 @@ mod tests {
 
         assert_eq!(submitted, Some("hi".to_string()));
         assert!(state.input.is_empty());
+    }
+
+    #[test]
+    fn insert_text_appends_multiple_characters() {
+        let mut state = AppState::default();
+
+        state.insert_char('h');
+        state.insert_text("ello\nworld");
+
+        assert_eq!(state.input, "hello\nworld");
     }
 
     #[test]

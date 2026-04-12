@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use crate::input::InputOutcome;
 use crate::input::handle_key_event;
+use crate::input::handle_paste_event;
 use crate::render::render_app;
 use crate::terminal::AppTerminal;
 
@@ -118,6 +119,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         start_provider_request(&mut state, augmented_prompt, &mut provider_rx);
                     }
                 },
+                Event::Paste(text) => handle_paste_event(&mut state, &text),
                 Event::Resize(_, _) => {}
                 _ => {}
             }
