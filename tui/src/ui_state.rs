@@ -21,6 +21,8 @@ pub struct TuiState {
     pub transcript_scroll_offset: usize,
     pub transcript_max_scroll: usize,
     pub transcript_follow_tail: bool,
+    pub transcript_rendered_lines: Vec<String>,
+    pub transcript_last_cell_range: Option<(usize, usize)>,
     pub busy_started_at: Option<Instant>,
 }
 
@@ -37,6 +39,8 @@ impl TuiState {
             transcript_scroll_offset: 0,
             transcript_max_scroll: 0,
             transcript_follow_tail: true,
+            transcript_rendered_lines: Vec::new(),
+            transcript_last_cell_range: None,
             busy_started_at: None,
         }
     }
@@ -133,6 +137,8 @@ impl TuiState {
         self.transcript_scroll_offset = 0;
         self.transcript_max_scroll = 0;
         self.transcript_follow_tail = true;
+        self.transcript_rendered_lines.clear();
+        self.transcript_last_cell_range = None;
         self.busy_started_at = None;
         Ok(summary)
     }

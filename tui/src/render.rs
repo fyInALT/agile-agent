@@ -51,22 +51,84 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.transcript_viewport_height = area.height;
-    let lines = cells::flatten_cells(&cells::build_cells(&state.app().transcript, area.width));
+    let transcript_cells = cells::build_cells(&state.app().transcript, area.width);
+    let lines = cells::flatten_cells(&transcript_cells);
+    let rendered_lines = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
     let max_scroll = lines.len().saturating_sub(area.height as usize);
     state.transcript_max_scroll = max_scroll;
     if state.transcript_follow_tail {
         state.transcript_scroll_offset = max_scroll;
-    } else if state.transcript_scroll_offset > max_scroll {
-        state.transcript_scroll_offset = max_scroll;
+    } else {
+        if let Some(anchor) = state
+            .transcript_rendered_lines
+            .get(state.transcript_scroll_offset)
+            .cloned()
+        {
+            if rendered_lines
+                .get(state.transcript_scroll_offset)
+                .map(|line| line.as_str())
+                != Some(anchor.as_str())
+            {
+                if let Some(index) =
+                    find_closest_matching_line(&rendered_lines, &anchor, state.transcript_scroll_offset)
+                {
+                    state.transcript_scroll_offset = index;
+                } else if let (Some((old_start, old_len)), Some((new_start, new_len))) = (
+                    state.transcript_last_cell_range,
+                    last_cell_range(&transcript_cells),
+                ) {
+                    let old_offset = state.transcript_scroll_offset;
+                    if old_offset >= old_start && old_offset < old_start + old_len {
+                        let relative = old_offset - old_start;
+                        state.transcript_scroll_offset =
+                            new_start + relative.min(new_len.saturating_sub(1));
+                    }
+                }
+            }
+        }
+
+        if state.transcript_scroll_offset > max_scroll {
+            state.transcript_scroll_offset = max_scroll;
+        }
     }
     if state.transcript_scroll_offset >= max_scroll {
         state.transcript_follow_tail = true;
     }
+    state.transcript_rendered_lines = rendered_lines;
+    state.transcript_last_cell_range = last_cell_range(&transcript_cells);
     let transcript = Paragraph::new(lines).scroll((
         state.transcript_scroll_offset.min(u16::MAX as usize) as u16,
         0,
     ));
     frame.render_widget(transcript, area);
+}
+
+fn find_closest_matching_line(lines: &[String], anchor: &str, origin: usize) -> Option<usize> {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.as_str() == anchor)
+        .min_by_key(|(index, _)| index.abs_diff(origin))
+        .map(|(index, _)| index)
+}
+
+fn last_cell_range(cells: &[cells::TranscriptCell]) -> Option<(usize, usize)> {
+    let mut start = 0usize;
+    for (index, cell) in cells.iter().enumerate() {
+        if index + 1 == cells.len() {
+            return Some((start, cell.lines.len()));
+        }
+        start += cell.lines.len() + 1;
+    }
+    None
 }
 
 fn render_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {

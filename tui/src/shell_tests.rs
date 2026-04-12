@@ -1,7 +1,11 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
+use crate::render::render_app;
 use crate::test_support::ShellHarness;
+use crate::transcript::cells;
 use agent_core::app::TranscriptEntry;
 use agent_core::logging;
 use agent_core::logging::RunMode;
@@ -221,4 +225,80 @@ fn provider_switch_logs_tui_action() {
     let log_path = logging::current_log_path().expect("log path");
     let contents = std::fs::read_to_string(log_path).expect("log file");
     assert!(contents.contains("\"event\":\"tui.provider_switch\""));
+}
+
+#[test]
+fn manual_scroll_keeps_same_top_line_while_streaming_reflows_content() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+
+    for index in 0..6 {
+        shell
+            .state
+            .app_mut()
+            .push_status_message(format!("history line {index}"));
+    }
+
+    shell.state.app_mut().append_assistant_chunk(
+        "## Focus\n\n- `agile-agent` is the prim",
+    );
+
+    let lines_before =
+        cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
+    let original_offset = lines_before
+        .iter()
+        .position(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+                == "the prim"
+        })
+        .expect("top anchor line");
+    let original_top = lines_before[original_offset]
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+
+    shell.state.transcript_scroll_offset = original_offset;
+    shell.state.transcript_follow_tail = false;
+
+    let backend = TestBackend::new(18, 6);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("first draw");
+    shell.state.transcript_scroll_offset = original_offset;
+    shell.state.transcript_follow_tail = false;
+    let first_offset = shell.state.transcript_scroll_offset;
+    let first_follow_tail = shell.state.transcript_follow_tail;
+    let first_last_cell = shell.state.transcript_last_cell_range;
+
+    shell.state.app_mut().append_assistant_chunk(
+        "ary implementation target in this workspace.",
+    );
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("second draw");
+
+    let lines_after =
+        cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
+    let top_after = lines_after[shell.state.transcript_scroll_offset]
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+
+    assert!(
+        top_after.contains("primary"),
+        "manual scroll anchor drifted out of the active paragraph: before=`{}` after=`{}` first_offset={} second_offset={} first_follow_tail={} second_follow_tail={} first_last_cell={:?} second_last_cell={:?}",
+        original_top,
+        top_after,
+        first_offset,
+        shell.state.transcript_scroll_offset,
+        first_follow_tail,
+        shell.state.transcript_follow_tail,
+        first_last_cell,
+        shell.state.transcript_last_cell_range
+    );
 }
