@@ -10,6 +10,11 @@ mod terminal;
 mod transcript;
 mod ui_state;
 
+#[cfg(test)]
+mod shell_tests;
+#[cfg(test)]
+mod test_support;
+
 pub fn run_tui() -> Result<()> {
     run_tui_with_options(false)
 }
