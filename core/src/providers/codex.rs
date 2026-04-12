@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -163,6 +164,7 @@ fn run_codex(
 
     let mut turn_started = false;
     let mut turn_completed = false;
+    let mut streamed_agent_message_ids = HashSet::new();
     while let Some(line) = stdout_lines.next() {
         let line = line.context("failed to read line from codex stdout")?;
         let trimmed = line.trim();
@@ -177,6 +179,7 @@ fn run_codex(
             event_tx,
             &mut turn_started,
             &mut turn_completed,
+            &mut streamed_agent_message_ids,
         )? {
             break;
         }
@@ -317,6 +320,7 @@ fn wait_for_response(
     turn_completed: Option<&mut bool>,
 ) -> Result<JsonRpcMessage> {
     let mut turn_completed = turn_completed;
+    let mut streamed_agent_message_ids = HashSet::new();
     while let Some(line) = stdout_lines.next() {
         let line = line.context("failed to read line from codex stdout")?;
         let trimmed = line.trim();
@@ -338,6 +342,7 @@ fn wait_for_response(
             event_tx,
             &mut local_turn_started,
             turn_completed.as_deref_mut().unwrap_or(&mut false),
+            &mut streamed_agent_message_ids,
         )? {
             continue;
         }
@@ -361,6 +366,7 @@ fn handle_message(
     event_tx: &Sender<ProviderEvent>,
     turn_started: &mut bool,
     turn_completed: &mut bool,
+    streamed_agent_message_ids: &mut HashSet<String>,
 ) -> Result<bool> {
     if let Some(method) = message.method {
         if let Some(id) = message.id {
@@ -373,6 +379,7 @@ fn handle_message(
             event_tx,
             turn_started,
             turn_completed,
+            streamed_agent_message_ids,
         );
     }
 
@@ -415,6 +422,7 @@ fn handle_notification(
     event_tx: &Sender<ProviderEvent>,
     turn_started: &mut bool,
     turn_completed: &mut bool,
+    streamed_agent_message_ids: &mut HashSet<String>,
 ) -> Result<bool> {
     let params = params.unwrap_or(serde_json::Value::Null);
 
@@ -452,12 +460,23 @@ fn handle_notification(
                 return Ok(true);
             }
         }
+        "item/agentMessage/delta" => {
+            if let Some(item_id) = params.get("itemId").and_then(|value| value.as_str()) {
+                streamed_agent_message_ids.insert(item_id.to_string());
+            }
+            if let Some(delta) = params.get("delta").and_then(|value| value.as_str()) {
+                if !delta.is_empty() {
+                    let _ = event_tx.send(ProviderEvent::AssistantChunk(delta.to_string()));
+                }
+            }
+        }
         "item/started" | "item/completed" => {
             let item = params.get("item").unwrap_or(&params);
-            for event in parse_item_event(method.as_str(), item) {
+            for event in parse_item_event(method.as_str(), item, streamed_agent_message_ids) {
                 let _ = event_tx.send(event);
             }
         }
+        "configWarning" | "account/rateLimits/updated" | "thread/tokenUsage/updated" => {}
         other => {
             let _ = event_tx.send(ProviderEvent::Status(format!(
                 "ignored codex event: {other}"
@@ -468,7 +487,11 @@ fn handle_notification(
     Ok(false)
 }
 
-fn parse_item_event(method: &str, item: &serde_json::Value) -> Vec<ProviderEvent> {
+fn parse_item_event(
+    method: &str,
+    item: &serde_json::Value,
+    streamed_agent_message_ids: &HashSet<String>,
+) -> Vec<ProviderEvent> {
     let item_type = item
         .get("type")
         .and_then(|value| value.as_str())
@@ -513,21 +536,43 @@ fn parse_item_event(method: &str, item: &serde_json::Value) -> Vec<ProviderEvent
             output_preview: None,
             success: true,
         }],
+        (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
             .get("text")
             .and_then(|value| value.as_str())
+            .filter(|text| {
+                !text.is_empty()
+                    && !item_id
+                        .as_ref()
+                        .is_some_and(|id| streamed_agent_message_ids.contains(id))
+            })
             .map(|text| vec![ProviderEvent::AssistantChunk(text.to_string())])
             .unwrap_or_default(),
-        (_, _) => parse_content_blocks(item),
+        (_, _) => parse_content_blocks(item, streamed_agent_message_ids),
     }
 }
 
-fn parse_content_blocks(item: &serde_json::Value) -> Vec<ProviderEvent> {
+fn parse_content_blocks(
+    item: &serde_json::Value,
+    streamed_agent_message_ids: &HashSet<String>,
+) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
+    let item_type = item
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if item_type == "userMessage" {
+        return events;
+    }
+
     let item_status = item
         .get("status")
         .and_then(|value| value.as_str())
         .unwrap_or("completed");
+    let item_id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned);
 
     if let Some(content) = item.get("content").and_then(|value| value.as_array()) {
         for block in content {
@@ -538,7 +583,10 @@ fn parse_content_blocks(item: &serde_json::Value) -> Vec<ProviderEvent> {
             match block_type {
                 "text" => {
                     if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
-                        if !text.is_empty() {
+                        let already_streamed = item_id
+                            .as_ref()
+                            .is_some_and(|id| streamed_agent_message_ids.contains(id));
+                        if !text.is_empty() && !already_streamed {
                             events.push(ProviderEvent::AssistantChunk(text.to_string()));
                         }
                     }
@@ -601,9 +649,13 @@ fn read_stderr(stderr: impl std::io::Read) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+    use std::sync::mpsc;
+
     use super::JsonRpcMessage;
     use super::JsonRpcRequest;
     use super::ProviderEvent;
+    use super::handle_notification;
     use super::parse_item_event;
     use super::parse_jsonrpc_message;
     use super::resolve_codex_executable_from;
@@ -693,11 +745,69 @@ mod tests {
             ]
         });
 
-        let events = parse_item_event("item/completed", &item);
+        let events = parse_item_event("item/completed", &item, &HashSet::new());
         assert_eq!(
             events,
             vec![ProviderEvent::AssistantChunk("hello world".to_string())]
         );
+    }
+
+    #[test]
+    fn ignores_user_message_items() {
+        let item = serde_json::json!({
+            "id": "user-1",
+            "type": "userMessage",
+            "content": [
+                { "type": "text", "text": "echoed user input" }
+            ]
+        });
+
+        let events = parse_item_event("item/completed", &item, &HashSet::new());
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn streams_agent_message_delta_notifications() {
+        let (tx, rx) = mpsc::channel();
+        let mut turn_started = false;
+        let mut turn_completed = false;
+        let mut streamed = HashSet::new();
+
+        let finished = handle_notification(
+            "item/agentMessage/delta".to_string(),
+            Some(serde_json::json!({
+                "delta": "hello",
+                "itemId": "msg-1",
+                "threadId": "thr-1",
+                "turnId": "turn-1"
+            })),
+            &tx,
+            &mut turn_started,
+            &mut turn_completed,
+            &mut streamed,
+        )
+        .expect("handle notification");
+
+        assert!(!finished);
+        assert!(streamed.contains("msg-1"));
+        assert_eq!(
+            rx.recv().expect("assistant chunk"),
+            ProviderEvent::AssistantChunk("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn skips_completed_agent_message_text_after_streaming_deltas() {
+        let item = serde_json::json!({
+            "id": "msg-1",
+            "type": "agentMessage",
+            "text": "full final text"
+        });
+        let mut streamed = HashSet::new();
+        streamed.insert("msg-1".to_string());
+
+        let events = parse_item_event("item/completed", &item, &streamed);
+        assert!(events.is_empty());
     }
 
     #[test]
