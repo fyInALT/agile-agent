@@ -53,6 +53,31 @@ fn resume_last_reuses_claude_session_id() {
 }
 
 #[test]
+fn resume_last_reuses_codex_thread_id() {
+    let harness = TestHarness::new();
+    harness.write_backlog_with_ready_todo("write summary");
+
+    let first = harness.run_with_codex(&["run-loop", "--max-iterations", "1"]);
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    harness.overwrite_backlog_with_ready_todo("write summary again");
+    let second = harness.run_with_codex(&["run-loop", "--max-iterations", "1", "--resume-last"]);
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    let log = harness.read_provider_log();
+    let lines: Vec<&str> = log.lines().collect();
+    assert!(lines.iter().any(|line| *line == "resume=thr-cli-1"));
+}
+
+#[test]
 fn inspect_commands_read_workplace_state() {
     let harness = TestHarness::new();
     harness.write_backlog_with_ready_todo("write summary");
