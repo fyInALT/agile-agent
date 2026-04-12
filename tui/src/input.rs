@@ -119,7 +119,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         KeyEvent {
             code: KeyCode::Down,
             ..
-        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptEnd,
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptDown(TRANSCRIPT_SCROLL_STEP),
         KeyEvent {
             code: KeyCode::PageUp,
             ..
@@ -281,6 +281,17 @@ mod tests {
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::ScrollTranscriptUp(3)));
+    }
+
+    #[test]
+    fn empty_composer_down_scrolls_transcript_in_steps() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::ScrollTranscriptDown(3)));
     }
 
     #[test]
