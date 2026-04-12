@@ -177,6 +177,24 @@ Resume the most recent saved TUI session:
 cargo run -p agent-cli -- resume-last
 ```
 
+Inspect the current workplace:
+
+```bash
+cargo run -p agent-cli -- workplace current
+```
+
+Inspect the current or most recent agent:
+
+```bash
+cargo run -p agent-cli -- agent current
+```
+
+List known agents in the current workplace:
+
+```bash
+cargo run -p agent-cli -- agent list
+```
+
 Run the autonomous loop headlessly:
 
 ```bash
