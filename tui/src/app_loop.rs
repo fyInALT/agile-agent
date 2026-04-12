@@ -1,5 +1,6 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
+use agent_core::backlog_store;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
 use agent_core::probe;
@@ -26,6 +27,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
+    state.backlog = backlog_store::load_backlog()?;
     if resume_last {
         if let Ok(session) = session_store::load_recent_session() {
             let restored_cwd = std::path::PathBuf::from(&session.cwd);
@@ -129,6 +131,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     ProviderEvent::SessionHandle(handle) => state.apply_session_handle(handle),
                     ProviderEvent::Error(error) => state.push_error_message(error),
                     ProviderEvent::Finished => {
+                        let summary = state.transcript.iter().rev().find_map(|entry| match entry {
+                            agent_core::app::TranscriptEntry::Assistant(text)
+                                if !text.is_empty() =>
+                            {
+                                Some(text.clone())
+                            }
+                            _ => None,
+                        });
+                        state.finish_active_task(summary);
                         state.finish_provider_response();
                         should_clear_provider_rx = true;
                         break;
@@ -142,6 +153,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
 
+    backlog_store::save_backlog(&state.backlog)?;
     session_store::save_recent_session(&state)?;
     Ok(state)
 }
@@ -176,6 +188,18 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) {
                     state.push_status_message(line);
                 }
             }
+        }
+        LocalCommand::Backlog => {
+            for line in state.render_backlog_lines() {
+                state.push_status_message(line);
+            }
+        }
+        LocalCommand::TodoAdd(title) => {
+            let todo_id = state.add_todo(title.clone());
+            state.push_status_message(format!("added todo: {} ({})", todo_id, title));
+        }
+        LocalCommand::RunOnce => {
+            state.push_status_message("run-once is not implemented as a local command yet");
         }
         LocalCommand::Quit => state.request_quit(),
     }

@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
+use crate::backlog::BacklogState;
 use crate::provider::ProviderKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub struct PersistedSession {
     pub codex_thread_id: Option<String>,
     pub enabled_skill_names: Vec<String>,
     pub transcript: Vec<TranscriptEntry>,
+    pub backlog: BacklogState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +41,7 @@ impl PersistedSession {
             codex_thread_id: state.codex_thread_id.clone(),
             enabled_skill_names: state.skills.enabled_names.iter().cloned().collect(),
             transcript: state.transcript.clone(),
+            backlog: state.backlog.clone(),
         }
     }
 
@@ -48,6 +51,7 @@ impl PersistedSession {
         state.claude_session_id = self.claude_session_id.clone();
         state.codex_thread_id = self.codex_thread_id.clone();
         state.transcript = self.transcript.clone();
+        state.backlog = self.backlog.clone();
 
         let restored_enabled: BTreeSet<String> = self
             .enabled_skill_names
@@ -121,6 +125,7 @@ mod tests {
     use super::save_recent_session_to_root;
     use crate::app::AppState;
     use crate::app::TranscriptEntry;
+    use crate::backlog::BacklogState;
     use crate::provider::ProviderKind;
     use crate::skills::SkillMetadata;
     use crate::skills::SkillRegistry;
@@ -174,6 +179,7 @@ mod tests {
             codex_thread_id: Some("thr-1".to_string()),
             enabled_skill_names: vec!["reviewer".to_string()],
             transcript: vec![TranscriptEntry::Assistant("pong".to_string())],
+            backlog: BacklogState::default(),
         };
 
         persisted.apply_to_app_state(&mut state);

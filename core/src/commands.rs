@@ -4,6 +4,9 @@ pub enum LocalCommand {
     Provider,
     Skills,
     Doctor,
+    Backlog,
+    TodoAdd(String),
+    RunOnce,
     Quit,
 }
 
@@ -13,17 +16,19 @@ pub fn parse_local_command(input: &str) -> Option<Result<LocalCommand, String>> 
         return None;
     }
 
-    let command = trimmed
-        .split_whitespace()
-        .next()
-        .unwrap_or(trimmed)
-        .trim_start_matches('/');
+    let mut parts = trimmed.split_whitespace();
+    let command = parts.next().unwrap_or(trimmed).trim_start_matches('/');
+    let remainder = parts.collect::<Vec<_>>().join(" ");
 
     let parsed = match command {
         "help" => Ok(LocalCommand::Help),
         "provider" => Ok(LocalCommand::Provider),
         "skills" => Ok(LocalCommand::Skills),
         "doctor" => Ok(LocalCommand::Doctor),
+        "backlog" => Ok(LocalCommand::Backlog),
+        "todo-add" if !remainder.trim().is_empty() => Ok(LocalCommand::TodoAdd(remainder)),
+        "todo-add" => Err("usage: /todo-add <title>".to_string()),
+        "run-once" => Ok(LocalCommand::RunOnce),
         "quit" => Ok(LocalCommand::Quit),
         other => Err(format!("unsupported command: /{other}")),
     };
@@ -51,7 +56,23 @@ mod tests {
             parse_local_command("/doctor"),
             Some(Ok(LocalCommand::Doctor))
         );
+        assert_eq!(
+            parse_local_command("/backlog"),
+            Some(Ok(LocalCommand::Backlog))
+        );
+        assert_eq!(
+            parse_local_command("/run-once"),
+            Some(Ok(LocalCommand::RunOnce))
+        );
         assert_eq!(parse_local_command("/quit"), Some(Ok(LocalCommand::Quit)));
+    }
+
+    #[test]
+    fn parses_todo_add_with_title() {
+        assert_eq!(
+            parse_local_command("/todo-add write readme"),
+            Some(Ok(LocalCommand::TodoAdd("write readme".to_string())))
+        );
     }
 
     #[test]

@@ -2,6 +2,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
 
+use crate::backlog::BacklogState;
+use crate::backlog::TaskItem;
+use crate::backlog::TaskStatus;
+use crate::backlog::TodoItem;
+use crate::backlog::TodoStatus;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
@@ -35,10 +40,12 @@ pub struct AppState {
     pub transcript: Vec<TranscriptEntry>,
     pub input: String,
     pub cwd: PathBuf,
+    pub backlog: BacklogState,
     pub selected_provider: ProviderKind,
     pub skills: SkillRegistry,
     pub skill_browser_open: bool,
     pub skill_browser_selected: usize,
+    pub active_task_id: Option<String>,
     pub claude_session_id: Option<String>,
     pub codex_thread_id: Option<String>,
     pub status: AppStatus,
@@ -51,10 +58,12 @@ impl Default for AppState {
             transcript: Vec::new(),
             input: String::new(),
             cwd: PathBuf::from("."),
+            backlog: BacklogState::default(),
             selected_provider: ProviderKind::Mock,
             skills: SkillRegistry::default(),
             skill_browser_open: false,
             skill_browser_selected: 0,
+            active_task_id: None,
             claude_session_id: None,
             codex_thread_id: None,
             status: AppStatus::Idle,
@@ -282,6 +291,90 @@ impl AppState {
         self.codex_thread_id = None;
         self.transcript.clear();
     }
+
+    pub fn add_todo(&mut self, title: String) -> String {
+        let id = format!("todo-{}", self.backlog.todos.len() + 1);
+        let todo = TodoItem {
+            id: id.clone(),
+            title: title.clone(),
+            description: title,
+            priority: self.backlog.todos.len() as u8 + 1,
+            status: TodoStatus::Ready,
+            acceptance_criteria: Vec::new(),
+            dependencies: Vec::new(),
+            source: "manual".to_string(),
+        };
+        self.backlog.push_todo(todo);
+        id
+    }
+
+    pub fn render_backlog_lines(&self) -> Vec<String> {
+        if self.backlog.todos.is_empty() {
+            return vec!["backlog is empty".to_string()];
+        }
+
+        self.backlog
+            .todos
+            .iter()
+            .map(|todo| {
+                format!(
+                    "{} [{}] {}",
+                    todo.id,
+                    match todo.status {
+                        TodoStatus::Candidate => "candidate",
+                        TodoStatus::Ready => "ready",
+                        TodoStatus::InProgress => "in_progress",
+                        TodoStatus::Blocked => "blocked",
+                        TodoStatus::Done => "done",
+                        TodoStatus::Dropped => "dropped",
+                    },
+                    todo.title
+                )
+            })
+            .collect()
+    }
+
+    pub fn begin_task_from_todo(&mut self, todo_id: &str) -> Option<TaskItem> {
+        let next_task_id = format!("task-{}", self.backlog.tasks.len() + 1);
+        let todo = self.backlog.find_todo_mut(todo_id)?;
+        todo.status = TodoStatus::InProgress;
+        let task = TaskItem {
+            id: next_task_id,
+            todo_id: todo.id.clone(),
+            objective: todo.title.clone(),
+            scope: format!("current workspace: {}", self.cwd.display()),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: TaskStatus::Running,
+            result_summary: None,
+        };
+        self.active_task_id = Some(task.id.clone());
+        self.backlog.push_task(task.clone());
+        Some(task)
+    }
+
+    pub fn finish_active_task(&mut self, summary: Option<String>) {
+        let Some(active_task_id) = self.active_task_id.take() else {
+            return;
+        };
+
+        let task_todo_id = self
+            .backlog
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == active_task_id)
+            .map(|task| {
+                task.status = TaskStatus::Completed;
+                task.result_summary = summary.clone();
+                task.todo_id.clone()
+            });
+
+        if let Some(todo_id) = task_todo_id {
+            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
+                todo.status = TodoStatus::InProgress;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +382,7 @@ mod tests {
     use super::AppState;
     use super::AppStatus;
     use super::TranscriptEntry;
+    use crate::backlog::TodoStatus;
     use crate::provider::ProviderKind;
     use crate::provider::SessionHandle;
     use crate::skills::SkillRegistry;
@@ -383,5 +477,27 @@ mod tests {
         assert!(state.skills.is_enabled("planner"));
         state.close_skill_browser();
         assert!(!state.skill_browser_open);
+    }
+
+    #[test]
+    fn adds_and_lists_todos() {
+        let mut state = AppState::default();
+        let id = state.add_todo("write tests".to_string());
+
+        assert_eq!(id, "todo-1");
+        assert_eq!(state.backlog.todos.len(), 1);
+        assert!(state.render_backlog_lines()[0].contains("write tests"));
+    }
+
+    #[test]
+    fn begins_task_from_todo_and_marks_it_in_progress() {
+        let mut state = AppState::default();
+        let todo_id = state.add_todo("write tests".to_string());
+
+        let task = state.begin_task_from_todo(&todo_id).expect("task");
+
+        assert_eq!(task.todo_id, todo_id);
+        assert_eq!(state.backlog.tasks.len(), 1);
+        assert_eq!(state.backlog.todos[0].status, TodoStatus::InProgress);
     }
 }
