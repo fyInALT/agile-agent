@@ -39,7 +39,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
-    app.backlog = backlog_store::load_backlog()?;
+    app.backlog = backlog_store::load_backlog_for_workplace(bootstrap.runtime.workplace())?;
     for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
         app.push_error_message(warning);
     }
@@ -59,10 +59,17 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
     if resume_last {
-        match session_store::restore_recent_session(&mut app, &launch_cwd) {
+        match session_store::restore_recent_session_for_workplace(
+            &mut app,
+            &launch_cwd,
+            bootstrap.runtime.workplace(),
+        ) {
             Ok(restored) => {
                 app.push_status_message("restored recent session");
                 for warning in restored.warnings {
+                    app.push_error_message(warning);
+                }
+                for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
                     app.push_error_message(warning);
                 }
             }
@@ -145,12 +152,12 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::ToggleSelectedSkill => state.app.toggle_selected_skill(),
                         InputOutcome::ToggleProvider => {
                             if state.app.status == AppStatus::Idle {
-                                state.app.toggle_provider();
+                                let next_provider = state.app.selected_provider.next();
+                                let summary = state.switch_to_new_agent(next_provider)?;
                                 state.app.push_status_message(format!(
-                                    "selected provider: {}",
+                                    "switched to agent {summary} on {}",
                                     state.app.selected_provider.label()
                                 ));
-                                persist_agent_runtime_if_changed(&mut state)?;
                             }
                         }
                         InputOutcome::OpenTranscript => state.open_transcript_overlay(),
@@ -260,8 +267,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     state.agent_runtime.sync_from_app_state(&state.app);
     state.agent_runtime.mark_stopped();
     state.agent_runtime.persist()?;
-    backlog_store::save_backlog(&state.app.backlog)?;
-    session_store::save_recent_session(&state.app)?;
+    backlog_store::save_backlog_for_workplace(&state.app.backlog, state.agent_runtime.workplace())?;
+    session_store::save_recent_session_for_workplace(&state.app, state.agent_runtime.workplace())?;
     Ok(state.into_app_state())
 }
 
@@ -286,8 +293,9 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
         }
         LocalCommand::Provider => {
             state.app.push_status_message(format!(
-                "current provider: {} (tab switches providers)",
-                state.app.selected_provider.label()
+                "current agent: {} · provider: {} (tab creates a new agent on the next provider)",
+                state.agent_runtime.summary(),
+                state.app.selected_provider.label(),
             ));
             None
         }

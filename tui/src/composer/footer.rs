@@ -17,7 +17,7 @@ pub fn build_footer_line(state: &TuiState, width: u16) -> Line<'static> {
             state.app.selected_provider.label()
         )
     } else {
-        "  enter send  ctrl+j newline  tab provider  ctrl+t transcript".to_string()
+        "  enter send  ctrl+j newline  tab new agent  ctrl+t transcript".to_string()
     };
 
     let cwd_label = display_cwd_label(&state.app.cwd);

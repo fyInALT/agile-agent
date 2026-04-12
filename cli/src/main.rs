@@ -73,7 +73,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
-    state.backlog = backlog_store::load_backlog()?;
+    state.backlog = backlog_store::load_backlog_for_workplace(bootstrap.runtime.workplace())?;
     for warning in bootstrap.runtime.apply_to_app_state(&mut state) {
         eprintln!("warning: {warning}");
     }
@@ -92,9 +92,16 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     let mut agent_runtime = bootstrap.runtime;
 
     if resume_last {
-        match session_store::restore_recent_session(&mut state, &launch_cwd) {
+        match session_store::restore_recent_session_for_workplace(
+            &mut state,
+            &launch_cwd,
+            agent_runtime.workplace(),
+        ) {
             Ok(restored) => {
                 for warning in restored.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                for warning in agent_runtime.apply_to_app_state(&mut state) {
                     eprintln!("warning: {warning}");
                 }
             }
@@ -116,8 +123,8 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         },
     )?;
 
-    backlog_store::save_backlog(&state.backlog)?;
-    session_store::save_recent_session(&state)?;
+    backlog_store::save_backlog_for_workplace(&state.backlog, agent_runtime.workplace())?;
+    session_store::save_recent_session_for_workplace(&state, agent_runtime.workplace())?;
     agent_runtime.sync_from_app_state(&state);
     agent_runtime.mark_stopped();
     agent_runtime.persist()?;

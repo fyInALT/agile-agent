@@ -179,6 +179,10 @@ impl AgentRuntime {
         self.workplace.path()
     }
 
+    pub fn workplace(&self) -> &WorkplaceStore {
+        &self.workplace
+    }
+
     pub fn agent_id(&self) -> &AgentId {
         &self.meta.agent_id
     }
@@ -233,12 +237,6 @@ impl AgentRuntime {
     pub fn sync_from_app_state(&mut self, state: &AppState) -> bool {
         let mut changed = false;
 
-        let provider_type = ProviderType::from_provider_kind(state.selected_provider);
-        if self.meta.provider_type != provider_type {
-            self.meta.provider_type = provider_type;
-            changed = true;
-        }
-
         let provider_session_id = provider_session_id_from_app(state);
         if self.meta.provider_session_id != provider_session_id {
             self.meta.provider_session_id = provider_session_id;
@@ -261,6 +259,13 @@ impl AgentRuntime {
     pub fn mark_stopped(&mut self) {
         self.meta.status = AgentStatus::Stopped;
         self.meta.updated_at = Utc::now().to_rfc3339();
+    }
+
+    pub fn create_sibling(&self, provider_kind: ProviderKind) -> Result<Self> {
+        let store = AgentStore::new(self.workplace.clone());
+        let runtime = Self::new(&self.workplace, store.next_agent_index()?, provider_kind);
+        runtime.persist()?;
+        Ok(runtime)
     }
 
     pub fn persist(&self) -> Result<std::path::PathBuf> {
@@ -376,7 +381,7 @@ mod tests {
         let changed = runtime.sync_from_app_state(&app);
 
         assert!(changed);
-        assert_eq!(runtime.meta().provider_type, ProviderType::Codex);
+        assert_eq!(runtime.meta().provider_type, ProviderType::Mock);
         assert_eq!(
             runtime.meta().provider_session_id,
             Some(ProviderSessionId::new("thr-1"))
@@ -436,5 +441,32 @@ mod tests {
             recreated.runtime.agent_id().as_str(),
             first.runtime.agent_id().as_str()
         );
+    }
+
+    #[test]
+    fn sync_does_not_mutate_provider_binding() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let mut runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Claude);
+        let app = AppState::new(ProviderKind::Codex);
+
+        runtime.sync_from_app_state(&app);
+
+        assert_eq!(runtime.meta().provider_type, ProviderType::Claude);
+    }
+
+    #[test]
+    fn create_sibling_creates_new_agent_id_for_new_provider() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Claude);
+        runtime.persist().expect("persist");
+
+        let sibling = runtime
+            .create_sibling(ProviderKind::Codex)
+            .expect("sibling");
+
+        assert_ne!(sibling.agent_id().as_str(), runtime.agent_id().as_str());
+        assert_eq!(sibling.meta().provider_type, ProviderType::Codex);
     }
 }

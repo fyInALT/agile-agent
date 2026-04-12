@@ -16,6 +16,7 @@ use crate::backlog::BacklogState;
 use crate::provider::ProviderKind;
 use crate::skills::SkillRegistry;
 use crate::storage;
+use crate::workplace_store::WorkplaceStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedSession {
@@ -117,6 +118,26 @@ pub fn restore_recent_session(
     Ok(apply_restored_session(state, &session, launch_cwd))
 }
 
+pub fn save_recent_session_for_workplace(
+    state: &AppState,
+    workplace: &WorkplaceStore,
+) -> Result<()> {
+    save_recent_session_to_root(state, workplace.path())
+}
+
+pub fn load_recent_session_for_workplace(workplace: &WorkplaceStore) -> Result<PersistedSession> {
+    load_recent_session_from_root(workplace.path())
+}
+
+pub fn restore_recent_session_for_workplace(
+    state: &mut AppState,
+    launch_cwd: &Path,
+    workplace: &WorkplaceStore,
+) -> Result<RestoreSessionResult> {
+    let session = load_recent_session_for_workplace(workplace)?;
+    Ok(apply_restored_session(state, &session, launch_cwd))
+}
+
 fn save_recent_session_to_root(state: &AppState, root: &Path) -> Result<()> {
     fs::create_dir_all(root.join("sessions")).context("failed to create session directory")?;
 
@@ -179,7 +200,9 @@ fn apply_restored_session(
 mod tests {
     use super::PersistedSession;
     use super::apply_restored_session;
+    use super::load_recent_session_for_workplace;
     use super::load_recent_session_from_root;
+    use super::save_recent_session_for_workplace;
     use super::save_recent_session_to_root;
     use crate::app::AppState;
     use crate::app::LoopPhase;
@@ -188,6 +211,7 @@ mod tests {
     use crate::provider::ProviderKind;
     use crate::skills::SkillMetadata;
     use crate::skills::SkillRegistry;
+    use crate::workplace_store::WorkplaceStore;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -284,5 +308,20 @@ mod tests {
 
         assert_eq!(state.cwd, PathBuf::from("."));
         assert_eq!(restored.warnings.len(), 1);
+    }
+
+    #[test]
+    fn saves_and_loads_recent_session_for_workplace() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        workplace.ensure().expect("ensure");
+        let mut state = AppState::new(ProviderKind::Codex);
+        state.codex_thread_id = Some("thr-123".to_string());
+
+        save_recent_session_for_workplace(&state, &workplace).expect("save session");
+        let restored = load_recent_session_for_workplace(&workplace).expect("load session");
+
+        assert_eq!(restored.selected_provider, ProviderKind::Codex);
+        assert_eq!(restored.codex_thread_id.as_deref(), Some("thr-123"));
     }
 }
