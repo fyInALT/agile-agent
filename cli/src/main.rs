@@ -87,6 +87,8 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         }
     }
 
+    let initial_transcript_len = state.transcript.len();
+
     let summary = loop_runner::run_loop(
         &mut state,
         LoopGuardrails {
@@ -100,7 +102,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
 
     println!("iterations: {}", summary.iterations);
     println!("stopped_reason: {}", summary.stopped_reason);
-    for entry in &state.transcript {
+    for entry in state.transcript.iter().skip(initial_transcript_len) {
         match entry {
             agent_core::app::TranscriptEntry::Status(text) => println!("status: {}", text),
             agent_core::app::TranscriptEntry::Error(text) => println!("error: {}", text),
