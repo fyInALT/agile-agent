@@ -11,6 +11,7 @@ pub mod backlog_store;
 pub mod commands;
 pub mod escalation;
 pub mod event;
+pub mod logging;
 pub mod loop_runner;
 pub mod mock_provider;
 pub mod probe;
