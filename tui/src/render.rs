@@ -13,25 +13,32 @@ use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
+use std::time::Instant;
 
 use crate::composer::footer::build_footer_line;
 use crate::transcript::cells;
 use crate::ui_state::TuiState;
 
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
+    state.sync_busy_started_at();
     let composer_height = state.composer.desired_height(frame.area().width, 8);
+    let working_height = if state.is_busy() { 1 } else { 0 };
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
+            Constraint::Length(working_height),
             Constraint::Length(composer_height),
             Constraint::Length(1),
         ])
         .split(frame.area());
 
     render_transcript(frame, state, areas[0]);
-    render_composer(frame, state, areas[1]);
-    render_footer(frame, state, areas[2]);
+    if state.is_busy() {
+        render_working_line(frame, state, areas[1]);
+    }
+    render_composer(frame, state, areas[2]);
+    render_footer(frame, state, areas[3]);
 
     if state.app.skill_browser_open {
         render_skill_browser(frame, state);
@@ -63,6 +70,11 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
 
 fn render_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.composer_width = area.width;
+    fill_background(
+        frame,
+        area,
+        Style::default().bg(Color::Rgb(28, 31, 38)).fg(Color::White),
+    );
     state.composer.render(
         area,
         frame.buffer_mut(),
@@ -90,6 +102,18 @@ fn render_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
             .add_modifier(Modifier::DIM),
     );
     frame.render_widget(footer, area);
+}
+
+fn render_working_line(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    fill_background(
+        frame,
+        area,
+        Style::default().bg(Color::Rgb(28, 31, 38)).fg(Color::White),
+    );
+    let line = build_working_line(state, area.width, Instant::now());
+    let paragraph =
+        Paragraph::new(line).style(Style::default().bg(Color::Rgb(28, 31, 38)).fg(Color::White));
+    frame.render_widget(paragraph, area);
 }
 
 fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
@@ -217,5 +241,116 @@ fn fill_background(frame: &mut Frame<'_>, area: Rect, style: Style) {
                 .set_symbol(" ")
                 .set_style(style);
         }
+    }
+}
+
+fn build_working_line(state: &TuiState, width: u16, now: Instant) -> Line<'static> {
+    let elapsed_duration = state
+        .busy_started_at
+        .map(|started_at| now.saturating_duration_since(started_at))
+        .unwrap_or_default();
+    let elapsed = elapsed_duration.as_secs();
+    let spinner = animated_spinner(elapsed_duration.as_millis());
+    let label = working_label(state);
+
+    let mut content = format!("{spinner} {label} ({elapsed}s");
+    if state.app.status == agent_core::app::AppStatus::Responding {
+        content.push_str(" • esc to interrupt");
+    }
+    content.push(')');
+
+    if let Some(summary) = background_terminal_summary(state) {
+        content.push_str(" · ");
+        content.push_str(&summary);
+    }
+
+    if content.len() > width as usize {
+        content.truncate(width as usize);
+    }
+
+    Line::from(vec![Span::styled(
+        content,
+        Style::default().add_modifier(Modifier::DIM),
+    )])
+}
+
+fn animated_spinner(elapsed_millis: u128) -> &'static str {
+    match (elapsed_millis / 400) % 2 {
+        0 => "•",
+        _ => "◦",
+    }
+}
+
+fn working_label(state: &TuiState) -> &'static str {
+    match state.app.loop_phase {
+        agent_core::app::LoopPhase::Planning => "Planning",
+        agent_core::app::LoopPhase::Verifying => "Verifying",
+        agent_core::app::LoopPhase::Escalating => "Escalating",
+        _ => "Working",
+    }
+}
+
+fn background_terminal_summary(state: &TuiState) -> Option<String> {
+    let count = state
+        .app
+        .transcript
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry,
+                agent_core::app::TranscriptEntry::ToolCall {
+                    name,
+                    started: true,
+                    ..
+                } if name == "exec_command"
+            )
+        })
+        .count();
+
+    if count == 0 {
+        return None;
+    }
+
+    let plural = if count == 1 { "" } else { "s" };
+    Some(format!("{count} background terminal{plural} running"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_working_line;
+    use crate::ui_state::TuiState;
+    use agent_core::app::AppState;
+    use agent_core::app::AppStatus;
+    use agent_core::app::TranscriptEntry;
+    use agent_core::provider::ProviderKind;
+    use ratatui::text::Line;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    fn line_to_string(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn working_line_mentions_elapsed_and_exec_count() {
+        let mut state = TuiState::from_app(AppState::new(ProviderKind::Mock));
+        state.app.status = AppStatus::Responding;
+        state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
+        state.app.transcript.push(TranscriptEntry::ToolCall {
+            name: "exec_command".to_string(),
+            call_id: Some("1".to_string()),
+            input_preview: None,
+            output_preview: None,
+            success: true,
+            started: true,
+        });
+
+        let rendered = line_to_string(&build_working_line(&state, 120, Instant::now()));
+
+        assert!(rendered.contains("Working (8s • esc to interrupt)"));
+        assert!(rendered.contains("1 background terminal running"));
     }
 }

@@ -1,4 +1,7 @@
 use agent_core::app::AppState;
+use agent_core::app::AppStatus;
+use agent_core::app::LoopPhase;
+use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
 use crate::composer::textarea::TextAreaState;
@@ -14,6 +17,7 @@ pub struct TuiState {
     pub transcript_viewport_height: u16,
     pub transcript_scroll_offset: usize,
     pub transcript_follow_tail: bool,
+    pub busy_started_at: Option<Instant>,
 }
 
 impl TuiState {
@@ -28,6 +32,7 @@ impl TuiState {
             transcript_viewport_height: 1,
             transcript_scroll_offset: 0,
             transcript_follow_tail: true,
+            busy_started_at: None,
         }
     }
 
@@ -61,6 +66,9 @@ impl TuiState {
 
     pub fn scroll_transcript_down(&mut self, rows: usize) {
         self.transcript_scroll_offset = self.transcript_scroll_offset.saturating_add(rows);
+        if rows > 0 {
+            self.transcript_follow_tail = false;
+        }
     }
 
     pub fn scroll_transcript_home(&mut self) {
@@ -70,5 +78,19 @@ impl TuiState {
 
     pub fn scroll_transcript_end(&mut self) {
         self.transcript_follow_tail = true;
+    }
+
+    pub fn sync_busy_started_at(&mut self) {
+        if self.is_busy() {
+            if self.busy_started_at.is_none() {
+                self.busy_started_at = Some(Instant::now());
+            }
+        } else {
+            self.busy_started_at = None;
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.app.status == AppStatus::Responding || !matches!(self.app.loop_phase, LoopPhase::Idle)
     }
 }

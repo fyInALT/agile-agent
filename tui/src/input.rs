@@ -117,7 +117,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         KeyEvent {
             code: KeyCode::Down,
             ..
-        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptDown(1),
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptEnd,
         KeyEvent {
             code: KeyCode::PageUp,
             ..

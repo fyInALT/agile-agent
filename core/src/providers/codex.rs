@@ -476,7 +476,12 @@ fn handle_notification(
                 let _ = event_tx.send(event);
             }
         }
-        "configWarning" | "account/rateLimits/updated" | "thread/tokenUsage/updated" => {}
+        "configWarning"
+        | "account/rateLimits/updated"
+        | "thread/tokenUsage/updated"
+        | "serverRequest/resolved"
+        | "item/commandExecution/outputDelta"
+        | "item/fileChange/outputDelta" => {}
         other => {
             let _ = event_tx.send(ProviderEvent::Status(format!(
                 "ignored codex event: {other}"
@@ -808,6 +813,29 @@ mod tests {
 
         let events = parse_item_event("item/completed", &item, &streamed);
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn suppresses_noisy_codex_notifications() {
+        let (tx, rx) = mpsc::channel();
+        let mut turn_started = false;
+        let mut turn_completed = false;
+        let mut streamed = HashSet::new();
+
+        let finished = handle_notification(
+            "item/commandExecution/outputDelta".to_string(),
+            Some(serde_json::json!({
+                "delta": "partial output"
+            })),
+            &tx,
+            &mut turn_started,
+            &mut turn_completed,
+            &mut streamed,
+        )
+        .expect("handle notification");
+
+        assert!(!finished);
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
