@@ -1,5 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -195,10 +196,13 @@ impl TextArea {
             state.scroll_row,
         );
         state.scroll_row = scroll;
+        let base_style = composer_base_style();
 
         for y in 0..area.height {
             for x in 0..area.width {
-                buf[(area.x + x, area.y + y)].set_symbol(" ");
+                buf[(area.x + x, area.y + y)]
+                    .set_symbol(" ")
+                    .set_style(base_style);
             }
         }
 
@@ -206,8 +210,8 @@ impl TextArea {
         let visible_end = (scroll + area.height as usize).min(lines.len());
         if self.text.is_empty() {
             let line = Line::from(vec![
-                Span::styled("› ", Style::default()),
-                Span::styled(placeholder.to_string(), Style::default().dim()),
+                Span::styled("› ", base_style),
+                Span::styled(placeholder.to_string(), base_style.dim()),
             ]);
             render_line(buf, area, 0, &line);
             return;
@@ -220,8 +224,8 @@ impl TextArea {
                 "  "
             };
             let rendered = Line::from(vec![
-                Span::styled(prefix.to_string(), Style::default()),
-                Span::styled(line.text.clone(), Style::default()),
+                Span::styled(prefix.to_string(), base_style),
+                Span::styled(line.text.clone(), base_style),
             ]);
             render_line(buf, area, row as u16, &rendered);
         }
@@ -415,6 +419,10 @@ fn display_width(text: &str) -> usize {
     text.chars()
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0).max(1))
         .sum()
+}
+
+fn composer_base_style() -> Style {
+    Style::default().fg(Color::White).bg(Color::Rgb(28, 31, 38))
 }
 
 #[cfg(test)]

@@ -10,6 +10,10 @@ pub enum InputOutcome {
     None,
     Submit(String),
     ToggleProvider,
+    ScrollTranscriptUp(usize),
+    ScrollTranscriptDown(usize),
+    ScrollTranscriptHome,
+    ScrollTranscriptEnd,
     OpenSkills,
     CloseSkills,
     SkillUp,
@@ -68,6 +72,9 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             ..
         } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::OpenTranscript,
         KeyEvent {
+            code: KeyCode::Tab, ..
+        } if state.app.status == AppStatus::Idle => InputOutcome::ToggleProvider,
+        KeyEvent {
             code: KeyCode::Char('p'),
             modifiers,
             ..
@@ -104,6 +111,28 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             state.sync_app_input_from_composer();
             InputOutcome::None
         }
+        KeyEvent {
+            code: KeyCode::Up, ..
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptUp(1),
+        KeyEvent {
+            code: KeyCode::Down,
+            ..
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptDown(1),
+        KeyEvent {
+            code: KeyCode::PageUp,
+            ..
+        } => InputOutcome::ScrollTranscriptUp(state.transcript_viewport_height.max(1) as usize),
+        KeyEvent {
+            code: KeyCode::PageDown,
+            ..
+        } => InputOutcome::ScrollTranscriptDown(state.transcript_viewport_height.max(1) as usize),
+        KeyEvent {
+            code: KeyCode::Home,
+            ..
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptHome,
+        KeyEvent {
+            code: KeyCode::End, ..
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptEnd,
         KeyEvent {
             code: KeyCode::Up, ..
         } => {
@@ -212,16 +241,23 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_p_requests_provider_toggle() {
+    fn tab_requests_provider_toggle() {
         let app = AppState::new(ProviderKind::Mock);
         let mut state = TuiState::from_app(app);
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
-        );
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::ToggleProvider));
+    }
+
+    #[test]
+    fn empty_composer_up_scrolls_transcript() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = TuiState::from_app(app);
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::ScrollTranscriptUp(1)));
     }
 
     #[test]

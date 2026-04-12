@@ -43,11 +43,21 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
 }
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    state.transcript_viewport_height = area.height;
     let lines = cells::flatten_cells(&cells::build_cells(&state.app.transcript, area.width));
-    let scroll = lines.len().saturating_sub(area.height as usize);
-    let transcript = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll.min(u16::MAX as usize) as u16, 0));
+    let max_scroll = lines.len().saturating_sub(area.height as usize);
+    if state.transcript_follow_tail {
+        state.transcript_scroll_offset = max_scroll;
+    } else if state.transcript_scroll_offset > max_scroll {
+        state.transcript_scroll_offset = max_scroll;
+    }
+    if state.transcript_scroll_offset >= max_scroll {
+        state.transcript_follow_tail = true;
+    }
+    let transcript = Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((
+        state.transcript_scroll_offset.min(u16::MAX as usize) as u16,
+        0,
+    ));
     frame.render_widget(transcript, area);
 }
 
@@ -68,8 +78,17 @@ fn render_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
 }
 
 fn render_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
-    let footer = Paragraph::new(build_footer_line(state, area.width))
-        .style(Style::default().add_modifier(Modifier::DIM));
+    fill_background(
+        frame,
+        area,
+        Style::default().bg(Color::Rgb(28, 31, 38)).fg(Color::White),
+    );
+    let footer = Paragraph::new(build_footer_line(state, area.width)).style(
+        Style::default()
+            .bg(Color::Rgb(28, 31, 38))
+            .fg(Color::White)
+            .add_modifier(Modifier::DIM),
+    );
     frame.render_widget(footer, area);
 }
 
@@ -189,4 +208,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn fill_background(frame: &mut Frame<'_>, area: Rect, style: Style) {
+    for y in 0..area.height {
+        for x in 0..area.width {
+            frame.buffer_mut()[(area.x + x, area.y + y)]
+                .set_symbol(" ")
+                .set_style(style);
+        }
+    }
 }

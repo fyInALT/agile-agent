@@ -108,6 +108,12 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                     match handle_key_event(&mut state, key_event) {
                         InputOutcome::None => {}
+                        InputOutcome::ScrollTranscriptUp(rows) => state.scroll_transcript_up(rows),
+                        InputOutcome::ScrollTranscriptDown(rows) => {
+                            state.scroll_transcript_down(rows)
+                        }
+                        InputOutcome::ScrollTranscriptHome => state.scroll_transcript_home(),
+                        InputOutcome::ScrollTranscriptEnd => state.scroll_transcript_end(),
                         InputOutcome::OpenSkills => state.app.open_skill_browser(),
                         InputOutcome::CloseSkills => state.app.close_skill_browser(),
                         InputOutcome::SkillUp => state.app.move_skill_selection_up(),
@@ -247,7 +253,7 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
         }
         LocalCommand::Provider => {
             state.app.push_status_message(format!(
-                "current provider: {} (ctrl+p switches providers)",
+                "current provider: {} (tab switches providers)",
                 state.app.selected_provider.label()
             ));
             None

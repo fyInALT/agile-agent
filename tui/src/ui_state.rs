@@ -11,6 +11,9 @@ pub struct TuiState {
     pub composer_state: TextAreaState,
     pub transcript_overlay: Option<TranscriptOverlayState>,
     pub composer_width: u16,
+    pub transcript_viewport_height: u16,
+    pub transcript_scroll_offset: usize,
+    pub transcript_follow_tail: bool,
 }
 
 impl TuiState {
@@ -22,6 +25,9 @@ impl TuiState {
             composer_state: TextAreaState::default(),
             transcript_overlay: None,
             composer_width: 80,
+            transcript_viewport_height: 1,
+            transcript_scroll_offset: 0,
+            transcript_follow_tail: true,
         }
     }
 
@@ -46,5 +52,23 @@ impl TuiState {
 
     pub fn close_transcript_overlay(&mut self) {
         self.transcript_overlay = None;
+    }
+
+    pub fn scroll_transcript_up(&mut self, rows: usize) {
+        self.transcript_scroll_offset = self.transcript_scroll_offset.saturating_sub(rows);
+        self.transcript_follow_tail = false;
+    }
+
+    pub fn scroll_transcript_down(&mut self, rows: usize) {
+        self.transcript_scroll_offset = self.transcript_scroll_offset.saturating_add(rows);
+    }
+
+    pub fn scroll_transcript_home(&mut self) {
+        self.transcript_scroll_offset = 0;
+        self.transcript_follow_tail = false;
+    }
+
+    pub fn scroll_transcript_end(&mut self) {
+        self.transcript_follow_tail = true;
     }
 }

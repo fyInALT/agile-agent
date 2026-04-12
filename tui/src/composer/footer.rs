@@ -17,11 +17,16 @@ pub fn build_footer_line(state: &TuiState, width: u16) -> Line<'static> {
             state.app.selected_provider.label()
         )
     } else {
-        "  enter send  ctrl+j newline  ctrl+t transcript  ctrl+p provider".to_string()
+        "  enter send  ctrl+j newline  tab provider  ctrl+t transcript".to_string()
     };
 
     let cwd_label = display_cwd_label(&state.app.cwd);
-    let right = format!("{}  {}", loop_phase_label(state.app.loop_phase), cwd_label);
+    let right = format!(
+        "{} · {} · {}",
+        state.app.selected_provider.label(),
+        loop_phase_label(state.app.loop_phase),
+        cwd_label
+    );
 
     let total_width = width as usize;
     let left_width = left.width();

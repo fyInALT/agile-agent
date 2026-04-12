@@ -71,16 +71,37 @@ The TUI and loop runner reuse provider session continuity when available:
 
 ### TUI
 
-The TUI supports:
+The TUI provides a codex-style shell interface with:
 
-- multi-turn chat
-- provider switching with `Tab`
-- skill browser with `$`
-- transcript rendering for assistant Markdown
-- local slash commands
-- loop phase visibility
+- viewport + bottom pane layout (not stacked boxed widgets)
+- multiline composer with real text editing
+- paste support for multiline content
+- transcript rendering as typed cells (user, assistant, status, error)
+- width-aware Markdown rendering for assistant output
+- transcript overlay/pager for browsing full conversation history
+- skill browser overlay
 
-Supported slash commands:
+Keybindings:
+
+- `Enter` — submit current input
+- `Ctrl+J` — insert newline (for multiline input)
+- `Tab` — switch provider (claude ↔ codex)
+- `Ctrl+T` — open transcript overlay/pager
+- `Ctrl+C` — quit
+- `q` — quit (when composer is empty)
+- `$` — open skill browser (when composer is empty)
+- `Up/Down` — scroll transcript when the composer is empty
+- `PageUp/PageDown` — page transcript in the main shell
+- `Home/End` — jump to transcript top/bottom when the composer is empty
+
+Transcript overlay controls:
+
+- `Esc` or `q` — close overlay
+- `Up/Down` — scroll
+- `PageUp/PageDown` or `Space` — page
+- `Home/End` — jump to top/bottom
+
+Slash commands:
 
 - `/help`
 - `/provider`
