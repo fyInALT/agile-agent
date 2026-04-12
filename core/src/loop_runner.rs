@@ -19,6 +19,7 @@ use crate::verification::VerificationOutcome;
 pub struct LoopGuardrails {
     pub max_iterations: usize,
     pub max_continuations_per_task: u8,
+    pub max_verification_failures: usize,
 }
 
 impl Default for LoopGuardrails {
@@ -26,6 +27,7 @@ impl Default for LoopGuardrails {
         Self {
             max_iterations: 5,
             max_continuations_per_task: 3,
+            max_verification_failures: 1,
         }
     }
 }
@@ -33,6 +35,7 @@ impl Default for LoopGuardrails {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopRunSummary {
     pub iterations: usize,
+    pub verification_failures: usize,
     pub stopped_reason: String,
 }
 
@@ -52,12 +55,14 @@ pub fn run_single_iteration(state: &mut AppState) -> Result<Option<LoopRunSummar
 
     Ok(Some(LoopRunSummary {
         iterations: 1,
+        verification_failures: 0,
         stopped_reason: "single iteration completed".to_string(),
     }))
 }
 
 pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<LoopRunSummary> {
     let mut iterations = 0usize;
+    let mut verification_failures = 0usize;
 
     loop {
         if iterations >= guardrails.max_iterations {
@@ -65,6 +70,7 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
             state.push_error_message("loop guardrail reached: max iterations");
             return Ok(LoopRunSummary {
                 iterations,
+                verification_failures,
                 stopped_reason: "max iterations reached".to_string(),
             });
         }
@@ -77,6 +83,7 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
                 state.set_loop_phase(LoopPhase::Idle);
                 return Ok(LoopRunSummary {
                     iterations,
+                    verification_failures,
                     stopped_reason: "no ready todo available".to_string(),
                 });
             };
@@ -89,16 +96,35 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
             task
         };
 
-        execute_task_until_resolution(state, &task, guardrails)?;
+        let outcome = execute_task_until_resolution(state, &task, guardrails)?;
+        if outcome == LoopExecutionOutcome::VerificationFailed {
+            verification_failures += 1;
+            if verification_failures >= guardrails.max_verification_failures {
+                state.set_loop_phase(LoopPhase::Escalating);
+                state.push_error_message("loop guardrail reached: max verification failures");
+                return Ok(LoopRunSummary {
+                    iterations: iterations + 1,
+                    verification_failures,
+                    stopped_reason: "max verification failures reached".to_string(),
+                });
+            }
+        }
         iterations += 1;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopExecutionOutcome {
+    Completed,
+    VerificationFailed,
+    Escalated,
 }
 
 fn execute_task_until_resolution(
     state: &mut AppState,
     task: &TaskItem,
     guardrails: LoopGuardrails,
-) -> Result<()> {
+) -> Result<LoopExecutionOutcome> {
     let mut prompt = build_task_prompt(task);
 
     loop {
@@ -122,20 +148,20 @@ fn execute_task_until_resolution(
         if state.active_task_had_error {
             state.set_loop_phase(LoopPhase::Escalating);
             escalate_active_task(state, "provider execution failed");
-            return Ok(());
+            return Ok(LoopExecutionOutcome::Escalated);
         }
 
         let Some(summary_text) = summary.clone() else {
             state.set_loop_phase(LoopPhase::Escalating);
             escalate_active_task(state, "no assistant summary available");
-            return Ok(());
+            return Ok(LoopExecutionOutcome::Escalated);
         };
 
         if let Some(next_prompt) = autonomy::continuation_prompt(&summary_text) {
             if state.continuation_attempts >= guardrails.max_continuations_per_task {
                 state.set_loop_phase(LoopPhase::Escalating);
                 escalate_active_task(state, "continuation limit reached");
-                return Ok(());
+                return Ok(LoopExecutionOutcome::Escalated);
             }
             state.continuation_attempts += 1;
             state.push_status_message(format!(
@@ -160,20 +186,21 @@ fn execute_task_until_resolution(
                     VerificationOutcome::Passed => {
                         state.complete_active_task(summary);
                         state.set_loop_phase(LoopPhase::Idle);
+                        return Ok(LoopExecutionOutcome::Completed);
                     }
                     VerificationOutcome::Failed | VerificationOutcome::NotRunnable => {
                         state.set_loop_phase(LoopPhase::Escalating);
                         escalate_active_task(state, "verification failed");
+                        return Ok(LoopExecutionOutcome::VerificationFailed);
                     }
                 }
             }
             CompletionDecision::Incomplete { reason } => {
                 state.set_loop_phase(LoopPhase::Escalating);
                 escalate_active_task(state, reason);
+                return Ok(LoopExecutionOutcome::Escalated);
             }
         }
-
-        return Ok(());
     }
 }
 
@@ -323,12 +350,41 @@ mod tests {
             LoopGuardrails {
                 max_iterations: 2,
                 max_continuations_per_task: 1,
+                max_verification_failures: 1,
             },
         )
         .expect("run loop");
 
         assert_eq!(summary.iterations, 1);
+        assert_eq!(summary.verification_failures, 0);
         assert_eq!(summary.stopped_reason, "no ready todo available");
         assert_eq!(state.backlog.todos[0].status, TodoStatus::Done);
+    }
+
+    #[test]
+    fn run_loop_can_resume_existing_active_task() {
+        let mut state =
+            AppState::with_skills(ProviderKind::Mock, ".".into(), SkillRegistry::default());
+        state
+            .backlog
+            .push_todo(ready_todo("todo-1", "write summary", 1));
+        let task = state.begin_task_from_todo("todo-1").expect("task");
+        state.active_task_id = Some(task.id.clone());
+
+        let summary = run_loop(
+            &mut state,
+            LoopGuardrails {
+                max_iterations: 1,
+                max_continuations_per_task: 1,
+                max_verification_failures: 1,
+            },
+        )
+        .expect("run loop");
+
+        assert_eq!(summary.iterations, 1);
+        assert_eq!(
+            state.backlog.tasks[0].status,
+            crate::backlog::TaskStatus::Completed
+        );
     }
 }

@@ -94,6 +94,7 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
         LoopGuardrails {
             max_iterations,
             max_continuations_per_task: 3,
+            max_verification_failures: 1,
         },
     )?;
 
