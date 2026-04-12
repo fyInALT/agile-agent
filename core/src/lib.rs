@@ -1,3 +1,5 @@
+pub mod agent_runtime;
+pub mod agent_store;
 pub mod app;
 pub mod autonomy;
 pub mod backlog;
@@ -16,3 +18,4 @@ pub mod storage;
 pub mod task_artifacts;
 pub mod task_engine;
 pub mod verification;
+pub mod workplace_store;
