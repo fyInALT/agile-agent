@@ -20,6 +20,7 @@ use crate::transcript::cells;
 use crate::ui_state::TuiState;
 
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
+    frame.render_widget(Clear, frame.area());
     state.sync_busy_started_at();
     let composer_height = state.composer.desired_height(frame.area().width, 8);
     let working_height = if state.is_busy() { 1 } else { 0 };
