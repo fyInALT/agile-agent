@@ -302,3 +302,68 @@ fn manual_scroll_keeps_same_top_line_while_streaming_reflows_content() {
         shell.state.transcript_last_cell_range
     );
 }
+
+#[test]
+fn manual_up_scroll_does_not_reenable_follow_tail_during_streaming() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    let backend = TestBackend::new(18, 6);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    for index in 0..12 {
+        shell
+            .state
+            .app_mut()
+            .push_status_message(format!("history line {index}"));
+    }
+    shell.state.app_mut().append_assistant_chunk(
+        "## Focus\n\n- `agile-agent` is the primary implementation target in this workspace.",
+    );
+
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("initial draw");
+
+    for _ in 0..5 {
+        shell.state.scroll_transcript_up(1);
+        shell.state.app_mut().append_assistant_chunk(" more streaming text");
+        terminal
+            .draw(|frame| render_app(frame, &mut shell.state))
+            .expect("streaming draw");
+        assert!(
+            !shell.state.transcript_follow_tail,
+            "manual scroll unexpectedly re-enabled follow-tail: offset={} max_scroll={}",
+            shell.state.transcript_scroll_offset,
+            shell.state.transcript_max_scroll
+        );
+    }
+}
+
+#[test]
+fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    let backend = TestBackend::new(18, 6);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    for index in 0..10 {
+        shell
+            .state
+            .app_mut()
+            .push_status_message(format!("history line {index}"));
+    }
+
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("initial draw");
+
+    shell.state.transcript_follow_tail = false;
+    shell.state.transcript_scroll_offset = shell.state.transcript_max_scroll;
+
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("manual bottom draw");
+
+    assert!(
+        !shell.state.transcript_follow_tail,
+        "render should not silently re-enable follow-tail when user is in manual mode"
+    );
+}

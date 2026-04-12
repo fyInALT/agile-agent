@@ -99,9 +99,6 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
             state.transcript_scroll_offset = max_scroll;
         }
     }
-    if state.transcript_scroll_offset >= max_scroll {
-        state.transcript_follow_tail = true;
-    }
     state.transcript_rendered_lines = rendered_lines;
     state.transcript_last_cell_range = last_cell_range(&transcript_cells);
     let transcript = Paragraph::new(lines).scroll((

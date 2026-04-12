@@ -6,6 +6,8 @@ use crossterm::event::KeyModifiers;
 
 use crate::ui_state::TuiState;
 
+const TRANSCRIPT_SCROLL_STEP: usize = 3;
+
 pub enum InputOutcome {
     None,
     Submit(String),
@@ -113,7 +115,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         }
         KeyEvent {
             code: KeyCode::Up, ..
-        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptUp(1),
+        } if state.composer.is_empty() => InputOutcome::ScrollTranscriptUp(TRANSCRIPT_SCROLL_STEP),
         KeyEvent {
             code: KeyCode::Down,
             ..
@@ -252,6 +254,16 @@ mod tests {
     }
 
     #[test]
+    fn empty_composer_up_scrolls_transcript_faster() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::ScrollTranscriptUp(3)));
+    }
+
+    #[test]
     fn tab_requests_provider_toggle() {
         let app = AppState::new(ProviderKind::Mock);
         let mut state = state_from_app(app);
@@ -268,7 +280,7 @@ mod tests {
 
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
-        assert!(matches!(outcome, InputOutcome::ScrollTranscriptUp(1)));
+        assert!(matches!(outcome, InputOutcome::ScrollTranscriptUp(3)));
     }
 
     #[test]
