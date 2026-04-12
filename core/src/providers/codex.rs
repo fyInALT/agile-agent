@@ -17,6 +17,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
@@ -28,6 +29,15 @@ pub fn start(
     event_tx: Sender<ProviderEvent>,
 ) -> Result<()> {
     let executable = resolve_codex_executable()?;
+    logging::debug_event(
+        "provider.codex.start",
+        "spawning Codex provider worker",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "session_handle": format!("{:?}", session_handle),
+        }),
+    );
 
     thread::Builder::new()
         .name("agent-codex-provider".to_string())
@@ -59,6 +69,15 @@ fn run_codex(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start codex executable `{executable}`"))?;
+    logging::debug_event(
+        "provider.codex.process_spawned",
+        "spawned Codex process",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "args": ["app-server", "--listen", "stdio://"],
+        }),
+    );
 
     let mut stdin = child.stdin.take().context("codex stdin pipe unavailable")?;
     let stdout = child
@@ -220,6 +239,14 @@ fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
     loop {
         if let Some(status) = child.try_wait().context("failed to poll codex process")? {
             if status.success() {
+                logging::debug_event(
+                    "provider.codex.exit",
+                    "Codex process exited successfully",
+                    serde_json::json!({
+                        "status": status.to_string(),
+                        "forced_kill": false,
+                    }),
+                );
                 return Ok(());
             }
             anyhow::bail!("codex exited with status {status}");
@@ -227,6 +254,13 @@ fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
         if Instant::now() >= deadline {
             child.kill().context("failed to kill codex process")?;
             let _ = child.wait();
+            logging::warn_event(
+                "provider.codex.exit",
+                "forced Codex process shutdown after timeout",
+                serde_json::json!({
+                    "forced_kill": true,
+                }),
+            );
             return Ok(());
         }
         thread::sleep(Duration::from_millis(25));
@@ -265,6 +299,13 @@ struct JsonRpcError {
 
 fn send_request(stdin: &mut impl Write, request: &JsonRpcRequest) -> Result<()> {
     let json = serde_json::to_string(request).context("failed to serialize codex request")?;
+    logging::debug_event(
+        "provider.codex.request",
+        "writing Codex JSON-RPC request",
+        serde_json::json!({
+            "payload": json,
+        }),
+    );
     stdin
         .write_all(json.as_bytes())
         .context("failed to write codex request")?;
@@ -279,6 +320,14 @@ fn send_notification(stdin: &mut impl Write, method: &str) -> Result<()> {
         "method": method
     });
     let json = serde_json::to_string(&payload).context("failed to serialize codex notification")?;
+    logging::debug_event(
+        "provider.codex.request",
+        "writing Codex JSON-RPC notification",
+        serde_json::json!({
+            "payload": json,
+            "method": method,
+        }),
+    );
     stdin
         .write_all(json.as_bytes())
         .context("failed to write codex notification")?;
@@ -298,6 +347,14 @@ fn send_response(stdin: &mut impl Write, id: u64, result: serde_json::Value) -> 
         "result": result
     });
     let json = serde_json::to_string(&payload).context("failed to serialize codex response")?;
+    logging::debug_event(
+        "provider.codex.approval",
+        "writing Codex approval response",
+        serde_json::json!({
+            "id": id,
+            "payload": json,
+        }),
+    );
     stdin
         .write_all(json.as_bytes())
         .context("failed to write codex response")?;
@@ -327,8 +384,25 @@ fn wait_for_response(
         if trimmed.is_empty() {
             continue;
         }
+        logging::debug_event(
+            "provider.codex.stdout_line",
+            "read raw Codex JSON-RPC line",
+            serde_json::json!({
+                "line": trimmed,
+                "target_id": target_id,
+            }),
+        );
         let message = parse_jsonrpc_message(trimmed)?;
         if message.id == Some(target_id) && (message.result.is_some() || message.error.is_some()) {
+            logging::debug_event(
+                "provider.codex.response",
+                "received Codex JSON-RPC response",
+                serde_json::json!({
+                    "id": message.id,
+                    "result": message.result,
+                    "error": message.error.as_ref().map(|error| error.message.clone()),
+                }),
+            );
             if let Some(error) = &message.error {
                 anyhow::bail!("JSON-RPC error {}: {}", error.code, error.message);
             }
@@ -413,6 +487,16 @@ fn handle_server_request(
         _ => serde_json::json!({}),
     };
 
+    logging::debug_event(
+        "provider.codex.approval",
+        "resolved Codex approval request",
+        serde_json::json!({
+            "method": method,
+            "id": id,
+            "decision": decision,
+        }),
+    );
+
     send_response(stdin, id, decision)
 }
 
@@ -425,6 +509,14 @@ fn handle_notification(
     streamed_agent_message_ids: &mut HashSet<String>,
 ) -> Result<bool> {
     let params = params.unwrap_or(serde_json::Value::Null);
+    logging::debug_event(
+        "provider.codex.notification",
+        "received Codex notification",
+        serde_json::json!({
+            "method": method,
+            "params": params,
+        }),
+    );
 
     match method.as_str() {
         "thread/started" => {
@@ -657,6 +749,8 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::mpsc;
 
+    use crate::logging;
+    use crate::logging::RunMode;
     use super::JsonRpcMessage;
     use super::JsonRpcRequest;
     use super::ProviderEvent;
@@ -665,7 +759,9 @@ mod tests {
     use super::parse_jsonrpc_message;
     use super::resolve_codex_executable_from;
     use super::thread_id_from_result;
+    use super::wait_for_response;
     use crate::provider::SessionHandle;
+    use crate::workplace_store::WorkplaceStore;
 
     #[test]
     fn resolves_missing_executable_with_clear_error() {
@@ -849,5 +945,44 @@ mod tests {
                 thread_id: "thr_123".to_string()
             }
         );
+    }
+
+    #[test]
+    fn wait_for_response_logs_raw_jsonrpc_messages() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        workplace.ensure().expect("ensure");
+        logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
+
+        let mut stdout_lines = vec![
+            Ok(r#"{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thr-123"}}}"#.to_string()),
+            Ok(r#"{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-123"}}}"#.to_string()),
+        ]
+        .into_iter();
+        let mut stdin = Vec::new();
+        let (tx, _rx) = mpsc::channel();
+
+        let response = wait_for_response(&mut stdout_lines, &mut stdin, 2, &tx, None)
+            .expect("response");
+        assert_eq!(
+            thread_id_from_result(response.result.as_ref()),
+            Some("thr-123".to_string())
+        );
+
+        let log_path = logging::current_log_path().expect("log path");
+        let contents = std::fs::read_to_string(log_path).expect("log file");
+        let entries: Vec<serde_json::Value> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid json log line"))
+            .collect();
+
+        assert!(entries.iter().any(|entry| {
+            entry.get("event").and_then(|value| value.as_str())
+                == Some("provider.codex.notification")
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.get("event").and_then(|value| value.as_str())
+                == Some("provider.codex.response")
+        }));
     }
 }
