@@ -1,0 +1,50 @@
+use agent_core::app::AppState;
+
+use crate::composer::textarea::TextArea;
+use crate::composer::textarea::TextAreaState;
+use crate::transcript::overlay::TranscriptOverlayState;
+
+#[derive(Debug)]
+pub struct TuiState {
+    pub app: AppState,
+    pub composer: TextArea,
+    pub composer_state: TextAreaState,
+    pub transcript_overlay: Option<TranscriptOverlayState>,
+    pub composer_width: u16,
+}
+
+impl TuiState {
+    pub fn from_app(app: AppState) -> Self {
+        let composer = TextArea::from_text(app.input.clone());
+        Self {
+            app,
+            composer,
+            composer_state: TextAreaState::default(),
+            transcript_overlay: None,
+            composer_width: 80,
+        }
+    }
+
+    pub fn sync_app_input_from_composer(&mut self) {
+        self.app.input = self.composer.text().to_string();
+    }
+
+    pub fn into_app_state(mut self) -> AppState {
+        self.sync_app_input_from_composer();
+        self.app
+    }
+
+    pub fn is_overlay_open(&self) -> bool {
+        self.transcript_overlay.is_some()
+    }
+
+    pub fn open_transcript_overlay(&mut self) {
+        if self.transcript_overlay.is_none() {
+            self.transcript_overlay = Some(TranscriptOverlayState::default());
+        }
+    }
+
+    pub fn close_transcript_overlay(&mut self) {
+        self.transcript_overlay = None;
+    }
+}

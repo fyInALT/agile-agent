@@ -2,9 +2,13 @@ use agent_core::probe;
 use anyhow::Result;
 
 mod app_loop;
+mod composer;
 mod input;
+mod markdown;
 mod render;
 mod terminal;
+mod transcript;
+mod ui_state;
 
 pub fn run_tui() -> Result<()> {
     run_tui_with_options(false)

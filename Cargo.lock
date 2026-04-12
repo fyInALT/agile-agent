@@ -37,6 +37,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "textwrap",
+ "unicode-segmentation",
  "unicode-width 0.2.0",
 ]
 

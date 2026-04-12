@@ -12,4 +12,5 @@ crossterm.workspace = true
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 textwrap.workspace = true
+unicode-segmentation.workspace = true
 unicode-width.workspace = true
