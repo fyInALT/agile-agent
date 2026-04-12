@@ -7,6 +7,7 @@ Current product scope:
 - an interactive terminal UI
 - local skill discovery and prompt injection
 - persisted backlog, task, and session state
+- a persisted single-agent runtime identity
 - a single-agent autonomous execution loop
 - headless CLI execution for automation and experiments
 
@@ -68,6 +69,7 @@ The TUI provides:
 - width-aware Markdown rendering for assistant output
 - a local skill browser
 - slash commands for provider inspection, backlog updates, and loop control
+- current agent identity in the footer
 
 Common keybindings:
 
@@ -104,6 +106,27 @@ The current loop:
 5. runs verification
 6. marks the task `done`, `failed`, or `blocked`
 7. writes task artifacts and escalations when needed
+
+### Agent Runtime
+
+The current runtime now treats one `agent` as a first-class object:
+
+- one agent maps to one long-lived runtime identity
+- one agent binds to one provider type
+- one agent reuses one provider session continuity when available
+
+The runtime currently persists:
+
+- `agent_id`
+- `codename`
+- `workplace_id`
+- `provider_type`
+- `provider_session_id`
+- `created_at`
+- `updated_at`
+- `status`
+
+On startup from the same working directory, `agile-agent` restores the most recent agent for the derived workplace and reattaches provider session continuity when possible.
 
 Default headless guardrails:
 
@@ -215,6 +238,10 @@ Current files and folders include:
 - `task-artifacts/*.json`
 - `escalations/*.json`
 
+Agent runtime state is stored separately under:
+
+- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/meta.json`
+
 Persisted state includes:
 
 - backlog todos and tasks
@@ -223,6 +250,7 @@ Persisted state includes:
 - Claude session / Codex thread continuity
 - enabled skills
 - active task and loop state
+- agent identity and provider binding
 
 ## Documentation
 
