@@ -5,11 +5,15 @@ use agent_core::autonomy::CompletionDecision;
 use agent_core::backlog_store;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
+use agent_core::escalation;
+use agent_core::escalation::EscalationRecord;
 use agent_core::probe;
 use agent_core::provider;
 use agent_core::provider::ProviderEvent;
 use agent_core::session_store;
 use agent_core::skills::SkillRegistry;
+use agent_core::verification;
+use agent_core::verification::VerificationOutcome;
 use anyhow::Result;
 use crossterm::event;
 use crossterm::event::Event;
@@ -134,7 +138,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         let summary = state.active_task_summary();
                         if state.active_task_id.is_some() {
                             if state.active_task_had_error {
-                                state.block_active_task("provider execution failed");
+                                escalate_active_task(&mut state, "provider execution failed");
                             } else if let Some(summary_text) = summary.clone() {
                                 if let Some(next_prompt) =
                                     autonomy::continuation_prompt(&summary_text)
@@ -153,20 +157,64 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                         should_clear_provider_rx = false;
                                         break;
                                     } else {
-                                        state.block_active_task("continuation limit reached");
+                                        escalate_active_task(
+                                            &mut state,
+                                            "continuation limit reached",
+                                        );
                                     }
                                 } else {
                                     match autonomy::judge_completion(&summary_text) {
                                         CompletionDecision::Complete => {
-                                            state.complete_active_task(summary.clone());
+                                            let verification_task = state
+                                                .active_task_id
+                                                .as_ref()
+                                                .and_then(|task_id| {
+                                                    state
+                                                        .backlog
+                                                        .tasks
+                                                        .iter()
+                                                        .find(|task| &task.id == task_id)
+                                                })
+                                                .cloned();
+                                            if let Some(task) = verification_task {
+                                                let plan = verification::build_verification_plan(
+                                                    &state.cwd, &task,
+                                                );
+                                                let result = verification::execute_verification(
+                                                    &plan,
+                                                    &state.cwd,
+                                                    Some(&summary_text),
+                                                );
+                                                state.push_status_message(result.summary.clone());
+                                                for evidence in result.evidence {
+                                                    state.push_status_message(format!(
+                                                        "evidence: {}",
+                                                        evidence
+                                                    ));
+                                                }
+                                                match result.outcome {
+                                                    VerificationOutcome::Passed => {
+                                                        state.complete_active_task(summary.clone());
+                                                    }
+                                                    VerificationOutcome::Failed
+                                                    | VerificationOutcome::NotRunnable => {
+                                                        escalate_active_task(
+                                                            &mut state,
+                                                            "verification failed",
+                                                        );
+                                                    }
+                                                }
+                                            } else {
+                                                state.complete_active_task(summary.clone());
+                                            }
                                         }
                                         CompletionDecision::Incomplete { reason } => {
-                                            state.block_active_task(reason);
+                                            escalate_active_task(&mut state, reason);
                                         }
                                     }
                                 }
                             } else {
-                                state.block_active_task("no assistant summary available");
+                                escalate_active_task(&mut state, "no assistant summary available");
                             }
                         }
                         state.finish_provider_response();
@@ -185,6 +233,35 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     backlog_store::save_backlog(&state.backlog)?;
     session_store::save_recent_session(&state)?;
     Ok(state)
+}
+
+fn escalate_active_task(state: &mut AppState, reason: impl Into<String>) {
+    let reason = reason.into();
+    let task_id = state
+        .active_task_id
+        .clone()
+        .unwrap_or_else(|| "unknown-task".to_string());
+    let context_summary = state
+        .active_task_summary()
+        .unwrap_or_else(|| "no assistant summary".to_string());
+
+    let record = EscalationRecord {
+        task_id: task_id.clone(),
+        reason: reason.clone(),
+        context_summary,
+        recommended_actions: vec![
+            "inspect task output".to_string(),
+            "review verification evidence".to_string(),
+        ],
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let artifact_path = escalation::save_escalation(&record).ok();
+    state.block_active_task(reason.clone());
+    state.push_error_message(format!("escalated task: {} ({})", task_id, reason));
+    if let Some(path) = artifact_path {
+        state.push_status_message(format!("escalation artifact: {}", path.display()));
+    }
 }
 
 fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<String> {
