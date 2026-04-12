@@ -60,16 +60,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             break;
         }
 
-        if state.loop_run_active
-            && provider_rx.is_none()
-            && state.status == AppStatus::Idle
-            && state.active_task_id.is_none()
-        {
+        if state.loop_run_active && provider_rx.is_none() && state.status == AppStatus::Idle {
             if state.remaining_loop_iterations == 0 {
                 state.set_loop_phase(LoopPhase::Idle);
                 state.stop_loop_run("loop guardrail reached: max iterations");
-            } else if let Some(prompt) = start_next_loop_iteration(&mut state) {
-                state.remaining_loop_iterations = state.remaining_loop_iterations.saturating_sub(1);
+            } else if let Some((prompt, started_new_task)) = next_loop_prompt(&mut state) {
+                if started_new_task {
+                    state.remaining_loop_iterations =
+                        state.remaining_loop_iterations.saturating_sub(1);
+                }
                 start_provider_request(&mut state, prompt, &mut provider_rx);
             } else {
                 state.set_loop_phase(LoopPhase::Idle);
@@ -419,7 +418,19 @@ fn build_task_prompt(task: &agent_core::backlog::TaskItem) -> String {
     prompt
 }
 
-fn start_next_loop_iteration(state: &mut AppState) -> Option<String> {
+fn next_loop_prompt(state: &mut AppState) -> Option<(String, bool)> {
+    if let Some(active_task_id) = state.active_task_id.clone() {
+        let task = state
+            .backlog
+            .tasks
+            .iter()
+            .find(|task| task.id == active_task_id)
+            .cloned()?;
+        state.set_loop_phase(LoopPhase::Executing);
+        state.push_status_message(format!("resuming task: {}", task.id));
+        return Some((build_task_prompt(&task), false));
+    }
+
     let Some(todo_id) = state.next_ready_todo_id() else {
         return None;
     };
@@ -431,5 +442,5 @@ fn start_next_loop_iteration(state: &mut AppState) -> Option<String> {
     };
 
     state.push_status_message(format!("running task: {}", task.id));
-    Some(build_task_prompt(&task))
+    Some((build_task_prompt(&task), true))
 }
