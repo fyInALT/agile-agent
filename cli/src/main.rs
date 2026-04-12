@@ -193,9 +193,8 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     let mut agent_runtime = bootstrap.runtime;
 
     if resume_last {
-        match agent_runtime.restore_state(&mut state) {
+        match agent_runtime.restore_snapshot(&mut state) {
             Ok(restored) => {
-                let _ = agent_runtime.restore_transcript(&mut state);
                 for warning in restored.warnings {
                     eprintln!("warning: {warning}");
                 }

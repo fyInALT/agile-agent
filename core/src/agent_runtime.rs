@@ -150,6 +150,11 @@ pub struct AgentBootstrap {
     pub kind: AgentBootstrapKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreAgentSnapshotResult {
+    pub warnings: Vec<String>,
+}
+
 impl AgentRuntime {
     pub fn new(
         workplace: &WorkplaceStore,
@@ -276,6 +281,7 @@ impl AgentRuntime {
     }
 
     pub fn persist(&self) -> Result<std::path::PathBuf> {
+        self.workplace.touch_meta()?;
         AgentStore::new(self.workplace.clone()).save_meta(&self.meta)
     }
 
@@ -301,9 +307,20 @@ impl AgentRuntime {
         Ok(())
     }
 
+    pub fn restore_snapshot(&self, state: &mut AppState) -> Result<RestoreAgentSnapshotResult> {
+        let restored = self.restore_state(state)?;
+        let mut warnings = restored.warnings;
+        if let Err(err) = self.restore_transcript(state) {
+            warnings.push(format!("failed to restore agent transcript: {err}"));
+        }
+        Ok(RestoreAgentSnapshotResult { warnings })
+    }
+
     pub fn persist_messages(&self, state: &AppState) -> Result<std::path::PathBuf> {
-        AgentStore::new(self.workplace.clone())
-            .save_messages(&self.meta.agent_id, &AgentMessages::from_app_state(state))
+        AgentStore::new(self.workplace.clone()).save_messages(
+            &self.meta.agent_id,
+            &AgentMessages::from_runtime_and_app(self, state),
+        )
     }
 
     pub fn persist_memory(&self, state: &AppState) -> Result<std::path::PathBuf> {
@@ -316,6 +333,7 @@ impl AgentRuntime {
     pub fn bootstrap_for_cwd(cwd: &Path, default_provider: ProviderKind) -> Result<AgentBootstrap> {
         let workplace = WorkplaceStore::for_cwd(cwd)?;
         workplace.ensure()?;
+        workplace.touch_meta()?;
         let store = AgentStore::new(workplace.clone());
 
         match store.load_most_recent_meta() {

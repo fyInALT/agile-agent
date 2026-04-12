@@ -59,9 +59,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
     if resume_last {
-        match bootstrap.runtime.restore_state(&mut app) {
+        match bootstrap.runtime.restore_snapshot(&mut app) {
             Ok(restored) => {
-                let _ = bootstrap.runtime.restore_transcript(&mut app);
                 app.push_status_message("restored recent agent state");
                 for warning in restored.warnings {
                     app.push_error_message(warning);
