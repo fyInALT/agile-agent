@@ -13,7 +13,7 @@ use crate::ui_state::TuiState;
 pub fn build_footer_line(state: &TuiState, width: u16) -> Line<'static> {
     let left = if state.app.status == AppStatus::Responding {
         format!(
-            "  working with {}  ctrl+t transcript  ctrl+j newline",
+            "  {}  ctrl+t transcript  ctrl+j newline",
             state.app.selected_provider.label()
         )
     } else {
@@ -22,7 +22,8 @@ pub fn build_footer_line(state: &TuiState, width: u16) -> Line<'static> {
 
     let cwd_label = display_cwd_label(&state.app.cwd);
     let right = format!(
-        "{} · {} · {}",
+        "{} · {} · {} · {}",
+        state.agent_runtime.codename().as_str(),
         state.app.selected_provider.label(),
         loop_phase_label(state.app.loop_phase),
         cwd_label

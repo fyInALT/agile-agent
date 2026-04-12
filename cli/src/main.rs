@@ -1,3 +1,5 @@
+use agent_core::agent_runtime::AgentBootstrapKind;
+use agent_core::agent_runtime::AgentRuntime;
 use agent_core::app::AppState;
 use agent_core::backlog_store;
 use agent_core::loop_runner;
@@ -64,12 +66,30 @@ fn main() -> Result<()> {
 
 fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     let launch_cwd = env::current_dir()?;
+    let bootstrap =
+        AgentRuntime::bootstrap_for_cwd(&launch_cwd, agent_core::provider::default_provider())?;
     let mut state = AppState::with_skills(
         agent_core::provider::default_provider(),
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
     state.backlog = backlog_store::load_backlog()?;
+    for warning in bootstrap.runtime.apply_to_app_state(&mut state) {
+        eprintln!("warning: {warning}");
+    }
+    match &bootstrap.kind {
+        AgentBootstrapKind::Created => {
+            eprintln!("agent: created {}", bootstrap.runtime.summary());
+        }
+        AgentBootstrapKind::Restored => {
+            eprintln!("agent: restored {}", bootstrap.runtime.summary());
+        }
+        AgentBootstrapKind::RecreatedAfterError { error } => {
+            eprintln!("warning: failed to restore agent runtime: {error}");
+            eprintln!("agent: created replacement {}", bootstrap.runtime.summary());
+        }
+    }
+    let mut agent_runtime = bootstrap.runtime;
 
     if resume_last {
         match session_store::restore_recent_session(&mut state, &launch_cwd) {
@@ -80,6 +100,9 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
             }
             Err(err) => eprintln!("warning: failed to restore recent session: {err}"),
         }
+    }
+    if agent_runtime.sync_from_app_state(&state) {
+        agent_runtime.persist()?;
     }
 
     let initial_transcript_len = state.transcript.len();
@@ -95,6 +118,9 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
 
     backlog_store::save_backlog(&state.backlog)?;
     session_store::save_recent_session(&state)?;
+    agent_runtime.sync_from_app_state(&state);
+    agent_runtime.mark_stopped();
+    agent_runtime.persist()?;
 
     println!("iterations: {}", summary.iterations);
     println!("stopped_reason: {}", summary.stopped_reason);

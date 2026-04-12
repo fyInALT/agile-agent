@@ -36,6 +36,7 @@ dependencies = [
  "crossterm",
  "pulldown-cmark",
  "ratatui",
+ "tempfile",
  "textwrap",
  "unicode-segmentation",
  "unicode-width 0.2.0",

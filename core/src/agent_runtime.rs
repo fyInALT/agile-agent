@@ -1,10 +1,11 @@
 use std::path::Path;
-use std::path::PathBuf;
 
+use anyhow::Result;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::agent_store::AgentStore;
 use crate::app::AppState;
 use crate::app::AppStatus;
 use crate::app::LoopPhase;
@@ -128,7 +129,7 @@ pub struct AgentMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRuntime {
     meta: AgentMeta,
-    workplace_path: PathBuf,
+    workplace: WorkplaceStore,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,15 +163,12 @@ impl AgentRuntime {
                 updated_at: now,
                 status: AgentStatus::Idle,
             },
-            workplace_path: workplace.path().to_path_buf(),
+            workplace: workplace.clone(),
         }
     }
 
-    pub fn from_meta(meta: AgentMeta, workplace_path: PathBuf) -> Self {
-        Self {
-            meta,
-            workplace_path,
-        }
+    pub fn from_meta(meta: AgentMeta, workplace: WorkplaceStore) -> Self {
+        Self { meta, workplace }
     }
 
     pub fn meta(&self) -> &AgentMeta {
@@ -178,7 +176,7 @@ impl AgentRuntime {
     }
 
     pub fn workplace_path(&self) -> &Path {
-        &self.workplace_path
+        self.workplace.path()
     }
 
     pub fn agent_id(&self) -> &AgentId {
@@ -232,7 +230,7 @@ impl AgentRuntime {
         warnings
     }
 
-    pub fn sync_from_app_state(&mut self, state: &AppState) {
+    pub fn sync_from_app_state(&mut self, state: &AppState) -> bool {
         let mut changed = false;
 
         let provider_type = ProviderType::from_provider_kind(state.selected_provider);
@@ -256,11 +254,48 @@ impl AgentRuntime {
         if changed {
             self.meta.updated_at = Utc::now().to_rfc3339();
         }
+
+        changed
     }
 
     pub fn mark_stopped(&mut self) {
         self.meta.status = AgentStatus::Stopped;
         self.meta.updated_at = Utc::now().to_rfc3339();
+    }
+
+    pub fn persist(&self) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone()).save_meta(&self.meta)
+    }
+
+    pub fn bootstrap_for_cwd(cwd: &Path, default_provider: ProviderKind) -> Result<AgentBootstrap> {
+        let workplace = WorkplaceStore::for_cwd(cwd)?;
+        workplace.ensure()?;
+        let store = AgentStore::new(workplace.clone());
+
+        match store.load_most_recent_meta() {
+            Ok(Some(meta)) => Ok(AgentBootstrap {
+                runtime: Self::from_meta(meta, workplace),
+                kind: AgentBootstrapKind::Restored,
+            }),
+            Ok(None) => {
+                let runtime = Self::new(&workplace, store.next_agent_index()?, default_provider);
+                runtime.persist()?;
+                Ok(AgentBootstrap {
+                    runtime,
+                    kind: AgentBootstrapKind::Created,
+                })
+            }
+            Err(error) => {
+                let runtime = Self::new(&workplace, store.next_agent_index()?, default_provider);
+                runtime.persist()?;
+                Ok(AgentBootstrap {
+                    runtime,
+                    kind: AgentBootstrapKind::RecreatedAfterError {
+                        error: error.to_string(),
+                    },
+                })
+            }
+        }
     }
 }
 
@@ -304,6 +339,7 @@ fn generate_codename(index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::AgentBootstrapKind;
     use super::AgentRuntime;
     use super::AgentStatus;
     use super::ProviderSessionId;
@@ -337,8 +373,9 @@ mod tests {
         app.status = AppStatus::Responding;
         app.loop_phase = LoopPhase::Executing;
 
-        runtime.sync_from_app_state(&app);
+        let changed = runtime.sync_from_app_state(&app);
 
+        assert!(changed);
         assert_eq!(runtime.meta().provider_type, ProviderType::Codex);
         assert_eq!(
             runtime.meta().provider_session_id,
@@ -356,5 +393,48 @@ mod tests {
         runtime.mark_stopped();
 
         assert_eq!(runtime.meta().status, AgentStatus::Stopped);
+    }
+
+    #[test]
+    fn bootstrap_restores_existing_runtime() {
+        let temp = TempDir::new().expect("tempdir");
+        let first =
+            AgentRuntime::bootstrap_for_cwd(temp.path(), ProviderKind::Claude).expect("bootstrap");
+        assert!(matches!(first.kind, AgentBootstrapKind::Created));
+
+        let restored =
+            AgentRuntime::bootstrap_for_cwd(temp.path(), ProviderKind::Mock).expect("bootstrap");
+        assert!(matches!(restored.kind, AgentBootstrapKind::Restored));
+        assert_eq!(
+            restored.runtime.agent_id().as_str(),
+            first.runtime.agent_id().as_str()
+        );
+        assert_eq!(restored.runtime.meta().provider_type, ProviderType::Claude);
+    }
+
+    #[test]
+    fn bootstrap_recreates_runtime_after_broken_meta() {
+        let temp = TempDir::new().expect("tempdir");
+        let first =
+            AgentRuntime::bootstrap_for_cwd(temp.path(), ProviderKind::Claude).expect("bootstrap");
+        let meta_path = first
+            .runtime
+            .workplace_path()
+            .join("agents")
+            .join(first.runtime.agent_id().as_str())
+            .join("meta.json");
+        std::fs::write(&meta_path, "{ not valid json").expect("corrupt meta");
+
+        let recreated =
+            AgentRuntime::bootstrap_for_cwd(temp.path(), ProviderKind::Mock).expect("bootstrap");
+
+        assert!(matches!(
+            recreated.kind,
+            AgentBootstrapKind::RecreatedAfterError { .. }
+        ));
+        assert_ne!(
+            recreated.runtime.agent_id().as_str(),
+            first.runtime.agent_id().as_str()
+        );
     }
 }

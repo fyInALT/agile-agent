@@ -15,6 +15,10 @@ pub struct WorkplaceStore {
 }
 
 impl WorkplaceStore {
+    pub fn from_existing(workplace_id: WorkplaceId, path: PathBuf) -> Self {
+        Self { workplace_id, path }
+    }
+
     pub fn for_cwd(cwd: &Path) -> Result<Self> {
         let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
         let workplace_id = derive_workplace_id(&canonical_cwd);

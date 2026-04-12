@@ -1,3 +1,4 @@
+use agent_core::agent_runtime::AgentRuntime;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
@@ -10,6 +11,7 @@ use crate::transcript::overlay::TranscriptOverlayState;
 #[derive(Debug)]
 pub struct TuiState {
     pub app: AppState,
+    pub agent_runtime: AgentRuntime,
     pub composer: TextArea,
     pub composer_state: TextAreaState,
     pub transcript_overlay: Option<TranscriptOverlayState>,
@@ -21,10 +23,11 @@ pub struct TuiState {
 }
 
 impl TuiState {
-    pub fn from_app(app: AppState) -> Self {
+    pub fn from_app(app: AppState, agent_runtime: AgentRuntime) -> Self {
         let composer = TextArea::from_text(app.input.clone());
         Self {
             app,
+            agent_runtime,
             composer,
             composer_state: TextAreaState::default(),
             transcript_overlay: None,
@@ -43,6 +46,10 @@ impl TuiState {
     pub fn into_app_state(mut self) -> AppState {
         self.sync_app_input_from_composer();
         self.app
+    }
+
+    pub fn sync_agent_runtime_from_app(&mut self) -> bool {
+        self.agent_runtime.sync_from_app_state(&self.app)
     }
 
     pub fn is_overlay_open(&self) -> bool {

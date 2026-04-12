@@ -211,18 +211,28 @@ mod tests {
     use super::handle_key_event;
     use super::handle_paste_event;
     use crate::ui_state::TuiState;
+    use agent_core::agent_runtime::AgentRuntime;
     use agent_core::app::AppState;
     use agent_core::app::AppStatus;
     use agent_core::provider::ProviderKind;
     use agent_core::skills::SkillRegistry;
+    use agent_core::workplace_store::WorkplaceStore;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
+    use tempfile::TempDir;
+
+    fn state_from_app(app: AppState) -> TuiState {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let runtime = AgentRuntime::new(&workplace, 1, app.selected_provider);
+        TuiState::from_app(app, runtime)
+    }
 
     #[test]
     fn enter_submits_user_input() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
         handle_key_event(
             &mut state,
             KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
@@ -243,7 +253,7 @@ mod tests {
     #[test]
     fn tab_requests_provider_toggle() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
 
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
@@ -253,7 +263,7 @@ mod tests {
     #[test]
     fn empty_composer_up_scrolls_transcript() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
 
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
@@ -263,7 +273,7 @@ mod tests {
     #[test]
     fn ctrl_t_opens_transcript_overlay() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
 
         let outcome = handle_key_event(
             &mut state,
@@ -276,7 +286,7 @@ mod tests {
     #[test]
     fn paste_appends_multiline_text_when_idle() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
 
         handle_paste_event(&mut state, "hello\nworld");
 
@@ -286,7 +296,7 @@ mod tests {
     #[test]
     fn paste_is_ignored_when_overlay_is_open() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
         state.open_transcript_overlay();
 
         handle_paste_event(&mut state, "hello");
@@ -297,7 +307,7 @@ mod tests {
     #[test]
     fn submit_is_blocked_while_responding() {
         let app = AppState::new(ProviderKind::Mock);
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
         state.app.status = AppStatus::Responding;
         state.composer.insert_text("hello");
 
@@ -313,7 +323,7 @@ mod tests {
     #[test]
     fn dollar_opens_skill_browser_when_composer_is_empty() {
         let app = AppState::with_skills(ProviderKind::Mock, ".".into(), SkillRegistry::default());
-        let mut state = TuiState::from_app(app);
+        let mut state = state_from_app(app);
         let outcome = handle_key_event(
             &mut state,
             KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),

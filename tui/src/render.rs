@@ -319,13 +319,16 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
 mod tests {
     use super::build_working_line;
     use crate::ui_state::TuiState;
+    use agent_core::agent_runtime::AgentRuntime;
     use agent_core::app::AppState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
+    use agent_core::workplace_store::WorkplaceStore;
     use ratatui::text::Line;
     use std::time::Duration;
     use std::time::Instant;
+    use tempfile::TempDir;
 
     fn line_to_string(line: &Line<'static>) -> String {
         line.spans
@@ -336,7 +339,10 @@ mod tests {
 
     #[test]
     fn working_line_mentions_elapsed_and_exec_count() {
-        let mut state = TuiState::from_app(AppState::new(ProviderKind::Mock));
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Mock);
+        let mut state = TuiState::from_app(AppState::new(ProviderKind::Mock), runtime);
         state.app.status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
         state.app.transcript.push(TranscriptEntry::ToolCall {
@@ -352,5 +358,18 @@ mod tests {
 
         assert!(rendered.contains("Working (8s • esc to interrupt)"));
         assert!(rendered.contains("1 background terminal running"));
+    }
+
+    #[test]
+    fn footer_surfaces_agent_codename() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let runtime = AgentRuntime::new(&workplace, 1, ProviderKind::Mock);
+        let state = TuiState::from_app(AppState::new(ProviderKind::Mock), runtime);
+
+        let rendered = line_to_string(&crate::composer::footer::build_footer_line(&state, 120));
+
+        assert!(rendered.contains("alpha"));
+        assert!(rendered.contains("mock"));
     }
 }

@@ -1,3 +1,5 @@
+use agent_core::agent_runtime::AgentBootstrapKind;
+use agent_core::agent_runtime::AgentRuntime;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
@@ -31,12 +33,31 @@ use crate::ui_state::TuiState;
 
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
+    let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, provider::default_provider())?;
     let mut app = AppState::with_skills(
         provider::default_provider(),
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
     app.backlog = backlog_store::load_backlog()?;
+    for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
+        app.push_error_message(warning);
+    }
+    match &bootstrap.kind {
+        AgentBootstrapKind::Created => {
+            app.push_status_message(format!("created agent: {}", bootstrap.runtime.summary()));
+        }
+        AgentBootstrapKind::Restored => {
+            app.push_status_message(format!("restored agent: {}", bootstrap.runtime.summary()));
+        }
+        AgentBootstrapKind::RecreatedAfterError { error } => {
+            app.push_error_message(format!("failed to restore agent runtime: {error}"));
+            app.push_status_message(format!(
+                "created replacement agent: {}",
+                bootstrap.runtime.summary()
+            ));
+        }
+    }
     if resume_last {
         match session_store::restore_recent_session(&mut app, &launch_cwd) {
             Ok(restored) => {
@@ -49,7 +70,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
 
-    let mut state = TuiState::from_app(app);
+    let mut state = TuiState::from_app(app, bootstrap.runtime);
+    if state.sync_agent_runtime_from_app() {
+        state.agent_runtime.persist()?;
+    }
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
 
     loop {
@@ -126,6 +150,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     "selected provider: {}",
                                     state.app.selected_provider.label()
                                 ));
+                                persist_agent_runtime_if_changed(&mut state)?;
                             }
                         }
                         InputOutcome::OpenTranscript => state.open_transcript_overlay(),
@@ -186,10 +211,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     } => state
                         .app
                         .push_tool_call_finished(name, call_id, output_preview, success),
-                    ProviderEvent::SessionHandle(handle) => state.app.apply_session_handle(handle),
+                    ProviderEvent::SessionHandle(handle) => {
+                        state.app.apply_session_handle(handle);
+                        persist_agent_runtime_if_changed(&mut state)?;
+                    }
                     ProviderEvent::Error(error) => {
                         state.app.mark_active_task_error();
                         state.app.push_error_message(error);
+                        persist_agent_runtime_if_changed(&mut state)?;
                     }
                     ProviderEvent::Finished => {
                         state.app.finish_provider_response();
@@ -214,6 +243,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         {
                             state.app.set_loop_phase(LoopPhase::Idle);
                         }
+                        persist_agent_runtime_if_changed(&mut state)?;
                         should_clear_provider_rx = true;
                         break;
                     }
@@ -227,6 +257,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     }
 
     state.sync_app_input_from_composer();
+    state.agent_runtime.sync_from_app_state(&state.app);
+    state.agent_runtime.mark_stopped();
+    state.agent_runtime.persist()?;
     backlog_store::save_backlog(&state.app.backlog)?;
     session_store::save_recent_session(&state.app)?;
     Ok(state.into_app_state())
@@ -336,6 +369,8 @@ fn start_provider_request(
         task_engine::handle_provider_start_failure(&mut state.app, err.to_string());
     } else {
         state.app.begin_provider_response();
+        let _ = state.sync_agent_runtime_from_app();
+        let _ = state.agent_runtime.persist();
         *provider_rx = Some(event_rx);
     }
 }
@@ -372,4 +407,11 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
         .app
         .push_status_message(format!("running task: {}", task.id));
     Some((task_engine::build_task_prompt(&task), true))
+}
+
+fn persist_agent_runtime_if_changed(state: &mut TuiState) -> Result<()> {
+    if state.sync_agent_runtime_from_app() {
+        state.agent_runtime.persist()?;
+    }
+    Ok(())
 }
