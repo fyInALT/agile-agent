@@ -1,5 +1,6 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
+use agent_core::app::LoopPhase;
 use agent_core::autonomy;
 use agent_core::autonomy::CompletionDecision;
 use agent_core::backlog_store;
@@ -103,6 +104,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
 
                         let augmented_prompt = state.skills.build_injected_prompt(&user_input);
+                        state.set_loop_phase(LoopPhase::Executing);
                         start_provider_request(&mut state, augmented_prompt, &mut provider_rx);
                     }
                 },
@@ -138,6 +140,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         let summary = state.active_task_summary();
                         if state.active_task_id.is_some() {
                             if state.active_task_had_error {
+                                state.set_loop_phase(LoopPhase::Escalating);
                                 escalate_active_task(&mut state, "provider execution failed");
                             } else if let Some(summary_text) = summary.clone() {
                                 if let Some(next_prompt) =
@@ -145,6 +148,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 {
                                     if state.continuation_attempts < 3 {
                                         state.continuation_attempts += 1;
+                                        state.set_loop_phase(LoopPhase::Executing);
                                         state.push_status_message(format!(
                                             "continuing active task automatically (attempt {})",
                                             state.continuation_attempts
@@ -157,6 +161,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                         should_clear_provider_rx = false;
                                         break;
                                     } else {
+                                        state.set_loop_phase(LoopPhase::Escalating);
                                         escalate_active_task(
                                             &mut state,
                                             "continuation limit reached",
@@ -165,6 +170,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 } else {
                                     match autonomy::judge_completion(&summary_text) {
                                         CompletionDecision::Complete => {
+                                            state.set_loop_phase(LoopPhase::Verifying);
                                             let verification_task = state
                                                 .active_task_id
                                                 .as_ref()
@@ -195,9 +201,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                                 match result.outcome {
                                                     VerificationOutcome::Passed => {
                                                         state.complete_active_task(summary.clone());
+                                                        state.set_loop_phase(LoopPhase::Idle);
                                                     }
                                                     VerificationOutcome::Failed
                                                     | VerificationOutcome::NotRunnable => {
+                                                        state.set_loop_phase(LoopPhase::Escalating);
                                                         escalate_active_task(
                                                             &mut state,
                                                             "verification failed",
@@ -206,18 +214,26 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                                 }
                                             } else {
                                                 state.complete_active_task(summary.clone());
+                                                state.set_loop_phase(LoopPhase::Idle);
                                             }
                                         }
                                         CompletionDecision::Incomplete { reason } => {
+                                            state.set_loop_phase(LoopPhase::Escalating);
                                             escalate_active_task(&mut state, reason);
                                         }
                                     }
                                 }
                             } else {
+                                state.set_loop_phase(LoopPhase::Escalating);
                                 escalate_active_task(&mut state, "no assistant summary available");
                             }
                         }
                         state.finish_provider_response();
+                        if state.active_task_id.is_none()
+                            && state.loop_phase != LoopPhase::Escalating
+                        {
+                            state.set_loop_phase(LoopPhase::Idle);
+                        }
                         should_clear_provider_rx = true;
                         break;
                     }

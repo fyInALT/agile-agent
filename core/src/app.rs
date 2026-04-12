@@ -18,6 +18,16 @@ pub enum AppStatus {
     Responding,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoopPhase {
+    #[default]
+    Idle,
+    Planning,
+    Executing,
+    Verifying,
+    Escalating,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TranscriptEntry {
     User(String),
@@ -51,6 +61,7 @@ pub struct AppState {
     pub claude_session_id: Option<String>,
     pub codex_thread_id: Option<String>,
     pub status: AppStatus,
+    pub loop_phase: LoopPhase,
     pub should_quit: bool,
 }
 
@@ -71,6 +82,7 @@ impl Default for AppState {
             claude_session_id: None,
             codex_thread_id: None,
             status: AppStatus::Idle,
+            loop_phase: LoopPhase::Idle,
             should_quit: false,
         }
     }
@@ -203,6 +215,10 @@ impl AppState {
 
     pub fn finish_provider_response(&mut self) {
         self.status = AppStatus::Idle;
+    }
+
+    pub fn set_loop_phase(&mut self, phase: LoopPhase) {
+        self.loop_phase = phase;
     }
 
     pub fn toggle_provider(&mut self) {
@@ -455,6 +471,7 @@ impl AppState {
 mod tests {
     use super::AppState;
     use super::AppStatus;
+    use super::LoopPhase;
     use super::TranscriptEntry;
     use crate::backlog::TodoStatus;
     use crate::provider::ProviderKind;
@@ -573,5 +590,12 @@ mod tests {
         assert_eq!(task.todo_id, todo_id);
         assert_eq!(state.backlog.tasks.len(), 1);
         assert_eq!(state.backlog.todos[0].status, TodoStatus::InProgress);
+    }
+
+    #[test]
+    fn loop_phase_can_be_updated() {
+        let mut state = AppState::default();
+        state.set_loop_phase(LoopPhase::Planning);
+        assert_eq!(state.loop_phase, LoopPhase::Planning);
     }
 }

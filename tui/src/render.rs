@@ -1,5 +1,6 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
+use agent_core::app::LoopPhase;
 use agent_core::app::TranscriptEntry;
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use ratatui::Frame;
@@ -44,6 +45,13 @@ fn render_header(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layout:
         AppStatus::Idle => "idle",
         AppStatus::Responding => "responding",
     };
+    let loop_text = match state.loop_phase {
+        LoopPhase::Idle => "idle",
+        LoopPhase::Planning => "planning",
+        LoopPhase::Executing => "executing",
+        LoopPhase::Verifying => "verifying",
+        LoopPhase::Escalating => "escalating",
+    };
 
     let session_info = match &state.current_session_handle() {
         Some(agent_core::provider::SessionHandle::ClaudeSession { session_id }) => {
@@ -64,9 +72,10 @@ fn render_header(frame: &mut Frame<'_>, state: &AppState, area: ratatui::layout:
     };
 
     let header = Paragraph::new(Line::from(format!(
-        "agile-agent | provider: {} | status: {}{} | skills: {} | tab: switch | ctrl+l: clear | q/esc: quit",
+        "agile-agent | provider: {} | status: {} | loop: {}{} | skills: {} | tab: switch | ctrl+l: clear | q/esc: quit",
         state.selected_provider.label(),
         status_text,
+        loop_text,
         session_info,
         state.skills.enabled_count()
     )))
