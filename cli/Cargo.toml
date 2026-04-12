@@ -16,4 +16,5 @@ serde_json.workspace = true
 agent-tui = { path = "../tui" }
 
 [dev-dependencies]
+agent-test-support = { path = "../test-support" }
 tempfile.workspace = true

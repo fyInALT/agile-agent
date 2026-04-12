@@ -9,7 +9,7 @@ use agent_core::backlog::TodoStatus;
 use agent_core::workplace_store::WorkplaceStore;
 use tempfile::TempDir;
 
-pub struct TestHarness {
+pub struct RuntimeHarness {
     _home: TempDir,
     _data: TempDir,
     pub workdir: TempDir,
@@ -19,7 +19,7 @@ pub struct TestHarness {
     workplace: WorkplaceStore,
 }
 
-impl TestHarness {
+impl RuntimeHarness {
     pub fn new() -> Self {
         let home = TempDir::new().expect("temp home");
         let data = TempDir::new().expect("temp data");
@@ -47,6 +47,10 @@ impl TestHarness {
         }
     }
 
+    pub fn workplace(&self) -> &WorkplaceStore {
+        &self.workplace
+    }
+
     pub fn write_backlog_with_ready_todo(&self, title: &str) {
         let mut backlog = BacklogState::default();
         backlog.push_todo(TodoItem {
@@ -67,28 +71,12 @@ impl TestHarness {
         self.write_backlog_with_ready_todo(title);
     }
 
-    pub fn run(&self, args: &[&str]) -> std::process::Output {
+    pub fn run_cli(&self, args: &[&str]) -> std::process::Output {
         self.run_with_env(args, &self.fake_claude_path, "definitely-not-real-codex")
     }
 
-    pub fn run_with_codex(&self, args: &[&str]) -> std::process::Output {
+    pub fn run_cli_with_codex(&self, args: &[&str]) -> std::process::Output {
         self.run_with_env(args, "definitely-not-real-claude", &self.fake_codex_path)
-    }
-
-    fn run_with_env(
-        &self,
-        args: &[&str],
-        claude_path: impl AsRef<std::ffi::OsStr>,
-        codex_path: impl AsRef<std::ffi::OsStr>,
-    ) -> std::process::Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_agile-agent"));
-        command.current_dir(self.workdir.path());
-        command.args(args);
-        command.env("HOME", self._home.path());
-        command.env("XDG_DATA_HOME", self._data.path());
-        command.env("AGILE_AGENT_CLAUDE_PATH", claude_path);
-        command.env("AGILE_AGENT_CODEX_PATH", codex_path);
-        command.output().expect("run agile-agent binary")
     }
 
     pub fn agent_dir(&self) -> PathBuf {
@@ -97,6 +85,24 @@ impl TestHarness {
 
     pub fn read_provider_log(&self) -> String {
         fs::read_to_string(&self.provider_log).unwrap_or_default()
+    }
+
+    fn run_with_env(
+        &self,
+        args: &[&str],
+        claude_path: impl AsRef<std::ffi::OsStr>,
+        codex_path: impl AsRef<std::ffi::OsStr>,
+    ) -> std::process::Output {
+        let bin = std::env::var("CARGO_BIN_EXE_agile-agent")
+            .expect("CARGO_BIN_EXE_agile-agent must be set by cargo test");
+        let mut command = Command::new(bin);
+        command.current_dir(self.workdir.path());
+        command.args(args);
+        command.env("HOME", self._home.path());
+        command.env("XDG_DATA_HOME", self._data.path());
+        command.env("AGILE_AGENT_CLAUDE_PATH", claude_path);
+        command.env("AGILE_AGENT_CODEX_PATH", codex_path);
+        command.output().expect("run agile-agent binary")
     }
 }
 

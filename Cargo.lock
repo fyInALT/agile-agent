@@ -7,6 +7,7 @@ name = "agent-cli"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-test-support",
  "agent-tui",
  "anyhow",
  "clap",
@@ -25,6 +26,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "which",
+]
+
+[[package]]
+name = "agent-test-support"
+version = "0.1.0"
+dependencies = [
+ "agent-core",
+ "tempfile",
 ]
 
 [[package]]
