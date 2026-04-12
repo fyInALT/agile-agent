@@ -4,8 +4,6 @@ use std::io::stdout;
 use anyhow::Result;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::EnableBracketedPaste;
-use crossterm::event::DisableMouseCapture;
-use crossterm::event::EnableMouseCapture;
 use crossterm::execute;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
@@ -35,7 +33,6 @@ impl TerminalGuard {
         execute!(
             self.terminal.backend_mut(),
             DisableBracketedPaste,
-            DisableMouseCapture,
             LeaveAlternateScreen,
             crossterm::cursor::Show
         )?;
@@ -57,7 +54,6 @@ pub fn setup_terminal() -> Result<TerminalGuard> {
         &mut stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture,
         crossterm::cursor::Hide
     )?;
 
