@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::app::AppState;
+use crate::app::LoopPhase;
 use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
 use crate::provider::ProviderKind;
@@ -24,6 +25,12 @@ pub struct PersistedSession {
     pub enabled_skill_names: Vec<String>,
     pub transcript: Vec<TranscriptEntry>,
     pub backlog: BacklogState,
+    pub active_task_id: Option<String>,
+    pub active_task_had_error: bool,
+    pub continuation_attempts: u8,
+    pub loop_phase: LoopPhase,
+    pub loop_run_active: bool,
+    pub remaining_loop_iterations: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +49,12 @@ impl PersistedSession {
             enabled_skill_names: state.skills.enabled_names.iter().cloned().collect(),
             transcript: state.transcript.clone(),
             backlog: state.backlog.clone(),
+            active_task_id: state.active_task_id.clone(),
+            active_task_had_error: state.active_task_had_error,
+            continuation_attempts: state.continuation_attempts,
+            loop_phase: state.loop_phase,
+            loop_run_active: state.loop_run_active,
+            remaining_loop_iterations: state.remaining_loop_iterations,
         }
     }
 
@@ -52,6 +65,12 @@ impl PersistedSession {
         state.codex_thread_id = self.codex_thread_id.clone();
         state.transcript = self.transcript.clone();
         state.backlog = self.backlog.clone();
+        state.active_task_id = self.active_task_id.clone();
+        state.active_task_had_error = self.active_task_had_error;
+        state.continuation_attempts = self.continuation_attempts;
+        state.loop_phase = self.loop_phase;
+        state.loop_run_active = self.loop_run_active;
+        state.remaining_loop_iterations = self.remaining_loop_iterations;
 
         let restored_enabled: BTreeSet<String> = self
             .enabled_skill_names
@@ -124,6 +143,7 @@ mod tests {
     use super::load_recent_session_from_root;
     use super::save_recent_session_to_root;
     use crate::app::AppState;
+    use crate::app::LoopPhase;
     use crate::app::TranscriptEntry;
     use crate::backlog::BacklogState;
     use crate::provider::ProviderKind;
@@ -180,6 +200,12 @@ mod tests {
             enabled_skill_names: vec!["reviewer".to_string()],
             transcript: vec![TranscriptEntry::Assistant("pong".to_string())],
             backlog: BacklogState::default(),
+            active_task_id: Some("task-1".to_string()),
+            active_task_had_error: false,
+            continuation_attempts: 1,
+            loop_phase: LoopPhase::Executing,
+            loop_run_active: true,
+            remaining_loop_iterations: 2,
         };
 
         persisted.apply_to_app_state(&mut state);
@@ -189,5 +215,8 @@ mod tests {
         assert_eq!(state.codex_thread_id.as_deref(), Some("thr-1"));
         assert_eq!(state.transcript.len(), 1);
         assert!(state.skills.is_enabled("reviewer"));
+        assert_eq!(state.active_task_id.as_deref(), Some("task-1"));
+        assert_eq!(state.continuation_attempts, 1);
+        assert!(state.loop_run_active);
     }
 }

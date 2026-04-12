@@ -69,19 +69,26 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
             });
         }
 
-        let Some(todo_id) = state.next_ready_todo_id() else {
-            state.set_loop_phase(LoopPhase::Idle);
-            return Ok(LoopRunSummary {
-                iterations,
-                stopped_reason: "no ready todo available".to_string(),
-            });
+        let task = if let Some(task) = current_active_task(state) {
+            state.push_status_message(format!("resuming task: {}", task.id));
+            task
+        } else {
+            let Some(todo_id) = state.next_ready_todo_id() else {
+                state.set_loop_phase(LoopPhase::Idle);
+                return Ok(LoopRunSummary {
+                    iterations,
+                    stopped_reason: "no ready todo available".to_string(),
+                });
+            };
+
+            state.set_loop_phase(LoopPhase::Planning);
+            let Some(task) = state.begin_task_from_todo(&todo_id) else {
+                anyhow::bail!("failed to start task from todo: {todo_id}");
+            };
+            state.push_status_message(format!("running task: {}", task.id));
+            task
         };
 
-        state.set_loop_phase(LoopPhase::Planning);
-        let Some(task) = state.begin_task_from_todo(&todo_id) else {
-            anyhow::bail!("failed to start task from todo: {todo_id}");
-        };
-        state.push_status_message(format!("running task: {}", task.id));
         execute_task_until_resolution(state, &task, guardrails)?;
         iterations += 1;
     }
@@ -230,6 +237,16 @@ fn build_task_prompt(task: &TaskItem) -> String {
     }
 
     prompt
+}
+
+fn current_active_task(state: &AppState) -> Option<TaskItem> {
+    let active_task_id = state.active_task_id.as_ref()?;
+    state
+        .backlog
+        .tasks
+        .iter()
+        .find(|task| &task.id == active_task_id)
+        .cloned()
 }
 
 fn escalate_active_task(state: &mut AppState, reason: impl Into<String>) {
