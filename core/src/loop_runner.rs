@@ -6,6 +6,7 @@ use anyhow::Result;
 use crate::app::AppState;
 use crate::app::LoopPhase;
 use crate::backlog::TaskItem;
+use crate::logging;
 use crate::provider;
 use crate::provider::ProviderEvent;
 use crate::task_engine;
@@ -47,9 +48,25 @@ pub fn run_single_iteration_with_hook<F>(
 where
     F: FnMut(&AppState) -> Result<()>,
 {
+    logging::debug_event(
+        "loop.single_iteration.start",
+        "starting single loop iteration",
+        serde_json::json!({
+            "has_ready_todo": state.next_ready_todo_id().is_some(),
+        }),
+    );
     let Some(todo_id) = state.next_ready_todo_id() else {
         state.push_status_message("no ready todo available");
         state.set_loop_phase(LoopPhase::Idle);
+        logging::debug_event(
+            "loop.stop",
+            "stopping loop because no ready todo is available",
+            serde_json::json!({
+                "stopped_reason": "no ready todo available",
+                "iterations": 0,
+                "verification_failures": 0,
+            }),
+        );
         return Ok(None);
     };
 
@@ -60,6 +77,13 @@ where
     state.push_status_message(format!("running task: {}", task.id));
     on_state_change(state)?;
     execute_task_until_resolution(state, &task, LoopGuardrails::default(), on_state_change)?;
+    logging::debug_event(
+        "loop.single_iteration.stop",
+        "completed single loop iteration",
+        serde_json::json!({
+            "task_id": task.id,
+        }),
+    );
 
     Ok(Some(LoopRunSummary {
         iterations: 1,
@@ -82,11 +106,29 @@ where
 {
     let mut iterations = 0usize;
     let mut verification_failures = 0usize;
+    logging::debug_event(
+        "loop.start",
+        "starting autonomous loop",
+        serde_json::json!({
+            "max_iterations": guardrails.max_iterations,
+            "max_continuations_per_task": guardrails.max_continuations_per_task,
+            "max_verification_failures": guardrails.max_verification_failures,
+        }),
+    );
 
     loop {
         if iterations >= guardrails.max_iterations {
             state.set_loop_phase(LoopPhase::Escalating);
             state.push_error_message("loop guardrail reached: max iterations");
+            logging::warn_event(
+                "loop.stop",
+                "stopping loop because max iterations was reached",
+                serde_json::json!({
+                    "stopped_reason": "max iterations reached",
+                    "iterations": iterations,
+                    "verification_failures": verification_failures,
+                }),
+            );
             return Ok(LoopRunSummary {
                 iterations,
                 verification_failures,
@@ -100,6 +142,15 @@ where
         } else {
             let Some(todo_id) = state.next_ready_todo_id() else {
                 state.set_loop_phase(LoopPhase::Idle);
+                logging::debug_event(
+                    "loop.stop",
+                    "stopping loop because no ready todo is available",
+                    serde_json::json!({
+                        "stopped_reason": "no ready todo available",
+                        "iterations": iterations,
+                        "verification_failures": verification_failures,
+                    }),
+                );
                 return Ok(LoopRunSummary {
                     iterations,
                     verification_failures,
@@ -115,6 +166,15 @@ where
             on_state_change(state)?;
             task
         };
+        logging::debug_event(
+            "loop.iteration.start",
+            "starting loop iteration",
+            serde_json::json!({
+                "iteration": iterations + 1,
+                "task_id": task.id,
+                "todo_id": task.todo_id,
+            }),
+        );
 
         let outcome = execute_task_until_resolution(state, &task, guardrails, on_state_change)?;
         if outcome == LoopExecutionOutcome::VerificationFailed {
@@ -122,6 +182,15 @@ where
             if verification_failures >= guardrails.max_verification_failures {
                 state.set_loop_phase(LoopPhase::Escalating);
                 state.push_error_message("loop guardrail reached: max verification failures");
+                logging::warn_event(
+                    "loop.stop",
+                    "stopping loop because max verification failures was reached",
+                    serde_json::json!({
+                        "stopped_reason": "max verification failures reached",
+                        "iterations": iterations + 1,
+                        "verification_failures": verification_failures,
+                    }),
+                );
                 return Ok(LoopRunSummary {
                     iterations: iterations + 1,
                     verification_failures,
@@ -255,8 +324,11 @@ mod tests {
     use crate::app::AppState;
     use crate::backlog::TodoItem;
     use crate::backlog::TodoStatus;
+    use crate::logging;
+    use crate::logging::RunMode;
     use crate::provider::ProviderKind;
     use crate::skills::SkillRegistry;
+    use crate::workplace_store::WorkplaceStore;
 
     fn ready_todo(id: &str, title: &str, priority: u8) -> TodoItem {
         TodoItem {
@@ -301,6 +373,39 @@ mod tests {
         assert_eq!(summary.verification_failures, 0);
         assert_eq!(summary.stopped_reason, "no ready todo available");
         assert_eq!(state.backlog.todos[0].status, TodoStatus::Done);
+    }
+
+    #[test]
+    fn run_loop_logs_iteration_boundaries_and_stop_reason() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        workplace.ensure().expect("ensure");
+        logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
+
+        let mut state =
+            AppState::with_skills(ProviderKind::Mock, temp.path().into(), SkillRegistry::default());
+        state
+            .backlog
+            .push_todo(ready_todo("todo-1", "write summary", 1));
+
+        let summary = run_loop(
+            &mut state,
+            LoopGuardrails {
+                max_iterations: 2,
+                max_continuations_per_task: 1,
+                max_verification_failures: 1,
+            },
+        )
+        .expect("run loop");
+
+        assert_eq!(summary.stopped_reason, "no ready todo available");
+
+        let log_path = logging::current_log_path().expect("log path");
+        let contents = std::fs::read_to_string(log_path).expect("log file");
+        assert!(contents.contains("\"event\":\"loop.start\""));
+        assert!(contents.contains("\"event\":\"loop.iteration.start\""));
+        assert!(contents.contains("\"event\":\"task.complete\""));
+        assert!(contents.contains("\"event\":\"loop.stop\""));
     }
 
     #[test]

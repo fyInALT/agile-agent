@@ -10,6 +10,7 @@ use crate::autonomy::CompletionDecision;
 use crate::backlog::TaskItem;
 use crate::escalation;
 use crate::escalation::EscalationRecord;
+use crate::logging;
 use crate::task_artifacts;
 use crate::task_artifacts::TaskArtifact;
 use crate::task_artifacts::TaskArtifactOutcome;
@@ -59,6 +60,16 @@ pub fn build_task_prompt(task: &TaskItem) -> String {
         }
     }
 
+    logging::debug_event(
+        "task.prompt.build",
+        "built task prompt",
+        serde_json::json!({
+            "task_id": task.id,
+            "todo_id": task.todo_id,
+            "prompt": prompt,
+        }),
+    );
+
     prompt
 }
 
@@ -74,6 +85,14 @@ pub fn current_active_task(state: &AppState) -> Option<TaskItem> {
 
 pub fn handle_provider_start_failure(state: &mut AppState, reason: impl Into<String>) {
     let reason = reason.into();
+    logging::error_event(
+        "task.provider_start_failed",
+        "provider failed to start for task execution",
+        serde_json::json!({
+            "reason": reason,
+            "active_task_id": state.active_task_id,
+        }),
+    );
     if let Some(task) = current_active_task(state) {
         state.set_loop_phase(LoopPhase::Escalating);
         let escalation_path =
@@ -164,6 +183,14 @@ pub fn resolve_active_task_after_turn(
                 escalation_path.as_ref(),
             )?;
             state.push_status_message(format!("task artifact: {}", artifact_path.display()));
+            logging::warn_event(
+                "task.escalate",
+                "escalated task because continuation limit was reached",
+                serde_json::json!({
+                    "task_id": task.id,
+                    "reason": "continuation limit reached",
+                }),
+            );
             return Ok(TurnResolution::Escalated);
         }
 
@@ -185,6 +212,15 @@ pub fn resolve_active_task_after_turn(
             let plan = verification::build_verification_plan(&state.cwd, &task);
             let result = verification::execute_verification(&plan, &state.cwd, Some(&summary_text));
             record_verification_messages(state, &result);
+            logging::debug_event(
+                "task.verify",
+                "verification finished",
+                serde_json::json!({
+                    "task_id": task.id,
+                    "summary": result.summary,
+                    "outcome": format!("{:?}", result.outcome),
+                }),
+            );
             match result.outcome {
                 VerificationOutcome::Passed => {
                     state.complete_active_task(summary);
@@ -199,6 +235,14 @@ pub fn resolve_active_task_after_turn(
                     )?;
                     state
                         .push_status_message(format!("task artifact: {}", artifact_path.display()));
+                    logging::debug_event(
+                        "task.complete",
+                        "completed task after successful verification",
+                        serde_json::json!({
+                            "task_id": task.id,
+                            "artifact_path": artifact_path.display().to_string(),
+                        }),
+                    );
                     Ok(TurnResolution::Completed)
                 }
                 VerificationOutcome::Failed | VerificationOutcome::NotRunnable => {
@@ -219,6 +263,15 @@ pub fn resolve_active_task_after_turn(
                     ));
                     state
                         .push_status_message(format!("task artifact: {}", artifact_path.display()));
+                    logging::warn_event(
+                        "task.fail",
+                        "failed task during verification",
+                        serde_json::json!({
+                            "task_id": task.id,
+                            "reason": failure_reason,
+                            "artifact_path": artifact_path.display().to_string(),
+                        }),
+                    );
                     Ok(TurnResolution::Failed {
                         verification_failed: true,
                     })
@@ -232,11 +285,20 @@ pub fn resolve_active_task_after_turn(
                 &task,
                 state,
                 TaskArtifactOutcome::Escalated,
-                Some(reason),
+                Some(reason.clone()),
                 None,
                 escalation_path.as_ref(),
             )?;
             state.push_status_message(format!("task artifact: {}", artifact_path.display()));
+            logging::warn_event(
+                "task.escalate",
+                "escalated incomplete task",
+                serde_json::json!({
+                    "task_id": task.id,
+                    "reason": reason,
+                    "artifact_path": artifact_path.display().to_string(),
+                }),
+            );
             Ok(TurnResolution::Escalated)
         }
     }
