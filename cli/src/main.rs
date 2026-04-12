@@ -1,5 +1,6 @@
 use agent_core::agent_runtime::AgentBootstrapKind;
 use agent_core::agent_runtime::AgentRuntime;
+use agent_core::agent_store::AgentStore;
 use agent_core::app::AppState;
 use agent_core::backlog_store;
 use agent_core::loop_runner;
@@ -7,6 +8,7 @@ use agent_core::loop_runner::LoopGuardrails;
 use agent_core::probe;
 use agent_core::session_store;
 use agent_core::skills::SkillRegistry;
+use agent_core::workplace_store::WorkplaceStore;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
@@ -23,6 +25,16 @@ struct Cli {
 enum Command {
     /// Inspect available providers in the current environment.
     Doctor,
+    /// Inspect agent runtime state in the current workplace.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
+    /// Inspect workplace state in the current working directory.
+    Workplace {
+        #[command(subcommand)]
+        command: WorkplaceCommand,
+    },
     /// Restore the most recent saved session.
     ResumeLast,
     /// Run the autonomous loop without the TUI.
@@ -39,12 +51,35 @@ enum Command {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum AgentCommand {
+    /// Show the current or most recent agent for this workplace.
+    Current,
+    /// List known agents for this workplace.
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkplaceCommand {
+    /// Show the current workplace mapping for this working directory.
+    Current,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         None => agent_tui::run_tui(),
         Some(Command::ResumeLast) => agent_tui::run_tui_with_resume_last(),
+        Some(Command::Agent {
+            command: AgentCommand::Current,
+        }) => print_current_agent(),
+        Some(Command::Agent {
+            command: AgentCommand::List,
+        }) => print_agent_list(),
+        Some(Command::Workplace {
+            command: WorkplaceCommand::Current,
+        }) => print_current_workplace(),
         Some(Command::RunLoop {
             max_iterations,
             resume_last,
@@ -62,6 +97,72 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn print_current_agent() -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let store = AgentStore::new(workplace);
+
+    if let Some(meta) = store.load_most_recent_meta()? {
+        println!("agent_id: {}", meta.agent_id.as_str());
+        println!("codename: {}", meta.codename.as_str());
+        println!("workplace_id: {}", meta.workplace_id.as_str());
+        println!("provider_type: {}", meta.provider_type.label());
+        println!(
+            "provider_session_id: {}",
+            meta.provider_session_id
+                .as_ref()
+                .map(|value| value.as_str())
+                .unwrap_or("<none>")
+        );
+        println!("status: {:?}", meta.status);
+        println!("created_at: {}", meta.created_at);
+        println!("updated_at: {}", meta.updated_at);
+    } else {
+        println!("no agent found for the current workplace");
+    }
+
+    Ok(())
+}
+
+fn print_agent_list() -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let store = AgentStore::new(workplace);
+    let agents = store.list_meta()?;
+
+    if agents.is_empty() {
+        println!("no agents found for the current workplace");
+        return Ok(());
+    }
+
+    for meta in agents {
+        println!(
+            "{} {} {} {}",
+            meta.agent_id.as_str(),
+            meta.codename.as_str(),
+            meta.provider_type.label(),
+            meta.updated_at
+        );
+    }
+
+    Ok(())
+}
+
+fn print_current_workplace() -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    workplace.ensure()?;
+    let meta = workplace.load_meta()?;
+
+    println!("workplace_id: {}", meta.workplace_id.as_str());
+    println!("root_cwd: {}", meta.root_cwd);
+    println!("path: {}", workplace.path().display());
+    println!("created_at: {}", meta.created_at);
+    println!("updated_at: {}", meta.updated_at);
+
+    Ok(())
 }
 
 fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
@@ -114,12 +215,18 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
 
     let initial_transcript_len = state.transcript.len();
 
-    let summary = loop_runner::run_loop(
+    let summary = loop_runner::run_loop_with_hook(
         &mut state,
         LoopGuardrails {
             max_iterations,
             max_continuations_per_task: 3,
             max_verification_failures: 1,
+        },
+        &mut |state: &AppState| {
+            if agent_runtime.sync_from_app_state(state) {
+                agent_runtime.persist()?;
+            }
+            Ok(())
         },
     )?;
 

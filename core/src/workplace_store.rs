@@ -4,7 +4,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
+use chrono::Utc;
 use dirs::home_dir;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::agent_runtime::WorkplaceId;
 
@@ -12,11 +15,24 @@ use crate::agent_runtime::WorkplaceId;
 pub struct WorkplaceStore {
     workplace_id: WorkplaceId,
     path: PathBuf,
+    cwd: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkplaceMeta {
+    pub workplace_id: WorkplaceId,
+    pub root_cwd: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 impl WorkplaceStore {
-    pub fn from_existing(workplace_id: WorkplaceId, path: PathBuf) -> Self {
-        Self { workplace_id, path }
+    pub fn from_existing(workplace_id: WorkplaceId, path: PathBuf, cwd: PathBuf) -> Self {
+        Self {
+            workplace_id,
+            path,
+            cwd,
+        }
     }
 
     pub fn for_cwd(cwd: &Path) -> Result<Self> {
@@ -24,7 +40,11 @@ impl WorkplaceStore {
         let workplace_id = derive_workplace_id(&canonical_cwd);
         let root = workplaces_root()?;
         let path = root.join(workplace_id.as_str());
-        Ok(Self { workplace_id, path })
+        Ok(Self {
+            workplace_id,
+            path,
+            cwd: canonical_cwd,
+        })
     }
 
     pub fn ensure(&self) -> Result<()> {
@@ -33,7 +53,9 @@ impl WorkplaceStore {
                 "failed to create workplace directory {}",
                 self.path.display()
             )
-        })
+        })?;
+        self.ensure_meta()?;
+        Ok(())
     }
 
     pub fn workplace_id(&self) -> &WorkplaceId {
@@ -44,8 +66,62 @@ impl WorkplaceStore {
         &self.path
     }
 
+    pub fn root_cwd(&self) -> &Path {
+        &self.cwd
+    }
+
     pub fn agents_dir(&self) -> PathBuf {
         self.path.join("agents")
+    }
+
+    pub fn meta_path(&self) -> PathBuf {
+        self.path.join("meta.json")
+    }
+
+    pub fn load_meta(&self) -> Result<WorkplaceMeta> {
+        let path = self.meta_path();
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    pub fn save_meta(&self, meta: &WorkplaceMeta) -> Result<PathBuf> {
+        fs::create_dir_all(&self.path)
+            .with_context(|| format!("failed to create {}", self.path.display()))?;
+        let path = self.meta_path();
+        let payload =
+            serde_json::to_string_pretty(meta).context("failed to serialize workplace meta")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    }
+
+    pub fn touch_meta(&self) -> Result<()> {
+        let mut meta = if self.meta_path().exists() {
+            self.load_meta()?
+        } else {
+            self.default_meta()
+        };
+        meta.updated_at = Utc::now().to_rfc3339();
+        self.save_meta(&meta)?;
+        Ok(())
+    }
+
+    fn ensure_meta(&self) -> Result<()> {
+        if !self.meta_path().exists() {
+            self.save_meta(&self.default_meta())?;
+        }
+        Ok(())
+    }
+
+    fn default_meta(&self) -> WorkplaceMeta {
+        let now = Utc::now().to_rfc3339();
+        WorkplaceMeta {
+            workplace_id: self.workplace_id.clone(),
+            root_cwd: self.cwd.display().to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        }
     }
 }
 
@@ -110,6 +186,7 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::WorkplaceMeta;
     use super::WorkplaceStore;
     use super::slugify;
     use tempfile::TempDir;
@@ -133,11 +210,31 @@ mod tests {
         store.ensure().expect("ensure");
 
         assert!(store.agents_dir().ends_with("agents"));
+        assert!(store.meta_path().exists());
     }
 
     #[test]
     fn slugify_normalizes_symbols() {
         assert_eq!(slugify("My Project!"), "my-project");
         assert_eq!(slugify("agile_agent"), "agile-agent");
+    }
+
+    #[test]
+    fn saves_and_loads_workplace_meta() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+        let meta = WorkplaceMeta {
+            workplace_id: store.workplace_id().clone(),
+            root_cwd: store.root_cwd().display().to_string(),
+            created_at: "2026-04-12T00:00:00Z".to_string(),
+            updated_at: "2026-04-12T00:10:00Z".to_string(),
+        };
+
+        store.save_meta(&meta).expect("save meta");
+        let loaded = store.load_meta().expect("load meta");
+
+        assert_eq!(loaded.workplace_id, *store.workplace_id());
+        assert_eq!(loaded.root_cwd, store.root_cwd().display().to_string());
     }
 }

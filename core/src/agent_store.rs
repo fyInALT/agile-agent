@@ -45,9 +45,15 @@ impl AgentStore {
     }
 
     pub fn load_most_recent_meta(&self) -> Result<Option<AgentMeta>> {
+        let mut metas = self.list_meta()?;
+        metas.sort_by(|a, b| meta_sort_key(a).cmp(&meta_sort_key(b)));
+        Ok(metas.pop())
+    }
+
+    pub fn list_meta(&self) -> Result<Vec<AgentMeta>> {
         let agents_dir = self.workplace.agents_dir();
         if !agents_dir.exists() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
         let mut metas = Vec::new();
@@ -76,7 +82,7 @@ impl AgentStore {
         }
 
         metas.sort_by(|a, b| meta_sort_key(a).cmp(&meta_sort_key(b)));
-        Ok(metas.pop())
+        Ok(metas)
     }
 
     pub fn next_agent_index(&self) -> Result<usize> {

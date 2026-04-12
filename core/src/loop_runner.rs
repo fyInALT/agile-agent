@@ -37,6 +37,16 @@ pub struct LoopRunSummary {
 }
 
 pub fn run_single_iteration(state: &mut AppState) -> Result<Option<LoopRunSummary>> {
+    run_single_iteration_with_hook(state, &mut |_state| Ok(()))
+}
+
+pub fn run_single_iteration_with_hook<F>(
+    state: &mut AppState,
+    on_state_change: &mut F,
+) -> Result<Option<LoopRunSummary>>
+where
+    F: FnMut(&AppState) -> Result<()>,
+{
     let Some(todo_id) = state.next_ready_todo_id() else {
         state.push_status_message("no ready todo available");
         state.set_loop_phase(LoopPhase::Idle);
@@ -48,7 +58,8 @@ pub fn run_single_iteration(state: &mut AppState) -> Result<Option<LoopRunSummar
         anyhow::bail!("failed to start task from todo: {todo_id}");
     };
     state.push_status_message(format!("running task: {}", task.id));
-    execute_task_until_resolution(state, &task, LoopGuardrails::default())?;
+    on_state_change(state)?;
+    execute_task_until_resolution(state, &task, LoopGuardrails::default(), on_state_change)?;
 
     Ok(Some(LoopRunSummary {
         iterations: 1,
@@ -58,6 +69,17 @@ pub fn run_single_iteration(state: &mut AppState) -> Result<Option<LoopRunSummar
 }
 
 pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<LoopRunSummary> {
+    run_loop_with_hook(state, guardrails, &mut |_state| Ok(()))
+}
+
+pub fn run_loop_with_hook<F>(
+    state: &mut AppState,
+    guardrails: LoopGuardrails,
+    on_state_change: &mut F,
+) -> Result<LoopRunSummary>
+where
+    F: FnMut(&AppState) -> Result<()>,
+{
     let mut iterations = 0usize;
     let mut verification_failures = 0usize;
 
@@ -90,10 +112,11 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
                 anyhow::bail!("failed to start task from todo: {todo_id}");
             };
             state.push_status_message(format!("running task: {}", task.id));
+            on_state_change(state)?;
             task
         };
 
-        let outcome = execute_task_until_resolution(state, &task, guardrails)?;
+        let outcome = execute_task_until_resolution(state, &task, guardrails, on_state_change)?;
         if outcome == LoopExecutionOutcome::VerificationFailed {
             verification_failures += 1;
             if verification_failures >= guardrails.max_verification_failures {
@@ -121,6 +144,7 @@ fn execute_task_until_resolution(
     state: &mut AppState,
     task: &TaskItem,
     guardrails: LoopGuardrails,
+    on_state_change: &mut impl FnMut(&AppState) -> Result<()>,
 ) -> Result<LoopExecutionOutcome> {
     let mut prompt = task_engine::build_task_prompt(task);
     let execution_guardrails = ExecutionGuardrails {
@@ -131,6 +155,7 @@ fn execute_task_until_resolution(
         state.set_loop_phase(LoopPhase::Executing);
         state.mark_active_task_running();
         state.begin_provider_response();
+        on_state_change(state)?;
 
         let (event_tx, event_rx) = mpsc::channel();
         let provider_kind = state.selected_provider;
@@ -144,11 +169,14 @@ fn execute_task_until_resolution(
         ) {
             state.finish_provider_response();
             task_engine::handle_provider_start_failure(state, err.to_string());
+            on_state_change(state)?;
             return Ok(LoopExecutionOutcome::Escalated);
         }
 
-        consume_provider_until_finished(state, event_rx);
-        match task_engine::resolve_active_task_after_turn(state, execution_guardrails)? {
+        consume_provider_until_finished(state, event_rx, on_state_change)?;
+        let resolution = task_engine::resolve_active_task_after_turn(state, execution_guardrails)?;
+        on_state_change(state)?;
+        match resolution {
             TurnResolution::Continue {
                 prompt: next_prompt,
             } => {
@@ -168,7 +196,11 @@ fn execute_task_until_resolution(
     }
 }
 
-fn consume_provider_until_finished(state: &mut AppState, rx: mpsc::Receiver<ProviderEvent>) {
+fn consume_provider_until_finished(
+    state: &mut AppState,
+    rx: mpsc::Receiver<ProviderEvent>,
+    on_state_change: &mut impl FnMut(&AppState) -> Result<()>,
+) -> Result<()> {
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => match event {
@@ -186,13 +218,18 @@ fn consume_provider_until_finished(state: &mut AppState, rx: mpsc::Receiver<Prov
                     output_preview,
                     success,
                 } => state.push_tool_call_finished(name, call_id, output_preview, success),
-                ProviderEvent::SessionHandle(handle) => state.apply_session_handle(handle),
+                ProviderEvent::SessionHandle(handle) => {
+                    state.apply_session_handle(handle);
+                    on_state_change(state)?;
+                }
                 ProviderEvent::Error(error) => {
                     state.mark_active_task_error();
                     state.push_error_message(error);
+                    on_state_change(state)?;
                 }
                 ProviderEvent::Finished => {
                     state.finish_provider_response();
+                    on_state_change(state)?;
                     break;
                 }
             },
@@ -201,10 +238,13 @@ fn consume_provider_until_finished(state: &mut AppState, rx: mpsc::Receiver<Prov
                 state.mark_active_task_error();
                 state.push_error_message("provider event stream disconnected");
                 state.finish_provider_response();
+                on_state_change(state)?;
                 break;
             }
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
