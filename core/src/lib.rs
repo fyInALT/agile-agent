@@ -1,4 +1,6 @@
 pub mod app;
+pub mod backlog;
+pub mod backlog_store;
 pub mod commands;
 pub mod event;
 pub mod mock_provider;
