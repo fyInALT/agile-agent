@@ -30,15 +30,24 @@ Not started yet:
 agile-agent/
 ├── cli/   # `agile-agent` binary and subcommands
 ├── core/  # providers, state, loop runner, persistence, verification
-├── docs/  # implementation-facing specs
+├── docs/  # specs and superpowers artifacts
+├── scripts/  # developer helper scripts
+├── test-support/  # shared test harnesses and fixtures
 └── tui/   # interactive terminal UI
 ```
 
 Workspace crates:
 
-- `agent-cli`: CLI entrypoints such as `doctor`, `probe`, `resume-last`, and headless `run-loop`
+- `agent-cli`: the `agile-agent` binary, TUI entrypoint, and CLI subcommands such as `doctor`, `probe`, `agent`, `workplace`, `resume-last`, and headless `run-loop`
 - `agent-core`: providers, backlog/task models, persistence, verification, and artifacts
 - `agent-tui`: codex-style terminal UI
+- `agent-test-support`: shared test helpers for workspace crates
+
+Key docs:
+
+- `docs/plan/spec/`: implementation-facing product and sprint specs
+- `docs/superpowers/specs/`: superpowers design specs
+- `docs/superpowers/plans/`: superpowers implementation plans
 
 ## Features
 
@@ -54,10 +63,22 @@ Default provider selection order:
 2. `codex`
 3. `mock`
 
+Runtime mode constraints:
+
+- the TUI requires at least one real provider (`claude` or `codex`) and exits early otherwise
+- headless `run-loop` can still bootstrap with `mock` for local development and tests
+
 Session continuity is reused when available:
 
 - Claude via `session_id`
 - Codex via `thread_id`
+
+### Execution Modes
+
+- interactive TUI via `cargo run -p agent-cli`
+- TUI resume flow via `cargo run -p agent-cli -- resume-last`
+- headless autonomous loop via `cargo run -p agent-cli -- run-loop ...`
+- state inspection via `agent current`, `agent list`, `workplace current`, `doctor`, and `probe --json`
 
 ### TUI
 
@@ -152,6 +173,7 @@ Requirements:
 
 - Rust toolchain
 - for the TUI: `claude` or `codex` installed and available on `PATH`
+- for headless local experimentation: no real provider is required because `run-loop` can fall back to `mock`
 - optional overrides through `AGILE_AGENT_CLAUDE_PATH` or `AGILE_AGENT_CODEX_PATH`
 
 Build:
@@ -256,8 +278,9 @@ If those variables are unset, `agile-agent` falls back to `claude` and `codex` f
 
 Verification is intentionally simple today:
 
-- assistant output must be non-empty
+- every verification plan checks that assistant output is non-empty
 - `cargo check` is added automatically when the working directory contains a `Cargo.toml`
+- verification results are recorded as `passed`, `failed`, or `not runnable`
 
 Verification evidence is stored with task artifacts so failed runs can be inspected later.
 
