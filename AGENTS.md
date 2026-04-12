@@ -12,6 +12,7 @@
 - Do not take on technical debt in technical decisions. Prefer clear architecture, explicit boundaries, and durable implementations over shortcuts.
 - During every planning step, explicitly re-evaluate whether the current architecture and module boundaries are still the right fit.
 - After every completed task, explicitly check whether all requirements were fully delivered and whether there is any worthwhile improvement to make before closing the work.
+- Git commit messages must be clear, concise, when u finished a task, commit changes then keep workspace clean.
 
 ## Index
 

@@ -18,6 +18,7 @@ pub struct TuiState {
     pub composer_width: u16,
     pub transcript_viewport_height: u16,
     pub transcript_scroll_offset: usize,
+    pub transcript_max_scroll: usize,
     pub transcript_follow_tail: bool,
     pub busy_started_at: Option<Instant>,
 }
@@ -33,6 +34,7 @@ impl TuiState {
             composer_width: 80,
             transcript_viewport_height: 1,
             transcript_scroll_offset: 0,
+            transcript_max_scroll: 0,
             transcript_follow_tail: true,
             busy_started_at: None,
         }
@@ -81,7 +83,8 @@ impl TuiState {
     pub fn scroll_transcript_down(&mut self, rows: usize) {
         self.transcript_scroll_offset = self.transcript_scroll_offset.saturating_add(rows);
         if rows > 0 {
-            self.transcript_follow_tail = false;
+            self.transcript_follow_tail =
+                self.transcript_scroll_offset >= self.transcript_max_scroll;
         }
     }
 
@@ -119,6 +122,7 @@ impl TuiState {
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;
         self.transcript_scroll_offset = 0;
+        self.transcript_max_scroll = 0;
         self.transcript_follow_tail = true;
         self.busy_started_at = None;
         Ok(summary)
@@ -158,5 +162,24 @@ mod tests {
             state.session.app.transcript.first(),
             Some(TranscriptEntry::Status(text)) if text.contains("created agent:")
         ));
+    }
+
+    #[test]
+    fn scrolling_down_to_known_tail_restores_follow_mode() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.transcript_scroll_offset = 6;
+        state.transcript_max_scroll = 6;
+        state.transcript_follow_tail = false;
+
+        state.scroll_transcript_up(2);
+        assert!(!state.transcript_follow_tail);
+
+        state.scroll_transcript_down(2);
+
+        assert_eq!(state.transcript_scroll_offset, 6);
+        assert!(state.transcript_follow_tail);
     }
 }

@@ -34,6 +34,11 @@ impl RuntimeSession {
         for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
             app.push_error_message(warning);
         }
+        if matches!(bootstrap.kind, AgentBootstrapKind::Restored) {
+            if let Err(err) = bootstrap.runtime.restore_transcript(&mut app) {
+                app.push_error_message(format!("failed to restore agent transcript: {err}"));
+            }
+        }
         announce_bootstrap_kind(&mut app, &bootstrap.kind, &bootstrap.runtime);
 
         let mut session = Self {
@@ -156,7 +161,9 @@ fn announce_bootstrap_kind(app: &mut AppState, kind: &AgentBootstrapKind, runtim
 #[cfg(test)]
 mod tests {
     use super::RuntimeSession;
+    use crate::app::TranscriptEntry;
     use crate::provider::ProviderKind;
+    use crate::provider::SessionHandle;
     use tempfile::TempDir;
 
     #[test]
@@ -180,5 +187,39 @@ mod tests {
 
         assert_ne!(session.agent_runtime.agent_id().as_str(), previous);
         assert_eq!(session.app.selected_provider, ProviderKind::Codex);
+    }
+
+    #[test]
+    fn bootstrap_restores_existing_agent_transcript_and_codex_thread_without_resume_snapshot() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Codex, false)
+            .expect("bootstrap");
+        first.app.push_user_message("hello".to_string());
+        first.app.begin_provider_response();
+        first.app.append_assistant_chunk("world");
+        first.app.finish_provider_response();
+        first.app.apply_session_handle(SessionHandle::CodexThread {
+            thread_id: "thr-restore-1".to_string(),
+        });
+        first.mark_stopped_and_persist().expect("persist");
+
+        let restored =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap restored");
+
+        assert_eq!(restored.app.selected_provider, ProviderKind::Codex);
+        assert!(restored.app.transcript.iter().any(|entry| {
+            matches!(entry, TranscriptEntry::User(text) if text == "hello")
+        }));
+        assert!(restored.app.transcript.iter().any(|entry| {
+            matches!(entry, TranscriptEntry::Assistant(text) if text == "world")
+        }));
+        assert_eq!(restored.app.codex_thread_id.as_deref(), Some("thr-restore-1"));
+        assert_eq!(
+            restored.app.current_session_handle(),
+            Some(SessionHandle::CodexThread {
+                thread_id: "thr-restore-1".to_string(),
+            })
+        );
     }
 }

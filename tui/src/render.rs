@@ -53,6 +53,7 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.transcript_viewport_height = area.height;
     let lines = cells::flatten_cells(&cells::build_cells(&state.app().transcript, area.width));
     let max_scroll = lines.len().saturating_sub(area.height as usize);
+    state.transcript_max_scroll = max_scroll;
     if state.transcript_follow_tail {
         state.transcript_scroll_offset = max_scroll;
     } else if state.transcript_scroll_offset > max_scroll {
