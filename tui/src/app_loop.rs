@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use crate::input::InputOutcome;
 use crate::input::handle_key_event;
+use crate::input::handle_mouse_event;
 use crate::input::handle_paste_event;
 use crate::render::render_app;
 use crate::terminal::AppTerminal;
@@ -162,6 +163,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     }
                 }
                 Event::Paste(text) => handle_paste_event(&mut state, &text),
+                Event::Mouse(mouse_event) => match handle_mouse_event(&mut state, mouse_event) {
+                    InputOutcome::ScrollTranscriptUp(rows) => state.scroll_transcript_up(rows),
+                    InputOutcome::ScrollTranscriptDown(rows) => {
+                        state.scroll_transcript_down(rows)
+                    }
+                    _ => {}
+                },
                 Event::Resize(_, _) => {}
                 _ => {}
             }

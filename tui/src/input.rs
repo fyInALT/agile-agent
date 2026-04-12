@@ -3,10 +3,13 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 
 use crate::ui_state::TuiState;
 
 const TRANSCRIPT_SCROLL_STEP: usize = 3;
+const MOUSE_SCROLL_STEP: usize = 3;
 
 pub enum InputOutcome {
     None,
@@ -32,6 +35,26 @@ pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
 
     state.composer.insert_text(pasted_text);
     state.sync_app_input_from_composer();
+}
+
+pub fn handle_mouse_event(state: &mut TuiState, mouse_event: MouseEvent) -> InputOutcome {
+    match mouse_event.kind {
+        MouseEventKind::ScrollUp => {
+            if state.is_overlay_open() || state.app().skill_browser_open {
+                InputOutcome::None
+            } else {
+                InputOutcome::ScrollTranscriptUp(MOUSE_SCROLL_STEP)
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if state.is_overlay_open() || state.app().skill_browser_open {
+                InputOutcome::None
+            } else {
+                InputOutcome::ScrollTranscriptDown(MOUSE_SCROLL_STEP)
+            }
+        }
+        _ => InputOutcome::None,
+    }
 }
 
 pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutcome {
@@ -211,6 +234,7 @@ fn has_non_shift_modifiers(modifiers: KeyModifiers) -> bool {
 mod tests {
     use super::InputOutcome;
     use super::handle_key_event;
+    use super::handle_mouse_event;
     use super::handle_paste_event;
     use crate::ui_state::TuiState;
     use agent_core::app::AppState;
@@ -221,6 +245,8 @@ mod tests {
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
     use tempfile::TempDir;
 
     fn state_from_app(app: AppState) -> TuiState {
@@ -292,6 +318,53 @@ mod tests {
             handle_key_event(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::ScrollTranscriptDown(3)));
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_transcript_in_steps() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let up = handle_mouse_event(
+            &mut state,
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let down = handle_mouse_event(
+            &mut state,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(up, InputOutcome::ScrollTranscriptUp(3)));
+        assert!(matches!(down, InputOutcome::ScrollTranscriptDown(3)));
+    }
+
+    #[test]
+    fn mouse_wheel_is_ignored_when_overlay_is_open() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.open_transcript_overlay();
+
+        let outcome = handle_mouse_event(
+            &mut state,
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(outcome, InputOutcome::None));
     }
 
     #[test]
