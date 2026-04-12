@@ -81,28 +81,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     InputOutcome::Submit(user_input) => {
                         if let Some(command_result) = parse_local_command(&user_input) {
                             match command_result {
-                                Ok(command) => handle_local_command(&mut state, command),
+                                Ok(command) => {
+                                    if let Some(prompt) = handle_local_command(&mut state, command)
+                                    {
+                                        start_provider_request(
+                                            &mut state,
+                                            prompt,
+                                            &mut provider_rx,
+                                        );
+                                    }
+                                }
                                 Err(error) => state.push_error_message(error),
                             }
                             continue;
                         }
 
-                        let (event_tx, event_rx) = mpsc::channel();
-                        let provider_kind = state.selected_provider;
-                        let session_handle = state.current_session_handle();
                         let augmented_prompt = state.skills.build_injected_prompt(&user_input);
-                        if let Err(err) = provider::start_provider(
-                            provider_kind,
-                            augmented_prompt,
-                            state.cwd.clone(),
-                            session_handle,
-                            event_tx,
-                        ) {
-                            state.push_error_message(format!("failed to start provider: {err}"));
-                        } else {
-                            state.begin_provider_response();
-                            provider_rx = Some(event_rx);
-                        }
+                        start_provider_request(&mut state, augmented_prompt, &mut provider_rx);
                     }
                 },
                 Event::Resize(_, _) => {}
@@ -158,7 +153,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     Ok(state)
 }
 
-fn handle_local_command(state: &mut AppState, command: LocalCommand) {
+fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<String> {
     match command {
         LocalCommand::Help => {
             for line in [
@@ -171,15 +166,18 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) {
             ] {
                 state.push_status_message(line);
             }
+            None
         }
         LocalCommand::Provider => {
             state.push_status_message(format!(
                 "current provider: {} (tab switches providers)",
                 state.selected_provider.label()
             ));
+            None
         }
         LocalCommand::Skills => {
             state.open_skill_browser();
+            None
         }
         LocalCommand::Doctor => {
             let report = probe::probe_report();
@@ -188,19 +186,81 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) {
                     state.push_status_message(line);
                 }
             }
+            None
         }
         LocalCommand::Backlog => {
             for line in state.render_backlog_lines() {
                 state.push_status_message(line);
             }
+            None
         }
         LocalCommand::TodoAdd(title) => {
             let todo_id = state.add_todo(title.clone());
             state.push_status_message(format!("added todo: {} ({})", todo_id, title));
+            None
         }
         LocalCommand::RunOnce => {
-            state.push_status_message("run-once is not implemented as a local command yet");
+            let Some(todo_id) = state.next_ready_todo_id() else {
+                state.push_status_message("no ready todo available");
+                return None;
+            };
+
+            let Some(task) = state.begin_task_from_todo(&todo_id) else {
+                state.push_error_message(format!("failed to start task from todo: {todo_id}"));
+                return None;
+            };
+
+            state.push_status_message(format!("running task: {}", task.id));
+            Some(build_task_prompt(&task))
         }
-        LocalCommand::Quit => state.request_quit(),
+        LocalCommand::Quit => {
+            state.request_quit();
+            None
+        }
     }
+}
+
+fn start_provider_request(
+    state: &mut AppState,
+    prompt: String,
+    provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
+) {
+    let (event_tx, event_rx) = mpsc::channel();
+    let provider_kind = state.selected_provider;
+    let session_handle = state.current_session_handle();
+    if let Err(err) = provider::start_provider(
+        provider_kind,
+        prompt,
+        state.cwd.clone(),
+        session_handle,
+        event_tx,
+    ) {
+        state.push_error_message(format!("failed to start provider: {err}"));
+    } else {
+        state.begin_provider_response();
+        *provider_rx = Some(event_rx);
+    }
+}
+
+fn build_task_prompt(task: &agent_core::backlog::TaskItem) -> String {
+    let mut prompt = format!(
+        "Execute the following task.\n\nObjective: {}\nScope: {}\n",
+        task.objective, task.scope
+    );
+
+    if !task.constraints.is_empty() {
+        prompt.push_str("Constraints:\n");
+        for constraint in &task.constraints {
+            prompt.push_str(&format!("- {}\n", constraint));
+        }
+    }
+
+    if !task.verification_plan.is_empty() {
+        prompt.push_str("\nVerification plan:\n");
+        for item in &task.verification_plan {
+            prompt.push_str(&format!("- {}\n", item));
+        }
+    }
+
+    prompt
 }

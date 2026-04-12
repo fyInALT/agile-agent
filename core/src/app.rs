@@ -309,11 +309,12 @@ impl AppState {
     }
 
     pub fn render_backlog_lines(&self) -> Vec<String> {
-        if self.backlog.todos.is_empty() {
+        if self.backlog.todos.is_empty() && self.backlog.tasks.is_empty() {
             return vec!["backlog is empty".to_string()];
         }
 
-        self.backlog
+        let mut lines: Vec<String> = self
+            .backlog
             .todos
             .iter()
             .map(|todo| {
@@ -331,7 +332,35 @@ impl AppState {
                     todo.title
                 )
             })
-            .collect()
+            .collect();
+
+        if !self.backlog.tasks.is_empty() {
+            lines.push("tasks:".to_string());
+            lines.extend(self.backlog.tasks.iter().map(|task| {
+                format!(
+                    "{} [{}] {}",
+                    task.id,
+                    match task.status {
+                        TaskStatus::Draft => "draft",
+                        TaskStatus::Ready => "ready",
+                        TaskStatus::Running => "running",
+                        TaskStatus::Completed => "completed",
+                        TaskStatus::Blocked => "blocked",
+                        TaskStatus::Failed => "failed",
+                    },
+                    task.objective
+                )
+            }));
+        }
+
+        lines
+    }
+
+    pub fn next_ready_todo_id(&self) -> Option<String> {
+        self.backlog
+            .ready_todos()
+            .first()
+            .map(|todo| todo.id.clone())
     }
 
     pub fn begin_task_from_todo(&mut self, todo_id: &str) -> Option<TaskItem> {
