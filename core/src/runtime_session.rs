@@ -203,18 +203,26 @@ mod tests {
         });
         first.mark_stopped_and_persist().expect("persist");
 
-        let restored =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap restored");
+        let restored = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap restored");
 
         assert_eq!(restored.app.selected_provider, ProviderKind::Codex);
-        assert!(restored.app.transcript.iter().any(|entry| {
-            matches!(entry, TranscriptEntry::User(text) if text == "hello")
-        }));
-        assert!(restored.app.transcript.iter().any(|entry| {
-            matches!(entry, TranscriptEntry::Assistant(text) if text == "world")
-        }));
-        assert_eq!(restored.app.codex_thread_id.as_deref(), Some("thr-restore-1"));
+        assert!(
+            restored
+                .app
+                .transcript
+                .iter()
+                .any(|entry| { matches!(entry, TranscriptEntry::User(text) if text == "hello") })
+        );
+        assert!(
+            restored.app.transcript.iter().any(|entry| {
+                matches!(entry, TranscriptEntry::Assistant(text) if text == "world")
+            })
+        );
+        assert_eq!(
+            restored.app.codex_thread_id.as_deref(),
+            Some("thr-restore-1")
+        );
         assert_eq!(
             restored.app.current_session_handle(),
             Some(SessionHandle::CodexThread {

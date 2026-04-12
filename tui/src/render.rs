@@ -62,7 +62,7 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     if state.transcript_scroll_offset >= max_scroll {
         state.transcript_follow_tail = true;
     }
-    let transcript = Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((
+    let transcript = Paragraph::new(lines).scroll((
         state.transcript_scroll_offset.min(u16::MAX as usize) as u16,
         0,
     ));
@@ -154,9 +154,8 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     if overlay.scroll_offset > max_scroll {
         overlay.scroll_offset = max_scroll;
     }
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((overlay.scroll_offset.min(u16::MAX as usize) as u16, 0));
+    let paragraph =
+        Paragraph::new(lines).scroll((overlay.scroll_offset.min(u16::MAX as usize) as u16, 0));
     frame.render_widget(paragraph, chunks[1]);
 
     let percent = if max_scroll == 0 {
