@@ -221,6 +221,21 @@ cargo check
 cargo test
 ```
 
+Coverage setup:
+
+```bash
+cargo install cargo-llvm-cov
+rustup component add llvm-tools-preview
+```
+
+Coverage report:
+
+```bash
+./scripts/coverage.sh
+```
+
+This prints a terminal coverage summary and writes `target/coverage/lcov.info`.
+
 ## Provider Configuration
 
 Real providers are resolved through:
