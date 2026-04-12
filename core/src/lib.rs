@@ -1,4 +1,5 @@
 pub mod app;
+pub mod autonomy;
 pub mod backlog;
 pub mod backlog_store;
 pub mod commands;

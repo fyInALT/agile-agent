@@ -1,5 +1,7 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
+use agent_core::autonomy;
+use agent_core::autonomy::CompletionDecision;
 use agent_core::backlog_store;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
@@ -124,17 +126,49 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         success,
                     } => state.push_tool_call_finished(name, call_id, output_preview, success),
                     ProviderEvent::SessionHandle(handle) => state.apply_session_handle(handle),
-                    ProviderEvent::Error(error) => state.push_error_message(error),
+                    ProviderEvent::Error(error) => {
+                        state.mark_active_task_error();
+                        state.push_error_message(error);
+                    }
                     ProviderEvent::Finished => {
-                        let summary = state.transcript.iter().rev().find_map(|entry| match entry {
-                            agent_core::app::TranscriptEntry::Assistant(text)
-                                if !text.is_empty() =>
-                            {
-                                Some(text.clone())
+                        let summary = state.active_task_summary();
+                        if state.active_task_id.is_some() {
+                            if state.active_task_had_error {
+                                state.block_active_task("provider execution failed");
+                            } else if let Some(summary_text) = summary.clone() {
+                                if let Some(next_prompt) =
+                                    autonomy::continuation_prompt(&summary_text)
+                                {
+                                    if state.continuation_attempts < 3 {
+                                        state.continuation_attempts += 1;
+                                        state.push_status_message(format!(
+                                            "continuing active task automatically (attempt {})",
+                                            state.continuation_attempts
+                                        ));
+                                        start_provider_request(
+                                            &mut state,
+                                            next_prompt,
+                                            &mut provider_rx,
+                                        );
+                                        should_clear_provider_rx = false;
+                                        break;
+                                    } else {
+                                        state.block_active_task("continuation limit reached");
+                                    }
+                                } else {
+                                    match autonomy::judge_completion(&summary_text) {
+                                        CompletionDecision::Complete => {
+                                            state.complete_active_task(summary.clone());
+                                        }
+                                        CompletionDecision::Incomplete { reason } => {
+                                            state.block_active_task(reason);
+                                        }
+                                    }
+                                }
+                            } else {
+                                state.block_active_task("no assistant summary available");
                             }
-                            _ => None,
-                        });
-                        state.finish_active_task(summary);
+                        }
                         state.finish_provider_response();
                         should_clear_provider_rx = true;
                         break;

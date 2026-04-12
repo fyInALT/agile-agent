@@ -46,6 +46,8 @@ pub struct AppState {
     pub skill_browser_open: bool,
     pub skill_browser_selected: usize,
     pub active_task_id: Option<String>,
+    pub active_task_had_error: bool,
+    pub continuation_attempts: u8,
     pub claude_session_id: Option<String>,
     pub codex_thread_id: Option<String>,
     pub status: AppStatus,
@@ -64,6 +66,8 @@ impl Default for AppState {
             skill_browser_open: false,
             skill_browser_selected: 0,
             active_task_id: None,
+            active_task_had_error: false,
+            continuation_attempts: 0,
             claude_session_id: None,
             codex_thread_id: None,
             status: AppStatus::Idle,
@@ -378,11 +382,24 @@ impl AppState {
             result_summary: None,
         };
         self.active_task_id = Some(task.id.clone());
+        self.active_task_had_error = false;
+        self.continuation_attempts = 0;
         self.backlog.push_task(task.clone());
         Some(task)
     }
 
-    pub fn finish_active_task(&mut self, summary: Option<String>) {
+    pub fn mark_active_task_error(&mut self) {
+        self.active_task_had_error = true;
+    }
+
+    pub fn active_task_summary(&self) -> Option<String> {
+        self.transcript.iter().rev().find_map(|entry| match entry {
+            TranscriptEntry::Assistant(text) if !text.is_empty() => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn complete_active_task(&mut self, summary: Option<String>) {
         let Some(active_task_id) = self.active_task_id.take() else {
             return;
         };
@@ -400,9 +417,37 @@ impl AppState {
 
         if let Some(todo_id) = task_todo_id {
             if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
-                todo.status = TodoStatus::InProgress;
+                todo.status = TodoStatus::Done;
             }
         }
+        self.active_task_had_error = false;
+        self.continuation_attempts = 0;
+    }
+
+    pub fn block_active_task(&mut self, reason: impl Into<String>) {
+        let reason = reason.into();
+        let Some(active_task_id) = self.active_task_id.take() else {
+            return;
+        };
+
+        let task_todo_id = self
+            .backlog
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == active_task_id)
+            .map(|task| {
+                task.status = TaskStatus::Blocked;
+                task.result_summary = Some(reason.clone());
+                task.todo_id.clone()
+            });
+
+        if let Some(todo_id) = task_todo_id {
+            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
+                todo.status = TodoStatus::Blocked;
+            }
+        }
+        self.active_task_had_error = false;
+        self.continuation_attempts = 0;
     }
 }
 
