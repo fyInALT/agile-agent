@@ -7,6 +7,8 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::storage;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EscalationRecord {
     pub task_id: String,
@@ -17,8 +19,7 @@ pub struct EscalationRecord {
 }
 
 pub fn save_escalation(record: &EscalationRecord) -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir().context("local data directory is unavailable")?;
-    let dir = data_dir.join("agile-agent").join("escalations");
+    let dir = storage::app_data_root()?.join("escalations");
     fs::create_dir_all(&dir).context("failed to create escalation directory")?;
 
     let file_path = dir.join(format!(

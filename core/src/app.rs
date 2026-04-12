@@ -10,6 +10,7 @@ use crate::backlog::TodoStatus;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
+use crate::verification;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppStatus {
@@ -379,7 +380,8 @@ impl AppState {
                         TaskStatus::Draft => "draft",
                         TaskStatus::Ready => "ready",
                         TaskStatus::Running => "running",
-                        TaskStatus::Completed => "completed",
+                        TaskStatus::Verifying => "verifying",
+                        TaskStatus::Done => "done",
                         TaskStatus::Blocked => "blocked",
                         TaskStatus::Failed => "failed",
                     },
@@ -402,16 +404,18 @@ impl AppState {
         let next_task_id = format!("task-{}", self.backlog.tasks.len() + 1);
         let todo = self.backlog.find_todo_mut(todo_id)?;
         todo.status = TodoStatus::InProgress;
-        let task = TaskItem {
+        let mut task = TaskItem {
             id: next_task_id,
             todo_id: todo.id.clone(),
             objective: todo.title.clone(),
             scope: format!("current workspace: {}", self.cwd.display()),
             constraints: Vec::new(),
             verification_plan: Vec::new(),
-            status: TaskStatus::Running,
+            status: TaskStatus::Ready,
             result_summary: None,
         };
+        let plan = verification::build_verification_plan(&self.cwd, &task);
+        task.verification_plan = verification::describe_verification_plan(&plan);
         self.active_task_id = Some(task.id.clone());
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
@@ -421,6 +425,34 @@ impl AppState {
 
     pub fn mark_active_task_error(&mut self) {
         self.active_task_had_error = true;
+    }
+
+    pub fn mark_active_task_running(&mut self) {
+        let Some(active_task_id) = self.active_task_id.as_ref() else {
+            return;
+        };
+        if let Some(task) = self
+            .backlog
+            .tasks
+            .iter_mut()
+            .find(|task| &task.id == active_task_id)
+        {
+            task.status = TaskStatus::Running;
+        }
+    }
+
+    pub fn mark_active_task_verifying(&mut self) {
+        let Some(active_task_id) = self.active_task_id.as_ref() else {
+            return;
+        };
+        if let Some(task) = self
+            .backlog
+            .tasks
+            .iter_mut()
+            .find(|task| &task.id == active_task_id)
+        {
+            task.status = TaskStatus::Verifying;
+        }
     }
 
     pub fn active_task_summary(&self) -> Option<String> {
@@ -441,7 +473,7 @@ impl AppState {
             .iter_mut()
             .find(|task| task.id == active_task_id)
             .map(|task| {
-                task.status = TaskStatus::Completed;
+                task.status = TaskStatus::Done;
                 task.result_summary = summary.clone();
                 task.todo_id.clone()
             });
@@ -449,6 +481,34 @@ impl AppState {
         if let Some(todo_id) = task_todo_id {
             if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
                 todo.status = TodoStatus::Done;
+            }
+        }
+        self.active_task_had_error = false;
+        self.continuation_attempts = 0;
+    }
+
+    pub fn fail_active_task(&mut self, reason: impl Into<String>) {
+        let reason = reason.into();
+        let Some(active_task_id) = self.active_task_id.take() else {
+            return;
+        };
+
+        let task_todo_id = self
+            .backlog
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == active_task_id)
+            .map(|task| {
+                task.status = TaskStatus::Failed;
+                task.result_summary = Some(reason.clone());
+                task.todo_id.clone()
+            });
+
+        if let Some(todo_id) = task_todo_id {
+            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
+                if todo.status == TodoStatus::InProgress {
+                    todo.status = TodoStatus::Ready;
+                }
             }
         }
         self.active_task_had_error = false;
@@ -488,6 +548,7 @@ mod tests {
     use super::AppStatus;
     use super::LoopPhase;
     use super::TranscriptEntry;
+    use crate::backlog::TaskStatus;
     use crate::backlog::TodoStatus;
     use crate::provider::ProviderKind;
     use crate::provider::SessionHandle;
@@ -605,6 +666,33 @@ mod tests {
         assert_eq!(task.todo_id, todo_id);
         assert_eq!(state.backlog.tasks.len(), 1);
         assert_eq!(state.backlog.todos[0].status, TodoStatus::InProgress);
+        assert!(!task.verification_plan.is_empty());
+        assert_eq!(task.status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn marks_active_task_running_and_verifying() {
+        let mut state = AppState::default();
+        let todo_id = state.add_todo("write tests".to_string());
+        state.begin_task_from_todo(&todo_id).expect("task");
+
+        state.mark_active_task_running();
+        assert_eq!(state.backlog.tasks[0].status, TaskStatus::Running);
+
+        state.mark_active_task_verifying();
+        assert_eq!(state.backlog.tasks[0].status, TaskStatus::Verifying);
+    }
+
+    #[test]
+    fn failing_active_task_marks_task_failed_and_todo_ready() {
+        let mut state = AppState::default();
+        let todo_id = state.add_todo("write tests".to_string());
+        state.begin_task_from_todo(&todo_id).expect("task");
+
+        state.fail_active_task("verification failed");
+
+        assert_eq!(state.backlog.tasks[0].status, TaskStatus::Failed);
+        assert_eq!(state.backlog.todos[0].status, TodoStatus::Ready);
     }
 
     #[test]

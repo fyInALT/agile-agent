@@ -16,7 +16,9 @@ pub enum TaskStatus {
     Draft,
     Ready,
     Running,
-    Completed,
+    Verifying,
+    #[serde(alias = "Completed")]
+    Done,
     Blocked,
     Failed,
 }

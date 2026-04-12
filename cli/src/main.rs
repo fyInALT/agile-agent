@@ -1,6 +1,3 @@
-use std::env;
-use std::path::PathBuf;
-
 use agent_core::app::AppState;
 use agent_core::backlog_store;
 use agent_core::loop_runner;
@@ -11,6 +8,7 @@ use agent_core::skills::SkillRegistry;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use std::env;
 
 #[derive(Parser, Debug)]
 #[command(name = "agile-agent", version, about = "agile-agent CLI")]
@@ -74,16 +72,13 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
     state.backlog = backlog_store::load_backlog()?;
 
     if resume_last {
-        if let Ok(session) = session_store::load_recent_session() {
-            let restored_cwd = PathBuf::from(&session.cwd);
-            let effective_cwd = if restored_cwd.is_dir() {
-                restored_cwd
-            } else {
-                launch_cwd
-            };
-            state.cwd = effective_cwd.clone();
-            state.skills = SkillRegistry::discover(&effective_cwd);
-            session.apply_to_app_state(&mut state);
+        match session_store::restore_recent_session(&mut state, &launch_cwd) {
+            Ok(restored) => {
+                for warning in restored.warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
+            Err(err) => eprintln!("warning: failed to restore recent session: {err}"),
         }
     }
 

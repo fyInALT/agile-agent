@@ -1,6 +1,8 @@
+use crate::backlog::TaskItem;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompletionDecision {
-    Complete,
+    ReadyForVerification,
     Incomplete { reason: String },
 }
 
@@ -37,7 +39,7 @@ pub fn continuation_prompt(text: &str) -> Option<String> {
     None
 }
 
-pub fn judge_completion(text: &str) -> CompletionDecision {
+pub fn judge_completion(task: &TaskItem, text: &str) -> CompletionDecision {
     if text.trim().is_empty() {
         return CompletionDecision::Incomplete {
             reason: "provider returned no assistant result".to_string(),
@@ -50,7 +52,19 @@ pub fn judge_completion(text: &str) -> CompletionDecision {
         };
     }
 
-    CompletionDecision::Complete
+    if task.objective.trim().is_empty() {
+        return CompletionDecision::Incomplete {
+            reason: "task objective is empty".to_string(),
+        };
+    }
+
+    if task.verification_plan.is_empty() {
+        return CompletionDecision::Incomplete {
+            reason: "task is missing a verification plan".to_string(),
+        };
+    }
+
+    CompletionDecision::ReadyForVerification
 }
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
@@ -62,6 +76,21 @@ mod tests {
     use super::CompletionDecision;
     use super::continuation_prompt;
     use super::judge_completion;
+    use crate::backlog::TaskItem;
+    use crate::backlog::TaskStatus;
+
+    fn task() -> TaskItem {
+        TaskItem {
+            id: "task-1".to_string(),
+            todo_id: "todo-1".to_string(),
+            objective: "write tests".to_string(),
+            scope: ".".to_string(),
+            constraints: Vec::new(),
+            verification_plan: vec!["cargo check passes".to_string()],
+            status: TaskStatus::Running,
+            result_summary: None,
+        }
+    }
 
     #[test]
     fn continuation_detects_unfinished_testing() {
@@ -71,8 +100,21 @@ mod tests {
     #[test]
     fn completion_marks_done_message_complete() {
         assert_eq!(
-            judge_completion("Implemented the change and completed the work."),
-            CompletionDecision::Complete
+            judge_completion(&task(), "Implemented the change and completed the work."),
+            CompletionDecision::ReadyForVerification
+        );
+    }
+
+    #[test]
+    fn completion_requires_verification_plan() {
+        let mut task = task();
+        task.verification_plan.clear();
+
+        assert_eq!(
+            judge_completion(&task, "Implemented the change and completed the work."),
+            CompletionDecision::Incomplete {
+                reason: "task is missing a verification plan".to_string()
+            }
         );
     }
 }

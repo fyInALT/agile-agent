@@ -5,15 +5,12 @@ use anyhow::Result;
 
 use crate::app::AppState;
 use crate::app::LoopPhase;
-use crate::autonomy;
-use crate::autonomy::CompletionDecision;
 use crate::backlog::TaskItem;
-use crate::escalation;
-use crate::escalation::EscalationRecord;
 use crate::provider;
 use crate::provider::ProviderEvent;
-use crate::verification;
-use crate::verification::VerificationOutcome;
+use crate::task_engine;
+use crate::task_engine::ExecutionGuardrails;
+use crate::task_engine::TurnResolution;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoopGuardrails {
@@ -75,7 +72,7 @@ pub fn run_loop(state: &mut AppState, guardrails: LoopGuardrails) -> Result<Loop
             });
         }
 
-        let task = if let Some(task) = current_active_task(state) {
+        let task = if let Some(task) = task_engine::current_active_task(state) {
             state.push_status_message(format!("resuming task: {}", task.id));
             task
         } else {
@@ -125,81 +122,48 @@ fn execute_task_until_resolution(
     task: &TaskItem,
     guardrails: LoopGuardrails,
 ) -> Result<LoopExecutionOutcome> {
-    let mut prompt = build_task_prompt(task);
+    let mut prompt = task_engine::build_task_prompt(task);
+    let execution_guardrails = ExecutionGuardrails {
+        max_continuations_per_task: guardrails.max_continuations_per_task,
+    };
 
     loop {
         state.set_loop_phase(LoopPhase::Executing);
+        state.mark_active_task_running();
         state.begin_provider_response();
 
         let (event_tx, event_rx) = mpsc::channel();
         let provider_kind = state.selected_provider;
         let session_handle = state.current_session_handle();
-        provider::start_provider(
+        if let Err(err) = provider::start_provider(
             provider_kind,
-            prompt,
+            prompt.clone(),
             state.cwd.clone(),
             session_handle,
             event_tx,
-        )?;
+        ) {
+            state.finish_provider_response();
+            task_engine::handle_provider_start_failure(state, err.to_string());
+            return Ok(LoopExecutionOutcome::Escalated);
+        }
 
         consume_provider_until_finished(state, event_rx);
-
-        let summary = state.active_task_summary();
-        if state.active_task_had_error {
-            state.set_loop_phase(LoopPhase::Escalating);
-            escalate_active_task(state, "provider execution failed");
-            return Ok(LoopExecutionOutcome::Escalated);
-        }
-
-        let Some(summary_text) = summary.clone() else {
-            state.set_loop_phase(LoopPhase::Escalating);
-            escalate_active_task(state, "no assistant summary available");
-            return Ok(LoopExecutionOutcome::Escalated);
-        };
-
-        if let Some(next_prompt) = autonomy::continuation_prompt(&summary_text) {
-            if state.continuation_attempts >= guardrails.max_continuations_per_task {
-                state.set_loop_phase(LoopPhase::Escalating);
-                escalate_active_task(state, "continuation limit reached");
-                return Ok(LoopExecutionOutcome::Escalated);
+        match task_engine::resolve_active_task_after_turn(state, execution_guardrails)? {
+            TurnResolution::Continue {
+                prompt: next_prompt,
+            } => {
+                prompt = next_prompt;
+                continue;
             }
-            state.continuation_attempts += 1;
-            state.push_status_message(format!(
-                "continuing active task automatically (attempt {})",
-                state.continuation_attempts
-            ));
-            prompt = next_prompt;
-            continue;
-        }
-
-        match autonomy::judge_completion(&summary_text) {
-            CompletionDecision::Complete => {
-                state.set_loop_phase(LoopPhase::Verifying);
-                let plan = verification::build_verification_plan(&state.cwd, task);
-                let result =
-                    verification::execute_verification(&plan, &state.cwd, Some(&summary_text));
-                state.push_status_message(result.summary.clone());
-                for evidence in result.evidence {
-                    state.push_status_message(format!("evidence: {}", evidence));
-                }
-                match result.outcome {
-                    VerificationOutcome::Passed => {
-                        state.complete_active_task(summary);
-                        state.set_loop_phase(LoopPhase::Idle);
-                        return Ok(LoopExecutionOutcome::Completed);
-                    }
-                    VerificationOutcome::Failed | VerificationOutcome::NotRunnable => {
-                        state.set_loop_phase(LoopPhase::Escalating);
-                        escalate_active_task(state, "verification failed");
-                        return Ok(LoopExecutionOutcome::VerificationFailed);
-                    }
-                }
-            }
-            CompletionDecision::Incomplete { reason } => {
-                state.set_loop_phase(LoopPhase::Escalating);
-                escalate_active_task(state, reason);
-                return Ok(LoopExecutionOutcome::Escalated);
-            }
+            TurnResolution::Completed => return Ok(LoopExecutionOutcome::Completed),
+            TurnResolution::Failed {
+                verification_failed: true,
+            } => return Ok(LoopExecutionOutcome::VerificationFailed),
+            TurnResolution::Failed {
+                verification_failed: false,
+            } => return Ok(LoopExecutionOutcome::Completed),
+            TurnResolution::Escalated => return Ok(LoopExecutionOutcome::Escalated),
+            TurnResolution::Idle => return Ok(LoopExecutionOutcome::Completed),
         }
     }
 }
@@ -240,68 +204,6 @@ fn consume_provider_until_finished(state: &mut AppState, rx: mpsc::Receiver<Prov
                 break;
             }
         }
-    }
-}
-
-fn build_task_prompt(task: &TaskItem) -> String {
-    let mut prompt = format!(
-        "Execute the following task.\n\nObjective: {}\nScope: {}\n",
-        task.objective, task.scope
-    );
-
-    if !task.constraints.is_empty() {
-        prompt.push_str("Constraints:\n");
-        for constraint in &task.constraints {
-            prompt.push_str(&format!("- {}\n", constraint));
-        }
-    }
-
-    if !task.verification_plan.is_empty() {
-        prompt.push_str("\nVerification plan:\n");
-        for item in &task.verification_plan {
-            prompt.push_str(&format!("- {}\n", item));
-        }
-    }
-
-    prompt
-}
-
-fn current_active_task(state: &AppState) -> Option<TaskItem> {
-    let active_task_id = state.active_task_id.as_ref()?;
-    state
-        .backlog
-        .tasks
-        .iter()
-        .find(|task| &task.id == active_task_id)
-        .cloned()
-}
-
-fn escalate_active_task(state: &mut AppState, reason: impl Into<String>) {
-    let reason = reason.into();
-    let task_id = state
-        .active_task_id
-        .clone()
-        .unwrap_or_else(|| "unknown-task".to_string());
-    let context_summary = state
-        .active_task_summary()
-        .unwrap_or_else(|| "no assistant summary".to_string());
-
-    let record = EscalationRecord {
-        task_id: task_id.clone(),
-        reason: reason.clone(),
-        context_summary,
-        recommended_actions: vec![
-            "inspect task output".to_string(),
-            "review verification evidence".to_string(),
-        ],
-        created_at: chrono::Utc::now().to_rfc3339(),
-    };
-
-    let artifact_path = escalation::save_escalation(&record).ok();
-    state.block_active_task(reason.clone());
-    state.push_error_message(format!("escalated task: {} ({})", task_id, reason));
-    if let Some(path) = artifact_path {
-        state.push_status_message(format!("escalation artifact: {}", path.display()));
     }
 }
 
@@ -384,7 +286,7 @@ mod tests {
         assert_eq!(summary.iterations, 1);
         assert_eq!(
             state.backlog.tasks[0].status,
-            crate::backlog::TaskStatus::Completed
+            crate::backlog::TaskStatus::Done
         );
     }
 }

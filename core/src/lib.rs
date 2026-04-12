@@ -12,4 +12,7 @@ pub mod provider;
 pub mod providers;
 pub mod session_store;
 pub mod skills;
+pub mod storage;
+pub mod task_artifacts;
+pub mod task_engine;
 pub mod verification;

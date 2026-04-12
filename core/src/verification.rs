@@ -27,6 +27,8 @@ pub enum VerificationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationResult {
     pub outcome: VerificationOutcome,
+    pub checks: Vec<VerificationCheck>,
+    pub failed_checks: Vec<VerificationCheck>,
     pub evidence: Vec<String>,
     pub summary: String,
 }
@@ -39,6 +41,10 @@ pub fn build_verification_plan(cwd: &Path, _task: &TaskItem) -> VerificationPlan
     VerificationPlan { checks }
 }
 
+pub fn describe_verification_plan(plan: &VerificationPlan) -> Vec<String> {
+    plan.checks.iter().map(describe_check).collect()
+}
+
 pub fn execute_verification(
     plan: &VerificationPlan,
     cwd: &Path,
@@ -47,12 +53,15 @@ pub fn execute_verification(
     if plan.checks.is_empty() {
         return VerificationResult {
             outcome: VerificationOutcome::NotRunnable,
+            checks: Vec::new(),
+            failed_checks: Vec::new(),
             evidence: Vec::new(),
             summary: "no verification checks available".to_string(),
         };
     }
 
     let mut evidence = Vec::new();
+    let mut failed_checks = Vec::new();
     let mut failed = false;
 
     for check in &plan.checks {
@@ -65,6 +74,7 @@ pub fn execute_verification(
                 ));
                 if !ok {
                     failed = true;
+                    failed_checks.push(check.clone());
                 }
             }
             VerificationCheck::CargoCheck => {
@@ -75,6 +85,7 @@ pub fn execute_verification(
                             evidence.push("cargo_check=pass".to_string());
                         } else {
                             failed = true;
+                            failed_checks.push(check.clone());
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             evidence.push(format!(
                                 "cargo_check=fail ({})",
@@ -84,6 +95,7 @@ pub fn execute_verification(
                     }
                     Err(err) => {
                         failed = true;
+                        failed_checks.push(check.clone());
                         evidence.push(format!("cargo_check=error ({err})"));
                     }
                 }
@@ -104,15 +116,27 @@ pub fn execute_verification(
 
     VerificationResult {
         outcome,
+        checks: plan.checks.clone(),
+        failed_checks,
         evidence,
         summary,
     }
 }
 
+fn describe_check(check: &VerificationCheck) -> String {
+    match check {
+        VerificationCheck::AssistantOutputNonEmpty => "assistant output is non-empty".to_string(),
+        VerificationCheck::CargoCheck => "cargo check passes".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::VerificationCheck;
     use super::VerificationOutcome;
+    use super::VerificationPlan;
     use super::build_verification_plan;
+    use super::describe_verification_plan;
     use super::execute_verification;
     use crate::backlog::TaskItem;
     use crate::backlog::TaskStatus;
@@ -134,6 +158,7 @@ mod tests {
         let result = execute_verification(&plan, std::path::Path::new("."), Some("done"));
 
         assert_eq!(result.outcome, VerificationOutcome::Passed);
+        assert!(result.failed_checks.is_empty());
     }
 
     #[test]
@@ -153,5 +178,24 @@ mod tests {
         let result = execute_verification(&plan, std::path::Path::new("."), None);
 
         assert_eq!(result.outcome, VerificationOutcome::Failed);
+        assert_eq!(result.failed_checks.len(), 1);
+    }
+
+    #[test]
+    fn plan_description_is_human_readable() {
+        let plan = VerificationPlan {
+            checks: vec![
+                VerificationCheck::AssistantOutputNonEmpty,
+                VerificationCheck::CargoCheck,
+            ],
+        };
+
+        assert_eq!(
+            describe_verification_plan(&plan),
+            vec![
+                "assistant output is non-empty".to_string(),
+                "cargo check passes".to_string(),
+            ]
+        );
     }
 }

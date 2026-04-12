@@ -6,6 +6,7 @@ use anyhow::Context;
 use anyhow::Result;
 
 use crate::backlog::BacklogState;
+use crate::storage;
 
 pub fn load_backlog() -> Result<BacklogState> {
     let root = default_backlog_root()?;
@@ -37,8 +38,7 @@ fn save_backlog_to_root(backlog: &BacklogState, root: &Path) -> Result<()> {
 }
 
 fn default_backlog_root() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir().context("local data directory is unavailable")?;
-    Ok(data_dir.join("agile-agent"))
+    storage::app_data_root().context("failed to resolve backlog root")
 }
 
 #[cfg(test)]

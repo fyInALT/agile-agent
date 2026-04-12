@@ -14,6 +14,8 @@ use crate::app::LoopPhase;
 use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
 use crate::provider::ProviderKind;
+use crate::skills::SkillRegistry;
+use crate::storage;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedSession {
@@ -38,6 +40,11 @@ struct RecentSessionPointer {
     session_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreSessionResult {
+    pub warnings: Vec<String>,
+}
+
 impl PersistedSession {
     pub fn from_app_state(state: &AppState) -> Self {
         Self {
@@ -59,7 +66,11 @@ impl PersistedSession {
     }
 
     pub fn apply_to_app_state(&self, state: &mut AppState) {
-        state.cwd = PathBuf::from(&self.cwd);
+        self.apply_to_app_state_with_cwd(state, PathBuf::from(&self.cwd));
+    }
+
+    pub fn apply_to_app_state_with_cwd(&self, state: &mut AppState, cwd: PathBuf) {
+        state.cwd = cwd;
         state.selected_provider = self.selected_provider;
         state.claude_session_id = self.claude_session_id.clone();
         state.codex_thread_id = self.codex_thread_id.clone();
@@ -98,6 +109,14 @@ pub fn load_recent_session() -> Result<PersistedSession> {
     load_recent_session_from_root(&root)
 }
 
+pub fn restore_recent_session(
+    state: &mut AppState,
+    launch_cwd: &Path,
+) -> Result<RestoreSessionResult> {
+    let session = load_recent_session()?;
+    Ok(apply_restored_session(state, &session, launch_cwd))
+}
+
 fn save_recent_session_to_root(state: &AppState, root: &Path) -> Result<()> {
     fs::create_dir_all(root.join("sessions")).context("failed to create session directory")?;
 
@@ -133,13 +152,33 @@ fn load_recent_session_from_root(root: &Path) -> Result<PersistedSession> {
 }
 
 fn default_session_root() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir().context("local data directory is unavailable")?;
-    Ok(data_dir.join("agile-agent"))
+    storage::app_data_root().context("failed to resolve session root")
+}
+
+fn apply_restored_session(
+    state: &mut AppState,
+    session: &PersistedSession,
+    launch_cwd: &Path,
+) -> RestoreSessionResult {
+    let restored_cwd = PathBuf::from(&session.cwd);
+    let mut warnings = Vec::new();
+    let effective_cwd = if restored_cwd.is_dir() {
+        restored_cwd
+    } else {
+        warnings.push(format!("saved session cwd is unavailable: {}", session.cwd));
+        launch_cwd.to_path_buf()
+    };
+
+    state.skills = SkillRegistry::discover(&effective_cwd);
+    session.apply_to_app_state_with_cwd(state, effective_cwd);
+
+    RestoreSessionResult { warnings }
 }
 
 #[cfg(test)]
 mod tests {
     use super::PersistedSession;
+    use super::apply_restored_session;
     use super::load_recent_session_from_root;
     use super::save_recent_session_to_root;
     use crate::app::AppState;
@@ -149,6 +188,7 @@ mod tests {
     use crate::provider::ProviderKind;
     use crate::skills::SkillMetadata;
     use crate::skills::SkillRegistry;
+    use std::path::Path;
     use std::path::PathBuf;
 
     use tempfile::TempDir;
@@ -218,5 +258,31 @@ mod tests {
         assert_eq!(state.active_task_id.as_deref(), Some("task-1"));
         assert_eq!(state.continuation_attempts, 1);
         assert!(state.loop_run_active);
+    }
+
+    #[test]
+    fn restore_warns_when_saved_cwd_is_missing() {
+        let mut state = AppState::default();
+        let session = PersistedSession {
+            saved_at: "2026-01-01T00:00:00Z".to_string(),
+            cwd: "/definitely/missing".to_string(),
+            selected_provider: ProviderKind::Mock,
+            claude_session_id: None,
+            codex_thread_id: None,
+            enabled_skill_names: Vec::new(),
+            transcript: Vec::new(),
+            backlog: BacklogState::default(),
+            active_task_id: None,
+            active_task_had_error: false,
+            continuation_attempts: 0,
+            loop_phase: LoopPhase::Idle,
+            loop_run_active: false,
+            remaining_loop_iterations: 0,
+        };
+
+        let restored = apply_restored_session(&mut state, &session, Path::new("."));
+
+        assert_eq!(state.cwd, PathBuf::from("."));
+        assert_eq!(restored.warnings.len(), 1);
     }
 }

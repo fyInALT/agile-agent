@@ -1,20 +1,17 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
-use agent_core::autonomy;
-use agent_core::autonomy::CompletionDecision;
 use agent_core::backlog_store;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
-use agent_core::escalation;
-use agent_core::escalation::EscalationRecord;
 use agent_core::probe;
 use agent_core::provider;
 use agent_core::provider::ProviderEvent;
 use agent_core::session_store;
 use agent_core::skills::SkillRegistry;
-use agent_core::verification;
-use agent_core::verification::VerificationOutcome;
+use agent_core::task_engine;
+use agent_core::task_engine::ExecutionGuardrails;
+use agent_core::task_engine::TurnResolution;
 use anyhow::Result;
 use crossterm::event;
 use crossterm::event::Event;
@@ -36,19 +33,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     );
     state.backlog = backlog_store::load_backlog()?;
     if resume_last {
-        if let Ok(session) = session_store::load_recent_session() {
-            let restored_cwd = std::path::PathBuf::from(&session.cwd);
-            let effective_cwd = if restored_cwd.is_dir() {
-                restored_cwd
-            } else {
-                launch_cwd.clone()
-            };
-            state.cwd = effective_cwd.clone();
-            state.skills = SkillRegistry::discover(&effective_cwd);
-            session.apply_to_app_state(&mut state);
-            state.push_status_message("restored recent session");
-        } else {
-            state.push_error_message("failed to restore recent session");
+        match session_store::restore_recent_session(&mut state, &launch_cwd) {
+            Ok(restored) => {
+                state.push_status_message("restored recent session");
+                for warning in restored.warnings {
+                    state.push_error_message(warning);
+                }
+            }
+            Err(err) => {
+                state.push_error_message(format!("failed to restore recent session: {err}"))
+            }
         }
     }
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
@@ -153,98 +147,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         state.push_error_message(error);
                     }
                     ProviderEvent::Finished => {
-                        let summary = state.active_task_summary();
+                        state.finish_provider_response();
                         if state.active_task_id.is_some() {
-                            if state.active_task_had_error {
-                                state.set_loop_phase(LoopPhase::Escalating);
-                                escalate_active_task(&mut state, "provider execution failed");
-                            } else if let Some(summary_text) = summary.clone() {
-                                if let Some(next_prompt) =
-                                    autonomy::continuation_prompt(&summary_text)
-                                {
-                                    if state.continuation_attempts < 3 {
-                                        state.continuation_attempts += 1;
-                                        state.set_loop_phase(LoopPhase::Executing);
-                                        state.push_status_message(format!(
-                                            "continuing active task automatically (attempt {})",
-                                            state.continuation_attempts
-                                        ));
-                                        start_provider_request(
-                                            &mut state,
-                                            next_prompt,
-                                            &mut provider_rx,
-                                        );
-                                        should_clear_provider_rx = false;
-                                        break;
-                                    } else {
-                                        state.set_loop_phase(LoopPhase::Escalating);
-                                        escalate_active_task(
-                                            &mut state,
-                                            "continuation limit reached",
-                                        );
-                                    }
-                                } else {
-                                    match autonomy::judge_completion(&summary_text) {
-                                        CompletionDecision::Complete => {
-                                            state.set_loop_phase(LoopPhase::Verifying);
-                                            let verification_task = state
-                                                .active_task_id
-                                                .as_ref()
-                                                .and_then(|task_id| {
-                                                    state
-                                                        .backlog
-                                                        .tasks
-                                                        .iter()
-                                                        .find(|task| &task.id == task_id)
-                                                })
-                                                .cloned();
-                                            if let Some(task) = verification_task {
-                                                let plan = verification::build_verification_plan(
-                                                    &state.cwd, &task,
-                                                );
-                                                let result = verification::execute_verification(
-                                                    &plan,
-                                                    &state.cwd,
-                                                    Some(&summary_text),
-                                                );
-                                                state.push_status_message(result.summary.clone());
-                                                for evidence in result.evidence {
-                                                    state.push_status_message(format!(
-                                                        "evidence: {}",
-                                                        evidence
-                                                    ));
-                                                }
-                                                match result.outcome {
-                                                    VerificationOutcome::Passed => {
-                                                        state.complete_active_task(summary.clone());
-                                                        state.set_loop_phase(LoopPhase::Idle);
-                                                    }
-                                                    VerificationOutcome::Failed
-                                                    | VerificationOutcome::NotRunnable => {
-                                                        state.set_loop_phase(LoopPhase::Escalating);
-                                                        escalate_active_task(
-                                                            &mut state,
-                                                            "verification failed",
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                state.complete_active_task(summary.clone());
-                                                state.set_loop_phase(LoopPhase::Idle);
-                                            }
-                                        }
-                                        CompletionDecision::Incomplete { reason } => {
-                                            state.set_loop_phase(LoopPhase::Escalating);
-                                            escalate_active_task(&mut state, reason);
-                                        }
-                                    }
+                            match task_engine::resolve_active_task_after_turn(
+                                &mut state,
+                                ExecutionGuardrails::default(),
+                            )? {
+                                TurnResolution::Continue { prompt } => {
+                                    start_provider_request(&mut state, prompt, &mut provider_rx);
+                                    should_clear_provider_rx = false;
+                                    break;
                                 }
-                            } else {
-                                state.set_loop_phase(LoopPhase::Escalating);
-                                escalate_active_task(&mut state, "no assistant summary available");
+                                TurnResolution::Completed
+                                | TurnResolution::Failed { .. }
+                                | TurnResolution::Escalated
+                                | TurnResolution::Idle => {}
                             }
                         }
-                        state.finish_provider_response();
                         if state.active_task_id.is_none()
                             && state.loop_phase != LoopPhase::Escalating
                         {
@@ -265,35 +184,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     backlog_store::save_backlog(&state.backlog)?;
     session_store::save_recent_session(&state)?;
     Ok(state)
-}
-
-fn escalate_active_task(state: &mut AppState, reason: impl Into<String>) {
-    let reason = reason.into();
-    let task_id = state
-        .active_task_id
-        .clone()
-        .unwrap_or_else(|| "unknown-task".to_string());
-    let context_summary = state
-        .active_task_summary()
-        .unwrap_or_else(|| "no assistant summary".to_string());
-
-    let record = EscalationRecord {
-        task_id: task_id.clone(),
-        reason: reason.clone(),
-        context_summary,
-        recommended_actions: vec![
-            "inspect task output".to_string(),
-            "review verification evidence".to_string(),
-        ],
-        created_at: chrono::Utc::now().to_rfc3339(),
-    };
-
-    let artifact_path = escalation::save_escalation(&record).ok();
-    state.block_active_task(reason.clone());
-    state.push_error_message(format!("escalated task: {} ({})", task_id, reason));
-    if let Some(path) = artifact_path {
-        state.push_status_message(format!("escalation artifact: {}", path.display()));
-    }
 }
 
 fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<String> {
@@ -358,7 +248,7 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<S
             };
 
             state.push_status_message(format!("running task: {}", task.id));
-            Some(build_task_prompt(&task))
+            Some(task_engine::build_task_prompt(&task))
         }
         LocalCommand::RunLoop => {
             state.start_loop_run(5);
@@ -381,6 +271,7 @@ fn start_provider_request(
     let (event_tx, event_rx) = mpsc::channel();
     let provider_kind = state.selected_provider;
     let session_handle = state.current_session_handle();
+    state.mark_active_task_running();
     if let Err(err) = provider::start_provider(
         provider_kind,
         prompt,
@@ -388,34 +279,11 @@ fn start_provider_request(
         session_handle,
         event_tx,
     ) {
-        state.push_error_message(format!("failed to start provider: {err}"));
+        task_engine::handle_provider_start_failure(state, err.to_string());
     } else {
         state.begin_provider_response();
         *provider_rx = Some(event_rx);
     }
-}
-
-fn build_task_prompt(task: &agent_core::backlog::TaskItem) -> String {
-    let mut prompt = format!(
-        "Execute the following task.\n\nObjective: {}\nScope: {}\n",
-        task.objective, task.scope
-    );
-
-    if !task.constraints.is_empty() {
-        prompt.push_str("Constraints:\n");
-        for constraint in &task.constraints {
-            prompt.push_str(&format!("- {}\n", constraint));
-        }
-    }
-
-    if !task.verification_plan.is_empty() {
-        prompt.push_str("\nVerification plan:\n");
-        for item in &task.verification_plan {
-            prompt.push_str(&format!("- {}\n", item));
-        }
-    }
-
-    prompt
 }
 
 fn next_loop_prompt(state: &mut AppState) -> Option<(String, bool)> {
@@ -428,7 +296,7 @@ fn next_loop_prompt(state: &mut AppState) -> Option<(String, bool)> {
             .cloned()?;
         state.set_loop_phase(LoopPhase::Executing);
         state.push_status_message(format!("resuming task: {}", task.id));
-        return Some((build_task_prompt(&task), false));
+        return Some((task_engine::build_task_prompt(&task), false));
     }
 
     let Some(todo_id) = state.next_ready_todo_id() else {
@@ -442,5 +310,5 @@ fn next_loop_prompt(state: &mut AppState) -> Option<(String, bool)> {
     };
 
     state.push_status_message(format!("running task: {}", task.id));
-    Some((build_task_prompt(&task), true))
+    Some((task_engine::build_task_prompt(&task), true))
 }
