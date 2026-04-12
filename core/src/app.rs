@@ -196,15 +196,18 @@ impl AppState {
             if let TranscriptEntry::ToolCall {
                 name: existing_name,
                 call_id: existing_call_id,
+                input_preview: existing_input_preview,
                 started: true,
                 ..
             } = entry
             {
-                if *existing_name == name && (call_id.is_none() || existing_call_id == &call_id) {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = *existing_name == name;
+                if matches_call_id || matches_name {
                     *entry = TranscriptEntry::ToolCall {
-                        name,
-                        call_id,
-                        input_preview: None,
+                        name: existing_name.clone(),
+                        call_id: existing_call_id.clone().or(call_id),
+                        input_preview: existing_input_preview.clone(),
                         output_preview,
                         success,
                         started: false,
@@ -697,6 +700,42 @@ mod tests {
 
         state.mark_active_task_verifying();
         assert_eq!(state.backlog.tasks[0].status, TaskStatus::Verifying);
+    }
+
+    #[test]
+    fn finished_tool_call_matches_started_entry_by_call_id_and_preserves_started_metadata() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_tool_call_started(
+            "exec_command".to_string(),
+            Some("call-1".to_string()),
+            Some("git diff README.md".to_string()),
+        );
+
+        state.push_tool_call_finished(
+            "tool_result".to_string(),
+            Some("call-1".to_string()),
+            Some("diff --git a/README.md b/README.md".to_string()),
+            true,
+        );
+
+        assert_eq!(state.transcript.len(), 1);
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::ToolCall {
+                name,
+                call_id,
+                input_preview,
+                output_preview,
+                success,
+                started,
+            }
+            if name == "exec_command"
+                && call_id.as_deref() == Some("call-1")
+                && input_preview.as_deref() == Some("git diff README.md")
+                && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
+                && *success
+                && !*started
+        ));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use ratatui::text::Span;
 use textwrap::wrap;
 
 use crate::markdown;
+use crate::tool_output;
 
 #[derive(Debug, Clone)]
 pub struct TranscriptCell {
@@ -55,41 +56,14 @@ fn build_cell(entry: &TranscriptEntry, width: usize) -> Option<TranscriptCell> {
             success,
             started,
             ..
-        } => {
-            let mut lines = Vec::new();
-            let summary = if *started {
-                format!("• running tool {name}")
-            } else if *success {
-                format!("• finished tool {name}")
-            } else {
-                format!("• failed tool {name}")
-            };
-            let style = if *started {
-                Style::default().fg(Color::Blue)
-            } else if *success {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::Red)
-            };
-            lines.push(Line::from(Span::styled(summary, style)));
-            if let Some(input) = input_preview {
-                lines.extend(wrap_prefixed(
-                    "  input: ",
-                    &markdown::render_tool_preview(input, width.saturating_sub(10)),
-                    Style::default().fg(Color::DarkGray),
-                    width,
-                ));
-            }
-            if let Some(output) = output_preview {
-                lines.extend(wrap_prefixed(
-                    "  output: ",
-                    &markdown::render_tool_preview(output, width.saturating_sub(11)),
-                    Style::default().fg(Color::DarkGray),
-                    width,
-                ));
-            }
-            lines
-        }
+        } => tool_output::render_tool_call_lines(
+            name,
+            input_preview.as_deref(),
+            output_preview.as_deref(),
+            *success,
+            *started,
+            width,
+        ),
         TranscriptEntry::Status(text) => {
             wrap_prefixed("• ", text, Style::default().fg(Color::DarkGray), width)
         }
@@ -128,4 +102,46 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
             Line::from(vec![Span::styled(leader, style), Span::styled(line, style)])
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_cells;
+    use super::flatten_cells;
+    use agent_core::app::TranscriptEntry;
+    use ratatui::text::Line;
+
+    fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
+        lines.iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tool_calls_render_command_and_structured_output_preview() {
+        let entries = vec![TranscriptEntry::ToolCall {
+            name: "exec_command".to_string(),
+            call_id: Some("call-1".to_string()),
+            input_preview: Some("git diff README.md".to_string()),
+            output_preview: Some(
+                "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new".to_string(),
+            ),
+            success: true,
+            started: false,
+        }];
+
+        let lines = flatten_cells(&build_cells(&entries, 80));
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("finished command")));
+        assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
+        assert!(rendered.iter().any(|line| line.contains("diff --git a/README.md b/README.md")));
+        assert!(rendered.iter().any(|line| line.contains("+new")));
+        assert!(!rendered.iter().any(|line| line.contains("output:")));
+    }
 }

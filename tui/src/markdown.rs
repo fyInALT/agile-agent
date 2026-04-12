@@ -9,8 +9,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use textwrap::wrap;
-use unicode_width::UnicodeWidthChar;
-use unicode_width::UnicodeWidthStr;
 
 pub fn render_markdown_lines(text: &str, max_width: usize) -> Vec<Line<'static>> {
     if text.is_empty() {
@@ -246,28 +244,6 @@ fn styled_line_with_blockquote_prefix(text: String, style: Style, depth: usize) 
             Span::styled(text, style),
         ])
     }
-}
-
-fn truncate_preview(text: &str, max_len: usize) -> String {
-    if text.width() <= max_len {
-        return text.to_string();
-    }
-    let mut result = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_len.saturating_sub(3) {
-            result.push_str("...");
-            break;
-        }
-        result.push(ch);
-        width += ch_width;
-    }
-    result
-}
-
-pub fn render_tool_preview(text: &str, max_width: usize) -> String {
-    truncate_preview(text, max_width)
 }
 
 #[cfg(test)]

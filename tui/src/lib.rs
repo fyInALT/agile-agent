@@ -10,6 +10,7 @@ mod input;
 mod markdown;
 mod render;
 mod terminal;
+mod tool_output;
 mod transcript;
 mod ui_state;
 
