@@ -36,9 +36,13 @@ impl WorkplaceStore {
     }
 
     pub fn for_cwd(cwd: &Path) -> Result<Self> {
+        let root = workplaces_root()?;
+        Self::for_root(cwd, root)
+    }
+
+    pub fn for_root(cwd: &Path, root: PathBuf) -> Result<Self> {
         let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
         let workplace_id = derive_workplace_id(&canonical_cwd);
-        let root = workplaces_root()?;
         let path = root.join(workplace_id.as_str());
         Ok(Self {
             workplace_id,
@@ -194,8 +198,9 @@ mod tests {
     #[test]
     fn same_cwd_produces_same_workplace_id() {
         let temp = TempDir::new().expect("tempdir");
-        let a = WorkplaceStore::for_cwd(temp.path()).expect("store");
-        let b = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        let root = TempDir::new().expect("root");
+        let a = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
+        let b = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
 
         assert_eq!(a.workplace_id(), b.workplace_id());
     }
@@ -203,9 +208,10 @@ mod tests {
     #[test]
     fn ensure_creates_agents_dir() {
         let temp = TempDir::new().expect("tempdir");
+        let root = TempDir::new().expect("root");
         let nested = temp.path().join("workspace");
         std::fs::create_dir_all(&nested).expect("create cwd");
-        let store = WorkplaceStore::for_cwd(&nested).expect("store");
+        let store = WorkplaceStore::for_root(&nested, root.path().to_path_buf()).expect("store");
 
         store.ensure().expect("ensure");
 
@@ -222,7 +228,9 @@ mod tests {
     #[test]
     fn saves_and_loads_workplace_meta() {
         let temp = TempDir::new().expect("tempdir");
-        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        let root = TempDir::new().expect("root");
+        let store =
+            WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         store.ensure().expect("ensure");
         let meta = WorkplaceMeta {
             workplace_id: store.workplace_id().clone(),
