@@ -367,3 +367,45 @@ fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
         "render should not silently re-enable follow-tail when user is in manual mode"
     );
 }
+
+#[test]
+fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    let backend = TestBackend::new(24, 3);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    shell
+        .state
+        .app_mut()
+        .push_status_message("short".to_string());
+    shell
+        .state
+        .app_mut()
+        .push_status_message("this line is much longer TRAIL-END".to_string());
+
+    shell.state.transcript_follow_tail = false;
+    shell.state.transcript_scroll_offset = 3;
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("first draw");
+
+    shell.state.transcript_scroll_offset = 0;
+    terminal
+        .draw(|frame| render_app(frame, &mut shell.state))
+        .expect("second draw");
+
+    let buf = terminal.backend().buffer();
+    let mut rendered = String::new();
+    for y in 0..3 {
+        for x in 0..24 {
+            rendered.push_str(buf[(x, y)].symbol());
+        }
+        rendered.push('\n');
+    }
+
+    assert!(
+        !rendered.contains("END"),
+        "stale suffix remained after redraw:\n{}",
+        rendered
+    );
+}

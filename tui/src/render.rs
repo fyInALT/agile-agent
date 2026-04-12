@@ -50,6 +50,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
 }
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    fill_background(frame, area, Style::default());
     state.transcript_viewport_height = area.height;
     let transcript_cells = cells::build_cells(&state.app().transcript, area.width);
     let lines = cells::flatten_cells(&transcript_cells);
