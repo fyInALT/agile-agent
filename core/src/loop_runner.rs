@@ -377,6 +377,7 @@ mod tests {
 
     #[test]
     fn run_loop_logs_iteration_boundaries_and_stop_reason() {
+        let _guard = logging::test_guard();
         let temp = tempfile::TempDir::new().expect("tempdir");
         let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         workplace.ensure().expect("ensure");

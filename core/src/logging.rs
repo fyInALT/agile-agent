@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -47,6 +48,7 @@ struct LoggerState {
 
 static LOGGER: OnceLock<Mutex<Option<LoggerState>>> = OnceLock::new();
 static LOG_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TEST_GUARD: Mutex<()> = Mutex::new(());
 
 impl RunMode {
     pub fn as_str(self) -> &'static str {
@@ -118,6 +120,10 @@ pub fn current_log_path() -> Option<PathBuf> {
     guard.as_ref().map(|state| state.log_path.clone())
 }
 
+pub fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_GUARD.lock().expect("test guard lock poisoned")
+}
+
 fn write_event(level: &str, event: &str, message: &str, fields: serde_json::Value) {
     let Some(slot) = LOGGER.get() else {
         return;
@@ -165,6 +171,7 @@ mod tests {
 
     #[test]
     fn init_creates_workplace_log_file_and_latest_pointer() {
+        let _guard = super::test_guard();
         let temp = TempDir::new().expect("tempdir");
         let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         workplace.ensure().expect("ensure");
@@ -190,6 +197,7 @@ mod tests {
 
     #[test]
     fn reinit_replaces_active_log_destination() {
+        let _guard = super::test_guard();
         let root = TempDir::new().expect("tempdir");
         let workspace_a = root.path().join("one");
         let workspace_b = root.path().join("two");

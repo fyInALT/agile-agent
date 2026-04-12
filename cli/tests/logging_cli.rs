@@ -25,4 +25,7 @@ fn run_loop_creates_workplace_log_with_launch_event() {
     let contents = fs::read_to_string(&log_path).expect("log contents");
     assert!(contents.contains("\"event\":\"app.launch\""));
     assert!(contents.contains("\"run_mode\":\"run-loop\""));
+    assert!(contents.contains("\"event\":\"agent.bootstrap\""));
+    assert!(contents.contains("\"event\":\"storage.write\""));
+    assert!(contents.contains("\"event\":\"loop.iteration.start\""));
 }

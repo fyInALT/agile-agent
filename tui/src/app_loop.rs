@@ -3,6 +3,7 @@ use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
+use agent_core::logging;
 use agent_core::probe;
 use agent_core::provider;
 use agent_core::provider::ProviderEvent;
@@ -122,6 +123,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             if let Some(command_result) = parse_local_command(&user_input) {
                                 match command_result {
                                     Ok(command) => {
+                                        logging::debug_event(
+                                            "tui.command",
+                                            "executed local TUI command",
+                                            serde_json::json!({
+                                                "command": format!("{:?}", command),
+                                            }),
+                                        );
                                         if let Some(prompt) =
                                             handle_local_command(&mut state, command)
                                         {
@@ -139,6 +147,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                             let augmented_prompt =
                                 state.app().skills.build_injected_prompt(&user_input);
+                            logging::debug_event(
+                                "tui.submit",
+                                "submitted prompt from TUI",
+                                serde_json::json!({
+                                    "provider": state.app().selected_provider.label(),
+                                    "prompt": user_input,
+                                    "active_task_id": state.app().active_task_id,
+                                }),
+                            );
                             state.app_mut().set_loop_phase(LoopPhase::Executing);
                             start_provider_request(&mut state, augmented_prompt, &mut provider_rx);
                         }
@@ -309,6 +326,13 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
             state
                 .app_mut()
                 .push_status_message("starting autonomous run-loop");
+            logging::debug_event(
+                "tui.loop_control",
+                "started autonomous loop from TUI",
+                serde_json::json!({
+                    "remaining_iterations": state.app().remaining_loop_iterations,
+                }),
+            );
             None
         }
         LocalCommand::Quit => {
@@ -326,6 +350,15 @@ fn start_provider_request(
     let (event_tx, event_rx) = mpsc::channel();
     let provider_kind = state.app().selected_provider;
     let session_handle = state.app().current_session_handle();
+    logging::debug_event(
+        "tui.provider_request",
+        "starting provider request from TUI",
+        serde_json::json!({
+            "provider": provider_kind.label(),
+            "prompt": prompt,
+            "session_handle": format!("{:?}", session_handle),
+        }),
+    );
     state.app_mut().mark_active_task_running();
     if let Err(err) = provider::start_provider(
         provider_kind,

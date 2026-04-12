@@ -220,6 +220,7 @@ mod tests {
 
     #[test]
     fn bootstrap_restores_existing_agent_transcript_and_codex_thread_without_resume_snapshot() {
+        let _guard = logging::test_guard();
         let temp = TempDir::new().expect("tempdir");
         let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         workplace.ensure().expect("ensure");

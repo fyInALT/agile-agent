@@ -267,6 +267,7 @@ mod tests {
 
     #[test]
     fn ensure_logs_workplace_resolution_and_meta_write() {
+        let _guard = logging::test_guard();
         let temp = TempDir::new().expect("tempdir");
         let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
         logging::init_for_workplace(&store, RunMode::RunLoop).expect("init logger");

@@ -8,6 +8,7 @@ use tempfile::TempDir;
 
 #[test]
 fn init_creates_workplace_log_file_and_latest_pointer() {
+    let _guard = agent_core::logging::test_guard();
     let temp = TempDir::new().expect("tempdir");
     let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
     workplace.ensure().expect("ensure");

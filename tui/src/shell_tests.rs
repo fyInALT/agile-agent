@@ -3,7 +3,10 @@ use crossterm::event::KeyModifiers;
 
 use crate::test_support::ShellHarness;
 use agent_core::app::TranscriptEntry;
+use agent_core::logging;
+use agent_core::logging::RunMode;
 use agent_core::provider::ProviderKind;
+use agent_core::workplace_store::WorkplaceStore;
 
 #[test]
 fn renders_shell_footer_and_prompt() {
@@ -200,4 +203,22 @@ fn scroll_offset_accounts_for_ratatui_paragraph_wrap() {
         shell.state.transcript_max_scroll,
         rendered
     );
+}
+
+#[test]
+fn provider_switch_logs_tui_action() {
+    let _guard = logging::test_guard();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+    workplace.ensure().expect("ensure");
+    logging::init_for_workplace(&workplace, RunMode::Tui).expect("init logger");
+
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    shell.state
+        .switch_to_new_agent(ProviderKind::Codex)
+        .expect("switch");
+
+    let log_path = logging::current_log_path().expect("log path");
+    let contents = std::fs::read_to_string(log_path).expect("log file");
+    assert!(contents.contains("\"event\":\"tui.provider_switch\""));
 }

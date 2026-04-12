@@ -1,6 +1,7 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
+use agent_core::logging;
 use agent_core::runtime_session::RuntimeSession;
 use anyhow::Result;
 use std::time::Instant;
@@ -118,6 +119,14 @@ impl TuiState {
     ) -> Result<String> {
         self.sync_app_input_from_composer();
         let summary = self.session.switch_agent(provider_kind)?;
+        logging::debug_event(
+            "tui.provider_switch",
+            "switched to sibling agent from TUI state",
+            serde_json::json!({
+                "provider": provider_kind.label(),
+                "summary": summary,
+            }),
+        );
         self.composer = TextArea::new();
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;

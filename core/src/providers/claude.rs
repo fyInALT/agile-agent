@@ -579,6 +579,7 @@ mod tests {
 
     #[test]
     fn read_stdout_logs_raw_line_and_parsed_events() {
+        let _guard = logging::test_guard();
         let temp = tempfile::TempDir::new().expect("tempdir");
         let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         workplace.ensure().expect("ensure");
