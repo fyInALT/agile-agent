@@ -12,6 +12,7 @@ use crate::agent_runtime::AgentId;
 use crate::agent_runtime::AgentMeta;
 use crate::agent_state::AgentState;
 use crate::agent_transcript::AgentTranscript;
+use crate::logging;
 use crate::workplace_store::WorkplaceStore;
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,15 @@ impl AgentStore {
         let payload =
             serde_json::to_string_pretty(meta).context("failed to serialize agent meta")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "storage.write",
+            "saved agent metadata",
+            serde_json::json!({
+                "kind": "agent_meta",
+                "agent_id": meta.agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 
@@ -44,8 +54,18 @@ impl AgentStore {
         let path = self.meta_path(agent_id);
         let payload = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&payload)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        let meta = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "storage.read",
+            "loaded agent metadata",
+            serde_json::json!({
+                "kind": "agent_meta",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(meta)
     }
 
     pub fn save_state(&self, agent_id: &AgentId, state: &AgentState) -> Result<PathBuf> {
@@ -56,6 +76,15 @@ impl AgentStore {
         let payload =
             serde_json::to_string_pretty(state).context("failed to serialize agent state")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "storage.write",
+            "saved agent state",
+            serde_json::json!({
+                "kind": "agent_state",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 
@@ -63,8 +92,18 @@ impl AgentStore {
         let path = self.state_path(agent_id);
         let payload = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&payload)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        let state = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "storage.read",
+            "loaded agent state",
+            serde_json::json!({
+                "kind": "agent_state",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(state)
     }
 
     pub fn save_transcript(
@@ -79,6 +118,15 @@ impl AgentStore {
         let payload =
             serde_json::to_string_pretty(transcript).context("failed to serialize transcript")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "storage.write",
+            "saved agent transcript",
+            serde_json::json!({
+                "kind": "agent_transcript",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 
@@ -86,8 +134,18 @@ impl AgentStore {
         let path = self.transcript_path(agent_id);
         let payload = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&payload)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        let transcript = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "storage.read",
+            "loaded agent transcript",
+            serde_json::json!({
+                "kind": "agent_transcript",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(transcript)
     }
 
     pub fn save_messages(&self, agent_id: &AgentId, messages: &AgentMessages) -> Result<PathBuf> {
@@ -98,6 +156,15 @@ impl AgentStore {
         let payload =
             serde_json::to_string_pretty(messages).context("failed to serialize messages")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "storage.write",
+            "saved agent messages",
+            serde_json::json!({
+                "kind": "agent_messages",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 
@@ -108,6 +175,15 @@ impl AgentStore {
         let path = agent_dir.join("memory.json");
         let payload = serde_json::to_string_pretty(memory).context("failed to serialize memory")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "storage.write",
+            "saved agent memory",
+            serde_json::json!({
+                "kind": "agent_memory",
+                "agent_id": agent_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 

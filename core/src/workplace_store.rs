@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::agent_runtime::WorkplaceId;
+use crate::logging;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkplaceStore {
@@ -44,6 +45,15 @@ impl WorkplaceStore {
         let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
         let workplace_id = derive_workplace_id(&canonical_cwd);
         let path = root.join(workplace_id.as_str());
+        logging::debug_event(
+            "workplace.resolve",
+            "resolved workplace from cwd",
+            serde_json::json!({
+                "cwd": canonical_cwd.display().to_string(),
+                "workplace_id": workplace_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(Self {
             workplace_id,
             path,
@@ -58,6 +68,15 @@ impl WorkplaceStore {
                 self.path.display()
             )
         })?;
+        logging::debug_event(
+            "workplace.ensure",
+            "ensured workplace directories",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "path": self.path.display().to_string(),
+                "agents_dir": self.agents_dir().display().to_string(),
+            }),
+        );
         self.ensure_meta()?;
         Ok(())
     }
@@ -86,8 +105,17 @@ impl WorkplaceStore {
         let path = self.meta_path();
         let payload = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&payload)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        let meta = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "workplace.meta.load",
+            "loaded workplace metadata",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(meta)
     }
 
     pub fn save_meta(&self, meta: &WorkplaceMeta) -> Result<PathBuf> {
@@ -97,6 +125,14 @@ impl WorkplaceStore {
         let payload =
             serde_json::to_string_pretty(meta).context("failed to serialize workplace meta")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "workplace.meta.save",
+            "saved workplace metadata",
+            serde_json::json!({
+                "workplace_id": meta.workplace_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
         Ok(path)
     }
 
@@ -108,6 +144,14 @@ impl WorkplaceStore {
         };
         meta.updated_at = Utc::now().to_rfc3339();
         self.save_meta(&meta)?;
+        logging::debug_event(
+            "workplace.meta.touch",
+            "touched workplace metadata",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "path": self.meta_path().display().to_string(),
+            }),
+        );
         Ok(())
     }
 
@@ -190,6 +234,8 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::logging;
+    use crate::logging::RunMode;
     use super::WorkplaceMeta;
     use super::WorkplaceStore;
     use super::slugify;
@@ -217,6 +263,20 @@ mod tests {
 
         assert!(store.agents_dir().ends_with("agents"));
         assert!(store.meta_path().exists());
+    }
+
+    #[test]
+    fn ensure_logs_workplace_resolution_and_meta_write() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        logging::init_for_workplace(&store, RunMode::RunLoop).expect("init logger");
+
+        store.ensure().expect("ensure");
+
+        let log_path = logging::current_log_path().expect("log path");
+        let contents = std::fs::read_to_string(log_path).expect("log file");
+        assert!(contents.contains("\"event\":\"workplace.ensure\""));
+        assert!(contents.contains("\"event\":\"workplace.meta.save\""));
     }
 
     #[test]

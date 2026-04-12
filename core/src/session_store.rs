@@ -13,6 +13,7 @@ use crate::app::AppState;
 use crate::app::LoopPhase;
 use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
+use crate::logging;
 use crate::provider::ProviderKind;
 use crate::skills::SkillRegistry;
 use crate::storage;
@@ -156,6 +157,15 @@ fn save_recent_session_to_root(state: &AppState, root: &Path) -> Result<()> {
         serde_json::to_string_pretty(&pointer).context("failed to serialize recent pointer")?;
     fs::write(root.join("recent-session.json"), pointer_json)
         .context("failed to write recent session pointer")?;
+    logging::debug_event(
+        "storage.write",
+        "saved recent session",
+        serde_json::json!({
+            "kind": "recent_session",
+            "session_path": session_path.display().to_string(),
+            "pointer_path": root.join("recent-session.json").display().to_string(),
+        }),
+    );
 
     Ok(())
 }
@@ -169,7 +179,17 @@ fn load_recent_session_from_root(root: &Path) -> Result<PersistedSession> {
 
     let session_json = fs::read_to_string(&pointer.session_path)
         .with_context(|| format!("failed to read {}", pointer.session_path))?;
-    serde_json::from_str(&session_json).context("failed to parse persisted session")
+    let session = serde_json::from_str(&session_json).context("failed to parse persisted session")?;
+    logging::debug_event(
+        "storage.read",
+        "loaded recent session",
+        serde_json::json!({
+            "kind": "recent_session",
+            "pointer_path": pointer_path.display().to_string(),
+            "session_path": pointer.session_path,
+        }),
+    );
+    Ok(session)
 }
 
 fn default_session_root() -> Result<PathBuf> {

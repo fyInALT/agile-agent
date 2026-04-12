@@ -7,6 +7,7 @@ use crate::agent_runtime::AgentBootstrapKind;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::backlog_store;
+use crate::logging;
 use crate::provider::ProviderKind;
 use crate::session_store;
 use crate::skills::SkillRegistry;
@@ -37,6 +38,13 @@ impl RuntimeSession {
         if matches!(bootstrap.kind, AgentBootstrapKind::Restored) {
             if let Err(err) = bootstrap.runtime.restore_transcript(&mut app) {
                 app.push_error_message(format!("failed to restore agent transcript: {err}"));
+                logging::error_event(
+                    "agent.restore_transcript",
+                    "failed to restore transcript into session app state",
+                    serde_json::json!({
+                        "error": err.to_string(),
+                    }),
+                );
             }
         }
         announce_bootstrap_kind(&mut app, &bootstrap.kind, &bootstrap.runtime);
@@ -51,6 +59,15 @@ impl RuntimeSession {
         }
 
         session.persist_if_changed()?;
+        logging::debug_event(
+            "agent.session.bootstrap",
+            "bootstrapped runtime session",
+            serde_json::json!({
+                "agent_id": session.agent_runtime.agent_id().as_str(),
+                "provider": session.app.selected_provider.label(),
+                "resume_snapshot": resume_snapshot,
+            }),
+        );
         Ok(session)
     }
 
@@ -75,6 +92,15 @@ impl RuntimeSession {
             &self.app,
             self.agent_runtime.workplace(),
         )?;
+        logging::debug_event(
+            "agent.persist",
+            "persisted runtime bundle",
+            serde_json::json!({
+                "agent_id": self.agent_runtime.agent_id().as_str(),
+                "workplace_id": self.agent_runtime.meta().workplace_id.as_str(),
+                "provider": self.app.selected_provider.label(),
+            }),
+        );
         Ok(())
     }
 
@@ -162,8 +188,11 @@ fn announce_bootstrap_kind(app: &mut AppState, kind: &AgentBootstrapKind, runtim
 mod tests {
     use super::RuntimeSession;
     use crate::app::TranscriptEntry;
+    use crate::logging;
+    use crate::logging::RunMode;
     use crate::provider::ProviderKind;
     use crate::provider::SessionHandle;
+    use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 
     #[test]
@@ -192,6 +221,9 @@ mod tests {
     #[test]
     fn bootstrap_restores_existing_agent_transcript_and_codex_thread_without_resume_snapshot() {
         let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        workplace.ensure().expect("ensure");
+        logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
         let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Codex, false)
             .expect("bootstrap");
         first.app.push_user_message("hello".to_string());
@@ -229,5 +261,10 @@ mod tests {
                 thread_id: "thr-restore-1".to_string(),
             })
         );
+
+        let log_path = logging::current_log_path().expect("log path");
+        let contents = std::fs::read_to_string(log_path).expect("log file");
+        assert!(contents.contains("\"event\":\"agent.bootstrap\""));
+        assert!(contents.contains("\"event\":\"agent.restore_transcript\""));
     }
 }

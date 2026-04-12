@@ -6,6 +6,7 @@ use anyhow::Context;
 use anyhow::Result;
 
 use crate::backlog::BacklogState;
+use crate::logging;
 use crate::storage;
 use crate::workplace_store::WorkplaceStore;
 
@@ -33,12 +34,29 @@ pub fn save_backlog_for_workplace(
 fn load_backlog_from_root(root: &Path) -> Result<BacklogState> {
     let path = root.join("backlog.json");
     if !path.exists() {
+        logging::debug_event(
+            "storage.read",
+            "backlog file missing, using default backlog",
+            serde_json::json!({
+                "kind": "backlog",
+                "path": path.display().to_string(),
+            }),
+        );
         return Ok(BacklogState::default());
     }
 
     let data =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&data).context("failed to parse backlog.json")
+    let backlog = serde_json::from_str(&data).context("failed to parse backlog.json")?;
+    logging::debug_event(
+        "storage.read",
+        "loaded workplace backlog",
+        serde_json::json!({
+            "kind": "backlog",
+            "path": path.display().to_string(),
+        }),
+    );
+    Ok(backlog)
 }
 
 fn save_backlog_to_root(backlog: &BacklogState, root: &Path) -> Result<()> {
@@ -46,6 +64,14 @@ fn save_backlog_to_root(backlog: &BacklogState, root: &Path) -> Result<()> {
     let path = root.join("backlog.json");
     let data = serde_json::to_string_pretty(backlog).context("failed to serialize backlog")?;
     fs::write(&path, data).with_context(|| format!("failed to write {}", path.display()))?;
+    logging::debug_event(
+        "storage.write",
+        "saved workplace backlog",
+        serde_json::json!({
+            "kind": "backlog",
+            "path": path.display().to_string(),
+        }),
+    );
     Ok(())
 }
 

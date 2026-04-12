@@ -14,6 +14,7 @@ use crate::agent_transcript::AgentTranscript;
 use crate::app::AppState;
 use crate::app::AppStatus;
 use crate::app::LoopPhase;
+use crate::logging;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::workplace_store::WorkplaceStore;
@@ -304,6 +305,14 @@ impl AgentRuntime {
         let snapshot =
             AgentStore::new(self.workplace.clone()).load_transcript(&self.meta.agent_id)?;
         snapshot.apply_to_app_state(state);
+        logging::debug_event(
+            "agent.restore_transcript",
+            "restored transcript into app state",
+            serde_json::json!({
+                "agent_id": self.meta.agent_id.as_str(),
+                "workplace_id": self.meta.workplace_id.as_str(),
+            }),
+        );
         Ok(())
     }
 
@@ -337,13 +346,33 @@ impl AgentRuntime {
         let store = AgentStore::new(workplace.clone());
 
         match store.load_most_recent_meta() {
-            Ok(Some(meta)) => Ok(AgentBootstrap {
-                runtime: Self::from_meta(meta, workplace),
-                kind: AgentBootstrapKind::Restored,
-            }),
+            Ok(Some(meta)) => {
+                logging::debug_event(
+                    "agent.bootstrap",
+                    "restored existing agent runtime",
+                    serde_json::json!({
+                        "bootstrap_kind": "restored",
+                        "agent_id": meta.agent_id.as_str(),
+                        "provider_type": meta.provider_type.label(),
+                    }),
+                );
+                Ok(AgentBootstrap {
+                    runtime: Self::from_meta(meta, workplace),
+                    kind: AgentBootstrapKind::Restored,
+                })
+            }
             Ok(None) => {
                 let runtime = Self::new(&workplace, store.next_agent_index()?, default_provider);
                 runtime.persist()?;
+                logging::debug_event(
+                    "agent.bootstrap",
+                    "created new agent runtime",
+                    serde_json::json!({
+                        "bootstrap_kind": "created",
+                        "agent_id": runtime.agent_id().as_str(),
+                        "provider_type": runtime.meta().provider_type.label(),
+                    }),
+                );
                 Ok(AgentBootstrap {
                     runtime,
                     kind: AgentBootstrapKind::Created,
@@ -352,6 +381,16 @@ impl AgentRuntime {
             Err(error) => {
                 let runtime = Self::new(&workplace, store.next_agent_index()?, default_provider);
                 runtime.persist()?;
+                logging::error_event(
+                    "agent.bootstrap",
+                    "recreated agent runtime after restore failure",
+                    serde_json::json!({
+                        "bootstrap_kind": "recreated_after_error",
+                        "agent_id": runtime.agent_id().as_str(),
+                        "provider_type": runtime.meta().provider_type.label(),
+                        "error": error.to_string(),
+                    }),
+                );
                 Ok(AgentBootstrap {
                     runtime,
                     kind: AgentBootstrapKind::RecreatedAfterError {
