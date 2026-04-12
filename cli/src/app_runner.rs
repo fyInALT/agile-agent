@@ -3,6 +3,8 @@ use agent_core::agent_runtime::AgentRuntime;
 use agent_core::agent_store::AgentStore;
 use agent_core::app::AppState;
 use agent_core::backlog_store;
+use agent_core::logging;
+use agent_core::logging::RunMode;
 use agent_core::loop_runner;
 use agent_core::loop_runner::LoopGuardrails;
 use agent_core::probe;
@@ -71,6 +73,9 @@ pub fn run() -> Result<()> {
 }
 
 pub fn execute(cli: Cli) -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    init_logging_for_mode(&launch_cwd, run_mode_for_cli(&cli));
+
     match cli.command {
         None => agent_tui::run_tui(),
         Some(Command::ResumeLast) => agent_tui::run_tui_with_resume_last(),
@@ -99,6 +104,43 @@ pub fn execute(cli: Cli) -> Result<()> {
             println!("probe requires --json");
             Ok(())
         }
+    }
+}
+
+fn run_mode_for_cli(cli: &Cli) -> RunMode {
+    match &cli.command {
+        None => RunMode::Tui,
+        Some(Command::ResumeLast) => RunMode::ResumeLast,
+        Some(Command::RunLoop { .. }) => RunMode::RunLoop,
+        Some(Command::Doctor) => RunMode::Doctor,
+        Some(Command::Probe { .. }) => RunMode::Probe,
+        Some(Command::Agent {
+            command: AgentCommand::Current,
+        }) => RunMode::AgentCurrent,
+        Some(Command::Agent {
+            command: AgentCommand::List,
+        }) => RunMode::AgentList,
+        Some(Command::Workplace {
+            command: WorkplaceCommand::Current,
+        }) => RunMode::WorkplaceCurrent,
+    }
+}
+
+fn init_logging_for_mode(launch_cwd: &std::path::Path, run_mode: RunMode) {
+    match WorkplaceStore::for_cwd(launch_cwd).and_then(|workplace| {
+        workplace.ensure()?;
+        logging::init_for_workplace(&workplace, run_mode)
+    }) {
+        Ok(initialized) => logging::debug_event(
+            "app.launch",
+            "initialized CLI logging",
+            serde_json::json!({
+                "cwd": launch_cwd.display().to_string(),
+                "run_mode": run_mode.as_str(),
+                "log_path": initialized.log_path.display().to_string(),
+            }),
+        ),
+        Err(error) => eprintln!("warning: failed to initialize debug logging: {error}"),
     }
 }
 
