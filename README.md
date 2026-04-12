@@ -321,6 +321,34 @@ Persisted state includes:
 
 Implementation-facing specs live under `docs/plan/spec/`.
 
+## Debug Logging
+
+`agile-agent` writes structured debug logs for every run to support troubleshooting and observability.
+
+Log location:
+
+- `~/.agile-agent/workplaces/{workplace_id}/logs/`
+
+Each run creates one JSON Lines log file:
+
+- `{utc-timestamp}-{run-mode}-pid{pid}.jsonl`
+- Example: `2026-04-13T10-15-30Z-tui-pid43120.jsonl`
+
+A `latest-path.txt` file in the same directory points to the most recent log for quick discovery.
+
+Logged events include:
+
+- launch environment and workplace resolution
+- agent lifecycle: bootstrap, restore, persist, shutdown
+- provider communication: raw stdin/stdout for Claude, JSON-RPC traffic for Codex
+- loop and task execution: iterations, task creation, verification, escalation
+- persistence operations: file reads, writes, and missing-file fallbacks
+- TUI control flow: command execution, provider switches, loop control
+
+The default log level is `debug`. Logs are structured JSON Lines for easy filtering and analysis.
+
+Logging failures are non-fatal: the runtime continues even if logging encounters errors.
+
 ## Current Boundaries
 
 `agile-agent` is intentionally narrower than its long-term name suggests. Today it is:
