@@ -60,6 +60,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             break;
         }
 
+        if state.loop_run_active
+            && provider_rx.is_none()
+            && state.status == AppStatus::Idle
+            && state.active_task_id.is_none()
+        {
+            if state.remaining_loop_iterations == 0 {
+                state.set_loop_phase(LoopPhase::Idle);
+                state.stop_loop_run("loop guardrail reached: max iterations");
+            } else if let Some(prompt) = start_next_loop_iteration(&mut state) {
+                state.remaining_loop_iterations = state.remaining_loop_iterations.saturating_sub(1);
+                start_provider_request(&mut state, prompt, &mut provider_rx);
+            } else {
+                state.set_loop_phase(LoopPhase::Idle);
+                state.stop_loop_run("no ready todo available");
+            }
+        }
+
         let poll_timeout = if provider_rx.is_some() {
             Duration::from_millis(80)
         } else {
@@ -289,7 +306,11 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<S
                 "/provider",
                 "/skills",
                 "/doctor",
+                "/backlog",
+                "/todo-add <title>",
                 "/quit",
+                "/run-once",
+                "/run-loop",
             ] {
                 state.push_status_message(line);
             }
@@ -339,6 +360,12 @@ fn handle_local_command(state: &mut AppState, command: LocalCommand) -> Option<S
 
             state.push_status_message(format!("running task: {}", task.id));
             Some(build_task_prompt(&task))
+        }
+        LocalCommand::RunLoop => {
+            state.start_loop_run(5);
+            state.set_loop_phase(LoopPhase::Planning);
+            state.push_status_message("starting autonomous run-loop");
+            None
         }
         LocalCommand::Quit => {
             state.request_quit();
@@ -390,4 +417,19 @@ fn build_task_prompt(task: &agent_core::backlog::TaskItem) -> String {
     }
 
     prompt
+}
+
+fn start_next_loop_iteration(state: &mut AppState) -> Option<String> {
+    let Some(todo_id) = state.next_ready_todo_id() else {
+        return None;
+    };
+
+    state.set_loop_phase(LoopPhase::Planning);
+    let Some(task) = state.begin_task_from_todo(&todo_id) else {
+        state.push_error_message(format!("failed to start task from todo: {todo_id}"));
+        return None;
+    };
+
+    state.push_status_message(format!("running task: {}", task.id));
+    Some(build_task_prompt(&task))
 }

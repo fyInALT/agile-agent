@@ -7,6 +7,7 @@ pub enum LocalCommand {
     Backlog,
     TodoAdd(String),
     RunOnce,
+    RunLoop,
     Quit,
 }
 
@@ -29,6 +30,7 @@ pub fn parse_local_command(input: &str) -> Option<Result<LocalCommand, String>> 
         "todo-add" if !remainder.trim().is_empty() => Ok(LocalCommand::TodoAdd(remainder)),
         "todo-add" => Err("usage: /todo-add <title>".to_string()),
         "run-once" => Ok(LocalCommand::RunOnce),
+        "run-loop" => Ok(LocalCommand::RunLoop),
         "quit" => Ok(LocalCommand::Quit),
         other => Err(format!("unsupported command: /{other}")),
     };
@@ -63,6 +65,10 @@ mod tests {
         assert_eq!(
             parse_local_command("/run-once"),
             Some(Ok(LocalCommand::RunOnce))
+        );
+        assert_eq!(
+            parse_local_command("/run-loop"),
+            Some(Ok(LocalCommand::RunLoop))
         );
         assert_eq!(parse_local_command("/quit"), Some(Ok(LocalCommand::Quit)));
     }
