@@ -75,7 +75,7 @@ Common keybindings:
 
 - `Enter`: submit
 - `Ctrl+J`: newline
-- `Tab`: switch provider
+- `Tab`: create a new agent on the next provider
 - `Ctrl+T`: open transcript overlay
 - `$`: open skill browser when the composer is empty
 - `Ctrl+C`: quit
@@ -114,6 +114,7 @@ The current runtime now treats one `agent` as a first-class object:
 - one agent maps to one long-lived runtime identity
 - one agent binds to one provider type
 - one agent reuses one provider session continuity when available
+- switching provider in the TUI creates a new agent instead of mutating the current one
 
 The runtime currently persists:
 
@@ -241,6 +242,9 @@ Current files and folders include:
 Agent runtime state is stored separately under:
 
 - `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/meta.json`
+- `~/.agile-agent/workplaces/{workplace_id}/backlog.json`
+- `~/.agile-agent/workplaces/{workplace_id}/recent-session.json`
+- `~/.agile-agent/workplaces/{workplace_id}/sessions/session-*.json`
 
 Persisted state includes:
 
