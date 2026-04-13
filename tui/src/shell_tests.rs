@@ -369,6 +369,31 @@ fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
 }
 
 #[test]
+fn active_cell_height_accounts_for_wrapped_rows() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    shell.state.app_mut().transcript.push(TranscriptEntry::WebSearch {
+        call_id: Some("search-1".to_string()),
+        query: "example search query with several generic words to exercise wrapping"
+            .to_string(),
+        action: None,
+        started: true,
+    });
+
+    let rendered = shell.render_to_string(30, 12);
+
+    assert!(
+        rendered.contains("wrapping"),
+        "active cell wrapped rows were clipped:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("ctrl+j newline"),
+        "footer should still render after active cell wrapping:\n{}",
+        rendered
+    );
+}
+
+#[test]
 fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
     let backend = TestBackend::new(24, 3);
