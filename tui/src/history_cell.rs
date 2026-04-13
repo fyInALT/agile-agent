@@ -10,6 +10,7 @@ use textwrap::Options;
 use textwrap::WordSplitter;
 use textwrap::wrap;
 
+use crate::exec_semantics::ExploringOp;
 use crate::markdown;
 use crate::text_formatting::format_json_compact;
 use crate::tool_output;
@@ -100,6 +101,12 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
     }
 }
 
+pub(crate) fn history_cell_for_exploring_exec_group(
+    calls: Vec<ExploringExecCall>,
+) -> Box<dyn HistoryCell> {
+    Box::new(ExploringExecHistoryCell { calls })
+}
+
 #[derive(Debug)]
 struct PrefixedTextCell {
     prefix: &'static str,
@@ -144,6 +151,23 @@ struct ExecHistoryCell {
     duration_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ExploringExecCall {
+    pub(crate) source: Option<String>,
+    pub(crate) input_preview: Option<String>,
+    pub(crate) output_preview: Option<String>,
+    pub(crate) success: bool,
+    pub(crate) started: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) duration_ms: Option<u64>,
+    pub(crate) ops: Vec<ExploringOp>,
+}
+
+#[derive(Debug)]
+struct ExploringExecHistoryCell {
+    calls: Vec<ExploringExecCall>,
+}
+
 impl HistoryCell for ExecHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_exec_history_lines(
@@ -171,6 +195,33 @@ impl HistoryCell for ExecHistoryCell {
             width,
             ToolRenderMode::Full,
         )
+    }
+}
+
+impl HistoryCell for ExploringExecHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        render_exploring_exec_lines(&self.calls, width)
+    }
+
+    fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for (index, call) in self.calls.iter().enumerate() {
+            if index > 0 {
+                lines.push(Line::from(""));
+            }
+            lines.extend(render_exec_history_lines(
+                call.source.as_deref(),
+                call.input_preview.as_deref(),
+                call.output_preview.as_deref(),
+                call.success,
+                call.started,
+                call.exit_code,
+                call.duration_ms,
+                width,
+                ToolRenderMode::Full,
+            ));
+        }
+        lines
     }
 }
 
@@ -314,6 +365,77 @@ fn render_exec_history_lines(
             success,
             exit_code,
             duration_ms,
+        ));
+    }
+
+    lines
+}
+
+fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let any_started = calls.iter().any(|call| call.started);
+    let bullet_style = if any_started {
+        Style::default().fg(Color::Blue)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+    let title = if any_started { "Exploring" } else { "Explored" };
+    lines.push(Line::from(vec![
+        Span::styled("• ", bullet_style),
+        Span::styled(title.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+    ]));
+
+    let mut grouped = Vec::new();
+    let mut index = 0usize;
+    while index < calls.len() {
+        let call = &calls[index];
+        if call.ops.iter().all(|op| matches!(op, ExploringOp::Read(_))) {
+            let mut names = Vec::new();
+            while index < calls.len()
+                && calls[index]
+                    .ops
+                    .iter()
+                    .all(|op| matches!(op, ExploringOp::Read(_)))
+            {
+                for op in &calls[index].ops {
+                    if let ExploringOp::Read(name) = op && !names.contains(name) {
+                        names.push(name.clone());
+                    }
+                }
+                index += 1;
+            }
+            grouped.push(("Read".to_string(), names.join(", ")));
+            continue;
+        }
+
+        for op in &call.ops {
+            match op {
+                ExploringOp::Read(name) => grouped.push(("Read".to_string(), name.clone())),
+                ExploringOp::List(target) => grouped.push(("List".to_string(), target.clone())),
+                ExploringOp::Search { query, path } => grouped.push((
+                    "Search".to_string(),
+                    match path {
+                        Some(path) => format!("{query} in {path}"),
+                        None => query.clone(),
+                    },
+                )),
+            }
+        }
+        index += 1;
+    }
+
+    for (index, (label, text)) in grouped.into_iter().enumerate() {
+        let prefix = if index == 0 {
+            DETAIL_INITIAL_PREFIX
+        } else {
+            DETAIL_CONTINUATION_PREFIX
+        };
+        let content = format!("{label} {text}");
+        lines.extend(wrap_prefixed(
+            prefix,
+            &content,
+            Style::default().fg(Color::Cyan),
+            width as usize,
         ));
     }
 

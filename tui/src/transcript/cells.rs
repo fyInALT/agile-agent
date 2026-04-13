@@ -1,6 +1,9 @@
 use agent_core::app::TranscriptEntry;
 use ratatui::text::Line;
 
+use crate::exec_semantics::parse_exploring_ops;
+use crate::history_cell::ExploringExecCall;
+use crate::history_cell::history_cell_for_exploring_exec_group;
 use crate::history_cell::history_cell_for_entry;
 use crate::tool_output::ToolRenderMode;
 
@@ -22,18 +25,86 @@ fn build_cells_with_mode(
     width: u16,
     mode: ToolRenderMode,
 ) -> Vec<TranscriptCell> {
-    entries
-        .iter()
-        .map(|entry| {
-            let cell = history_cell_for_entry(entry);
-            let lines = match mode {
-                ToolRenderMode::Preview => cell.display_lines(width),
-                ToolRenderMode::Full => cell.transcript_lines(width),
-            };
-            TranscriptCell { lines }
-        })
-        .filter(|cell| !cell.lines.is_empty())
-        .collect()
+    let mut cells = Vec::new();
+    let mut index = 0usize;
+
+    while index < entries.len() {
+        if let ToolRenderMode::Preview = mode
+            && let Some((next_index, cell)) = exploring_exec_group_cell(entries, index, width)
+        {
+            cells.push(cell);
+            index = next_index;
+            continue;
+        }
+
+        let cell = history_cell_for_entry(&entries[index]);
+        let lines = match mode {
+            ToolRenderMode::Preview => cell.display_lines(width),
+            ToolRenderMode::Full => cell.transcript_lines(width),
+        };
+        if !lines.is_empty() {
+            cells.push(TranscriptCell { lines });
+        }
+        index += 1;
+    }
+
+    cells
+}
+
+fn exploring_exec_group_cell(
+    entries: &[TranscriptEntry],
+    start: usize,
+    width: u16,
+) -> Option<(usize, TranscriptCell)> {
+    let mut index = start;
+    let mut calls = Vec::new();
+
+    while index < entries.len() {
+        let TranscriptEntry::ExecCommand {
+            source,
+            input_preview,
+            output_preview,
+            success,
+            started,
+            exit_code,
+            duration_ms,
+            ..
+        } = &entries[index]
+        else {
+            break;
+        };
+
+        let Some(command) = input_preview.as_deref() else {
+            break;
+        };
+        let Some(ops) = parse_exploring_ops(command, source.as_deref()) else {
+            break;
+        };
+
+        calls.push(ExploringExecCall {
+            source: source.clone(),
+            input_preview: input_preview.clone(),
+            output_preview: output_preview.clone(),
+            success: *success,
+            started: *started,
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
+            ops,
+        });
+        index += 1;
+    }
+
+    if calls.is_empty() {
+        return None;
+    }
+
+    let cell = history_cell_for_exploring_exec_group(calls);
+    let lines = cell.display_lines(width);
+    if lines.is_empty() {
+        None
+    } else {
+        Some((index, TranscriptCell { lines }))
+    }
 }
 
 pub fn flatten_cells(cells: &[TranscriptCell]) -> Vec<Line<'static>> {
@@ -331,6 +402,138 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "• Edited old_name.rs → new_name.rs (+1 -1)"), "{rendered:?}");
+    }
+
+    #[test]
+    fn preview_coalesces_adjacent_exploring_exec_calls() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-1".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("ls -la".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-2".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("cat foo.txt".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-3".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("cat bar.txt".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "    Read foo.txt, bar.txt"), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line.contains("Ran ls -la")), "{rendered:?}");
+    }
+
+    #[test]
+    fn preview_marks_started_exploring_cluster_as_exploring() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-1".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("rg shimmer_spans src".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-2".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("cat src/shimmer.rs".to_string()),
+                output_preview: None,
+                success: true,
+                started: true,
+                exit_code: None,
+                duration_ms: None,
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Exploring"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ Search shimmer_spans in src"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "    Read src/shimmer.rs"), "{rendered:?}");
+    }
+
+    #[test]
+    fn overlay_keeps_individual_exec_cells_for_exploring_cluster() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-1".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("ls -la".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-2".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("cat foo.txt".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line.contains("Ran ls -la")), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line.contains("Ran cat foo.txt")), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+    }
+
+    #[test]
+    fn user_shell_exec_does_not_coalesce_into_exploring_cell() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-1".to_string()),
+            source: Some("userShell".to_string()),
+            input_preview: Some("cat foo.txt".to_string()),
+            output_preview: Some(String::new()),
+            success: true,
+            started: false,
+            exit_code: Some(0),
+            duration_ms: Some(10),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line.contains("You ran cat foo.txt")), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
     }
 
     #[test]
