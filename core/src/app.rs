@@ -13,6 +13,7 @@ use crate::skills::SkillRegistry;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::WebSearchAction;
 use crate::verification;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +52,22 @@ pub enum TranscriptEntry {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
         status: PatchApplyStatus,
+    },
+    WebSearch {
+        call_id: Option<String>,
+        query: String,
+        action: Option<WebSearchAction>,
+        started: bool,
+    },
+    ViewImage {
+        call_id: Option<String>,
+        path: String,
+    },
+    ImageGeneration {
+        call_id: Option<String>,
+        revised_prompt: Option<String>,
+        result: Option<String>,
+        saved_path: Option<String>,
     },
     GenericToolCall {
         name: String,
@@ -410,6 +427,70 @@ impl AppState {
             call_id,
             changes,
             status,
+        });
+    }
+
+    pub fn push_web_search_started(&mut self, call_id: Option<String>, query: String) {
+        self.transcript.push(TranscriptEntry::WebSearch {
+            call_id,
+            query,
+            action: None,
+            started: true,
+        });
+    }
+
+    pub fn push_web_search_finished(
+        &mut self,
+        call_id: Option<String>,
+        query: String,
+        action: Option<WebSearchAction>,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::WebSearch {
+                call_id: existing_call_id,
+                started: true,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = existing_call_id.is_none();
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::WebSearch {
+                        call_id: existing_call_id.clone().or(call_id),
+                        query,
+                        action,
+                        started: false,
+                    };
+                    return;
+                }
+            }
+        }
+
+        self.transcript.push(TranscriptEntry::WebSearch {
+            call_id,
+            query,
+            action,
+            started: false,
+        });
+    }
+
+    pub fn push_view_image(&mut self, call_id: Option<String>, path: String) {
+        self.transcript
+            .push(TranscriptEntry::ViewImage { call_id, path });
+    }
+
+    pub fn push_image_generation(
+        &mut self,
+        call_id: Option<String>,
+        revised_prompt: Option<String>,
+        result: Option<String>,
+        saved_path: Option<String>,
+    ) {
+        self.transcript.push(TranscriptEntry::ImageGeneration {
+            call_id,
+            revised_prompt,
+            result,
+            saved_path,
         });
     }
 
@@ -1028,6 +1109,63 @@ mod tests {
                     removed: 1,
                 }]
                 && *status == crate::tool_calls::PatchApplyStatus::Completed
+        ));
+    }
+
+    #[test]
+    fn web_search_and_media_events_use_dedicated_transcript_entries() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_web_search_started(
+            Some("search-1".to_string()),
+            "ratatui stylize".to_string(),
+        );
+        state.push_web_search_finished(
+            Some("search-1".to_string()),
+            "ratatui stylize".to_string(),
+            Some(crate::tool_calls::WebSearchAction::Other),
+        );
+        state.push_view_image(
+            Some("image-view-1".to_string()),
+            "example.png".to_string(),
+        );
+        state.push_image_generation(
+            Some("image-gen-1".to_string()),
+            Some("A tiny blue square".to_string()),
+            Some("image.png".to_string()),
+            Some("/tmp/ig-1.png".to_string()),
+        );
+
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::WebSearch {
+                call_id,
+                query,
+                action,
+                started,
+            }
+            if call_id.as_deref() == Some("search-1")
+                && query == "ratatui stylize"
+                && action == &Some(crate::tool_calls::WebSearchAction::Other)
+                && !*started
+        ));
+        assert!(matches!(
+            &state.transcript[1],
+            TranscriptEntry::ViewImage { call_id, path }
+            if call_id.as_deref() == Some("image-view-1")
+                && path == "example.png"
+        ));
+        assert!(matches!(
+            &state.transcript[2],
+            TranscriptEntry::ImageGeneration {
+                call_id,
+                revised_prompt,
+                result,
+                saved_path,
+            }
+            if call_id.as_deref() == Some("image-gen-1")
+                && revised_prompt.as_deref() == Some("A tiny blue square")
+                && result.as_deref() == Some("image.png")
+                && saved_path.as_deref() == Some("/tmp/ig-1.png")
         ));
     }
 

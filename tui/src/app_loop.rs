@@ -227,6 +227,25 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         exit_code,
                         duration_ms,
                     ),
+                    ProviderEvent::WebSearchStarted { call_id, query } => {
+                        state.app_mut().push_web_search_started(call_id, query)
+                    }
+                    ProviderEvent::WebSearchFinished {
+                        call_id,
+                        query,
+                        action,
+                    } => state.app_mut().push_web_search_finished(call_id, query, action),
+                    ProviderEvent::ViewImage { call_id, path } => {
+                        state.app_mut().push_view_image(call_id, path)
+                    }
+                    ProviderEvent::ImageGenerationFinished {
+                        call_id,
+                        revised_prompt,
+                        result,
+                        saved_path,
+                    } => state
+                        .app_mut()
+                        .push_image_generation(call_id, revised_prompt, result, saved_path),
                     ProviderEvent::PatchApplyStarted { call_id, changes } => {
                         state.app_mut().push_patch_apply_started(call_id, changes)
                     }

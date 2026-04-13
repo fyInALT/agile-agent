@@ -13,6 +13,7 @@ use crate::probe;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::WebSearchAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderKind {
@@ -88,6 +89,25 @@ pub enum ProviderEvent {
         success: bool,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
+    },
+    WebSearchStarted {
+        call_id: Option<String>,
+        query: String,
+    },
+    WebSearchFinished {
+        call_id: Option<String>,
+        query: String,
+        action: Option<WebSearchAction>,
+    },
+    ViewImage {
+        call_id: Option<String>,
+        path: String,
+    },
+    ImageGenerationFinished {
+        call_id: Option<String>,
+        revised_prompt: Option<String>,
+        result: Option<String>,
+        saved_path: Option<String>,
     },
     PatchApplyStarted {
         call_id: Option<String>,
@@ -201,6 +221,10 @@ mod tests {
                 | ProviderEvent::ExecCommandOutputDelta { .. }
                 | ProviderEvent::GenericToolCallStarted { .. }
                 | ProviderEvent::GenericToolCallFinished { .. }
+                | ProviderEvent::WebSearchStarted { .. }
+                | ProviderEvent::WebSearchFinished { .. }
+                | ProviderEvent::ViewImage { .. }
+                | ProviderEvent::ImageGenerationFinished { .. }
                 | ProviderEvent::PatchApplyStarted { .. }
                 | ProviderEvent::PatchApplyFinished { .. }
                 | ProviderEvent::SessionHandle(_)

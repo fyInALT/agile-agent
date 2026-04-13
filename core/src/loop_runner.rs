@@ -319,6 +319,23 @@ fn consume_provider_until_finished(
                     exit_code,
                     duration_ms,
                 ),
+                ProviderEvent::WebSearchStarted { call_id, query } => {
+                    state.push_web_search_started(call_id, query)
+                }
+                ProviderEvent::WebSearchFinished {
+                    call_id,
+                    query,
+                    action,
+                } => state.push_web_search_finished(call_id, query, action),
+                ProviderEvent::ViewImage { call_id, path } => {
+                    state.push_view_image(call_id, path)
+                }
+                ProviderEvent::ImageGenerationFinished {
+                    call_id,
+                    revised_prompt,
+                    result,
+                    saved_path,
+                } => state.push_image_generation(call_id, revised_prompt, result, saved_path),
                 ProviderEvent::PatchApplyStarted { call_id, changes } => {
                     state.push_patch_apply_started(call_id, changes)
                 }

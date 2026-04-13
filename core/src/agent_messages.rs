@@ -8,6 +8,7 @@ use crate::app::TranscriptEntry;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::WebSearchAction;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -225,6 +226,79 @@ fn map_entry(
             ),
             created_at: captured_at,
         },
+        TranscriptEntry::WebSearch {
+            call_id,
+            query,
+            action,
+            started,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: if *started {
+                agent_endpoint.clone()
+            } else {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "web_search".to_string(),
+                }
+            },
+            recipient: if *started {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "web_search".to_string(),
+                }
+            } else {
+                agent_endpoint
+            },
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!(
+                "web_search:{}:{}:{}",
+                started,
+                query,
+                summarize_web_search_action(action),
+            ),
+            created_at: captured_at,
+        },
+        TranscriptEntry::ViewImage { call_id, path } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: AgentMessageEndpoint {
+                kind: AgentMessageEndpointKind::Tool,
+                id: "view_image".to_string(),
+            },
+            recipient: agent_endpoint,
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!("view_image:{path}"),
+            created_at: captured_at,
+        },
+        TranscriptEntry::ImageGeneration {
+            call_id,
+            revised_prompt,
+            result,
+            saved_path,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: AgentMessageEndpoint {
+                kind: AgentMessageEndpointKind::Tool,
+                id: "image_generation".to_string(),
+            },
+            recipient: agent_endpoint,
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!(
+                "image_generation:{}:{}:{}",
+                revised_prompt.as_deref().unwrap_or(""),
+                result.as_deref().unwrap_or(""),
+                saved_path.as_deref().unwrap_or(""),
+            ),
+            created_at: captured_at,
+        },
         TranscriptEntry::GenericToolCall {
             name,
             call_id,
@@ -334,6 +408,25 @@ fn exec_command_status_label(status: ExecCommandStatus) -> &'static str {
         ExecCommandStatus::Failed => "failed",
         ExecCommandStatus::Declined => "declined",
     }
+}
+
+fn summarize_web_search_action(action: &Option<WebSearchAction>) -> String {
+    match action {
+        Some(WebSearchAction::Search { query, queries }) => {
+            query.clone().or_else(|| queries.as_ref().and_then(|items| items.first().cloned()))
+        }
+        Some(WebSearchAction::OpenPage { url }) => url.clone(),
+        Some(WebSearchAction::FindInPage { url, pattern }) => {
+            match (pattern.as_deref(), url.as_deref()) {
+                (Some(pattern), Some(url)) => Some(format!("{pattern} in {url}")),
+                (Some(pattern), None) => Some(pattern.to_string()),
+                (None, Some(url)) => Some(url.to_string()),
+                (None, None) => None,
+            }
+        }
+        Some(WebSearchAction::Other) | None => None,
+    }
+    .unwrap_or_default()
 }
 
 #[cfg(test)]

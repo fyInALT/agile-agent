@@ -25,6 +25,7 @@ use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchChangeKind;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::WebSearchAction;
 
 pub fn start(
     prompt: String,
@@ -664,6 +665,52 @@ fn parse_item_event(
             changes: parse_patch_changes(item),
             status: parse_patch_apply_status(item),
         }],
+        ("item/started", "webSearch") => item
+            .get("query")
+            .and_then(|value| value.as_str())
+            .map(|query| {
+                vec![ProviderEvent::WebSearchStarted {
+                    call_id: item_id,
+                    query: query.to_string(),
+                }]
+            })
+            .unwrap_or_default(),
+        ("item/completed", "webSearch") => item
+            .get("query")
+            .and_then(|value| value.as_str())
+            .map(|query| {
+                vec![ProviderEvent::WebSearchFinished {
+                    call_id: item_id,
+                    query: query.to_string(),
+                    action: item.get("action").and_then(parse_web_search_action),
+                }]
+            })
+            .unwrap_or_default(),
+        ("item/completed", "imageView") => item
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(|path| {
+                vec![ProviderEvent::ViewImage {
+                    call_id: item_id,
+                    path: path.to_string(),
+                }]
+            })
+            .unwrap_or_default(),
+        ("item/completed", "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
+            call_id: item_id,
+            revised_prompt: item
+                .get("revisedPrompt")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            result: item
+                .get("result")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            saved_path: item
+                .get("savedPath")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+        }],
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
             .get("text")
@@ -716,6 +763,43 @@ fn parse_exec_command_status(
         "inProgress" => ExecCommandStatus::InProgress,
         _ => ExecCommandStatus::Completed,
     }
+}
+
+fn parse_web_search_action(action: &serde_json::Value) -> Option<WebSearchAction> {
+    let action_type = action.get("type").and_then(|value| value.as_str())?;
+    Some(match action_type {
+        "search" => WebSearchAction::Search {
+            query: action
+                .get("query")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            queries: action.get("queries").and_then(|value| {
+                value.as_array().map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                        .collect::<Vec<_>>()
+                })
+            }),
+        },
+        "open_page" => WebSearchAction::OpenPage {
+            url: action
+                .get("url")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+        },
+        "find_in_page" => WebSearchAction::FindInPage {
+            url: action
+                .get("url")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            pattern: action
+                .get("pattern")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+        },
+        _ => WebSearchAction::Other,
+    })
 }
 
 fn parse_patch_change(change: &serde_json::Value) -> Option<PatchChange> {
@@ -1175,6 +1259,71 @@ mod tests {
                     removed: 1,
                 }],
                 status: crate::tool_calls::PatchApplyStatus::Failed,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_web_search_item_lifecycle() {
+        let started = serde_json::json!({
+            "id": "search-1",
+            "type": "webSearch",
+            "query": "ratatui stylize"
+        });
+        let completed = serde_json::json!({
+            "id": "search-1",
+            "type": "webSearch",
+            "query": "ratatui stylize",
+            "action": { "type": "other" }
+        });
+
+        assert_eq!(
+            parse_item_event("item/started", &started, &HashSet::new()),
+            vec![ProviderEvent::WebSearchStarted {
+                call_id: Some("search-1".to_string()),
+                query: "ratatui stylize".to_string(),
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item/completed", &completed, &HashSet::new()),
+            vec![ProviderEvent::WebSearchFinished {
+                call_id: Some("search-1".to_string()),
+                query: "ratatui stylize".to_string(),
+                action: Some(crate::tool_calls::WebSearchAction::Other),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_image_view_and_generation_items() {
+        let image_view = serde_json::json!({
+            "id": "image-view-1",
+            "type": "imageView",
+            "path": "example.png"
+        });
+        let image_generation = serde_json::json!({
+            "id": "image-gen-1",
+            "type": "imageGeneration",
+            "status": "completed",
+            "revisedPrompt": "A tiny blue square",
+            "result": "image.png",
+            "savedPath": "/tmp/ig-1.png"
+        });
+
+        assert_eq!(
+            parse_item_event("item/completed", &image_view, &HashSet::new()),
+            vec![ProviderEvent::ViewImage {
+                call_id: Some("image-view-1".to_string()),
+                path: "example.png".to_string(),
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item/completed", &image_generation, &HashSet::new()),
+            vec![ProviderEvent::ImageGenerationFinished {
+                call_id: Some("image-gen-1".to_string()),
+                revised_prompt: Some("A tiny blue square".to_string()),
+                result: Some("image.png".to_string()),
+                saved_path: Some("/tmp/ig-1.png".to_string()),
             }]
         );
     }

@@ -3,6 +3,7 @@ use agent_core::tool_calls::ExecCommandStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
 use agent_core::tool_calls::PatchApplyStatus;
+use agent_core::tool_calls::WebSearchAction;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -73,6 +74,29 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
         } => Box::new(PatchHistoryCell {
             changes: changes.clone(),
             status: *status,
+        }),
+        TranscriptEntry::WebSearch {
+            call_id: _,
+            query,
+            action,
+            started,
+        } => Box::new(WebSearchHistoryCell {
+            query: query.clone(),
+            action: action.clone(),
+            started: *started,
+        }),
+        TranscriptEntry::ViewImage { call_id: _, path } => Box::new(ViewImageHistoryCell {
+            path: path.clone(),
+        }),
+        TranscriptEntry::ImageGeneration {
+            call_id: _,
+            revised_prompt,
+            result,
+            saved_path,
+        } => Box::new(ImageGenerationHistoryCell {
+            revised_prompt: revised_prompt.clone(),
+            result: result.clone(),
+            saved_path: saved_path.clone(),
         }),
         TranscriptEntry::GenericToolCall {
             name,
@@ -226,6 +250,25 @@ struct PatchHistoryCell {
     status: PatchApplyStatus,
 }
 
+#[derive(Debug)]
+struct WebSearchHistoryCell {
+    query: String,
+    action: Option<WebSearchAction>,
+    started: bool,
+}
+
+#[derive(Debug)]
+struct ViewImageHistoryCell {
+    path: String,
+}
+
+#[derive(Debug)]
+struct ImageGenerationHistoryCell {
+    revised_prompt: Option<String>,
+    result: Option<String>,
+    saved_path: Option<String>,
+}
+
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
@@ -269,6 +312,72 @@ impl HistoryCell for ToolCallHistoryCell {
             width as usize,
             ToolRenderMode::Full,
         )
+    }
+}
+
+impl HistoryCell for WebSearchHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let prefix = if self.started {
+            "• Searching the web "
+        } else {
+            "• Searched "
+        };
+        wrap_prefixed(
+            prefix,
+            &web_search_detail(self.action.as_ref(), &self.query),
+            Style::default(),
+            width as usize,
+        )
+    }
+}
+
+impl HistoryCell for ViewImageHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("• ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled("Viewed Image".to_string(), Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        lines.extend(wrap_prefixed(
+            DETAIL_INITIAL_PREFIX,
+            &self.path,
+            Style::default().add_modifier(Modifier::DIM),
+            width as usize,
+        ));
+        lines
+    }
+}
+
+impl HistoryCell for ImageGenerationHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("• ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(
+                "Generated Image:".to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        let detail = self
+            .revised_prompt
+            .clone()
+            .or_else(|| self.result.clone())
+            .unwrap_or_else(|| "image generation".to_string());
+        lines.extend(wrap_prefixed(
+            DETAIL_INITIAL_PREFIX,
+            &detail,
+            Style::default().add_modifier(Modifier::DIM),
+            width as usize,
+        ));
+        if let Some(saved_path) = self.saved_path.as_deref() {
+            lines.extend(wrap_prefixed(
+                DETAIL_INITIAL_PREFIX,
+                &format!("Saved to: {saved_path}"),
+                Style::default().add_modifier(Modifier::DIM),
+                width as usize,
+            ));
+        }
+        lines
     }
 }
 
@@ -493,6 +602,23 @@ fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<L
     }
 
     lines
+}
+
+fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> String {
+    match action {
+        Some(WebSearchAction::Search { query: action_query, queries }) => action_query
+            .clone()
+            .or_else(|| queries.as_ref().and_then(|items| items.first().cloned()))
+            .unwrap_or_else(|| query.to_string()),
+        Some(WebSearchAction::OpenPage { url }) => url.clone().unwrap_or_else(|| query.to_string()),
+        Some(WebSearchAction::FindInPage { url, pattern }) => match (pattern, url) {
+            (Some(pattern), Some(url)) => format!("'{pattern}' in {url}"),
+            (Some(pattern), None) => pattern.clone(),
+            (None, Some(url)) => url.clone(),
+            (None, None) => query.to_string(),
+        },
+        Some(WebSearchAction::Other) | None => query.to_string(),
+    }
 }
 
 fn render_exec_header_lines(

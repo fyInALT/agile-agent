@@ -429,6 +429,62 @@ mod tests {
     }
 
     #[test]
+    fn web_search_renders_dedicated_history_cell() {
+        let started = vec![TranscriptEntry::WebSearch {
+            call_id: Some("search-1".to_string()),
+            query: "example search query with several generic words to exercise wrapping"
+                .to_string(),
+            action: None,
+            started: true,
+        }];
+        let completed = vec![TranscriptEntry::WebSearch {
+            call_id: Some("search-1".to_string()),
+            query: "example search query with several generic words to exercise wrapping"
+                .to_string(),
+            action: Some(agent_core::tool_calls::WebSearchAction::Other),
+            started: false,
+        }];
+
+        let started_rendered = lines_to_strings(&flatten_cells(&build_cells(&started, 80)));
+        let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
+
+        assert!(started_rendered
+            .iter()
+            .any(|line| line.contains("Searching the web")), "{started_rendered:?}");
+        assert!(completed_rendered
+            .iter()
+            .any(|line| line.contains("Searched example search query")), "{completed_rendered:?}");
+    }
+
+    #[test]
+    fn image_view_and_generation_render_dedicated_history_cells() {
+        let entries = vec![
+            TranscriptEntry::ViewImage {
+                call_id: Some("image-view-1".to_string()),
+                path: "example.png".to_string(),
+            },
+            TranscriptEntry::ImageGeneration {
+                call_id: Some("image-gen-1".to_string()),
+                revised_prompt: Some("A tiny blue square".to_string()),
+                result: Some("image.png".to_string()),
+                saved_path: Some("/tmp/ig-1.png".to_string()),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Viewed Image"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ example.png"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "• Generated Image:"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ A tiny blue square"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ Saved to: /tmp/ig-1.png"), "{rendered:?}");
+    }
+
+    #[test]
     fn preview_coalesces_adjacent_exploring_exec_calls() {
         let entries = vec![
             TranscriptEntry::ExecCommand {
