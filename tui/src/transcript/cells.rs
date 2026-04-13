@@ -485,6 +485,62 @@ mod tests {
     }
 
     #[test]
+    fn mcp_tool_call_renders_dedicated_history_cell() {
+        let invocation = agent_core::tool_calls::McpInvocation {
+            server: "search".to_string(),
+            tool: "find_docs".to_string(),
+            arguments: Some(serde_json::json!({
+                "query": "ratatui styling",
+                "limit": 3
+            })),
+        };
+        let started = vec![TranscriptEntry::McpToolCall {
+            call_id: Some("mcp-1".to_string()),
+            invocation: invocation.clone(),
+            result_blocks: Vec::new(),
+            error: None,
+            status: agent_core::tool_calls::McpToolCallStatus::InProgress,
+            is_error: false,
+        }];
+        let completed = vec![TranscriptEntry::McpToolCall {
+            call_id: Some("mcp-1".to_string()),
+            invocation: invocation.clone(),
+            result_blocks: vec![serde_json::json!({
+                "type": "text",
+                "text": "Found styling guidance in styles.md"
+            })],
+            error: None,
+            status: agent_core::tool_calls::McpToolCallStatus::Completed,
+            is_error: false,
+        }];
+        let failed = vec![TranscriptEntry::McpToolCall {
+            call_id: Some("mcp-2".to_string()),
+            invocation,
+            result_blocks: Vec::new(),
+            error: Some("network timeout".to_string()),
+            status: agent_core::tool_calls::McpToolCallStatus::Failed,
+            is_error: true,
+        }];
+
+        let started_rendered = lines_to_strings(&flatten_cells(&build_cells(&started, 80)));
+        let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
+        let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
+
+        assert!(started_rendered
+            .iter()
+            .any(|line| line.starts_with("• Calling search.find_docs(") && line.contains("\"query\":\"ratatui styling\"") && line.contains("\"limit\":3")), "{started_rendered:?}");
+        assert!(completed_rendered
+            .iter()
+            .any(|line| line.starts_with("• Called search.find_docs(") && line.contains("\"query\":\"ratatui styling\"") && line.contains("\"limit\":3")), "{completed_rendered:?}");
+        assert!(completed_rendered
+            .iter()
+            .any(|line| line == "  └ Found styling guidance in styles.md"), "{completed_rendered:?}");
+        assert!(failed_rendered
+            .iter()
+            .any(|line| line == "  └ Error: network timeout"), "{failed_rendered:?}");
+    }
+
+    #[test]
     fn preview_coalesces_adjacent_exploring_exec_calls() {
         let entries = vec![
             TranscriptEntry::ExecCommand {

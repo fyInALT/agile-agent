@@ -336,6 +336,24 @@ fn consume_provider_until_finished(
                     result,
                     saved_path,
                 } => state.push_image_generation(call_id, revised_prompt, result, saved_path),
+                ProviderEvent::McpToolCallStarted { call_id, invocation } => {
+                    state.push_mcp_tool_call_started(call_id, invocation)
+                }
+                ProviderEvent::McpToolCallFinished {
+                    call_id,
+                    invocation,
+                    result_blocks,
+                    error,
+                    status,
+                    is_error,
+                } => state.push_mcp_tool_call_finished(
+                    call_id,
+                    invocation,
+                    result_blocks,
+                    error,
+                    status,
+                    is_error,
+                ),
                 ProviderEvent::PatchApplyStarted { call_id, changes } => {
                     state.push_patch_apply_started(call_id, changes)
                 }

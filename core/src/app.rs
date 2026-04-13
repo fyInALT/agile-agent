@@ -11,6 +11,8 @@ use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
 use crate::tool_calls::ExecCommandStatus;
+use crate::tool_calls::McpInvocation;
+use crate::tool_calls::McpToolCallStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::WebSearchAction;
@@ -68,6 +70,14 @@ pub enum TranscriptEntry {
         revised_prompt: Option<String>,
         result: Option<String>,
         saved_path: Option<String>,
+    },
+    McpToolCall {
+        call_id: Option<String>,
+        invocation: McpInvocation,
+        result_blocks: Vec<serde_json::Value>,
+        error: Option<String>,
+        status: McpToolCallStatus,
+        is_error: bool,
     },
     GenericToolCall {
         name: String,
@@ -491,6 +501,63 @@ impl AppState {
             revised_prompt,
             result,
             saved_path,
+        });
+    }
+
+    pub fn push_mcp_tool_call_started(
+        &mut self,
+        call_id: Option<String>,
+        invocation: McpInvocation,
+    ) {
+        self.transcript.push(TranscriptEntry::McpToolCall {
+            call_id,
+            invocation,
+            result_blocks: Vec::new(),
+            error: None,
+            status: McpToolCallStatus::InProgress,
+            is_error: false,
+        });
+    }
+
+    pub fn push_mcp_tool_call_finished(
+        &mut self,
+        call_id: Option<String>,
+        invocation: McpInvocation,
+        result_blocks: Vec<serde_json::Value>,
+        error: Option<String>,
+        status: McpToolCallStatus,
+        is_error: bool,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::McpToolCall {
+                call_id: existing_call_id,
+                status: McpToolCallStatus::InProgress,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = existing_call_id.is_none();
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::McpToolCall {
+                        call_id: existing_call_id.clone().or(call_id),
+                        invocation,
+                        result_blocks,
+                        error,
+                        status,
+                        is_error,
+                    };
+                    return;
+                }
+            }
+        }
+
+        self.transcript.push(TranscriptEntry::McpToolCall {
+            call_id,
+            invocation,
+            result_blocks,
+            error,
+            status,
+            is_error,
         });
     }
 
@@ -1166,6 +1233,57 @@ mod tests {
                 && revised_prompt.as_deref() == Some("A tiny blue square")
                 && result.as_deref() == Some("image.png")
                 && saved_path.as_deref() == Some("/tmp/ig-1.png")
+        ));
+    }
+
+    #[test]
+    fn mcp_tool_call_uses_dedicated_transcript_entry() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        let invocation = crate::tool_calls::McpInvocation {
+            server: "search".to_string(),
+            tool: "find_docs".to_string(),
+            arguments: Some(serde_json::json!({
+                "query": "ratatui styling",
+                "limit": 3
+            })),
+        };
+
+        state.push_mcp_tool_call_started(
+            Some("mcp-1".to_string()),
+            invocation.clone(),
+        );
+        state.push_mcp_tool_call_finished(
+            Some("mcp-1".to_string()),
+            invocation.clone(),
+            vec![serde_json::json!({
+                "type": "text",
+                "text": "Found styling guidance in styles.md"
+            })],
+            None,
+            crate::tool_calls::McpToolCallStatus::Completed,
+            false,
+        );
+
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::McpToolCall {
+                call_id,
+                invocation,
+                result_blocks,
+                error,
+                status,
+                is_error,
+            }
+            if call_id.as_deref() == Some("mcp-1")
+                && invocation.server == "search"
+                && invocation.tool == "find_docs"
+                && result_blocks == &vec![serde_json::json!({
+                    "type": "text",
+                    "text": "Found styling guidance in styles.md"
+                })]
+                && error.is_none()
+                && *status == crate::tool_calls::McpToolCallStatus::Completed
+                && !*is_error
         ));
     }
 

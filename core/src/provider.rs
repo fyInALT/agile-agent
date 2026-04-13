@@ -11,6 +11,8 @@ use crate::logging;
 use crate::mock_provider;
 use crate::probe;
 use crate::tool_calls::ExecCommandStatus;
+use crate::tool_calls::McpInvocation;
+use crate::tool_calls::McpToolCallStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::WebSearchAction;
@@ -108,6 +110,18 @@ pub enum ProviderEvent {
         revised_prompt: Option<String>,
         result: Option<String>,
         saved_path: Option<String>,
+    },
+    McpToolCallStarted {
+        call_id: Option<String>,
+        invocation: McpInvocation,
+    },
+    McpToolCallFinished {
+        call_id: Option<String>,
+        invocation: McpInvocation,
+        result_blocks: Vec<serde_json::Value>,
+        error: Option<String>,
+        status: McpToolCallStatus,
+        is_error: bool,
     },
     PatchApplyStarted {
         call_id: Option<String>,
@@ -225,6 +239,8 @@ mod tests {
                 | ProviderEvent::WebSearchFinished { .. }
                 | ProviderEvent::ViewImage { .. }
                 | ProviderEvent::ImageGenerationFinished { .. }
+                | ProviderEvent::McpToolCallStarted { .. }
+                | ProviderEvent::McpToolCallFinished { .. }
                 | ProviderEvent::PatchApplyStarted { .. }
                 | ProviderEvent::PatchApplyFinished { .. }
                 | ProviderEvent::SessionHandle(_)

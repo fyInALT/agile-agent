@@ -1,5 +1,7 @@
 use agent_core::app::TranscriptEntry;
 use agent_core::tool_calls::ExecCommandStatus;
+use agent_core::tool_calls::McpInvocation;
+use agent_core::tool_calls::McpToolCallStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
 use agent_core::tool_calls::PatchApplyStatus;
@@ -97,6 +99,20 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             revised_prompt: revised_prompt.clone(),
             result: result.clone(),
             saved_path: saved_path.clone(),
+        }),
+        TranscriptEntry::McpToolCall {
+            call_id: _,
+            invocation,
+            result_blocks,
+            error,
+            status,
+            is_error,
+        } => Box::new(McpToolCallHistoryCell {
+            invocation: invocation.clone(),
+            result_blocks: result_blocks.clone(),
+            error: error.clone(),
+            status: *status,
+            is_error: *is_error,
         }),
         TranscriptEntry::GenericToolCall {
             name,
@@ -269,6 +285,15 @@ struct ImageGenerationHistoryCell {
     saved_path: Option<String>,
 }
 
+#[derive(Debug)]
+struct McpToolCallHistoryCell {
+    invocation: McpInvocation,
+    result_blocks: Vec<serde_json::Value>,
+    error: Option<String>,
+    status: McpToolCallStatus,
+    is_error: bool,
+}
+
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
@@ -377,6 +402,71 @@ impl HistoryCell for ImageGenerationHistoryCell {
                 width as usize,
             ));
         }
+        lines
+    }
+}
+
+impl HistoryCell for McpToolCallHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        let (bullet_style, header) = match self.status {
+            McpToolCallStatus::InProgress => (Style::default().fg(Color::Blue), "Calling"),
+            McpToolCallStatus::Completed if !self.is_error => {
+                (Style::default().fg(Color::Green), "Called")
+            }
+            _ => (Style::default().fg(Color::Red), "Called"),
+        };
+        let invocation = format_mcp_invocation(&self.invocation);
+        let inline = invocation.len() + header.len() + 3 <= width as usize;
+
+        if inline {
+            lines.push(Line::from(vec![
+                Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    header.to_string(),
+                    bullet_style.add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::raw(invocation),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    header.to_string(),
+                    bullet_style.add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.extend(wrap_prefixed(
+                DETAIL_INITIAL_PREFIX,
+                &invocation,
+                Style::default(),
+                width as usize,
+            ));
+        }
+
+        if let Some(error) = self.error.as_deref() {
+            lines.extend(wrap_prefixed(
+                DETAIL_INITIAL_PREFIX,
+                &format!("Error: {error}"),
+                Style::default().add_modifier(Modifier::DIM),
+                width as usize,
+            ));
+            return lines;
+        }
+
+        for block in &self.result_blocks {
+            let detail = render_mcp_result_block(block);
+            for line in detail.lines() {
+                lines.extend(wrap_prefixed(
+                    DETAIL_INITIAL_PREFIX,
+                    line,
+                    Style::default().add_modifier(Modifier::DIM),
+                    width as usize,
+                ));
+            }
+        }
+
         lines
     }
 }
@@ -618,6 +708,40 @@ fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> String {
             (None, None) => query.to_string(),
         },
         Some(WebSearchAction::Other) | None => query.to_string(),
+    }
+}
+
+fn format_mcp_invocation(invocation: &McpInvocation) -> String {
+    let args = invocation
+        .arguments
+        .as_ref()
+        .map(|value| serde_json::to_string(value).unwrap_or_else(|_| value.to_string()))
+        .unwrap_or_default();
+    format!("{}.{}({args})", invocation.server, invocation.tool)
+}
+
+fn render_mcp_result_block(block: &serde_json::Value) -> String {
+    match block.get("type").and_then(|value| value.as_str()) {
+        Some("text") => block
+            .get("text")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+        Some("image") => "<image content>".to_string(),
+        Some("audio") => "<audio content>".to_string(),
+        Some("resource_link") => format!(
+            "link: {}",
+            block.get("uri")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+        ),
+        Some("resource") => format!(
+            "embedded resource: {}",
+            block.get("uri")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+        ),
+        _ => format_json_compact(&block.to_string()).unwrap_or_else(|| block.to_string()),
     }
 }
 

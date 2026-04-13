@@ -246,6 +246,24 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     } => state
                         .app_mut()
                         .push_image_generation(call_id, revised_prompt, result, saved_path),
+                    ProviderEvent::McpToolCallStarted { call_id, invocation } => {
+                        state.app_mut().push_mcp_tool_call_started(call_id, invocation)
+                    }
+                    ProviderEvent::McpToolCallFinished {
+                        call_id,
+                        invocation,
+                        result_blocks,
+                        error,
+                        status,
+                        is_error,
+                    } => state.app_mut().push_mcp_tool_call_finished(
+                        call_id,
+                        invocation,
+                        result_blocks,
+                        error,
+                        status,
+                        is_error,
+                    ),
                     ProviderEvent::PatchApplyStarted { call_id, changes } => {
                         state.app_mut().push_patch_apply_started(call_id, changes)
                     }

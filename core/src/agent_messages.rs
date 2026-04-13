@@ -6,6 +6,7 @@ use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
 use crate::tool_calls::ExecCommandStatus;
+use crate::tool_calls::McpToolCallStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::WebSearchAction;
@@ -299,6 +300,45 @@ fn map_entry(
             ),
             created_at: captured_at,
         },
+        TranscriptEntry::McpToolCall {
+            call_id,
+            invocation,
+            result_blocks,
+            error,
+            status,
+            is_error: _,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: if matches!(status, McpToolCallStatus::InProgress) {
+                agent_endpoint.clone()
+            } else {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: format!("{}.{}", invocation.server, invocation.tool),
+                }
+            },
+            recipient: if matches!(status, McpToolCallStatus::InProgress) {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: format!("{}.{}", invocation.server, invocation.tool),
+                }
+            } else {
+                agent_endpoint
+            },
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!(
+                "mcp_tool_call:{}:{}:{}:{}:{}",
+                mcp_tool_call_status_label(*status),
+                invocation.server,
+                invocation.tool,
+                error.as_deref().unwrap_or(""),
+                result_blocks.len(),
+            ),
+            created_at: captured_at,
+        },
         TranscriptEntry::GenericToolCall {
             name,
             call_id,
@@ -427,6 +467,14 @@ fn summarize_web_search_action(action: &Option<WebSearchAction>) -> String {
         Some(WebSearchAction::Other) | None => None,
     }
     .unwrap_or_default()
+}
+
+fn mcp_tool_call_status_label(status: McpToolCallStatus) -> &'static str {
+    match status {
+        McpToolCallStatus::InProgress => "in_progress",
+        McpToolCallStatus::Completed => "completed",
+        McpToolCallStatus::Failed => "failed",
+    }
 }
 
 #[cfg(test)]

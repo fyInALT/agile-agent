@@ -22,6 +22,8 @@ use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
 use crate::tool_calls::ExecCommandStatus;
+use crate::tool_calls::McpInvocation;
+use crate::tool_calls::McpToolCallStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchChangeKind;
 use crate::tool_calls::PatchApplyStatus;
@@ -711,6 +713,29 @@ fn parse_item_event(
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
         }],
+        ("item/started", "mcpToolCall") => parse_mcp_invocation(item).map_or_else(
+            Vec::new,
+            |invocation| {
+                vec![ProviderEvent::McpToolCallStarted {
+                    call_id: item_id,
+                    invocation,
+                }]
+            },
+        ),
+        ("item/completed", "mcpToolCall") => parse_mcp_invocation(item).map_or_else(
+            Vec::new,
+            |invocation| {
+                let (result_blocks, error, is_error) = parse_mcp_tool_call_result(item);
+                vec![ProviderEvent::McpToolCallFinished {
+                    call_id: item_id,
+                    invocation,
+                    result_blocks,
+                    error,
+                    status: parse_mcp_tool_call_status(item),
+                    is_error,
+                }]
+            },
+        ),
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
             .get("text")
@@ -749,6 +774,18 @@ fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
     }
 }
 
+fn parse_mcp_tool_call_status(item: &serde_json::Value) -> McpToolCallStatus {
+    match item
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("completed")
+    {
+        "failed" => McpToolCallStatus::Failed,
+        "inProgress" => McpToolCallStatus::InProgress,
+        _ => McpToolCallStatus::Completed,
+    }
+}
+
 fn parse_exec_command_status(
     item: &serde_json::Value,
     exit_code: Option<i32>,
@@ -763,6 +800,45 @@ fn parse_exec_command_status(
         "inProgress" => ExecCommandStatus::InProgress,
         _ => ExecCommandStatus::Completed,
     }
+}
+
+fn parse_mcp_invocation(item: &serde_json::Value) -> Option<McpInvocation> {
+    Some(McpInvocation {
+        server: item.get("server").and_then(|value| value.as_str())?.to_string(),
+        tool: item.get("tool").and_then(|value| value.as_str())?.to_string(),
+        arguments: item.get("arguments").cloned(),
+    })
+}
+
+fn parse_mcp_tool_call_result(
+    item: &serde_json::Value,
+) -> (Vec<serde_json::Value>, Option<String>, bool) {
+    let result_blocks = item
+        .get("result")
+        .and_then(|result| result.get("content"))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let is_error = item
+        .get("result")
+        .and_then(|result| {
+            result
+                .get("isError")
+                .or_else(|| result.get("is_error"))
+                .and_then(|value| value.as_bool())
+        })
+        .unwrap_or(false);
+    let error = item
+        .get("error")
+        .and_then(|value| {
+            value
+                .get("message")
+                .or_else(|| value.as_str().map(|_| value))
+                .and_then(|message| message.as_str())
+        })
+        .map(ToOwned::to_owned);
+
+    (result_blocks, error, is_error)
 }
 
 fn parse_web_search_action(action: &serde_json::Value) -> Option<WebSearchAction> {
@@ -1290,6 +1366,69 @@ mod tests {
                 call_id: Some("search-1".to_string()),
                 query: "ratatui stylize".to_string(),
                 action: Some(crate::tool_calls::WebSearchAction::Other),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_mcp_tool_call_lifecycle() {
+        let started = serde_json::json!({
+            "id": "mcp-1",
+            "type": "mcpToolCall",
+            "server": "search",
+            "tool": "find_docs",
+            "status": "inProgress",
+            "arguments": { "query": "ratatui styling", "limit": 3 }
+        });
+        let completed = serde_json::json!({
+            "id": "mcp-1",
+            "type": "mcpToolCall",
+            "server": "search",
+            "tool": "find_docs",
+            "status": "completed",
+            "arguments": { "query": "ratatui styling", "limit": 3 },
+            "result": {
+                "content": [
+                    { "type": "text", "text": "Found styling guidance in styles.md" }
+                ],
+                "isError": false
+            },
+            "error": null
+        });
+
+        assert_eq!(
+            parse_item_event("item/started", &started, &HashSet::new()),
+            vec![ProviderEvent::McpToolCallStarted {
+                call_id: Some("mcp-1".to_string()),
+                invocation: crate::tool_calls::McpInvocation {
+                    server: "search".to_string(),
+                    tool: "find_docs".to_string(),
+                    arguments: Some(serde_json::json!({
+                        "query": "ratatui styling",
+                        "limit": 3
+                    })),
+                },
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item/completed", &completed, &HashSet::new()),
+            vec![ProviderEvent::McpToolCallFinished {
+                call_id: Some("mcp-1".to_string()),
+                invocation: crate::tool_calls::McpInvocation {
+                    server: "search".to_string(),
+                    tool: "find_docs".to_string(),
+                    arguments: Some(serde_json::json!({
+                        "query": "ratatui styling",
+                        "limit": 3
+                    })),
+                },
+                result_blocks: vec![serde_json::json!({
+                    "type": "text",
+                    "text": "Found styling guidance in styles.md"
+                })],
+                error: None,
+                status: crate::tool_calls::McpToolCallStatus::Completed,
+                is_error: false,
             }]
         );
     }
