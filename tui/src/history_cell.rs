@@ -73,9 +73,11 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             call_id: _,
             changes,
             status,
+            output_preview,
         } => Box::new(PatchHistoryCell {
             changes: changes.clone(),
             status: *status,
+            output_preview: output_preview.clone(),
         }),
         TranscriptEntry::WebSearch {
             call_id: _,
@@ -264,6 +266,7 @@ impl HistoryCell for ExploringExecHistoryCell {
 struct PatchHistoryCell {
     changes: Vec<PatchChange>,
     status: PatchApplyStatus,
+    output_preview: Option<String>,
 }
 
 #[derive(Debug)]
@@ -299,6 +302,7 @@ impl HistoryCell for PatchHistoryCell {
         render_patch_summary_lines(
             &self.changes,
             self.status,
+            self.output_preview.as_deref(),
             width as usize,
             ToolRenderMode::Preview,
         )
@@ -308,6 +312,7 @@ impl HistoryCell for PatchHistoryCell {
         render_patch_summary_lines(
             &self.changes,
             self.status,
+            self.output_preview.as_deref(),
             width as usize,
             ToolRenderMode::Full,
         )
@@ -877,6 +882,7 @@ fn render_generic_tool_call_lines(
 fn render_patch_summary_lines(
     changes: &[PatchChange],
     status: PatchApplyStatus,
+    output_preview: Option<&str>,
     width: usize,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
@@ -900,7 +906,7 @@ fn render_patch_summary_lines(
             title.to_string(),
             style.add_modifier(Modifier::BOLD),
         )));
-        return lines;
+        return append_patch_output(lines, output_preview, width, mode);
     }
 
     let bullet_style = match status {
@@ -927,7 +933,7 @@ fn render_patch_summary_lines(
             Span::raw(format!("(+{} -{})", change.added, change.removed)),
         ]));
         lines.extend(render_patch_diff_lines(change, DETAIL_CONTINUATION_PREFIX, mode));
-        return lines;
+        return append_patch_output(lines, output_preview, width, mode);
     }
 
     lines.push(Line::from(vec![
@@ -963,6 +969,28 @@ fn render_patch_summary_lines(
         ));
     }
 
+    append_patch_output(lines, output_preview, width, mode)
+}
+
+fn append_patch_output(
+    mut lines: Vec<Line<'static>>,
+    output_preview: Option<&str>,
+    width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) else {
+        return lines;
+    };
+
+    let detail = render_prefixed_text_block(
+        output,
+        width,
+        DETAIL_INITIAL_PREFIX,
+        DETAIL_CONTINUATION_PREFIX,
+        Style::default().add_modifier(Modifier::DIM),
+        mode,
+    );
+    lines.extend(detail);
     lines
 }
 

@@ -111,6 +111,10 @@ pub enum ProviderEvent {
         result: Option<String>,
         saved_path: Option<String>,
     },
+    PatchApplyOutputDelta {
+        call_id: Option<String>,
+        delta: String,
+    },
     McpToolCallStarted {
         call_id: Option<String>,
         invocation: McpInvocation,
@@ -239,6 +243,7 @@ mod tests {
                 | ProviderEvent::WebSearchFinished { .. }
                 | ProviderEvent::ViewImage { .. }
                 | ProviderEvent::ImageGenerationFinished { .. }
+                | ProviderEvent::PatchApplyOutputDelta { .. }
                 | ProviderEvent::McpToolCallStarted { .. }
                 | ProviderEvent::McpToolCallFinished { .. }
                 | ProviderEvent::PatchApplyStarted { .. }

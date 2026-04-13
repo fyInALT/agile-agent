@@ -54,6 +54,7 @@ pub enum TranscriptEntry {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
         status: PatchApplyStatus,
+        output_preview: Option<String>,
     },
     WebSearch {
         call_id: Option<String>,
@@ -399,6 +400,7 @@ impl AppState {
             call_id,
             changes,
             status: PatchApplyStatus::InProgress,
+            output_preview: None,
         });
     }
 
@@ -413,6 +415,7 @@ impl AppState {
                 call_id: existing_call_id,
                 changes: existing_changes,
                 status: PatchApplyStatus::InProgress,
+                output_preview,
                 ..
             } = entry
             {
@@ -427,6 +430,7 @@ impl AppState {
                             changes
                         },
                         status,
+                        output_preview: output_preview.clone(),
                     };
                     return;
                 }
@@ -437,7 +441,32 @@ impl AppState {
             call_id,
             changes,
             status,
+            output_preview: None,
         });
+    }
+
+    pub fn append_patch_apply_output(&mut self, call_id: Option<String>, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::PatchApply {
+                call_id: existing_call_id,
+                output_preview,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_latest = call_id.is_none();
+                if matches_call_id || matches_latest {
+                    output_preview
+                        .get_or_insert_with(String::new)
+                        .push_str(delta);
+                    return;
+                }
+            }
+        }
     }
 
     pub fn push_web_search_started(&mut self, call_id: Option<String>, query: String) {
@@ -1165,6 +1194,7 @@ mod tests {
                 call_id,
                 changes,
                 status,
+                output_preview,
             }
             if call_id.as_deref() == Some("patch-1")
                 && changes == &vec![crate::tool_calls::PatchChange {
@@ -1176,6 +1206,38 @@ mod tests {
                     removed: 1,
                 }]
                 && *status == crate::tool_calls::PatchApplyStatus::Completed
+                && output_preview.is_none()
+        ));
+    }
+
+    #[test]
+    fn patch_output_delta_appends_to_patch_entry() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_patch_apply_started(
+            Some("patch-1".to_string()),
+            vec![crate::tool_calls::PatchChange {
+                path: "README.md".to_string(),
+                move_path: None,
+                kind: crate::tool_calls::PatchChangeKind::Update,
+                diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                added: 1,
+                removed: 1,
+            }],
+        );
+
+        state.append_patch_apply_output(Some("patch-1".to_string()), "patch rejected");
+
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::PatchApply {
+                call_id,
+                output_preview,
+                status,
+                ..
+            }
+            if call_id.as_deref() == Some("patch-1")
+                && output_preview.as_deref() == Some("patch rejected")
+                && *status == crate::tool_calls::PatchApplyStatus::InProgress
         ));
     }
 

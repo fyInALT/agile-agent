@@ -198,6 +198,7 @@ fn map_entry(
             call_id,
             changes,
             status,
+            output_preview: _,
         } => AgentMessageEnvelope {
             sequence,
             direction: AgentMessageDirection::Internal,

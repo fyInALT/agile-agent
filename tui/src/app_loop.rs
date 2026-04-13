@@ -267,6 +267,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     ProviderEvent::PatchApplyStarted { call_id, changes } => {
                         state.app_mut().push_patch_apply_started(call_id, changes)
                     }
+                    ProviderEvent::PatchApplyOutputDelta { call_id, delta } => {
+                        state.app_mut().append_patch_apply_output(call_id, &delta)
+                    }
                     ProviderEvent::PatchApplyFinished {
                         call_id,
                         changes,

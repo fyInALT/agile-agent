@@ -337,6 +337,7 @@ mod tests {
                 },
             ],
             status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            output_preview: None,
         }];
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -370,6 +371,7 @@ mod tests {
                 removed: 5,
             }],
             status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            output_preview: None,
         }];
 
         let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -395,6 +397,7 @@ mod tests {
                 removed: 1,
             }],
             status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            output_preview: None,
         }];
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -410,11 +413,13 @@ mod tests {
             call_id: Some("patch-failed".to_string()),
             changes: Vec::new(),
             status: agent_core::tool_calls::PatchApplyStatus::Failed,
+            output_preview: Some("patch rejected by user".to_string()),
         }];
         let declined = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-declined".to_string()),
             changes: Vec::new(),
             status: agent_core::tool_calls::PatchApplyStatus::Declined,
+            output_preview: Some("patch canceled".to_string()),
         }];
 
         let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
@@ -423,9 +428,15 @@ mod tests {
         assert!(failed_rendered
             .iter()
             .any(|line| line == "• Failed patch"), "{failed_rendered:?}");
+        assert!(failed_rendered
+            .iter()
+            .any(|line| line == "  └ patch rejected by user"), "{failed_rendered:?}");
         assert!(declined_rendered
             .iter()
             .any(|line| line == "• Declined patch"), "{declined_rendered:?}");
+        assert!(declined_rendered
+            .iter()
+            .any(|line| line == "  └ patch canceled"), "{declined_rendered:?}");
     }
 
     #[test]

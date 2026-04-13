@@ -578,13 +578,25 @@ fn handle_notification(
         "configWarning"
         | "account/rateLimits/updated"
         | "thread/tokenUsage/updated"
-        | "serverRequest/resolved"
-        | "item/fileChange/outputDelta" => {}
+        | "serverRequest/resolved" => {}
         "item/commandExecution/outputDelta" => {
             if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
                 && !delta.is_empty()
             {
                 let _ = event_tx.send(ProviderEvent::ExecCommandOutputDelta {
+                    call_id: params
+                        .get("itemId")
+                        .and_then(|value| value.as_str())
+                        .map(ToOwned::to_owned),
+                    delta: delta.to_string(),
+                });
+            }
+        }
+        "item/fileChange/outputDelta" => {
+            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
+                && !delta.is_empty()
+            {
+                let _ = event_tx.send(ProviderEvent::PatchApplyOutputDelta {
                     call_id: params
                         .get("itemId")
                         .and_then(|value| value.as_str())
@@ -1215,6 +1227,38 @@ mod tests {
             ProviderEvent::ExecCommandOutputDelta {
                 call_id: Some("cmd-1".to_string()),
                 delta: "partial output".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn streams_file_change_output_delta_notifications() {
+        let (tx, rx) = mpsc::channel();
+        let mut turn_started = false;
+        let mut turn_completed = false;
+        let mut streamed = HashSet::new();
+
+        let finished = handle_notification(
+            "item/fileChange/outputDelta".to_string(),
+            Some(serde_json::json!({
+                "delta": "patch rejected by user",
+                "itemId": "patch-1",
+                "threadId": "thr-1",
+                "turnId": "turn-1"
+            })),
+            &tx,
+            &mut turn_started,
+            &mut turn_completed,
+            &mut streamed,
+        )
+        .expect("handle notification");
+
+        assert!(!finished);
+        assert_eq!(
+            rx.recv().expect("patch output delta"),
+            ProviderEvent::PatchApplyOutputDelta {
+                call_id: Some("patch-1".to_string()),
+                delta: "patch rejected by user".to_string(),
             }
         );
     }
