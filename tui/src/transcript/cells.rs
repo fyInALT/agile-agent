@@ -13,27 +13,39 @@ pub struct TranscriptCell {
 }
 
 pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
-    build_cells_with_mode(entries, width, ToolRenderMode::Preview)
+    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::Committed)
+}
+
+pub fn build_active_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
+    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::Active)
 }
 
 pub fn build_overlay_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
-    build_cells_with_mode(entries, width, ToolRenderMode::Full)
+    build_cells_with_mode(entries, width, ToolRenderMode::Full, CellSelection::All)
 }
 
 fn build_cells_with_mode(
     entries: &[TranscriptEntry],
     width: u16,
     mode: ToolRenderMode,
+    selection: CellSelection,
 ) -> Vec<TranscriptCell> {
     let mut cells = Vec::new();
     let mut index = 0usize;
 
     while index < entries.len() {
         if let ToolRenderMode::Preview = mode
-            && let Some((next_index, cell)) = exploring_exec_group_cell(entries, index, width)
+            && let Some((next_index, cell)) = exploring_exec_group_cell(entries, index, width, selection)
         {
-            cells.push(cell);
+            if let Some(cell) = cell {
+                cells.push(cell);
+            }
             index = next_index;
+            continue;
+        }
+
+        if !selection_matches_entry(selection, &entries[index]) {
+            index += 1;
             continue;
         }
 
@@ -51,13 +63,47 @@ fn build_cells_with_mode(
     cells
 }
 
+#[derive(Clone, Copy)]
+enum CellSelection {
+    Committed,
+    Active,
+    All,
+}
+
+fn selection_matches_entry(selection: CellSelection, entry: &TranscriptEntry) -> bool {
+    match selection {
+        CellSelection::All => true,
+        CellSelection::Committed => !is_active_entry(entry),
+        CellSelection::Active => is_active_entry(entry),
+    }
+}
+
+fn is_active_entry(entry: &TranscriptEntry) -> bool {
+    match entry {
+        TranscriptEntry::ExecCommand { status, .. } => {
+            matches!(status, agent_core::tool_calls::ExecCommandStatus::InProgress)
+        }
+        TranscriptEntry::PatchApply { status, .. } => {
+            matches!(status, agent_core::tool_calls::PatchApplyStatus::InProgress)
+        }
+        TranscriptEntry::WebSearch { started, .. } => *started,
+        TranscriptEntry::McpToolCall { status, .. } => {
+            matches!(status, agent_core::tool_calls::McpToolCallStatus::InProgress)
+        }
+        TranscriptEntry::GenericToolCall { started, .. } => *started,
+        _ => false,
+    }
+}
+
 fn exploring_exec_group_cell(
     entries: &[TranscriptEntry],
     start: usize,
     width: u16,
-) -> Option<(usize, TranscriptCell)> {
+    selection: CellSelection,
+) -> Option<(usize, Option<TranscriptCell>)> {
     let mut index = start;
     let mut calls = Vec::new();
+    let mut contains_active = false;
 
     while index < entries.len() {
         let TranscriptEntry::ExecCommand {
@@ -85,6 +131,7 @@ fn exploring_exec_group_cell(
             break;
         };
 
+        contains_active |= matches!(status, agent_core::tool_calls::ExecCommandStatus::InProgress);
         calls.push(ExploringExecCall {
             source: source.clone(),
             input_preview: input_preview.clone(),
@@ -101,12 +148,18 @@ fn exploring_exec_group_cell(
         return None;
     }
 
+    match selection {
+        CellSelection::Committed if contains_active => return Some((index, None)),
+        CellSelection::Active if !contains_active => return None,
+        _ => {}
+    }
+
     let cell = history_cell_for_exploring_exec_group(calls);
     let lines = cell.display_lines(width);
     if lines.is_empty() {
-        None
+        Some((index, None))
     } else {
-        Some((index, TranscriptCell { lines }))
+        Some((index, Some(TranscriptCell { lines })))
     }
 }
 
@@ -127,6 +180,7 @@ pub fn flatten_cells(cells: &[TranscriptCell]) -> Vec<Line<'static>> {
 
 #[cfg(test)]
 mod tests {
+    use super::build_active_cells;
     use super::build_cells;
     use super::build_overlay_cells;
     use super::flatten_cells;
@@ -456,7 +510,7 @@ mod tests {
             started: false,
         }];
 
-        let started_rendered = lines_to_strings(&flatten_cells(&build_cells(&started, 80)));
+        let started_rendered = lines_to_strings(&flatten_cells(&build_active_cells(&started, 80)));
         let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
 
         assert!(started_rendered
@@ -533,7 +587,7 @@ mod tests {
             is_error: true,
         }];
 
-        let started_rendered = lines_to_strings(&flatten_cells(&build_cells(&started, 80)));
+        let started_rendered = lines_to_strings(&flatten_cells(&build_active_cells(&started, 80)));
         let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
         let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
 
@@ -621,7 +675,7 @@ mod tests {
             },
         ];
 
-        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let rendered = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
         assert!(rendered.iter().any(|line| line == "• Exploring"), "{rendered:?}");
         assert!(rendered
@@ -740,12 +794,36 @@ mod tests {
             duration_ms: None,
         }];
 
-        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let rendered = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
         assert!(rendered.iter().any(|line| line == "• Running printf hello"), "{rendered:?}");
         assert!(rendered.iter().any(|line| line == "  └ hello"), "{rendered:?}");
         assert!(rendered.iter().any(|line| line == "    world"), "{rendered:?}");
         assert!(!rendered.iter().any(|line| line.contains("✓")), "{rendered:?}");
+    }
+
+    #[test]
+    fn committed_cells_omit_in_progress_exec_entries() {
+        let entries = vec![
+            TranscriptEntry::Status("done before".to_string()),
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-live".to_string()),
+                source: Some("agent".to_string()),
+                allow_exploring_group: true,
+                input_preview: Some("printf hello".to_string()),
+                output_preview: Some("hello".to_string()),
+                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                exit_code: None,
+                duration_ms: None,
+            },
+        ];
+
+        let committed = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let active = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
+
+        assert!(committed.iter().any(|line| line == "• done before"), "{committed:?}");
+        assert!(!committed.iter().any(|line| line.contains("Running printf hello")), "{committed:?}");
+        assert!(active.iter().any(|line| line == "• Running printf hello"), "{active:?}");
     }
 
     #[test]
@@ -840,16 +918,17 @@ mod tests {
             },
         ];
 
-        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let committed = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let active = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Exploring"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ Read /dev/null"), "{rendered:?}");
-        assert!(rendered
+        assert!(active.iter().any(|line| line == "• Exploring"), "{active:?}");
+        assert!(active.iter().any(|line| line == "  └ Read /dev/null"), "{active:?}");
+        assert!(committed
             .iter()
-            .any(|line| line.contains("Ran echo repro-marker")), "{rendered:?}");
-        assert!(!rendered
+            .any(|line| line.contains("Ran echo repro-marker")), "{committed:?}");
+        assert!(!active
             .iter()
-            .any(|line| line == "    Read /dev/null, echo repro-marker"), "{rendered:?}");
+            .any(|line| line == "    Read /dev/null, echo repro-marker"), "{active:?}");
     }
 
     #[test]

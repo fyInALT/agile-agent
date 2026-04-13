@@ -23,11 +23,19 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     frame.render_widget(Clear, frame.area());
     state.sync_busy_started_at();
     let composer_height = state.composer.desired_height(frame.area().width, 8);
-    let working_height = if state.is_busy() { 1 } else { 0 };
+    let active_cells = cells::build_active_cells(&state.app().transcript, frame.area().width);
+    let active_lines = cells::flatten_cells(&active_cells);
+    let active_height = active_lines.len() as u16;
+    let working_height = if state.is_busy() && active_height == 0 {
+        1
+    } else {
+        0
+    };
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
+            Constraint::Length(active_height),
             Constraint::Length(working_height),
             Constraint::Length(composer_height),
             Constraint::Length(1),
@@ -35,11 +43,14 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         .split(frame.area());
 
     render_transcript(frame, state, areas[0]);
-    if state.is_busy() {
-        render_working_line(frame, state, areas[1]);
+    if active_height > 0 {
+        render_active_cells(frame, &active_lines, areas[1]);
     }
-    render_composer(frame, state, areas[2]);
-    render_footer(frame, state, areas[3]);
+    if working_height > 0 {
+        render_working_line(frame, state, areas[2]);
+    }
+    render_composer(frame, state, areas[3]);
+    render_footer(frame, state, areas[4]);
 
     if state.app().skill_browser_open {
         render_skill_browser(frame, state);
@@ -48,6 +59,15 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_overlay_open() {
         render_transcript_overlay(frame, state);
     }
+}
+
+fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default());
+    let paragraph = Paragraph::new(lines.to_vec());
+    frame.render_widget(paragraph, area);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
