@@ -8,6 +8,7 @@ use textwrap::wrap;
 
 use crate::markdown;
 use crate::tool_output;
+use crate::tool_output::ToolRenderMode;
 
 #[derive(Debug, Clone)]
 pub struct TranscriptCell {
@@ -15,10 +16,22 @@ pub struct TranscriptCell {
 }
 
 pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
+    build_cells_with_mode(entries, width, ToolRenderMode::Preview)
+}
+
+pub fn build_overlay_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
+    build_cells_with_mode(entries, width, ToolRenderMode::Full)
+}
+
+fn build_cells_with_mode(
+    entries: &[TranscriptEntry],
+    width: u16,
+    mode: ToolRenderMode,
+) -> Vec<TranscriptCell> {
     let content_width = width.max(4) as usize;
     entries
         .iter()
-        .filter_map(|entry| build_cell(entry, content_width))
+        .filter_map(|entry| build_cell(entry, content_width, mode))
         .collect()
 }
 
@@ -37,7 +50,7 @@ pub fn flatten_cells(cells: &[TranscriptCell]) -> Vec<Line<'static>> {
     lines
 }
 
-fn build_cell(entry: &TranscriptEntry, width: usize) -> Option<TranscriptCell> {
+fn build_cell(entry: &TranscriptEntry, width: usize, mode: ToolRenderMode) -> Option<TranscriptCell> {
     let lines = match entry {
         TranscriptEntry::User(text) => wrap_prefixed("› ", text, Style::default(), width),
         TranscriptEntry::Assistant(text) => markdown::render_markdown_lines(text, width),
@@ -63,6 +76,7 @@ fn build_cell(entry: &TranscriptEntry, width: usize) -> Option<TranscriptCell> {
             *success,
             *started,
             width,
+            mode,
         ),
         TranscriptEntry::Status(text) => {
             wrap_prefixed("• ", text, Style::default().fg(Color::DarkGray), width)
@@ -107,6 +121,7 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
 #[cfg(test)]
 mod tests {
     use super::build_cells;
+    use super::build_overlay_cells;
     use super::flatten_cells;
     use agent_core::app::TranscriptEntry;
     use ratatui::text::Line;
@@ -143,5 +158,28 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("diff --git a/README.md b/README.md")));
         assert!(rendered.iter().any(|line| line.contains("+new")));
         assert!(!rendered.iter().any(|line| line.contains("output:")));
+    }
+
+    #[test]
+    fn overlay_cells_keep_full_tool_output() {
+        let output = (1..=20)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let entries = vec![TranscriptEntry::ToolCall {
+            name: "exec_command".to_string(),
+            call_id: Some("call-1".to_string()),
+            input_preview: Some("git log --oneline".to_string()),
+            output_preview: Some(output),
+            success: true,
+            started: false,
+        }];
+
+        let lines = flatten_cells(&build_overlay_cells(&entries, 80));
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("line 1")));
+        assert!(rendered.iter().any(|line| line.contains("line 20")));
+        assert!(!rendered.iter().any(|line| line.contains("… +")));
     }
 }

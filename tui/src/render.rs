@@ -205,7 +205,7 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let lines = cells::flatten_cells(&cells::build_cells(
+    let lines = cells::flatten_cells(&cells::build_overlay_cells(
         &state.app().transcript,
         chunks[1].width,
     ));

@@ -12,6 +12,12 @@ const TOOL_PREVIEW_TAIL_LINES: usize = 3;
 const TOOL_OUTPUT_INITIAL_PREFIX: &str = "  └ ";
 const TOOL_OUTPUT_CONTINUATION_PREFIX: &str = "    ";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRenderMode {
+    Preview,
+    Full,
+}
+
 pub fn render_tool_call_lines(
     name: &str,
     input_preview: Option<&str>,
@@ -19,6 +25,7 @@ pub fn render_tool_call_lines(
     success: bool,
     started: bool,
     width: usize,
+    mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(tool_header_line(name, success, started));
@@ -32,7 +39,7 @@ pub fn render_tool_call_lines(
     }
 
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
-        lines.extend(render_output_block(name, input_preview, output, width));
+        lines.extend(render_output_block(name, input_preview, output, width, mode));
     } else if !started && name == "exec_command" {
         lines.push(Line::from(vec![
             Span::styled(
@@ -148,17 +155,18 @@ fn render_output_block(
     input_preview: Option<&str>,
     output: &str,
     width: usize,
+    mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     if looks_like_diff(input_preview, output) {
-        return render_diff_block(output, width);
+        return render_diff_block(output, width, mode);
     }
 
     if looks_like_git_status(input_preview, output) {
-        return render_git_status_block(output, width);
+        return render_git_status_block(output, width, mode);
     }
 
     if looks_like_git_log(input_preview, output) {
-        return render_git_log_block(output, width);
+        return render_git_log_block(output, width, mode);
     }
 
     let formatted = if let Some(compact_json) = format_json_compact(output) {
@@ -167,7 +175,7 @@ fn render_output_block(
         output.to_string()
     };
 
-    render_text_block(name, &formatted, width)
+    render_text_block(name, &formatted, width, mode)
 }
 
 fn looks_like_diff(input_preview: Option<&str>, output: &str) -> bool {
@@ -195,7 +203,7 @@ fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
     !non_empty.is_empty() && non_empty.iter().all(|line| looks_like_git_log_line(line))
 }
 
-fn render_diff_block(output: &str, width: usize) -> Vec<Line<'static>> {
+fn render_diff_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let mut lines = Vec::new();
     lines.extend(render_diff_summary(output));
@@ -204,7 +212,10 @@ fn render_diff_block(output: &str, width: usize) -> Vec<Line<'static>> {
         body_width + 4,
         diff_style_for_line,
     );
-    lines.extend(truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES));
+    lines.extend(match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    });
 
     lines
 }
@@ -231,14 +242,17 @@ fn render_diff_summary(output: &str) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_git_status_block(output: &str, width: usize) -> Vec<Line<'static>> {
+fn render_git_status_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let rendered = render_wrapped_preview_lines(
         output.lines().map(ToOwned::to_owned).collect(),
         body_width + 4,
         git_status_style_for_line,
     );
-    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
 }
 
 fn git_status_style_for_line(line: &str) -> Style {
@@ -264,7 +278,7 @@ fn git_status_style_for_line(line: &str) -> Style {
     }
 }
 
-fn render_git_log_block(output: &str, width: usize) -> Vec<Line<'static>> {
+fn render_git_log_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let rendered = render_wrapped_preview_lines(
         output
@@ -280,7 +294,10 @@ fn render_git_log_block(output: &str, width: usize) -> Vec<Line<'static>> {
         body_width + 4,
         |_| Style::default().add_modifier(Modifier::DIM),
     );
-    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
 }
 
 fn diff_style_for_line(line: &str) -> Style {
@@ -349,7 +366,7 @@ fn summarize_unified_diff(diff: &str) -> Vec<DiffFileSummary> {
     summaries
 }
 
-fn render_text_block(name: &str, output: &str, width: usize) -> Vec<Line<'static>> {
+fn render_text_block(name: &str, output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let style = if name == "exec_command" {
         Style::default().add_modifier(Modifier::DIM)
@@ -361,7 +378,10 @@ fn render_text_block(name: &str, output: &str, width: usize) -> Vec<Line<'static
         body_width + 4,
         |_| style,
     );
-    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
 }
 
 fn looks_like_git_log_line(line: &str) -> bool {
@@ -512,6 +532,7 @@ fn format_json_compact(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::ToolRenderMode;
     use super::render_tool_call_lines;
     use ratatui::text::Line;
 
@@ -535,6 +556,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
         assert!(rendered.iter().any(|line| line.contains("finished command")));
@@ -559,6 +581,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
@@ -576,6 +599,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
@@ -592,6 +616,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
@@ -610,6 +635,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
@@ -626,6 +652,7 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
@@ -642,11 +669,34 @@ mod tests {
             true,
             false,
             80,
+            ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("applied patch")));
         assert!(rendered.iter().any(|line| line.contains("M /repo/README.md (+1 -1)")));
         assert!(rendered.iter().any(|line| line.contains("A /repo/src/lib.rs (+1 -0)")));
+    }
+
+    #[test]
+    fn full_mode_keeps_all_wrapped_output_lines() {
+        let output = (1..=20)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git log --oneline"),
+            Some(&output),
+            true,
+            false,
+            80,
+            ToolRenderMode::Full,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("line 1")));
+        assert!(rendered.iter().any(|line| line.contains("line 20")));
+        assert!(!rendered.iter().any(|line| line.contains("… +")));
     }
 }
