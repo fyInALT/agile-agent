@@ -7,6 +7,7 @@ use anyhow::Result;
 mod app_loop;
 mod composer;
 mod diff_render;
+mod exec_command;
 mod exec_semantics;
 mod history_cell;
 mod input;

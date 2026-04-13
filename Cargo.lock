@@ -48,6 +48,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "serde_json",
+ "shlex",
  "tempfile",
  "textwrap",
  "unicode-segmentation",

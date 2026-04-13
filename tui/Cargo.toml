@@ -13,6 +13,7 @@ diffy.workspace = true
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
+shlex.workspace = true
 textwrap.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

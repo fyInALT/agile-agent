@@ -10,6 +10,7 @@ use textwrap::Options;
 use textwrap::WordSplitter;
 use textwrap::wrap;
 
+use crate::exec_command::strip_shell_wrapper;
 use crate::exec_semantics::ExploringOp;
 use crate::markdown;
 use crate::text_formatting::format_json_compact;
@@ -389,16 +390,17 @@ fn render_exec_history_lines(
     } else {
         Style::default().fg(Color::Red)
     };
+    let display_command = input_preview.map(strip_shell_wrapper);
     lines.extend(render_exec_header_lines(
         title,
-        input_preview.unwrap_or(""),
+        display_command.as_deref().unwrap_or(""),
         bullet_style,
         width as usize,
     ));
 
     let output_lines = tool_output::render_tool_output_body(
         "exec_command",
-        input_preview,
+        display_command.as_deref(),
         output_preview,
         width as usize,
         mode,

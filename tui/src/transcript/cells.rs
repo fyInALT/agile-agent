@@ -560,6 +560,60 @@ mod tests {
     }
 
     #[test]
+    fn user_shell_exec_strips_bash_lc_wrapper_in_header() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-7".to_string()),
+            source: Some("userShell".to_string()),
+            input_preview: Some("bash -lc 'python3 -c '\\''print(\"Hello, world!\")'\\'''".to_string()),
+            output_preview: Some("Hello, world!".to_string()),
+            success: true,
+            started: false,
+            exit_code: Some(0),
+            duration_ms: Some(10),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered
+            .iter()
+            .any(|line| line == "• You ran python3 -c 'print(\"Hello, world!\")'"), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line.contains("bash -lc")), "{rendered:?}");
+    }
+
+    #[test]
+    fn exploring_cluster_uses_unwrapped_shell_commands() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-8".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("bash -lc 'ls -la'".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-9".to_string()),
+                source: Some("agent".to_string()),
+                input_preview: Some("/bin/bash -lc 'cat foo.txt'".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "    Read foo.txt"), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line.contains("bash -lc")), "{rendered:?}");
+    }
+
+    #[test]
     fn long_exec_command_shows_command_ellipsis_before_output() {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-4".to_string()),

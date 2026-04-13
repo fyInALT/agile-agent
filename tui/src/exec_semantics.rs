@@ -1,3 +1,5 @@
+use crate::exec_command::strip_shell_wrapper;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ExploringOp {
     Read(String),
@@ -10,6 +12,7 @@ pub(crate) fn parse_exploring_ops(command: &str, source: Option<&str>) -> Option
         return None;
     }
 
+    let command = strip_shell_wrapper(command);
     let mut ops = Vec::new();
     for line in command.lines().map(str::trim).filter(|line| !line.is_empty()) {
         ops.extend(parse_single_line(line)?);
