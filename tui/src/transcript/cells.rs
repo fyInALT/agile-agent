@@ -10,6 +10,7 @@ use crate::tool_output::ToolRenderMode;
 #[derive(Debug, Clone)]
 pub struct TranscriptCell {
     pub lines: Vec<Line<'static>>,
+    pub height: u16,
 }
 
 pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
@@ -54,8 +55,12 @@ fn build_cells_with_mode(
             ToolRenderMode::Preview => cell.display_lines(width),
             ToolRenderMode::Full => cell.transcript_lines(width),
         };
+        let height = match mode {
+            ToolRenderMode::Preview => cell.desired_height(width),
+            ToolRenderMode::Full => cell.desired_transcript_height(width),
+        };
         if !lines.is_empty() {
-            cells.push(TranscriptCell { lines });
+            cells.push(TranscriptCell { lines, height });
         }
         index += 1;
     }
@@ -156,10 +161,11 @@ fn exploring_exec_group_cell(
 
     let cell = history_cell_for_exploring_exec_group(calls);
     let lines = cell.display_lines(width);
+    let height = cell.desired_height(width);
     if lines.is_empty() {
         Some((index, None))
     } else {
-        Some((index, Some(TranscriptCell { lines })))
+        Some((index, Some(TranscriptCell { lines, height })))
     }
 }
 

@@ -32,7 +32,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     };
     let active_cells = cells::build_active_cells(&state.app().transcript, frame.area().width);
     let active_lines = cells::flatten_cells(&active_cells);
-    let active_height = rendered_line_height(&active_lines, frame.area().width);
+    let active_height = active_cells.iter().map(|cell| cell.height).sum::<u16>();
     let working_height = if state.is_busy() && active_height == 0 {
         1
     } else {
@@ -66,20 +66,6 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_overlay_open() {
         render_transcript_overlay(frame, state);
     }
-}
-
-fn rendered_line_height(lines: &[Line<'static>], width: u16) -> u16 {
-    if lines.is_empty() {
-        return 0;
-    }
-
-    let width = width.max(1) as usize;
-    lines
-        .iter()
-        .map(|line| line.width().div_ceil(width).max(1))
-        .sum::<usize>()
-        .try_into()
-        .unwrap_or(u16::MAX)
 }
 
 fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rect) {

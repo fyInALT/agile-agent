@@ -32,8 +32,28 @@ const GENERIC_TOOL_PREVIEW_MAX_LINES: usize = 5;
 pub(crate) trait HistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
 
+    fn desired_height(&self, width: u16) -> u16 {
+        let width = width.max(1) as usize;
+        self.display_lines(width as u16)
+            .iter()
+            .map(|line| line.width().div_ceil(width).max(1))
+            .sum::<usize>()
+            .try_into()
+            .unwrap_or(u16::MAX)
+    }
+
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.display_lines(width)
+    }
+
+    fn desired_transcript_height(&self, width: u16) -> u16 {
+        let width = width.max(1) as usize;
+        self.transcript_lines(width as u16)
+            .iter()
+            .map(|line| line.width().div_ceil(width).max(1))
+            .sum::<usize>()
+            .try_into()
+            .unwrap_or(u16::MAX)
     }
 }
 
