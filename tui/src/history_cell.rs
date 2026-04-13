@@ -1,6 +1,7 @@
 use agent_core::app::TranscriptEntry;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
+use agent_core::tool_calls::PatchApplyStatus;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -69,12 +70,10 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
         TranscriptEntry::PatchApply {
             call_id: _,
             changes,
-            success,
-            started,
+            status,
         } => Box::new(PatchHistoryCell {
             changes: changes.clone(),
-            success: *success,
-            started: *started,
+            status: *status,
         }),
         TranscriptEntry::GenericToolCall {
             name,
@@ -230,16 +229,14 @@ impl HistoryCell for ExploringExecHistoryCell {
 #[derive(Debug)]
 struct PatchHistoryCell {
     changes: Vec<PatchChange>,
-    success: bool,
-    started: bool,
+    status: PatchApplyStatus,
 }
 
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
             &self.changes,
-            self.success,
-            self.started,
+            self.status,
             width as usize,
             ToolRenderMode::Preview,
         )
@@ -248,8 +245,7 @@ impl HistoryCell for PatchHistoryCell {
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
             &self.changes,
-            self.success,
-            self.started,
+            self.status,
             width as usize,
             ToolRenderMode::Full,
         )
@@ -634,26 +630,25 @@ fn render_generic_tool_call_lines(
 
 fn render_patch_summary_lines(
     changes: &[PatchChange],
-    success: bool,
-    started: bool,
+    status: PatchApplyStatus,
     width: usize,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     if changes.is_empty() {
         let mut lines = Vec::new();
-        let style = if started {
-            Style::default().fg(Color::Blue)
-        } else if success {
-            Style::default().fg(Color::Green)
-        } else {
-            Style::default().fg(Color::Red)
+        let style = match status {
+            PatchApplyStatus::InProgress => Style::default().fg(Color::Blue),
+            PatchApplyStatus::Completed => Style::default().fg(Color::Green),
+            PatchApplyStatus::Failed => Style::default().fg(Color::Red),
+            PatchApplyStatus::Declined => Style::default().fg(Color::Yellow),
         };
-        let title = if started {
+        let title = match status {
+            PatchApplyStatus::InProgress => {
             "• Applying patch"
-        } else if success {
-            "• Applied patch"
-        } else {
-            "• Failed patch"
+            }
+            PatchApplyStatus::Completed => "• Applied patch",
+            PatchApplyStatus::Failed => "• Failed patch",
+            PatchApplyStatus::Declined => "• Declined patch",
         };
         lines.push(Line::from(Span::styled(
             title.to_string(),
@@ -662,12 +657,11 @@ fn render_patch_summary_lines(
         return lines;
     }
 
-    let bullet_style = if started {
-        Style::default().fg(Color::Blue)
-    } else if success {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::Red)
+    let bullet_style = match status {
+        PatchApplyStatus::InProgress => Style::default().fg(Color::Blue),
+        PatchApplyStatus::Completed => Style::default().fg(Color::Green),
+        PatchApplyStatus::Failed => Style::default().fg(Color::Red),
+        PatchApplyStatus::Declined => Style::default().fg(Color::Yellow),
     };
 
     let total_added = changes.iter().map(|change| change.added).sum::<usize>();

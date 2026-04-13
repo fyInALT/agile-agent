@@ -11,6 +11,7 @@ use crate::logging;
 use crate::mock_provider;
 use crate::probe;
 use crate::tool_calls::PatchChange;
+use crate::tool_calls::PatchApplyStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderKind {
@@ -94,7 +95,7 @@ pub enum ProviderEvent {
     PatchApplyFinished {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
-        success: bool,
+        status: PatchApplyStatus,
     },
     SessionHandle(SessionHandle),
     Error(String),

@@ -23,6 +23,7 @@ use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchChangeKind;
+use crate::tool_calls::PatchApplyStatus;
 
 pub fn start(
     prompt: String,
@@ -660,7 +661,7 @@ fn parse_item_event(
         ("item/completed", "fileChange") => vec![ProviderEvent::PatchApplyFinished {
             call_id: item_id,
             changes: parse_patch_changes(item),
-            success: true,
+            status: parse_patch_apply_status(item),
         }],
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
@@ -685,6 +686,19 @@ fn parse_patch_changes(item: &serde_json::Value) -> Vec<PatchChange> {
         .flatten()
         .filter_map(parse_patch_change)
         .collect()
+}
+
+fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
+    match item
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("completed")
+    {
+        "failed" => PatchApplyStatus::Failed,
+        "declined" => PatchApplyStatus::Declined,
+        "inProgress" => PatchApplyStatus::InProgress,
+        _ => PatchApplyStatus::Completed,
+    }
 }
 
 fn parse_patch_change(change: &serde_json::Value) -> Option<PatchChange> {
@@ -1110,6 +1124,40 @@ mod tests {
                 exit_code: Some(7),
                 duration_ms: Some(1234),
                 source: Some("userShell".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_file_change_completion_status() {
+        let item = serde_json::json!({
+            "id": "patch-2",
+            "type": "fileChange",
+            "status": "failed",
+            "changes": [
+                {
+                    "path": "/repo/README.md",
+                    "kind": "update",
+                    "diff": "@@ -1 +1 @@\n-old\n+new"
+                }
+            ]
+        });
+
+        let events = parse_item_event("item/completed", &item, &HashSet::new());
+
+        assert_eq!(
+            events,
+            vec![ProviderEvent::PatchApplyFinished {
+                call_id: Some("patch-2".to_string()),
+                changes: vec![crate::tool_calls::PatchChange {
+                    path: "/repo/README.md".to_string(),
+                    move_path: None,
+                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                    added: 1,
+                    removed: 1,
+                }],
+                status: crate::tool_calls::PatchApplyStatus::Failed,
             }]
         );
     }

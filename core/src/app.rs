@@ -11,6 +11,7 @@ use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
 use crate::tool_calls::PatchChange;
+use crate::tool_calls::PatchApplyStatus;
 use crate::verification;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,8 +50,7 @@ pub enum TranscriptEntry {
     PatchApply {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
-        success: bool,
-        started: bool,
+        status: PatchApplyStatus,
     },
     GenericToolCall {
         name: String,
@@ -375,8 +375,7 @@ impl AppState {
         self.transcript.push(TranscriptEntry::PatchApply {
             call_id,
             changes,
-            success: true,
-            started: true,
+            status: PatchApplyStatus::InProgress,
         });
     }
 
@@ -384,13 +383,13 @@ impl AppState {
         &mut self,
         call_id: Option<String>,
         changes: Vec<PatchChange>,
-        success: bool,
+        status: PatchApplyStatus,
     ) {
         for entry in self.transcript.iter_mut().rev() {
             if let TranscriptEntry::PatchApply {
                 call_id: existing_call_id,
                 changes: existing_changes,
-                started: true,
+                status: PatchApplyStatus::InProgress,
                 ..
             } = entry
             {
@@ -404,8 +403,7 @@ impl AppState {
                         } else {
                             changes
                         },
-                        success,
-                        started: false,
+                        status,
                     };
                     return;
                 }
@@ -415,8 +413,7 @@ impl AppState {
         self.transcript.push(TranscriptEntry::PatchApply {
             call_id,
             changes,
-            success,
-            started: false,
+            status,
         });
     }
 
@@ -1016,7 +1013,7 @@ mod tests {
                 added: 1,
                 removed: 1,
             }],
-            true,
+            crate::tool_calls::PatchApplyStatus::Completed,
         );
 
         assert_eq!(state.transcript.len(), 1);
@@ -1025,8 +1022,7 @@ mod tests {
             TranscriptEntry::PatchApply {
                 call_id,
                 changes,
-                success,
-                started,
+                status,
             }
             if call_id.as_deref() == Some("patch-1")
                 && changes == &vec![crate::tool_calls::PatchChange {
@@ -1037,8 +1033,7 @@ mod tests {
                     added: 1,
                     removed: 1,
                 }]
-                && *success
-                && !*started
+                && *status == crate::tool_calls::PatchApplyStatus::Completed
         ));
     }
 

@@ -9,6 +9,15 @@ pub enum PatchChangeKind {
     Update,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchApplyStatus {
+    InProgress,
+    Completed,
+    Failed,
+    Declined,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatchChange {
     pub path: String,

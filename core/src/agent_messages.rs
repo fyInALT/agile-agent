@@ -6,6 +6,7 @@ use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
 use crate::tool_calls::PatchChange;
+use crate::tool_calls::PatchApplyStatus;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -198,13 +199,12 @@ fn map_entry(
         TranscriptEntry::PatchApply {
             call_id,
             changes,
-            success,
-            started,
+            status,
         } => AgentMessageEnvelope {
             sequence,
             direction: AgentMessageDirection::Internal,
             channel: AgentMessageChannel::Tooling,
-            sender: if *started {
+            sender: if matches!(status, PatchApplyStatus::InProgress) {
                 agent_endpoint.clone()
             } else {
                 AgentMessageEndpoint {
@@ -212,7 +212,7 @@ fn map_entry(
                     id: "patch_apply".to_string(),
                 }
             },
-            recipient: if *started {
+            recipient: if matches!(status, PatchApplyStatus::InProgress) {
                 AgentMessageEndpoint {
                     kind: AgentMessageEndpointKind::Tool,
                     id: "patch_apply".to_string(),
@@ -223,9 +223,8 @@ fn map_entry(
             kind: AgentMessageKind::ToolCall,
             correlation_id: call_id.clone(),
             summary: format!(
-                "patch_apply:{}:{}:{}",
-                started,
-                success,
+                "patch_apply:{}:{}",
+                patch_apply_status_label(*status),
                 summarize_patch_changes(changes),
             ),
             created_at: captured_at,
@@ -321,6 +320,15 @@ fn summarize_patch_changes(changes: &[PatchChange]) -> String {
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn patch_apply_status_label(status: PatchApplyStatus) -> &'static str {
+    match status {
+        PatchApplyStatus::InProgress => "in_progress",
+        PatchApplyStatus::Completed => "completed",
+        PatchApplyStatus::Failed => "failed",
+        PatchApplyStatus::Declined => "declined",
+    }
 }
 
 #[cfg(test)]

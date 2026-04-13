@@ -325,8 +325,8 @@ fn consume_provider_until_finished(
                 ProviderEvent::PatchApplyFinished {
                     call_id,
                     changes,
-                    success,
-                } => state.push_patch_apply_finished(call_id, changes, success),
+                    status,
+                } => state.push_patch_apply_finished(call_id, changes, status),
                 ProviderEvent::SessionHandle(handle) => {
                     state.apply_session_handle(handle);
                     on_state_change(state)?;

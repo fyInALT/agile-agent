@@ -343,8 +343,7 @@ mod tests {
                     removed: 0,
                 },
             ],
-            success: true,
-            started: false,
+            status: agent_core::tool_calls::PatchApplyStatus::Completed,
         }];
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -377,8 +376,7 @@ mod tests {
                 added: 5,
                 removed: 5,
             }],
-            success: true,
-            started: false,
+            status: agent_core::tool_calls::PatchApplyStatus::Completed,
         }];
 
         let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -403,8 +401,7 @@ mod tests {
                 added: 1,
                 removed: 1,
             }],
-            success: true,
-            started: false,
+            status: agent_core::tool_calls::PatchApplyStatus::Completed,
         }];
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
@@ -412,6 +409,30 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "• Edited old_name.rs → new_name.rs (+1 -1)"), "{rendered:?}");
+    }
+
+    #[test]
+    fn patch_apply_failed_and_declined_render_distinct_headers() {
+        let failed = vec![TranscriptEntry::PatchApply {
+            call_id: Some("patch-failed".to_string()),
+            changes: Vec::new(),
+            status: agent_core::tool_calls::PatchApplyStatus::Failed,
+        }];
+        let declined = vec![TranscriptEntry::PatchApply {
+            call_id: Some("patch-declined".to_string()),
+            changes: Vec::new(),
+            status: agent_core::tool_calls::PatchApplyStatus::Declined,
+        }];
+
+        let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
+        let declined_rendered = lines_to_strings(&flatten_cells(&build_cells(&declined, 80)));
+
+        assert!(failed_rendered
+            .iter()
+            .any(|line| line == "• Failed patch"), "{failed_rendered:?}");
+        assert!(declined_rendered
+            .iter()
+            .any(|line| line == "• Declined patch"), "{declined_rendered:?}");
     }
 
     #[test]
