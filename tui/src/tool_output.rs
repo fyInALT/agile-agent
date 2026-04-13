@@ -24,7 +24,11 @@ pub fn render_tool_call_lines(
     lines.push(tool_header_line(name, success, started));
 
     if let Some(input) = input_preview.filter(|value| !value.trim().is_empty()) {
-        lines.extend(render_input_block(name, input, width));
+        if name == "patch_apply" {
+            lines.extend(render_patch_summary_block(input, width));
+        } else {
+            lines.extend(render_input_block(name, input, width));
+        }
     }
 
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
@@ -108,6 +112,35 @@ fn render_input_block(name: &str, input: &str, width: usize) -> Vec<Line<'static
         },
         width,
     )
+}
+
+fn render_patch_summary_block(summary: &str, width: usize) -> Vec<Line<'static>> {
+    let body_width = width.saturating_sub(4).max(1);
+    let mut lines = Vec::new();
+
+    for (index, line) in summary.lines().enumerate() {
+        let style = if line.starts_with("A ") {
+            Style::default().fg(Color::Green)
+        } else if line.starts_with("D ") {
+            Style::default().fg(Color::Red)
+        } else if line.starts_with("R ") {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        };
+        lines.extend(wrap_prefixed(
+            if index == 0 {
+                TOOL_OUTPUT_INITIAL_PREFIX
+            } else {
+                TOOL_OUTPUT_CONTINUATION_PREFIX
+            },
+            line,
+            style,
+            body_width + 4,
+        ));
+    }
+
+    lines
 }
 
 fn render_output_block(
@@ -598,5 +631,22 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line.contains("$ git rev-parse HEAD")));
         assert!(rendered.iter().any(|line| line.contains("(no output)")));
+    }
+
+    #[test]
+    fn patch_apply_summary_renders_file_list() {
+        let lines = render_tool_call_lines(
+            "patch_apply",
+            Some("M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)"),
+            None,
+            true,
+            false,
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("applied patch")));
+        assert!(rendered.iter().any(|line| line.contains("M /repo/README.md (+1 -1)")));
+        assert!(rendered.iter().any(|line| line.contains("A /repo/src/lib.rs (+1 -0)")));
     }
 }

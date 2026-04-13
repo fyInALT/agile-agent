@@ -625,7 +625,7 @@ fn parse_item_event(
         ("item/started", "fileChange") => vec![ProviderEvent::ToolCallStarted {
             name: "patch_apply".to_string(),
             call_id: item_id,
-            input_preview: None,
+            input_preview: summarize_file_changes(item),
         }],
         ("item/completed", "fileChange") => vec![ProviderEvent::ToolCallFinished {
             name: "patch_apply".to_string(),
@@ -647,6 +647,46 @@ fn parse_item_event(
             .unwrap_or_default(),
         (_, _) => parse_content_blocks(item, streamed_agent_message_ids),
     }
+}
+
+fn summarize_file_changes(item: &serde_json::Value) -> Option<String> {
+    let changes = item.get("changes")?.as_array()?;
+    if changes.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    for change in changes {
+        let path = change.get("path").and_then(|value| value.as_str())?;
+        let kind = change
+            .get("kind")
+            .and_then(|value| value.as_str())
+            .unwrap_or("update");
+        let diff = change.get("diff").and_then(|value| value.as_str()).unwrap_or("");
+        let (added, removed) = summarize_diff_counts(diff);
+        let marker = match kind {
+            "add" => "A",
+            "delete" => "D",
+            "rename" => "R",
+            _ => "M",
+        };
+        lines.push(format!("{marker} {path} (+{added} -{removed})"));
+    }
+
+    Some(lines.join("\n"))
+}
+
+fn summarize_diff_counts(diff: &str) -> (usize, usize) {
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    for line in diff.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            added += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            removed += 1;
+        }
+    }
+    (added, removed)
 }
 
 fn parse_content_blocks(
@@ -944,6 +984,39 @@ mod tests {
             SessionHandle::CodexThread {
                 thread_id: "thr_123".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn parses_file_change_start_into_patch_summary_preview() {
+        let item = serde_json::json!({
+            "id": "patch-1",
+            "type": "fileChange",
+            "changes": [
+                {
+                    "path": "/repo/README.md",
+                    "kind": "update",
+                    "diff": "@@ -1 +1 @@\n-old\n+new"
+                },
+                {
+                    "path": "/repo/src/lib.rs",
+                    "kind": "add",
+                    "diff": "+fn main() {}"
+                }
+            ]
+        });
+
+        let events = parse_item_event("item/started", &item, &HashSet::new());
+
+        assert_eq!(
+            events,
+            vec![ProviderEvent::ToolCallStarted {
+                name: "patch_apply".to_string(),
+                call_id: Some("patch-1".to_string()),
+                input_preview: Some(
+                    "M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)".to_string()
+                ),
+            }]
         );
     }
 
