@@ -7,8 +7,10 @@ use textwrap::wrap;
 use unicode_segmentation::UnicodeSegmentation;
 
 const TOOL_PREVIEW_MAX_LINES: usize = 8;
-const TOOL_PREVIEW_HEAD_LINES: usize = 5;
-const TOOL_PREVIEW_TAIL_LINES: usize = 2;
+const TOOL_PREVIEW_HEAD_LINES: usize = 4;
+const TOOL_PREVIEW_TAIL_LINES: usize = 3;
+const TOOL_OUTPUT_INITIAL_PREFIX: &str = "  └ ";
+const TOOL_OUTPUT_CONTINUATION_PREFIX: &str = "    ";
 
 pub fn render_tool_call_lines(
     name: &str,
@@ -28,10 +30,16 @@ pub fn render_tool_call_lines(
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
         lines.extend(render_output_block(name, input_preview, output, width));
     } else if !started && name == "exec_command" {
-        lines.push(Line::from(Span::styled(
-            "    (no output)",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(
+                TOOL_OUTPUT_INITIAL_PREFIX,
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                "(no output)",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+        ]));
     }
 
     lines
@@ -155,23 +163,15 @@ fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
 }
 
 fn render_diff_block(output: &str, width: usize) -> Vec<Line<'static>> {
-    let rendered = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
     let body_width = width.saturating_sub(4).max(1);
     let mut lines = Vec::new();
     lines.extend(render_diff_summary(output));
-
-    for line in rendered {
-        match line {
-            PreviewLine::Text(text) => {
-                let style = diff_style_for_line(&text);
-                lines.extend(wrap_prefixed("    ", &text, style, body_width + 4));
-            }
-            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
-                format!("    … +{omitted} lines"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-            ))),
-        }
-    }
+    let rendered = render_wrapped_preview_lines(
+        output.lines().map(ToOwned::to_owned).collect(),
+        body_width + 4,
+        diff_style_for_line,
+    );
+    lines.extend(truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES));
 
     lines
 }
@@ -199,24 +199,13 @@ fn render_diff_summary(output: &str) -> Vec<Line<'static>> {
 }
 
 fn render_git_status_block(output: &str, width: usize) -> Vec<Line<'static>> {
-    let preview = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
-    let mut lines = Vec::new();
     let body_width = width.saturating_sub(4).max(1);
-
-    for line in preview {
-        match line {
-            PreviewLine::Text(text) => {
-                let style = git_status_style_for_line(&text);
-                lines.extend(wrap_prefixed("    ", &text, style, body_width + 4));
-            }
-            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
-                format!("    … +{omitted} lines"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-            ))),
-        }
-    }
-
-    lines
+    let rendered = render_wrapped_preview_lines(
+        output.lines().map(ToOwned::to_owned).collect(),
+        body_width + 4,
+        git_status_style_for_line,
+    );
+    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
 }
 
 fn git_status_style_for_line(line: &str) -> Style {
@@ -243,33 +232,22 @@ fn git_status_style_for_line(line: &str) -> Style {
 }
 
 fn render_git_log_block(output: &str, width: usize) -> Vec<Line<'static>> {
-    let preview = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
-    let mut lines = Vec::new();
     let body_width = width.saturating_sub(4).max(1);
-
-    for line in preview {
-        match line {
-            PreviewLine::Text(text) => {
-                let rendered = if let Some((hash, rest)) = split_git_log_line(&text) {
-                    format!("    {hash} {rest}")
+    let rendered = render_wrapped_preview_lines(
+        output
+            .lines()
+            .map(|line| {
+                if let Some((hash, rest)) = split_git_log_line(line) {
+                    format!("{hash} {rest}")
                 } else {
-                    format!("    {text}")
-                };
-                lines.extend(wrap_prefixed(
-                    "",
-                    &rendered,
-                    Style::default().add_modifier(Modifier::DIM),
-                    body_width + 4,
-                ));
-            }
-            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
-                format!("    … +{omitted} lines"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-            ))),
-        }
-    }
-
-    lines
+                    line.to_string()
+                }
+            })
+            .collect(),
+        body_width + 4,
+        |_| Style::default().add_modifier(Modifier::DIM),
+    );
+    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
 }
 
 fn diff_style_for_line(line: &str) -> Style {
@@ -340,54 +318,17 @@ fn summarize_unified_diff(diff: &str) -> Vec<DiffFileSummary> {
 
 fn render_text_block(name: &str, output: &str, width: usize) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
-    let preview_lines = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
-    let mut lines = Vec::new();
-
-    for line in preview_lines {
-        match line {
-            PreviewLine::Text(text) => {
-                let style = if name == "exec_command" {
-                    Style::default().add_modifier(Modifier::DIM)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
-                lines.extend(wrap_prefixed("    ", &text, style, body_width + 4));
-            }
-            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
-                format!("    … +{omitted} lines"),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-            ))),
-        }
-    }
-
-    lines
-}
-
-enum PreviewLine {
-    Text(String),
-    Ellipsis(usize),
-}
-
-fn summarize_lines(text: &str, head: usize, tail: usize) -> Vec<PreviewLine> {
-    let lines = text.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-    if lines.len() <= TOOL_PREVIEW_MAX_LINES {
-        return lines.into_iter().map(PreviewLine::Text).collect();
-    }
-
-    let mut preview = Vec::new();
-    preview.extend(
-        lines[..head.min(lines.len())]
-            .iter()
-            .cloned()
-            .map(PreviewLine::Text),
+    let style = if name == "exec_command" {
+        Style::default().add_modifier(Modifier::DIM)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let rendered = render_wrapped_preview_lines(
+        output.lines().map(ToOwned::to_owned).collect(),
+        body_width + 4,
+        |_| style,
     );
-    let omitted = lines.len().saturating_sub(head + tail);
-    if omitted > 0 {
-        preview.push(PreviewLine::Ellipsis(omitted));
-    }
-    let tail_start = lines.len().saturating_sub(tail);
-    preview.extend(lines[tail_start..].iter().cloned().map(PreviewLine::Text));
-    preview
+    truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES)
 }
 
 fn looks_like_git_log_line(line: &str) -> bool {
@@ -400,6 +341,65 @@ fn split_git_log_line(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((hash, rest))
+}
+
+fn render_wrapped_preview_lines<F>(raw_lines: Vec<String>, width: usize, style_for: F) -> Vec<Line<'static>>
+where
+    F: Fn(&str) -> Style,
+{
+    let mut rendered = Vec::new();
+
+    for (index, raw_line) in raw_lines.iter().enumerate() {
+        rendered.extend(wrap_prefixed(
+            if index == 0 {
+                TOOL_OUTPUT_INITIAL_PREFIX
+            } else {
+                TOOL_OUTPUT_CONTINUATION_PREFIX
+            },
+            raw_line,
+            style_for(raw_line),
+            width,
+        ));
+    }
+
+    rendered
+}
+
+fn truncate_rendered_lines_middle(lines: Vec<Line<'static>>, max_rows: usize) -> Vec<Line<'static>> {
+    if lines.len() <= max_rows {
+        return lines;
+    }
+    if max_rows == 0 {
+        return Vec::new();
+    }
+    if max_rows == 1 {
+        return vec![ellipsis_line(lines.len())];
+    }
+
+    let head = TOOL_PREVIEW_HEAD_LINES.min(max_rows.saturating_sub(1));
+    let tail = TOOL_PREVIEW_TAIL_LINES.min(max_rows.saturating_sub(head + 1));
+    let omitted = lines.len().saturating_sub(head + tail);
+
+    let mut out = Vec::new();
+    out.extend(lines[..head].iter().cloned());
+    if omitted > 0 {
+        out.push(ellipsis_line(omitted));
+    }
+    out.extend(lines[lines.len().saturating_sub(tail)..].iter().cloned());
+    out
+}
+
+fn ellipsis_line(omitted: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            TOOL_OUTPUT_CONTINUATION_PREFIX,
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            format!("… +{omitted} lines"),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+    ])
 }
 
 fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
