@@ -218,7 +218,8 @@ fn provider_switch_logs_tui_action() {
     logging::init_for_workplace(&workplace, RunMode::Tui).expect("init logger");
 
     let mut shell = ShellHarness::new(ProviderKind::Claude);
-    shell.state
+    shell
+        .state
         .switch_to_new_agent(ProviderKind::Codex)
         .expect("switch");
 
@@ -238,12 +239,12 @@ fn manual_scroll_keeps_same_top_line_while_streaming_reflows_content() {
             .push_status_message(format!("history line {index}"));
     }
 
-    shell.state.app_mut().append_assistant_chunk(
-        "## Focus\n\n- `agile-agent` is the prim",
-    );
+    shell
+        .state
+        .app_mut()
+        .append_assistant_chunk("## Focus\n\n- `agile-agent` is the prim");
 
-    let lines_before =
-        cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
+    let lines_before = cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
     let original_offset = lines_before
         .iter()
         .position(|line| {
@@ -274,15 +275,15 @@ fn manual_scroll_keeps_same_top_line_while_streaming_reflows_content() {
     let first_follow_tail = shell.state.transcript_follow_tail;
     let first_last_cell = shell.state.transcript_last_cell_range;
 
-    shell.state.app_mut().append_assistant_chunk(
-        "ary implementation target in this workspace.",
-    );
+    shell
+        .state
+        .app_mut()
+        .append_assistant_chunk("ary implementation target in this workspace.");
     terminal
         .draw(|frame| render_app(frame, &mut shell.state))
         .expect("second draw");
 
-    let lines_after =
-        cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
+    let lines_after = cells::flatten_cells(&cells::build_cells(&shell.state.app().transcript, 18));
     let top_after = lines_after[shell.state.transcript_scroll_offset]
         .spans
         .iter()
@@ -325,15 +326,17 @@ fn manual_up_scroll_does_not_reenable_follow_tail_during_streaming() {
 
     for _ in 0..5 {
         shell.state.scroll_transcript_up(1);
-        shell.state.app_mut().append_assistant_chunk(" more streaming text");
+        shell
+            .state
+            .app_mut()
+            .append_assistant_chunk(" more streaming text");
         terminal
             .draw(|frame| render_app(frame, &mut shell.state))
             .expect("streaming draw");
         assert!(
             !shell.state.transcript_follow_tail,
             "manual scroll unexpectedly re-enabled follow-tail: offset={} max_scroll={}",
-            shell.state.transcript_scroll_offset,
-            shell.state.transcript_max_scroll
+            shell.state.transcript_scroll_offset, shell.state.transcript_max_scroll
         );
     }
 }
@@ -371,13 +374,16 @@ fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
 #[test]
 fn active_cell_height_accounts_for_wrapped_rows() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
-    shell.state.app_mut().transcript.push(TranscriptEntry::WebSearch {
-        call_id: Some("search-1".to_string()),
-        query: "example search query with several generic words to exercise wrapping"
-            .to_string(),
-        action: None,
-        started: true,
-    });
+    shell
+        .state
+        .active_entries
+        .push(TranscriptEntry::WebSearch {
+            call_id: Some("search-1".to_string()),
+            query: "example search query with several generic words to exercise wrapping"
+                .to_string(),
+            action: None,
+            started: true,
+        });
 
     let rendered = shell.render_to_string(30, 12);
 

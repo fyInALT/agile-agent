@@ -30,7 +30,8 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     } else {
         Constraint::Min(1)
     };
-    let active_cells = cells::build_active_cells(&state.app().transcript, frame.area().width);
+    let active_entries = state.active_entries_for_display();
+    let active_cells = cells::build_active_cells(&active_entries, frame.area().width);
     let active_lines = cells::flatten_cells(&active_cells);
     let active_height = active_cells.iter().map(|cell| cell.height).sum::<u16>();
     let working_height = if state.is_busy() && active_height == 0 {
@@ -106,9 +107,11 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
                 .map(|line| line.as_str())
                 != Some(anchor.as_str())
             {
-                if let Some(index) =
-                    find_closest_matching_line(&rendered_lines, &anchor, state.transcript_scroll_offset)
-                {
+                if let Some(index) = find_closest_matching_line(
+                    &rendered_lines,
+                    &anchor,
+                    state.transcript_scroll_offset,
+                ) {
                     state.transcript_scroll_offset = index;
                 } else if let (Some((old_start, old_len)), Some((new_start, new_len))) = (
                     state.transcript_last_cell_range,
@@ -232,10 +235,8 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let lines = cells::flatten_cells(&cells::build_overlay_cells(
-        &state.app().transcript,
-        chunks[1].width,
-    ));
+    let entries = state.overlay_entries_for_display();
+    let lines = cells::flatten_cells(&cells::build_overlay_cells(&entries, chunks[1].width));
     let content_height = lines.len();
     let max_scroll = content_height.saturating_sub(chunks[1].height as usize);
     let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
@@ -384,8 +385,7 @@ fn working_label(state: &TuiState) -> &'static str {
 
 fn background_terminal_summary(state: &TuiState) -> Option<String> {
     let count = state
-        .app()
-        .transcript
+        .active_entries_for_display()
         .iter()
         .filter(|entry| {
             matches!(
@@ -434,7 +434,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
         state.app_mut().status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
-        state.app_mut().transcript.push(TranscriptEntry::ExecCommand {
+        state.active_entries.push(TranscriptEntry::ExecCommand {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
             allow_exploring_group: true,
@@ -449,6 +449,41 @@ mod tests {
 
         assert!(rendered.contains("Working (8s • esc to interrupt)"));
         assert!(rendered.contains("1 background terminal running"));
+    }
+
+    #[test]
+    fn overlay_entries_append_active_tail_after_committed_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state
+            .app_mut()
+            .transcript
+            .push(TranscriptEntry::Status("committed".to_string()));
+        state.active_entries.push(TranscriptEntry::ExecCommand {
+            call_id: Some("1".to_string()),
+            source: Some("agent".to_string()),
+            allow_exploring_group: true,
+            input_preview: Some("printf hello".to_string()),
+            output_preview: Some("hello".to_string()),
+            status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+            exit_code: None,
+            duration_ms: None,
+        });
+
+        let entries = state.overlay_entries_for_display();
+
+        assert!(
+            entries
+                .iter()
+                .any(|entry| matches!(entry, TranscriptEntry::Status(text) if text == "committed"))
+        );
+        assert!(matches!(
+            entries.last(),
+            Some(TranscriptEntry::ExecCommand { status, .. })
+                if *status == agent_core::tool_calls::ExecCommandStatus::InProgress
+        ));
     }
 
     #[test]

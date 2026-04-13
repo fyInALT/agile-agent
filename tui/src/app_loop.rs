@@ -18,6 +18,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use std::env;
 use std::sync::mpsc;
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
 use crate::input::InputOutcome;
@@ -169,7 +170,20 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
         let mut should_clear_provider_rx = false;
         if let Some(rx) = provider_rx.as_ref() {
-            while let Ok(event) = rx.try_recv() {
+            loop {
+                let event = match rx.try_recv() {
+                    Ok(event) => event,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        handle_provider_terminal_error(
+                            &mut state,
+                            "provider event stream disconnected".to_string(),
+                        )?;
+                        should_clear_provider_rx = true;
+                        break;
+                    }
+                };
+
                 match event {
                     ProviderEvent::Status(text) => state.app_mut().push_status_message(text),
                     ProviderEvent::AssistantChunk(chunk) => {
@@ -182,9 +196,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         call_id,
                         input_preview,
                         source,
-                    } => state
-                        .app_mut()
-                        .push_exec_command_started(call_id, input_preview, source),
+                    } => state.push_active_exec_started(call_id, input_preview, source),
                     ProviderEvent::ExecCommandFinished {
                         call_id,
                         output_preview,
@@ -192,7 +204,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         exit_code,
                         duration_ms,
                         source,
-                    } => state.app_mut().push_exec_command_finished(
+                    } => state.finish_active_exec(
                         call_id,
                         output_preview,
                         status,
@@ -201,17 +213,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         source,
                     ),
                     ProviderEvent::ExecCommandOutputDelta { call_id, delta } => {
-                        state.app_mut().append_exec_command_output(call_id, &delta)
+                        state.append_active_exec_output(call_id, &delta)
                     }
                     ProviderEvent::GenericToolCallStarted {
                         name,
                         call_id,
                         input_preview,
-                    } => state.app_mut().push_generic_tool_call_started(
-                        name,
-                        call_id,
-                        input_preview,
-                    ),
+                    } => state.push_active_generic_tool_call_started(name, call_id, input_preview),
                     ProviderEvent::GenericToolCallFinished {
                         name,
                         call_id,
@@ -219,7 +227,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         success,
                         exit_code,
                         duration_ms,
-                    } => state.app_mut().push_generic_tool_call_finished(
+                    } => state.finish_active_generic_tool_call(
                         name,
                         call_id,
                         output_preview,
@@ -228,13 +236,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         duration_ms,
                     ),
                     ProviderEvent::WebSearchStarted { call_id, query } => {
-                        state.app_mut().push_web_search_started(call_id, query)
+                        state.push_active_web_search_started(call_id, query)
                     }
                     ProviderEvent::WebSearchFinished {
                         call_id,
                         query,
                         action,
-                    } => state.app_mut().push_web_search_finished(call_id, query, action),
+                    } => state.finish_active_web_search(call_id, query, action),
                     ProviderEvent::ViewImage { call_id, path } => {
                         state.app_mut().push_view_image(call_id, path)
                     }
@@ -243,12 +251,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         revised_prompt,
                         result,
                         saved_path,
-                    } => state
-                        .app_mut()
-                        .push_image_generation(call_id, revised_prompt, result, saved_path),
-                    ProviderEvent::McpToolCallStarted { call_id, invocation } => {
-                        state.app_mut().push_mcp_tool_call_started(call_id, invocation)
-                    }
+                    } => state.app_mut().push_image_generation(
+                        call_id,
+                        revised_prompt,
+                        result,
+                        saved_path,
+                    ),
+                    ProviderEvent::McpToolCallStarted {
+                        call_id,
+                        invocation,
+                    } => state.push_active_mcp_tool_call_started(call_id, invocation),
                     ProviderEvent::McpToolCallFinished {
                         call_id,
                         invocation,
@@ -256,7 +268,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         error,
                         status,
                         is_error,
-                    } => state.app_mut().push_mcp_tool_call_finished(
+                    } => state.finish_active_mcp_tool_call(
                         call_id,
                         invocation,
                         result_blocks,
@@ -265,28 +277,27 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         is_error,
                     ),
                     ProviderEvent::PatchApplyStarted { call_id, changes } => {
-                        state.app_mut().push_patch_apply_started(call_id, changes)
+                        state.push_active_patch_apply_started(call_id, changes)
                     }
                     ProviderEvent::PatchApplyOutputDelta { call_id, delta } => {
-                        state.app_mut().append_patch_apply_output(call_id, &delta)
+                        state.append_active_patch_apply_output(call_id, &delta)
                     }
                     ProviderEvent::PatchApplyFinished {
                         call_id,
                         changes,
                         status,
-                    } => state
-                        .app_mut()
-                        .push_patch_apply_finished(call_id, changes, status),
+                    } => state.finish_active_patch_apply(call_id, changes, status),
                     ProviderEvent::SessionHandle(handle) => {
                         state.app_mut().apply_session_handle(handle);
                         state.persist_if_changed()?;
                     }
                     ProviderEvent::Error(error) => {
-                        state.app_mut().mark_active_task_error();
-                        state.app_mut().push_error_message(error);
-                        state.persist_if_changed()?;
+                        handle_provider_terminal_error(&mut state, error)?;
+                        should_clear_provider_rx = true;
+                        break;
                     }
                     ProviderEvent::Finished => {
+                        state.finalize_active_entries_after_failure(None);
                         state.app_mut().finish_provider_response();
                         if state.app().active_task_id.is_some() {
                             match task_engine::resolve_active_task_after_turn(
@@ -456,6 +467,17 @@ fn start_provider_request(
     }
 }
 
+fn handle_provider_terminal_error(state: &mut TuiState, error: String) -> Result<()> {
+    state.finalize_active_entries_after_failure(Some(&error));
+    state.app_mut().mark_active_task_error();
+    state.app_mut().push_error_message(error);
+    state.app_mut().finish_provider_response();
+    if state.app().active_task_id.is_none() && state.app().loop_phase != LoopPhase::Escalating {
+        state.app_mut().set_loop_phase(LoopPhase::Idle);
+    }
+    state.persist_if_changed()
+}
+
 fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
     if let Some(active_task_id) = state.app().active_task_id.clone() {
         let task = state
@@ -488,4 +510,50 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
         .app_mut()
         .push_status_message(format!("running task: {}", task.id));
     Some((task_engine::build_task_prompt(&task), true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handle_provider_terminal_error;
+    use crate::ui_state::TuiState;
+    use agent_core::app::AppStatus;
+    use agent_core::app::TranscriptEntry;
+    use agent_core::provider::ProviderKind;
+    use agent_core::runtime_session::RuntimeSession;
+    use tempfile::TempDir;
+
+    #[test]
+    fn provider_terminal_error_finalizes_active_entries_and_marks_idle() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().begin_provider_response();
+        state.push_active_exec_started(
+            Some("call-1".to_string()),
+            Some("printf hello".to_string()),
+            Some("agent".to_string()),
+        );
+
+        handle_provider_terminal_error(&mut state, "provider crashed".to_string())
+            .expect("handle error");
+
+        assert!(state.active_entries.is_empty());
+        assert_eq!(state.app().status, AppStatus::Idle);
+        assert!(state.app().active_task_had_error);
+        assert!(state.app().transcript.iter().any(|entry| {
+            matches!(
+                entry,
+                TranscriptEntry::ExecCommand {
+                    call_id,
+                    status: agent_core::tool_calls::ExecCommandStatus::Failed,
+                    ..
+                } if call_id.as_deref() == Some("call-1")
+            )
+        }));
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Error(text)) if text == "provider crashed"
+        ));
+    }
 }
