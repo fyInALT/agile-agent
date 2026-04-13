@@ -626,6 +626,40 @@ mod tests {
     }
 
     #[test]
+    fn failed_and_declined_exec_render_distinct_headers() {
+        let failed = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-failed".to_string()),
+            source: Some("agent".to_string()),
+            allow_exploring_group: false,
+            input_preview: Some("false".to_string()),
+            output_preview: Some(String::new()),
+            status: agent_core::tool_calls::ExecCommandStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: Some(5),
+        }];
+        let declined = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-declined".to_string()),
+            source: Some("agent".to_string()),
+            allow_exploring_group: false,
+            input_preview: Some("rm -rf /tmp/demo".to_string()),
+            output_preview: Some(String::new()),
+            status: agent_core::tool_calls::ExecCommandStatus::Declined,
+            exit_code: None,
+            duration_ms: None,
+        }];
+
+        let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
+        let declined_rendered = lines_to_strings(&flatten_cells(&build_cells(&declined, 80)));
+
+        assert!(failed_rendered
+            .iter()
+            .any(|line| line == "• Ran false"), "{failed_rendered:?}");
+        assert!(declined_rendered
+            .iter()
+            .any(|line| line == "• Declined command rm -rf /tmp/demo"), "{declined_rendered:?}");
+    }
+
+    #[test]
     fn exploring_cluster_uses_unwrapped_shell_commands() {
         let entries = vec![
             TranscriptEntry::ExecCommand {
