@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::logging;
 use crate::mock_provider;
 use crate::probe;
+use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 
@@ -66,7 +67,7 @@ pub enum ProviderEvent {
     ExecCommandFinished {
         call_id: Option<String>,
         output_preview: Option<String>,
-        success: bool,
+        status: ExecCommandStatus,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
         source: Option<String>,

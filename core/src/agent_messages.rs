@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
+use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 
@@ -152,15 +153,14 @@ fn map_entry(
             allow_exploring_group: _,
             input_preview,
             output_preview,
-            success,
-            started,
+            status,
             exit_code,
             duration_ms,
         } => AgentMessageEnvelope {
             sequence,
             direction: AgentMessageDirection::Internal,
             channel: AgentMessageChannel::Tooling,
-            sender: if *started {
+            sender: if matches!(status, ExecCommandStatus::InProgress) {
                 agent_endpoint.clone()
             } else {
                 AgentMessageEndpoint {
@@ -168,7 +168,7 @@ fn map_entry(
                     id: "exec_command".to_string(),
                 }
             },
-            recipient: if *started {
+            recipient: if matches!(status, ExecCommandStatus::InProgress) {
                 AgentMessageEndpoint {
                     kind: AgentMessageEndpointKind::Tool,
                     id: "exec_command".to_string(),
@@ -179,20 +179,16 @@ fn map_entry(
             kind: AgentMessageKind::ToolCall,
             correlation_id: call_id.clone(),
             summary: format!(
-                "exec_command:{}:{}:{}:{}:{}:{}:{}",
+                "exec_command:{}:{}:{}:{}:{}:{}",
                 source.as_deref().unwrap_or(""),
-                started,
-                success,
+                exec_command_status_label(*status),
                 input_preview.as_deref().unwrap_or(""),
                 output_preview.as_deref().unwrap_or(""),
                 exit_code
                     .map(|value| value.to_string())
                     .as_deref()
                     .unwrap_or(""),
-                duration_ms
-                    .map(|value| value.to_string())
-                    .as_deref()
-                    .unwrap_or(""),
+                duration_ms.map(|value| value.to_string()).as_deref().unwrap_or(""),
             ),
             created_at: captured_at,
         },
@@ -328,6 +324,15 @@ fn patch_apply_status_label(status: PatchApplyStatus) -> &'static str {
         PatchApplyStatus::Completed => "completed",
         PatchApplyStatus::Failed => "failed",
         PatchApplyStatus::Declined => "declined",
+    }
+}
+
+fn exec_command_status_label(status: ExecCommandStatus) -> &'static str {
+    match status {
+        ExecCommandStatus::InProgress => "in_progress",
+        ExecCommandStatus::Completed => "completed",
+        ExecCommandStatus::Failed => "failed",
+        ExecCommandStatus::Declined => "declined",
     }
 }
 

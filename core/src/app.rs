@@ -10,6 +10,7 @@ use crate::backlog::TodoStatus;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
+use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
 use crate::verification;
@@ -42,8 +43,7 @@ pub enum TranscriptEntry {
         allow_exploring_group: bool,
         input_preview: Option<String>,
         output_preview: Option<String>,
-        success: bool,
-        started: bool,
+        status: ExecCommandStatus,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
     },
@@ -200,8 +200,7 @@ impl AppState {
             allow_exploring_group: true,
             input_preview,
             output_preview: None,
-            success: true,
-            started: true,
+            status: ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         });
@@ -211,7 +210,7 @@ impl AppState {
         &mut self,
         call_id: Option<String>,
         output_preview: Option<String>,
-        success: bool,
+        status: ExecCommandStatus,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
         source: Option<String>,
@@ -224,7 +223,7 @@ impl AppState {
                     source: existing_source,
                     allow_exploring_group,
                     input_preview: existing_input_preview,
-                    started: true,
+                    status: ExecCommandStatus::InProgress,
                     ..
                 } => {
                     let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
@@ -236,8 +235,7 @@ impl AppState {
                             allow_exploring_group: *allow_exploring_group,
                             input_preview: existing_input_preview.clone(),
                             output_preview,
-                            success,
-                            started: false,
+                            status,
                             exit_code,
                             duration_ms,
                         };
@@ -253,8 +251,7 @@ impl AppState {
             allow_exploring_group: false,
             input_preview: None,
             output_preview,
-            success,
-            started: false,
+            status,
             exit_code,
             duration_ms,
         });
@@ -290,8 +287,7 @@ impl AppState {
             allow_exploring_group: false,
             input_preview: None,
             output_preview: Some(delta.to_string()),
-            success: true,
-            started: true,
+            status: ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         });
@@ -900,7 +896,7 @@ mod tests {
         state.push_exec_command_finished(
             Some("call-1".to_string()),
             Some("diff --git a/README.md b/README.md".to_string()),
-            true,
+            crate::tool_calls::ExecCommandStatus::Completed,
             Some(0),
             Some(180),
             Some("agent".to_string()),
@@ -915,8 +911,7 @@ mod tests {
                 allow_exploring_group,
                 input_preview,
                 output_preview,
-                success,
-                started,
+                status,
                 exit_code,
                 duration_ms,
             }
@@ -925,8 +920,7 @@ mod tests {
                 && *allow_exploring_group
                 && input_preview.as_deref() == Some("git diff README.md")
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
-                && *success
-                && !*started
+                && *status == crate::tool_calls::ExecCommandStatus::Completed
                 && *exit_code == Some(0)
                 && *duration_ms == Some(180)
         ));
@@ -939,7 +933,7 @@ mod tests {
         state.push_exec_command_finished(
             Some("orphan-1".to_string()),
             Some("done".to_string()),
-            true,
+            crate::tool_calls::ExecCommandStatus::Completed,
             Some(0),
             Some(5),
             Some("agent".to_string()),
@@ -951,13 +945,13 @@ mod tests {
                 call_id,
                 allow_exploring_group,
                 output_preview,
-                started,
+                status,
                 ..
             }
             if call_id.as_deref() == Some("orphan-1")
                 && !*allow_exploring_group
                 && output_preview.as_deref() == Some("done")
-                && !*started
+                && *status == crate::tool_calls::ExecCommandStatus::Completed
         ));
     }
 
@@ -979,13 +973,13 @@ mod tests {
                 call_id,
                 input_preview,
                 output_preview,
-                started,
+                status,
                 ..
             }
             if call_id.as_deref() == Some("call-1")
                 && input_preview.as_deref() == Some("printf hello")
                 && output_preview.as_deref() == Some("hello\nworld")
-                && *started
+                && *status == crate::tool_calls::ExecCommandStatus::InProgress
         ));
     }
 

@@ -21,6 +21,7 @@ use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
+use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchChangeKind;
 use crate::tool_calls::PatchApplyStatus;
@@ -648,7 +649,7 @@ fn parse_item_event(
             vec![ProviderEvent::ExecCommandFinished {
                 call_id: item_id,
                 output_preview: output,
-                success: exit_code.unwrap_or(0) == 0,
+                status: parse_exec_command_status(item, exit_code),
                 exit_code,
                 duration_ms,
                 source,
@@ -698,6 +699,22 @@ fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
         "declined" => PatchApplyStatus::Declined,
         "inProgress" => PatchApplyStatus::InProgress,
         _ => PatchApplyStatus::Completed,
+    }
+}
+
+fn parse_exec_command_status(
+    item: &serde_json::Value,
+    exit_code: Option<i32>,
+) -> ExecCommandStatus {
+    match item
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or_else(|| if exit_code.unwrap_or(0) == 0 { "completed" } else { "failed" })
+    {
+        "declined" => ExecCommandStatus::Declined,
+        "failed" => ExecCommandStatus::Failed,
+        "inProgress" => ExecCommandStatus::InProgress,
+        _ => ExecCommandStatus::Completed,
     }
 }
 
@@ -1120,7 +1137,7 @@ mod tests {
             vec![ProviderEvent::ExecCommandFinished {
                 call_id: Some("exec-1".to_string()),
                 output_preview: Some("done".to_string()),
-                success: false,
+                status: crate::tool_calls::ExecCommandStatus::Failed,
                 exit_code: Some(7),
                 duration_ms: Some(1234),
                 source: Some("userShell".to_string()),

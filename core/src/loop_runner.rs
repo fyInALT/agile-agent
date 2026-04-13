@@ -284,14 +284,14 @@ fn consume_provider_until_finished(
                 ProviderEvent::ExecCommandFinished {
                     call_id,
                     output_preview,
-                    success,
+                    status,
                     exit_code,
                     duration_ms,
                     source,
                 } => state.push_exec_command_finished(
                     call_id,
                     output_preview,
-                    success,
+                    status,
                     exit_code,
                     duration_ms,
                     source,

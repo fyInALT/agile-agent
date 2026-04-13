@@ -1,4 +1,5 @@
 use agent_core::app::TranscriptEntry;
+use agent_core::tool_calls::ExecCommandStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
 use agent_core::tool_calls::PatchApplyStatus;
@@ -54,16 +55,14 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             allow_exploring_group: _,
             input_preview,
             output_preview,
-            success,
-            started,
+            status,
             exit_code,
             duration_ms,
         } => Box::new(ExecHistoryCell {
             source: source.clone(),
             input_preview: input_preview.clone(),
             output_preview: output_preview.clone(),
-            success: *success,
-            started: *started,
+            status: *status,
             exit_code: *exit_code,
             duration_ms: *duration_ms,
         }),
@@ -146,8 +145,7 @@ struct ExecHistoryCell {
     source: Option<String>,
     input_preview: Option<String>,
     output_preview: Option<String>,
-    success: bool,
-    started: bool,
+    status: ExecCommandStatus,
     exit_code: Option<i32>,
     duration_ms: Option<u64>,
 }
@@ -157,8 +155,7 @@ pub(crate) struct ExploringExecCall {
     pub(crate) source: Option<String>,
     pub(crate) input_preview: Option<String>,
     pub(crate) output_preview: Option<String>,
-    pub(crate) success: bool,
-    pub(crate) started: bool,
+    pub(crate) status: ExecCommandStatus,
     pub(crate) exit_code: Option<i32>,
     pub(crate) duration_ms: Option<u64>,
     pub(crate) ops: Vec<ExploringOp>,
@@ -175,8 +172,7 @@ impl HistoryCell for ExecHistoryCell {
             self.source.as_deref(),
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
-            self.success,
-            self.started,
+            self.status,
             self.exit_code,
             self.duration_ms,
             width,
@@ -189,8 +185,7 @@ impl HistoryCell for ExecHistoryCell {
             self.source.as_deref(),
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
-            self.success,
-            self.started,
+            self.status,
             self.exit_code,
             self.duration_ms,
             width,
@@ -214,8 +209,7 @@ impl HistoryCell for ExploringExecHistoryCell {
                 call.source.as_deref(),
                 call.input_preview.as_deref(),
                 call.output_preview.as_deref(),
-                call.success,
-                call.started,
+                call.status,
                 call.exit_code,
                 call.duration_ms,
                 width,
@@ -365,27 +359,27 @@ fn render_exec_history_lines(
     source: Option<&str>,
     input_preview: Option<&str>,
     output_preview: Option<&str>,
-    success: bool,
-    started: bool,
+    status: ExecCommandStatus,
     exit_code: Option<i32>,
     duration_ms: Option<u64>,
     width: u16,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let title = if started {
+    let title = if matches!(status, ExecCommandStatus::InProgress) {
         "Running"
+    } else if matches!(status, ExecCommandStatus::Declined) {
+        "Declined command"
     } else if matches!(source, Some("userShell")) {
         "You ran"
     } else {
         "Ran"
     };
-    let bullet_style = if started {
-        Style::default().fg(Color::Blue)
-    } else if success {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::Red)
+    let bullet_style = match status {
+        ExecCommandStatus::InProgress => Style::default().fg(Color::Blue),
+        ExecCommandStatus::Completed => Style::default().fg(Color::Green),
+        ExecCommandStatus::Failed => Style::default().fg(Color::Red),
+        ExecCommandStatus::Declined => Style::default().fg(Color::Yellow),
     };
     let display_command = input_preview.map(strip_shell_wrapper);
     lines.extend(render_exec_header_lines(
@@ -402,7 +396,7 @@ fn render_exec_history_lines(
         width as usize,
         mode,
     );
-    if output_lines.is_empty() && !started {
+    if output_lines.is_empty() && !matches!(status, ExecCommandStatus::InProgress) {
         lines.push(Line::from(vec![
             Span::styled(
                 DETAIL_INITIAL_PREFIX,
@@ -417,9 +411,9 @@ fn render_exec_history_lines(
         lines.extend(output_lines);
     }
 
-    if !started {
+    if !matches!(status, ExecCommandStatus::InProgress) {
         lines.push(tool_output::render_exec_result_line_public(
-            success,
+            matches!(status, ExecCommandStatus::Completed),
             exit_code,
             duration_ms,
         ));
@@ -430,7 +424,9 @@ fn render_exec_history_lines(
 
 fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let any_started = calls.iter().any(|call| call.started);
+    let any_started = calls
+        .iter()
+        .any(|call| matches!(call.status, ExecCommandStatus::InProgress));
     let bullet_style = if any_started {
         Style::default().fg(Color::Blue)
     } else {

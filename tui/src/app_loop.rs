@@ -188,14 +188,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     ProviderEvent::ExecCommandFinished {
                         call_id,
                         output_preview,
-                        success,
+                        status,
                         exit_code,
                         duration_ms,
                         source,
                     } => state.app_mut().push_exec_command_finished(
                         call_id,
                         output_preview,
-                        success,
+                        status,
                         exit_code,
                         duration_ms,
                         source,
