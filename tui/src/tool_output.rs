@@ -27,6 +27,11 @@ pub fn render_tool_call_lines(
 
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
         lines.extend(render_output_block(name, input_preview, output, width));
+    } else if !started && name == "exec_command" {
+        lines.push(Line::from(Span::styled(
+            "    (no output)",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        )));
     }
 
     lines
@@ -107,6 +112,14 @@ fn render_output_block(
         return render_diff_block(output, width);
     }
 
+    if looks_like_git_status(input_preview, output) {
+        return render_git_status_block(output, width);
+    }
+
+    if looks_like_git_log(input_preview, output) {
+        return render_git_log_block(output, width);
+    }
+
     let formatted = if let Some(compact_json) = format_json_compact(output) {
         compact_json
     } else {
@@ -123,16 +136,131 @@ fn looks_like_diff(input_preview: Option<&str>, output: &str) -> bool {
         || (output.contains("\n--- ") && output.contains("\n+++ "))
 }
 
+fn looks_like_git_status(input_preview: Option<&str>, output: &str) -> bool {
+    input_preview.is_some_and(|input| input.contains("git status"))
+        || output.starts_with("On branch ")
+}
+
+fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
+    if input_preview.is_some_and(|input| input.contains("git log")) {
+        return true;
+    }
+
+    let non_empty = output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(5)
+        .collect::<Vec<_>>();
+    !non_empty.is_empty() && non_empty.iter().all(|line| looks_like_git_log_line(line))
+}
+
 fn render_diff_block(output: &str, width: usize) -> Vec<Line<'static>> {
     let rendered = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
     let body_width = width.saturating_sub(4).max(1);
     let mut lines = Vec::new();
+    lines.extend(render_diff_summary(output));
 
     for line in rendered {
         match line {
             PreviewLine::Text(text) => {
                 let style = diff_style_for_line(&text);
                 lines.extend(wrap_prefixed("    ", &text, style, body_width + 4));
+            }
+            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
+                format!("    … +{omitted} lines"),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ))),
+        }
+    }
+
+    lines
+}
+
+fn render_diff_summary(output: &str) -> Vec<Line<'static>> {
+    let summaries = summarize_unified_diff(output);
+    if summaries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    for summary in summaries {
+        lines.push(Line::from(vec![
+            Span::styled("    ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(summary.path, Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            Span::styled(
+                format!("(+{} -{})", summary.added, summary.removed),
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines
+}
+
+fn render_git_status_block(output: &str, width: usize) -> Vec<Line<'static>> {
+    let preview = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
+    let mut lines = Vec::new();
+    let body_width = width.saturating_sub(4).max(1);
+
+    for line in preview {
+        match line {
+            PreviewLine::Text(text) => {
+                let style = git_status_style_for_line(&text);
+                lines.extend(wrap_prefixed("    ", &text, style, body_width + 4));
+            }
+            PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
+                format!("    … +{omitted} lines"),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ))),
+        }
+    }
+
+    lines
+}
+
+fn git_status_style_for_line(line: &str) -> Style {
+    let trimmed = line.trim_start();
+    if line.starts_with("On branch ") || line.starts_with("Your branch ") {
+        Style::default().fg(Color::Cyan)
+    } else if line.ends_with(':') {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else if trimmed.starts_with("modified:")
+        || trimmed.starts_with("deleted:")
+        || trimmed.starts_with("renamed:")
+    {
+        Style::default().fg(Color::Red)
+    } else if trimmed.starts_with("new file:") || trimmed.starts_with("added:") {
+        Style::default().fg(Color::Green)
+    } else if trimmed.starts_with("Changes not staged")
+        || trimmed.starts_with("Changes to be committed")
+        || trimmed.starts_with("Untracked files")
+    {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    }
+}
+
+fn render_git_log_block(output: &str, width: usize) -> Vec<Line<'static>> {
+    let preview = summarize_lines(output, TOOL_PREVIEW_HEAD_LINES, TOOL_PREVIEW_TAIL_LINES);
+    let mut lines = Vec::new();
+    let body_width = width.saturating_sub(4).max(1);
+
+    for line in preview {
+        match line {
+            PreviewLine::Text(text) => {
+                let rendered = if let Some((hash, rest)) = split_git_log_line(&text) {
+                    format!("    {hash} {rest}")
+                } else {
+                    format!("    {text}")
+                };
+                lines.extend(wrap_prefixed(
+                    "",
+                    &rendered,
+                    Style::default().add_modifier(Modifier::DIM),
+                    body_width + 4,
+                ));
             }
             PreviewLine::Ellipsis(omitted) => lines.push(Line::from(Span::styled(
                 format!("    … +{omitted} lines"),
@@ -162,6 +290,52 @@ fn diff_style_for_line(line: &str) -> Style {
     } else {
         Style::default().add_modifier(Modifier::DIM)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiffFileSummary {
+    path: String,
+    added: usize,
+    removed: usize,
+}
+
+fn summarize_unified_diff(diff: &str) -> Vec<DiffFileSummary> {
+    let mut summaries = Vec::new();
+    let mut current: Option<DiffFileSummary> = None;
+
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git a/") {
+            if let Some(summary) = current.take() {
+                summaries.push(summary);
+            }
+            let path = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or(rest)
+                .trim_end_matches(" b/")
+                .to_string();
+            current = Some(DiffFileSummary {
+                path,
+                added: 0,
+                removed: 0,
+            });
+            continue;
+        }
+
+        if let Some(summary) = current.as_mut() {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                summary.added += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                summary.removed += 1;
+            }
+        }
+    }
+
+    if let Some(summary) = current.take() {
+        summaries.push(summary);
+    }
+
+    summaries
 }
 
 fn render_text_block(name: &str, output: &str, width: usize) -> Vec<Line<'static>> {
@@ -214,6 +388,18 @@ fn summarize_lines(text: &str, head: usize, tail: usize) -> Vec<PreviewLine> {
     let tail_start = lines.len().saturating_sub(tail);
     preview.extend(lines[tail_start..].iter().cloned().map(PreviewLine::Text));
     preview
+}
+
+fn looks_like_git_log_line(line: &str) -> bool {
+    split_git_log_line(line).is_some()
+}
+
+fn split_git_log_line(line: &str) -> Option<(&str, &str)> {
+    let (hash, rest) = line.split_once(' ')?;
+    if hash.len() < 7 || !hash.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some((hash, rest))
 }
 
 fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
@@ -320,6 +506,7 @@ mod tests {
         let rendered = lines_to_strings(&lines);
         assert!(rendered.iter().any(|line| line.contains("finished command")));
         assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
+        assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
         assert!(rendered.iter().any(|line| line.contains("diff --git a/README.md b/README.md")));
         assert!(rendered.iter().any(|line| line.contains("+new")));
         assert!(!rendered.iter().any(|line| line.contains("output:")));
@@ -361,5 +548,55 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line.contains("\"ok\": true")));
         assert!(rendered.iter().any(|line| line.contains("\"items\": [1, 2, 3]")));
+    }
+
+    #[test]
+    fn git_status_output_is_rendered_with_status_specific_lines() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git status"),
+            Some("On branch main\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    old.txt"),
+            true,
+            false,
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("On branch main")));
+        assert!(rendered.iter().any(|line| line.contains("Changes not staged for commit:")));
+        assert!(rendered.iter().any(|line| line.contains("modified:   README.md")));
+        assert!(rendered.iter().any(|line| line.contains("deleted:    old.txt")));
+    }
+
+    #[test]
+    fn git_log_output_is_rendered_as_commit_list() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git log --oneline -4"),
+            Some("927a1e4 feat: add end-to-end debug observability\n0d7485f feat: log codex jsonrpc transport"),
+            true,
+            false,
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("927a1e4 feat: add end-to-end debug observability")));
+        assert!(rendered.iter().any(|line| line.contains("0d7485f feat: log codex jsonrpc transport")));
+    }
+
+    #[test]
+    fn finished_command_with_no_output_shows_explicit_empty_marker() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git rev-parse HEAD"),
+            Some(""),
+            true,
+            false,
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("$ git rev-parse HEAD")));
+        assert!(rendered.iter().any(|line| line.contains("(no output)")));
     }
 }
