@@ -146,6 +146,7 @@ fn map_entry(
         },
         TranscriptEntry::ExecCommand {
             call_id,
+            source,
             input_preview,
             output_preview,
             success,
@@ -175,7 +176,8 @@ fn map_entry(
             kind: AgentMessageKind::ToolCall,
             correlation_id: call_id.clone(),
             summary: format!(
-                "exec_command:{}:{}:{}:{}:{}:{}",
+                "exec_command:{}:{}:{}:{}:{}:{}:{}",
+                source.as_deref().unwrap_or(""),
                 started,
                 success,
                 input_preview.as_deref().unwrap_or(""),

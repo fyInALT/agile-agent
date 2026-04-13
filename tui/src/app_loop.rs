@@ -182,9 +182,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         name,
                         call_id,
                         input_preview,
+                        source,
                     } => state
                         .app_mut()
-                        .push_tool_call_started(name, call_id, input_preview),
+                        .push_tool_call_started(name, call_id, input_preview, source),
                     ProviderEvent::ToolCallFinished {
                         name,
                         call_id,
@@ -192,6 +193,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         success,
                         exit_code,
                         duration_ms,
+                        source,
                     } => state.app_mut().push_tool_call_finished(
                         name,
                         call_id,
@@ -199,6 +201,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         success,
                         exit_code,
                         duration_ms,
+                        source,
                     ),
                     ProviderEvent::SessionHandle(handle) => {
                         state.app_mut().apply_session_handle(handle);

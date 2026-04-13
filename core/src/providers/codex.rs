@@ -604,10 +604,15 @@ fn parse_item_event(
                 .get("command")
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
+            let source = item
+                .get("source")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned);
             vec![ProviderEvent::ToolCallStarted {
                 name: "exec_command".to_string(),
                 call_id: item_id,
                 input_preview: command,
+                source,
             }]
         }
         ("item/completed", "commandExecution") => {
@@ -622,6 +627,10 @@ fn parse_item_event(
             let duration_ms = item
                 .get("durationMs")
                 .and_then(|value| value.as_u64());
+            let source = item
+                .get("source")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned);
             vec![ProviderEvent::ToolCallFinished {
                 name: "exec_command".to_string(),
                 call_id: item_id,
@@ -629,12 +638,14 @@ fn parse_item_event(
                 success: exit_code.unwrap_or(0) == 0,
                 exit_code,
                 duration_ms,
+                source,
             }]
         }
         ("item/started", "fileChange") => vec![ProviderEvent::ToolCallStarted {
             name: "patch_apply".to_string(),
             call_id: item_id,
             input_preview: summarize_file_changes(item),
+            source: None,
         }],
         ("item/completed", "fileChange") => vec![ProviderEvent::ToolCallFinished {
             name: "patch_apply".to_string(),
@@ -643,6 +654,7 @@ fn parse_item_event(
             success: true,
             exit_code: None,
             duration_ms: None,
+            source: None,
         }],
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
@@ -760,6 +772,7 @@ fn parse_content_blocks(
                         input_preview: block
                             .get("arguments")
                             .and_then(|value| serde_json::to_string(value).ok()),
+                        source: None,
                     });
                 }
                 "tool_result" => {
@@ -780,6 +793,7 @@ fn parse_content_blocks(
                         success: item_status != "error",
                         exit_code: None,
                         duration_ms: None,
+                        source: None,
                     });
                 }
                 _ => {}
@@ -1029,6 +1043,7 @@ mod tests {
                 input_preview: Some(
                     "M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)".to_string()
                 ),
+                source: None,
             }]
         );
     }
@@ -1040,7 +1055,8 @@ mod tests {
             "type": "commandExecution",
             "aggregatedOutput": "done",
             "exitCode": 7,
-            "durationMs": 1234
+            "durationMs": 1234,
+            "source": "userShell"
         });
 
         let events = parse_item_event("item/completed", &item, &HashSet::new());
@@ -1054,6 +1070,7 @@ mod tests {
                 success: false,
                 exit_code: Some(7),
                 duration_ms: Some(1234),
+                source: Some("userShell".to_string()),
             }]
         );
     }

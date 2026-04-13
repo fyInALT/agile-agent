@@ -60,6 +60,7 @@ pub enum ProviderEvent {
         name: String,
         call_id: Option<String>,
         input_preview: Option<String>,
+        source: Option<String>,
     },
     ToolCallFinished {
         name: String,
@@ -68,6 +69,7 @@ pub enum ProviderEvent {
         success: bool,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
+        source: Option<String>,
     },
     SessionHandle(SessionHandle),
     Error(String),

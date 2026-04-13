@@ -4,11 +4,21 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use textwrap::Options;
+use textwrap::WordSplitter;
 use textwrap::wrap;
 
 use crate::markdown;
+use crate::text_formatting::format_json_compact;
 use crate::tool_output;
 use crate::tool_output::ToolRenderMode;
+
+const COMMAND_CONTINUATION_PREFIX: &str = "  │ ";
+const DETAIL_INITIAL_PREFIX: &str = "  └ ";
+const DETAIL_CONTINUATION_PREFIX: &str = "    ";
+const TRANSCRIPT_HINT: &str = "ctrl + t to view transcript";
+const EXEC_COMMAND_CONTINUATION_MAX_LINES: usize = 3;
+const GENERIC_TOOL_PREVIEW_MAX_LINES: usize = 5;
 
 pub(crate) trait HistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
@@ -35,6 +45,7 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
         }),
         TranscriptEntry::ExecCommand {
             call_id: _,
+            source,
             input_preview,
             output_preview,
             success,
@@ -42,6 +53,7 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             exit_code,
             duration_ms,
         } => Box::new(ExecHistoryCell {
+            source: source.clone(),
             input_preview: input_preview.clone(),
             output_preview: output_preview.clone(),
             success: *success,
@@ -65,8 +77,6 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             output_preview,
             success,
             started,
-            exit_code,
-            duration_ms,
             ..
         } => Box::new(ToolCallHistoryCell {
             name: name.clone(),
@@ -74,8 +84,6 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             output_preview: output_preview.clone(),
             success: *success,
             started: *started,
-            exit_code: *exit_code,
-            duration_ms: *duration_ms,
         }),
         TranscriptEntry::Status(text) => Box::new(PrefixedTextCell {
             prefix: "• ",
@@ -121,12 +129,11 @@ struct ToolCallHistoryCell {
     output_preview: Option<String>,
     success: bool,
     started: bool,
-    exit_code: Option<i32>,
-    duration_ms: Option<u64>,
 }
 
 #[derive(Debug)]
 struct ExecHistoryCell {
+    source: Option<String>,
     input_preview: Option<String>,
     output_preview: Option<String>,
     success: bool,
@@ -138,6 +145,7 @@ struct ExecHistoryCell {
 impl HistoryCell for ExecHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_exec_history_lines(
+            self.source.as_deref(),
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
@@ -151,6 +159,7 @@ impl HistoryCell for ExecHistoryCell {
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_exec_history_lines(
+            self.source.as_deref(),
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
@@ -172,58 +181,44 @@ struct PatchHistoryCell {
 
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
-            "patch_apply",
+        render_patch_summary_lines(
             self.summary_preview.as_deref(),
-            None,
             self.success,
             self.started,
-            None,
-            None,
             width as usize,
-            ToolRenderMode::Preview,
         )
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
-            "patch_apply",
+        render_patch_summary_lines(
             self.summary_preview.as_deref(),
-            None,
             self.success,
             self.started,
-            None,
-            None,
             width as usize,
-            ToolRenderMode::Full,
         )
     }
 }
 
 impl HistoryCell for ToolCallHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
+        render_generic_tool_call_lines(
             &self.name,
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
             self.started,
-            self.exit_code,
-            self.duration_ms,
             width as usize,
             ToolRenderMode::Preview,
         )
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
+        render_generic_tool_call_lines(
             &self.name,
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
             self.started,
-            self.exit_code,
-            self.duration_ms,
             width as usize,
             ToolRenderMode::Full,
         )
@@ -256,6 +251,7 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
 }
 
 fn render_exec_history_lines(
+    source: Option<&str>,
     input_preview: Option<&str>,
     output_preview: Option<&str>,
     success: bool,
@@ -266,7 +262,13 @@ fn render_exec_history_lines(
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let title = if started { "Running" } else { "Ran" };
+    let title = if started {
+        "Running"
+    } else if matches!(source, Some("userShell")) {
+        "You ran"
+    } else {
+        "Ran"
+    };
     let bullet_style = if started {
         Style::default().fg(Color::Blue)
     } else if success {
@@ -274,31 +276,12 @@ fn render_exec_history_lines(
     } else {
         Style::default().fg(Color::Red)
     };
-
-    let command = input_preview.unwrap_or("");
-    let mut header = format!("• {title}");
-    if !command.is_empty() {
-        header.push(' ');
-        header.push_str(command);
-    }
-
-    let wrap_width = width as usize;
-    let wrapped = wrap(&header, wrap_width.max(1));
-    if let Some((first, rest)) = wrapped.split_first() {
-        lines.push(Line::from(vec![Span::styled(
-            first.to_string(),
-            bullet_style.add_modifier(Modifier::BOLD),
-        )]));
-        for line in rest {
-            lines.push(Line::from(vec![
-                Span::styled("  │ ", Style::default().add_modifier(Modifier::DIM)),
-                Span::styled(
-                    line.to_string(),
-                    Style::default().fg(Color::Magenta),
-                ),
-            ]));
-        }
-    }
+    lines.extend(render_exec_header_lines(
+        title,
+        input_preview.unwrap_or(""),
+        bullet_style,
+        width as usize,
+    ));
 
     let output_lines = tool_output::render_tool_output_body(
         "exec_command",
@@ -307,7 +290,20 @@ fn render_exec_history_lines(
         width as usize,
         mode,
     );
-    lines.extend(output_lines);
+    if output_lines.is_empty() && !started {
+        lines.push(Line::from(vec![
+            Span::styled(
+                DETAIL_INITIAL_PREFIX,
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                "(no output)",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+        ]));
+    } else {
+        lines.extend(output_lines);
+    }
 
     if !started {
         lines.push(tool_output::render_exec_result_line_public(
@@ -318,4 +314,414 @@ fn render_exec_history_lines(
     }
 
     lines
+}
+
+fn render_exec_header_lines(
+    title: &str,
+    command: &str,
+    bullet_style: Style,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let header_prefix = format!("• {title}");
+
+    if command.trim().is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            header_prefix,
+            bullet_style.add_modifier(Modifier::BOLD),
+        )]));
+        return lines;
+    }
+
+    let command_lines = command.lines().collect::<Vec<_>>();
+    let first_segments = wrap_text_segments(
+        command_lines.first().copied().unwrap_or_default(),
+        width.saturating_sub(header_prefix.len() + 1).max(1),
+    );
+    let first_segment = first_segments.first().cloned().unwrap_or_default();
+    let mut header = header_prefix;
+    if !first_segment.is_empty() {
+        header.push(' ');
+        header.push_str(&first_segment);
+    }
+    lines.push(Line::from(vec![Span::styled(
+        header,
+        bullet_style.add_modifier(Modifier::BOLD),
+    )]));
+
+    let mut continuation_segments = first_segments.into_iter().skip(1).collect::<Vec<_>>();
+    for raw_line in command_lines.into_iter().skip(1) {
+        continuation_segments.extend(wrap_text_segments(
+            raw_line,
+            width
+                .saturating_sub(COMMAND_CONTINUATION_PREFIX.len())
+                .max(1),
+        ));
+    }
+
+    for segment in truncate_segments_from_start(
+        continuation_segments,
+        EXEC_COMMAND_CONTINUATION_MAX_LINES,
+    ) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                COMMAND_CONTINUATION_PREFIX,
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::styled(segment, Style::default().fg(Color::Magenta)),
+        ]));
+    }
+
+    lines
+}
+
+fn render_generic_tool_call_lines(
+    name: &str,
+    input_preview: Option<&str>,
+    output_preview: Option<&str>,
+    success: bool,
+    started: bool,
+    width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let bullet_style = if started {
+        Style::default().fg(Color::Blue)
+    } else if success {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+    let header_text = if started { "Calling" } else { "Called" };
+    let invocation = format_tool_invocation(name, input_preview);
+    let inline_invocation = !invocation.is_empty()
+        && invocation.len() + header_text.len() + 3 <= width.max(1);
+
+    if inline_invocation {
+        lines.push(Line::from(vec![
+            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                header_text.to_string(),
+                bullet_style.add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(invocation.clone()),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                header_text.to_string(),
+                bullet_style.add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        if !invocation.is_empty() {
+            lines.extend(render_prefixed_text_block(
+                &invocation,
+                width,
+                DETAIL_INITIAL_PREFIX,
+                DETAIL_CONTINUATION_PREFIX,
+                Style::default(),
+                ToolRenderMode::Full,
+            ));
+        }
+    }
+
+    if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
+        lines.extend(render_prefixed_tool_output(
+            output,
+            width,
+            if inline_invocation {
+                DETAIL_INITIAL_PREFIX
+            } else {
+                DETAIL_CONTINUATION_PREFIX
+            },
+            DETAIL_CONTINUATION_PREFIX,
+            mode,
+        ));
+    }
+
+    lines
+}
+
+fn render_patch_summary_lines(
+    summary_preview: Option<&str>,
+    success: bool,
+    started: bool,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let Some(summary_preview) = summary_preview.filter(|value| !value.trim().is_empty()) else {
+        return tool_output::render_tool_call_lines(
+            "patch_apply",
+            None,
+            None,
+            success,
+            started,
+            None,
+            None,
+            width,
+            ToolRenderMode::Preview,
+        );
+    };
+
+    let Some(changes) = parse_patch_summary_lines(summary_preview) else {
+        return tool_output::render_tool_call_lines(
+            "patch_apply",
+            Some(summary_preview),
+            None,
+            success,
+            started,
+            None,
+            None,
+            width,
+            ToolRenderMode::Preview,
+        );
+    };
+
+    let bullet_style = if started {
+        Style::default().fg(Color::Blue)
+    } else if success {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+
+    let total_added = changes.iter().map(|change| change.added).sum::<usize>();
+    let total_removed = changes.iter().map(|change| change.removed).sum::<usize>();
+    let mut lines = Vec::new();
+
+    if let [change] = changes.as_slice() {
+        lines.push(Line::from(vec![
+            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                patch_change_title(change.marker).to_string(),
+                bullet_style.add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(change.path.clone()),
+            Span::raw(" "),
+            Span::raw(format!("(+{} -{})", change.added, change.removed)),
+        ]));
+        return lines;
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Edited".to_string(),
+            bullet_style.add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(
+            " {} files (+{} -{})",
+            changes.len(),
+            total_added,
+            total_removed
+        )),
+    ]));
+
+    for change in changes {
+        lines.extend(wrap_prefixed(
+            DETAIL_INITIAL_PREFIX,
+            &format!("{} (+{} -{})", change.path, change.added, change.removed),
+            Style::default().add_modifier(Modifier::DIM),
+            width,
+        ));
+    }
+
+    lines
+}
+
+fn parse_patch_summary_lines(summary_preview: &str) -> Option<Vec<PatchSummaryLine>> {
+    let mut lines = Vec::new();
+    for raw_line in summary_preview.lines() {
+        let mut parts = raw_line.split_whitespace();
+        let marker = parts.next()?.chars().next()?;
+        let path = parts.next()?.to_string();
+        let counts = parts.collect::<Vec<_>>().join(" ");
+        let counts = counts
+            .trim_start_matches("(+")
+            .trim_end_matches(')')
+            .split_once(" -")?;
+        let added = counts.0.parse().ok()?;
+        let removed = counts.1.parse().ok()?;
+        lines.push(PatchSummaryLine {
+            marker,
+            path,
+            added,
+            removed,
+        });
+    }
+
+    Some(lines)
+}
+
+fn patch_change_title(marker: char) -> &'static str {
+    match marker {
+        'A' => "Added",
+        'D' => "Deleted",
+        _ => "Edited",
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PatchSummaryLine {
+    marker: char,
+    path: String,
+    added: usize,
+    removed: usize,
+}
+
+fn format_tool_invocation(name: &str, input_preview: Option<&str>) -> String {
+    match input_preview.filter(|value| !value.trim().is_empty()) {
+        Some(input) => format!("{name}({input})"),
+        None => name.to_string(),
+    }
+}
+
+fn render_prefixed_tool_output(
+    output: &str,
+    width: usize,
+    initial_prefix: &str,
+    continuation_prefix: &str,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let formatted = format_json_compact(output).unwrap_or_else(|| output.to_string());
+    render_prefixed_text_block(
+        &formatted,
+        width,
+        initial_prefix,
+        continuation_prefix,
+        Style::default().add_modifier(Modifier::DIM),
+        mode,
+    )
+}
+
+fn render_prefixed_text_block(
+    text: &str,
+    width: usize,
+    initial_prefix: &str,
+    continuation_prefix: &str,
+    style: Style,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let mut rendered = Vec::new();
+    let content_width = width
+        .saturating_sub(initial_prefix.len().max(continuation_prefix.len()))
+        .max(1);
+
+    for (index, raw_line) in text.lines().enumerate() {
+        let prefix = if index == 0 {
+            initial_prefix
+        } else {
+            continuation_prefix
+        };
+
+        for (segment_index, segment) in wrap_text_segments(raw_line, content_width)
+            .into_iter()
+            .enumerate()
+        {
+            let leader = if segment_index == 0 {
+                prefix.to_string()
+            } else {
+                continuation_prefix.to_string()
+            };
+            rendered.push(Line::from(vec![
+                Span::styled(
+                    leader,
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                ),
+                Span::styled(segment, style),
+            ]));
+        }
+    }
+
+    match mode {
+        ToolRenderMode::Preview => truncate_lines_middle(rendered, GENERIC_TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
+}
+
+fn wrap_text_segments(text: &str, width: usize) -> Vec<String> {
+    let options = Options::new(width.max(1)).word_splitter(WordSplitter::NoHyphenation);
+    let wrapped = wrap(text, options)
+        .into_iter()
+        .map(|line| line.into_owned())
+        .flat_map(|line| chunk_long_segment(&line, width.max(1)))
+        .collect::<Vec<_>>();
+
+    if wrapped.is_empty() {
+        vec![String::new()]
+    } else {
+        wrapped
+    }
+}
+
+fn chunk_long_segment(text: &str, width: usize) -> Vec<String> {
+    if text.chars().count() <= width.max(1) {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if current.chars().count() >= width.max(1) {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+fn truncate_segments_from_start(lines: Vec<String>, keep: usize) -> Vec<String> {
+    if lines.len() <= keep {
+        return lines;
+    }
+    if keep == 0 {
+        return vec![format!("… +{} lines", lines.len())];
+    }
+
+    let omitted = lines.len().saturating_sub(keep);
+    let mut out = lines.into_iter().take(keep).collect::<Vec<_>>();
+    out.pop();
+    out.push(format!("… +{} lines", omitted + 1));
+    out
+}
+
+fn truncate_lines_middle(lines: Vec<Line<'static>>, max_lines: usize) -> Vec<Line<'static>> {
+    if lines.len() <= max_lines {
+        return lines;
+    }
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    if max_lines == 1 {
+        return vec![ellipsis_line(lines.len())];
+    }
+
+    let head = (max_lines - 1) / 2;
+    let tail = max_lines.saturating_sub(head + 1);
+    let omitted = lines.len().saturating_sub(head + tail);
+
+    let mut out = Vec::new();
+    out.extend(lines[..head].iter().cloned());
+    out.push(ellipsis_line(omitted));
+    out.extend(lines[lines.len().saturating_sub(tail)..].iter().cloned());
+    out
+}
+
+fn ellipsis_line(omitted: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            DETAIL_CONTINUATION_PREFIX,
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            format!("… +{omitted} lines ({TRANSCRIPT_HINT})"),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+    ])
 }

@@ -36,6 +36,7 @@ pub enum TranscriptEntry {
     Thinking(String),
     ExecCommand {
         call_id: Option<String>,
+        source: Option<String>,
         input_preview: Option<String>,
         output_preview: Option<String>,
         success: bool,
@@ -190,10 +191,12 @@ impl AppState {
         name: String,
         call_id: Option<String>,
         input_preview: Option<String>,
+        source: Option<String>,
     ) {
         match name.as_str() {
             "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
                 call_id,
+                source,
                 input_preview,
                 output_preview: None,
                 success: true,
@@ -228,12 +231,14 @@ impl AppState {
         success: bool,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
+        source: Option<String>,
     ) {
         // Find the matching started tool call and update it
         for entry in self.transcript.iter_mut().rev() {
             match entry {
                 TranscriptEntry::ExecCommand {
                     call_id: existing_call_id,
+                    source: existing_source,
                     input_preview: existing_input_preview,
                     started: true,
                     ..
@@ -243,6 +248,7 @@ impl AppState {
                     if matches_call_id || matches_name {
                         *entry = TranscriptEntry::ExecCommand {
                             call_id: existing_call_id.clone().or(call_id),
+                            source: existing_source.clone().or(source),
                             input_preview: existing_input_preview.clone(),
                             output_preview,
                             success,
@@ -301,6 +307,7 @@ impl AppState {
         match name.as_str() {
             "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
                 call_id,
+                source,
                 input_preview: None,
                 output_preview,
                 success,
@@ -809,6 +816,7 @@ mod tests {
             "exec_command".to_string(),
             Some("call-1".to_string()),
             Some("git diff README.md".to_string()),
+            Some("agent".to_string()),
         );
 
         state.push_tool_call_finished(
@@ -818,6 +826,7 @@ mod tests {
             true,
             Some(0),
             Some(180),
+            Some("agent".to_string()),
         );
 
         assert_eq!(state.transcript.len(), 1);
@@ -825,6 +834,7 @@ mod tests {
             &state.transcript[0],
             TranscriptEntry::ExecCommand {
                 call_id,
+                source,
                 input_preview,
                 output_preview,
                 success,
@@ -833,6 +843,7 @@ mod tests {
                 duration_ms,
             }
             if call_id.as_deref() == Some("call-1")
+                && source.as_deref() == Some("agent")
                 && input_preview.as_deref() == Some("git diff README.md")
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
                 && *success
@@ -849,12 +860,14 @@ mod tests {
             "patch_apply".to_string(),
             Some("patch-1".to_string()),
             Some("M README.md (+1 -1)".to_string()),
+            None,
         );
         state.push_tool_call_finished(
             "patch_apply".to_string(),
             Some("patch-1".to_string()),
             None,
             true,
+            None,
             None,
             None,
         );
@@ -882,12 +895,14 @@ mod tests {
             "read_file".to_string(),
             Some("call-2".to_string()),
             Some("{\"path\":\"README.md\"}".to_string()),
+            None,
         );
         state.push_tool_call_finished(
             "tool_result".to_string(),
             Some("call-2".to_string()),
             Some("done".to_string()),
             true,
+            None,
             None,
             None,
         );

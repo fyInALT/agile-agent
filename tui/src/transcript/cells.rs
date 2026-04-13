@@ -74,6 +74,7 @@ mod tests {
     fn tool_calls_render_command_and_structured_output_preview() {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
+            source: Some("agent".to_string()),
             input_preview: Some("git diff README.md".to_string()),
             output_preview: Some(
                 "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new".to_string(),
@@ -104,6 +105,7 @@ mod tests {
             .join("\n");
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
+            source: Some("agent".to_string()),
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
             success: true,
@@ -128,6 +130,7 @@ mod tests {
             .join("\n");
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
+            source: Some("agent".to_string()),
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
             success: true,
@@ -141,5 +144,183 @@ mod tests {
 
         assert!(preview.iter().any(|line| line.contains("… +")));
         assert!(!overlay.iter().any(|line| line.contains("… +")));
+    }
+
+    #[test]
+    fn user_shell_exec_renders_you_ran_title() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-1".to_string()),
+            source: Some("userShell".to_string()),
+            input_preview: Some("git status".to_string()),
+            output_preview: Some("On branch main".to_string()),
+            success: true,
+            started: false,
+            exit_code: Some(0),
+            duration_ms: Some(50),
+        }];
+
+        let lines = flatten_cells(&build_cells(&entries, 80));
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("You ran git status")));
+    }
+
+    #[test]
+    fn multiline_exec_command_uses_codex_style_branch_continuations() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-1".to_string()),
+            source: Some("agent".to_string()),
+            input_preview: Some("set -o pipefail\ncargo test -p codex-tui --quiet".to_string()),
+            output_preview: Some(String::new()),
+            success: true,
+            started: false,
+            exit_code: Some(0),
+            duration_ms: Some(12),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 28)));
+
+        assert!(rendered.iter().any(|line| line == "• Ran set -o pipefail"));
+        assert!(rendered.iter().any(|line| line == "  │ cargo test -p"));
+        assert!(rendered.iter().any(|line| line == "  │ codex-tui --quiet"));
+        assert!(rendered.iter().any(|line| line == "  └ (no output)"));
+    }
+
+    #[test]
+    fn generic_tool_call_renders_called_header_like_codex() {
+        let entries = vec![TranscriptEntry::GenericToolCall {
+            name: "search.find_docs".to_string(),
+            call_id: Some("call-2".to_string()),
+            input_preview: Some("{\"query\":\"ratatui styling\",\"limit\":3}".to_string()),
+            output_preview: Some("Found styling guidance in styles.md".to_string()),
+            success: true,
+            started: false,
+            exit_code: None,
+            duration_ms: None,
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| {
+            line == "• Called search.find_docs({\"query\":\"ratatui styling\",\"limit\":3})"
+        }));
+        assert!(rendered.iter().any(|line| line == "  └ Found styling guidance in styles.md"));
+        assert!(!rendered
+            .iter()
+            .any(|line| line.contains("finished tool search.find_docs")));
+    }
+
+    #[test]
+    fn generic_tool_call_wraps_long_invocation_below_header() {
+        let entries = vec![TranscriptEntry::GenericToolCall {
+            name: "metrics.get_nearby_metric".to_string(),
+            call_id: Some("call-3".to_string()),
+            input_preview: Some(
+                "{\"query\":\"very_long_query_that_needs_wrapping_to_display_properly_in_the_history\",\"limit\":1}"
+                    .to_string(),
+            ),
+            output_preview: Some(
+                "Line one of the response, which is quite long and needs wrapping.".to_string(),
+            ),
+            success: true,
+            started: false,
+            exit_code: None,
+            duration_ms: None,
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 36)));
+
+        assert!(rendered.iter().any(|line| line == "• Called"));
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("  └ metrics.get_nearby_metric(")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.contains("Line one of the response,")));
+    }
+
+    #[test]
+    fn patch_apply_renders_codex_style_change_summary() {
+        let entries = vec![TranscriptEntry::PatchApply {
+            call_id: Some("patch-1".to_string()),
+            summary_preview: Some(
+                "M README.md (+1 -1)\nA src/lib.rs (+1 -0)".to_string(),
+            ),
+            success: true,
+            started: false,
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered
+            .iter()
+            .any(|line| line == "• Edited 2 files (+2 -1)"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ README.md (+1 -1)"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ src/lib.rs (+1 -0)"));
+        assert!(!rendered.iter().any(|line| line.contains("applied patch")));
+    }
+
+    #[test]
+    fn long_exec_command_shows_command_ellipsis_before_output() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-4".to_string()),
+            source: Some("agent".to_string()),
+            input_preview: Some(
+                "echo\nthis_is_a_very_long_single_token_that_will_wrap_over_multiple_lines"
+                    .to_string(),
+            ),
+            output_preview: Some(
+                "error: first line on stderr\nerror: second line on stderr".to_string(),
+            ),
+            success: false,
+            started: false,
+            exit_code: Some(1),
+            duration_ms: Some(50),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 24)));
+
+        assert!(rendered.iter().any(|line| line == "• Ran echo"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("  │ this_is_a_very_")), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  │ … +2 lines"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  └ error: first line"), "{rendered:?}");
+    }
+
+    #[test]
+    fn exec_output_preview_keeps_only_head_and_tail_lines_like_codex() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-5".to_string()),
+            source: Some("agent".to_string()),
+            input_preview: Some("seq 1 10 1>&2 && false".to_string()),
+            output_preview: Some(
+                (1..=10)
+                    .map(|index| index.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            success: false,
+            started: false,
+            exit_code: Some(1),
+            duration_ms: Some(250),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "  └ 1"));
+        assert!(rendered.iter().any(|line| line == "    2"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "    … +6 lines (ctrl + t to view transcript)"));
+        assert!(rendered.iter().any(|line| line == "    9"));
+        assert!(rendered.iter().any(|line| line == "    10"));
+        assert!(!rendered.iter().any(|line| line == "    3"));
     }
 }

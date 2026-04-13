@@ -280,7 +280,8 @@ fn consume_provider_until_finished(
                     name,
                     call_id,
                     input_preview,
-                } => state.push_tool_call_started(name, call_id, input_preview),
+                    source,
+                } => state.push_tool_call_started(name, call_id, input_preview, source),
                 ProviderEvent::ToolCallFinished {
                     name,
                     call_id,
@@ -288,6 +289,7 @@ fn consume_provider_until_finished(
                     success,
                     exit_code,
                     duration_ms,
+                    source,
                 } => state.push_tool_call_finished(
                     name,
                     call_id,
@@ -295,6 +297,7 @@ fn consume_provider_until_finished(
                     success,
                     exit_code,
                     duration_ms,
+                    source,
                 ),
                 ProviderEvent::SessionHandle(handle) => {
                     state.apply_session_handle(handle);

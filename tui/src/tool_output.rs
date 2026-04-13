@@ -10,9 +10,9 @@ use crate::diff_render::summarize_unified_diff;
 use crate::text_formatting::format_json_compact;
 use crate::text_formatting::truncate_graphemes;
 
-const TOOL_PREVIEW_MAX_LINES: usize = 8;
-const TOOL_PREVIEW_HEAD_LINES: usize = 4;
-const TOOL_PREVIEW_TAIL_LINES: usize = 3;
+const TOOL_PREVIEW_MAX_LINES: usize = 5;
+const TOOL_PREVIEW_HEAD_LINES: usize = 2;
+const TOOL_PREVIEW_TAIL_LINES: usize = 2;
 const TOOL_OUTPUT_INITIAL_PREFIX: &str = "  └ ";
 const TOOL_OUTPUT_CONTINUATION_PREFIX: &str = "    ";
 const TRANSCRIPT_HINT: &str = "ctrl + t to view transcript";

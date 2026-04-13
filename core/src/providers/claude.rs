@@ -301,6 +301,7 @@ fn parse_assistant_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEven
                         Some(block.id)
                     },
                     input_preview,
+                    source: None,
                 });
             }
             _ => {}
@@ -327,6 +328,7 @@ fn parse_user_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEvent>> {
                 success: true,
                 exit_code: None,
                 duration_ms: None,
+                source: None,
             });
         }
     }
@@ -496,7 +498,8 @@ mod tests {
                 ProviderEvent::ToolCallStarted {
                     name: "read_file".to_string(),
                     call_id: Some("call_1".to_string()),
-                    input_preview: Some("{\"path\":\"README.md\"}".to_string())
+                    input_preview: Some("{\"path\":\"README.md\"}".to_string()),
+                    source: None,
                 }
             ]
         );
@@ -517,6 +520,7 @@ mod tests {
                 success: true,
                 exit_code: None,
                 duration_ms: None,
+                source: None,
             }]
         );
     }
