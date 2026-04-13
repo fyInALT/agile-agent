@@ -28,22 +28,28 @@ pub(crate) fn parse_exploring_ops(command: &str, source: Option<&str>) -> Option
 fn normalize_exploring_line(line: &str) -> String {
     let mut line = line.trim().to_string();
 
-    while line.starts_with("cd ") {
-        let Some((_, tail)) = line.split_once("&&") else {
+    loop {
+        let Some(tokens) = shlex::split(&line) else {
             break;
         };
-        line = tail.trim().to_string();
+        if !matches!(tokens.first().map(String::as_str), Some("cd")) {
+            break;
+        }
+        let Some(and_index) = tokens.iter().position(|token| token == "&&") else {
+            break;
+        };
+        line = tokens[and_index + 1..].join(" ");
     }
 
-    if line.contains('|') {
-        let segments = line
-            .split('|')
-            .map(str::trim)
-            .filter(|segment| !segment.is_empty())
-            .filter(|segment| *segment != "yes" && *segment != "no")
-            .collect::<Vec<_>>();
-        if let Some(segment) = segments.first() {
-            line = (*segment).to_string();
+    if let Some(tokens) = shlex::split(&line)
+        && tokens.iter().any(|token| token == "|")
+    {
+        let segments = split_on_pipe(&tokens);
+        if let Some(segment) = segments
+            .into_iter()
+            .find(|segment| !matches!(segment.first().map(String::as_str), Some("yes" | "no")))
+        {
+            line = segment.join(" ");
         }
     }
 
@@ -51,7 +57,8 @@ fn normalize_exploring_line(line: &str) -> String {
 }
 
 fn parse_single_line(line: &str) -> Option<Vec<ExploringOp>> {
-    let tokens = line.split_whitespace().collect::<Vec<_>>();
+    let shell_tokens = shlex::split(line)?;
+    let tokens = shell_tokens.iter().map(String::as_str).collect::<Vec<_>>();
     let cmd = *tokens.first()?;
     match cmd {
         "cat" => {
@@ -131,6 +138,24 @@ fn positional_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> 
     positional
 }
 
+fn split_on_pipe(tokens: &[String]) -> Vec<Vec<String>> {
+    let mut segments = Vec::new();
+    let mut current = Vec::new();
+    for token in tokens {
+        if token == "|" {
+            if !current.is_empty() {
+                segments.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(token.clone());
+    }
+    if !current.is_empty() {
+        segments.push(current);
+    }
+    segments
+}
+
 #[cfg(test)]
 mod tests {
     use super::ExploringOp;
@@ -201,6 +226,25 @@ mod tests {
         assert_eq!(
             parse_exploring_ops("exa -I target .", Some("agent")),
             Some(vec![ExploringOp::List(".".to_string())])
+        );
+    }
+
+    #[test]
+    fn supports_quoted_read_paths() {
+        assert_eq!(
+            parse_exploring_ops(r#"cat "foo bar.txt""#, Some("agent")),
+            Some(vec![ExploringOp::Read("foo bar.txt".to_string())])
+        );
+    }
+
+    #[test]
+    fn supports_quoted_search_queries() {
+        assert_eq!(
+            parse_exploring_ops(r#"grep -R "hello world" src"#, Some("agent")),
+            Some(vec![ExploringOp::Search {
+                query: "hello world".to_string(),
+                path: Some("src".to_string()),
+            }])
         );
     }
 }
