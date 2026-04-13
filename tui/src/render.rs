@@ -364,7 +364,8 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
             matches!(
                 entry,
                 agent_core::app::TranscriptEntry::ExecCommand {
-                    started: true, ..
+                    status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                    ..
                 }
             )
         })
@@ -412,8 +413,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: None,
             output_preview: None,
-            success: true,
-            started: true,
+            status: agent_core::tool_calls::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         });
