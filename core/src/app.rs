@@ -34,6 +34,21 @@ pub enum TranscriptEntry {
     User(String),
     Assistant(String),
     Thinking(String),
+    ExecCommand {
+        call_id: Option<String>,
+        input_preview: Option<String>,
+        output_preview: Option<String>,
+        success: bool,
+        started: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
+    },
+    PatchApply {
+        call_id: Option<String>,
+        summary_preview: Option<String>,
+        success: bool,
+        started: bool,
+    },
     ToolCall {
         name: String,
         call_id: Option<String>,
@@ -176,16 +191,33 @@ impl AppState {
         call_id: Option<String>,
         input_preview: Option<String>,
     ) {
-        self.transcript.push(TranscriptEntry::ToolCall {
-            name,
-            call_id,
-            input_preview,
-            output_preview: None,
-            success: true,
-            started: true,
-            exit_code: None,
-            duration_ms: None,
-        });
+        match name.as_str() {
+            "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
+                call_id,
+                input_preview,
+                output_preview: None,
+                success: true,
+                started: true,
+                exit_code: None,
+                duration_ms: None,
+            }),
+            "patch_apply" => self.transcript.push(TranscriptEntry::PatchApply {
+                call_id,
+                summary_preview: input_preview,
+                success: true,
+                started: true,
+            }),
+            _ => self.transcript.push(TranscriptEntry::ToolCall {
+                name,
+                call_id,
+                input_preview,
+                output_preview: None,
+                success: true,
+                started: true,
+                exit_code: None,
+                duration_ms: None,
+            }),
+        }
     }
 
     pub fn push_tool_call_finished(
@@ -199,42 +231,100 @@ impl AppState {
     ) {
         // Find the matching started tool call and update it
         for entry in self.transcript.iter_mut().rev() {
-            if let TranscriptEntry::ToolCall {
-                name: existing_name,
-                call_id: existing_call_id,
-                input_preview: existing_input_preview,
-                started: true,
-                ..
-            } = entry
-            {
-                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
-                let matches_name = *existing_name == name;
-                if matches_call_id || matches_name {
-                    *entry = TranscriptEntry::ToolCall {
-                        name: existing_name.clone(),
-                        call_id: existing_call_id.clone().or(call_id),
-                        input_preview: existing_input_preview.clone(),
-                        output_preview,
-                        success,
-                        started: false,
-                        exit_code,
-                        duration_ms,
-                    };
-                    return;
+            match entry {
+                TranscriptEntry::ExecCommand {
+                    call_id: existing_call_id,
+                    input_preview: existing_input_preview,
+                    started: true,
+                    ..
+                } => {
+                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                    let matches_name = name == "exec_command" && existing_call_id.is_none();
+                    if matches_call_id || matches_name {
+                        *entry = TranscriptEntry::ExecCommand {
+                            call_id: existing_call_id.clone().or(call_id),
+                            input_preview: existing_input_preview.clone(),
+                            output_preview,
+                            success,
+                            started: false,
+                            exit_code,
+                            duration_ms,
+                        };
+                        return;
+                    }
                 }
+                TranscriptEntry::PatchApply {
+                    call_id: existing_call_id,
+                    summary_preview,
+                    started: true,
+                    ..
+                } if name == "patch_apply" => {
+                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                    let matches_name = existing_call_id.is_none();
+                    if matches_call_id || matches_name {
+                        *entry = TranscriptEntry::PatchApply {
+                            call_id: existing_call_id.clone().or(call_id),
+                            summary_preview: summary_preview.clone(),
+                            success,
+                            started: false,
+                        };
+                        return;
+                    }
+                }
+                TranscriptEntry::ToolCall {
+                    name: existing_name,
+                    call_id: existing_call_id,
+                    input_preview: existing_input_preview,
+                    started: true,
+                    ..
+                } => {
+                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                    let matches_name = *existing_name == name;
+                    if matches_call_id || matches_name {
+                        *entry = TranscriptEntry::ToolCall {
+                            name: existing_name.clone(),
+                            call_id: existing_call_id.clone().or(call_id),
+                            input_preview: existing_input_preview.clone(),
+                            output_preview,
+                            success,
+                            started: false,
+                            exit_code,
+                            duration_ms,
+                        };
+                        return;
+                    }
+                }
+                _ => {}
             }
         }
         // If not found, add as a finished entry
-        self.transcript.push(TranscriptEntry::ToolCall {
-            name,
-            call_id,
-            input_preview: None,
-            output_preview,
-            success,
-            started: false,
-            exit_code,
-            duration_ms,
-        });
+        match name.as_str() {
+            "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
+                call_id,
+                input_preview: None,
+                output_preview,
+                success,
+                started: false,
+                exit_code,
+                duration_ms,
+            }),
+            "patch_apply" => self.transcript.push(TranscriptEntry::PatchApply {
+                call_id,
+                summary_preview: None,
+                success,
+                started: false,
+            }),
+            _ => self.transcript.push(TranscriptEntry::ToolCall {
+                name,
+                call_id,
+                input_preview: None,
+                output_preview,
+                success,
+                started: false,
+                exit_code,
+                duration_ms,
+            }),
+        }
     }
 
     pub fn finish_provider_response(&mut self) {
@@ -733,8 +823,7 @@ mod tests {
         assert_eq!(state.transcript.len(), 1);
         assert!(matches!(
             &state.transcript[0],
-            TranscriptEntry::ToolCall {
-                name,
+            TranscriptEntry::ExecCommand {
                 call_id,
                 input_preview,
                 output_preview,
@@ -743,14 +832,46 @@ mod tests {
                 exit_code,
                 duration_ms,
             }
-            if name == "exec_command"
-                && call_id.as_deref() == Some("call-1")
+            if call_id.as_deref() == Some("call-1")
                 && input_preview.as_deref() == Some("git diff README.md")
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
                 && *success
                 && !*started
                 && *exit_code == Some(0)
                 && *duration_ms == Some(180)
+        ));
+    }
+
+    #[test]
+    fn patch_apply_uses_dedicated_transcript_entry() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_tool_call_started(
+            "patch_apply".to_string(),
+            Some("patch-1".to_string()),
+            Some("M README.md (+1 -1)".to_string()),
+        );
+        state.push_tool_call_finished(
+            "patch_apply".to_string(),
+            Some("patch-1".to_string()),
+            None,
+            true,
+            None,
+            None,
+        );
+
+        assert_eq!(state.transcript.len(), 1);
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::PatchApply {
+                call_id,
+                summary_preview,
+                success,
+                started,
+            }
+            if call_id.as_deref() == Some("patch-1")
+                && summary_preview.as_deref() == Some("M README.md (+1 -1)")
+                && *success
+                && !*started
         ));
     }
 

@@ -144,6 +144,88 @@ fn map_entry(
             summary: text.clone(),
             created_at: captured_at,
         },
+        TranscriptEntry::ExecCommand {
+            call_id,
+            input_preview,
+            output_preview,
+            success,
+            started,
+            exit_code,
+            duration_ms,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: if *started {
+                agent_endpoint.clone()
+            } else {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "exec_command".to_string(),
+                }
+            },
+            recipient: if *started {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "exec_command".to_string(),
+                }
+            } else {
+                agent_endpoint
+            },
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!(
+                "exec_command:{}:{}:{}:{}:{}:{}",
+                started,
+                success,
+                input_preview.as_deref().unwrap_or(""),
+                output_preview.as_deref().unwrap_or(""),
+                exit_code
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or(""),
+                duration_ms
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or(""),
+            ),
+            created_at: captured_at,
+        },
+        TranscriptEntry::PatchApply {
+            call_id,
+            summary_preview,
+            success,
+            started,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Tooling,
+            sender: if *started {
+                agent_endpoint.clone()
+            } else {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "patch_apply".to_string(),
+                }
+            },
+            recipient: if *started {
+                AgentMessageEndpoint {
+                    kind: AgentMessageEndpointKind::Tool,
+                    id: "patch_apply".to_string(),
+                }
+            } else {
+                agent_endpoint
+            },
+            kind: AgentMessageKind::ToolCall,
+            correlation_id: call_id.clone(),
+            summary: format!(
+                "patch_apply:{}:{}:{}",
+                started,
+                success,
+                summary_preview.as_deref().unwrap_or(""),
+            ),
+            created_at: captured_at,
+        },
         TranscriptEntry::ToolCall {
             name,
             call_id,

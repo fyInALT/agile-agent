@@ -33,6 +33,32 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::DIM),
         }),
+        TranscriptEntry::ExecCommand {
+            call_id: _,
+            input_preview,
+            output_preview,
+            success,
+            started,
+            exit_code,
+            duration_ms,
+        } => Box::new(ExecHistoryCell {
+            input_preview: input_preview.clone(),
+            output_preview: output_preview.clone(),
+            success: *success,
+            started: *started,
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
+        }),
+        TranscriptEntry::PatchApply {
+            call_id: _,
+            summary_preview,
+            success,
+            started,
+        } => Box::new(PatchHistoryCell {
+            summary_preview: summary_preview.clone(),
+            success: *success,
+            started: *started,
+        }),
         TranscriptEntry::ToolCall {
             name,
             input_preview,
@@ -97,6 +123,83 @@ struct ToolCallHistoryCell {
     started: bool,
     exit_code: Option<i32>,
     duration_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+struct ExecHistoryCell {
+    input_preview: Option<String>,
+    output_preview: Option<String>,
+    success: bool,
+    started: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+}
+
+impl HistoryCell for ExecHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        tool_output::render_tool_call_lines(
+            "exec_command",
+            self.input_preview.as_deref(),
+            self.output_preview.as_deref(),
+            self.success,
+            self.started,
+            self.exit_code,
+            self.duration_ms,
+            width as usize,
+            ToolRenderMode::Preview,
+        )
+    }
+
+    fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
+        tool_output::render_tool_call_lines(
+            "exec_command",
+            self.input_preview.as_deref(),
+            self.output_preview.as_deref(),
+            self.success,
+            self.started,
+            self.exit_code,
+            self.duration_ms,
+            width as usize,
+            ToolRenderMode::Full,
+        )
+    }
+}
+
+#[derive(Debug)]
+struct PatchHistoryCell {
+    summary_preview: Option<String>,
+    success: bool,
+    started: bool,
+}
+
+impl HistoryCell for PatchHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        tool_output::render_tool_call_lines(
+            "patch_apply",
+            self.summary_preview.as_deref(),
+            None,
+            self.success,
+            self.started,
+            None,
+            None,
+            width as usize,
+            ToolRenderMode::Preview,
+        )
+    }
+
+    fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
+        tool_output::render_tool_call_lines(
+            "patch_apply",
+            self.summary_preview.as_deref(),
+            None,
+            self.success,
+            self.started,
+            None,
+            None,
+            width as usize,
+            ToolRenderMode::Full,
+        )
+    }
 }
 
 impl HistoryCell for ToolCallHistoryCell {
