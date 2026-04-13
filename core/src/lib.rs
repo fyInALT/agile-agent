@@ -23,5 +23,6 @@ pub mod skills;
 pub mod storage;
 pub mod task_artifacts;
 pub mod task_engine;
+pub mod tool_calls;
 pub mod verification;
 pub mod workplace_store;

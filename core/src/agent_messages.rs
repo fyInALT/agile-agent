@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
+use crate::tool_calls::PatchChange;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -195,7 +196,7 @@ fn map_entry(
         },
         TranscriptEntry::PatchApply {
             call_id,
-            summary_preview,
+            changes,
             success,
             started,
         } => AgentMessageEnvelope {
@@ -224,7 +225,7 @@ fn map_entry(
                 "patch_apply:{}:{}:{}",
                 started,
                 success,
-                summary_preview.as_deref().unwrap_or(""),
+                summarize_patch_changes(changes),
             ),
             created_at: captured_at,
         },
@@ -306,6 +307,19 @@ fn map_entry(
             created_at: captured_at,
         },
     }
+}
+
+fn summarize_patch_changes(changes: &[PatchChange]) -> String {
+    changes
+        .iter()
+        .map(|change| {
+            format!(
+                "{} (+{} -{})",
+                change.path, change.added, change.removed
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 #[cfg(test)]

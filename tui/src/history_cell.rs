@@ -1,4 +1,6 @@
 use agent_core::app::TranscriptEntry;
+use agent_core::tool_calls::PatchChange;
+use agent_core::tool_calls::PatchChangeKind;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -63,11 +65,11 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
         }),
         TranscriptEntry::PatchApply {
             call_id: _,
-            summary_preview,
+            changes,
             success,
             started,
         } => Box::new(PatchHistoryCell {
-            summary_preview: summary_preview.clone(),
+            changes: changes.clone(),
             success: *success,
             started: *started,
         }),
@@ -174,7 +176,7 @@ impl HistoryCell for ExecHistoryCell {
 
 #[derive(Debug)]
 struct PatchHistoryCell {
-    summary_preview: Option<String>,
+    changes: Vec<PatchChange>,
     success: bool,
     started: bool,
 }
@@ -182,7 +184,7 @@ struct PatchHistoryCell {
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
-            self.summary_preview.as_deref(),
+            &self.changes,
             self.success,
             self.started,
             width as usize,
@@ -191,7 +193,7 @@ impl HistoryCell for PatchHistoryCell {
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         render_patch_summary_lines(
-            self.summary_preview.as_deref(),
+            &self.changes,
             self.success,
             self.started,
             width as usize,
@@ -446,12 +448,12 @@ fn render_generic_tool_call_lines(
 }
 
 fn render_patch_summary_lines(
-    summary_preview: Option<&str>,
+    changes: &[PatchChange],
     success: bool,
     started: bool,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let Some(summary_preview) = summary_preview.filter(|value| !value.trim().is_empty()) else {
+    if changes.is_empty() {
         return tool_output::render_tool_call_lines(
             "patch_apply",
             None,
@@ -463,21 +465,7 @@ fn render_patch_summary_lines(
             width,
             ToolRenderMode::Preview,
         );
-    };
-
-    let Some(changes) = parse_patch_summary_lines(summary_preview) else {
-        return tool_output::render_tool_call_lines(
-            "patch_apply",
-            Some(summary_preview),
-            None,
-            success,
-            started,
-            None,
-            None,
-            width,
-            ToolRenderMode::Preview,
-        );
-    };
+    }
 
     let bullet_style = if started {
         Style::default().fg(Color::Blue)
@@ -491,18 +479,22 @@ fn render_patch_summary_lines(
     let total_removed = changes.iter().map(|change| change.removed).sum::<usize>();
     let mut lines = Vec::new();
 
-    if let [change] = changes.as_slice() {
+    if let [change] = changes {
         lines.push(Line::from(vec![
             Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
             Span::styled(
-                patch_change_title(change.marker).to_string(),
+                patch_change_title(change.kind).to_string(),
                 bullet_style.add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::raw(change.path.clone()),
+            Span::raw(patch_change_path(change)),
             Span::raw(" "),
             Span::raw(format!("(+{} -{})", change.added, change.removed)),
         ]));
+        lines.extend(render_patch_diff_lines(
+            change,
+            DETAIL_CONTINUATION_PREFIX,
+        ));
         return lines;
     }
 
@@ -523,53 +515,182 @@ fn render_patch_summary_lines(
     for change in changes {
         lines.extend(wrap_prefixed(
             DETAIL_INITIAL_PREFIX,
-            &format!("{} (+{} -{})", change.path, change.added, change.removed),
+            &format!(
+                "{} (+{} -{})",
+                patch_change_path(change),
+                change.added,
+                change.removed
+            ),
             Style::default().add_modifier(Modifier::DIM),
             width,
         ));
+        lines.extend(render_patch_diff_lines(change, DETAIL_CONTINUATION_PREFIX));
     }
 
     lines
 }
 
-fn parse_patch_summary_lines(summary_preview: &str) -> Option<Vec<PatchSummaryLine>> {
-    let mut lines = Vec::new();
-    for raw_line in summary_preview.lines() {
-        let mut parts = raw_line.split_whitespace();
-        let marker = parts.next()?.chars().next()?;
-        let path = parts.next()?.to_string();
-        let counts = parts.collect::<Vec<_>>().join(" ");
-        let counts = counts
-            .trim_start_matches("(+")
-            .trim_end_matches(')')
-            .split_once(" -")?;
-        let added = counts.0.parse().ok()?;
-        let removed = counts.1.parse().ok()?;
-        lines.push(PatchSummaryLine {
-            marker,
-            path,
-            added,
-            removed,
-        });
-    }
-
-    Some(lines)
-}
-
-fn patch_change_title(marker: char) -> &'static str {
-    match marker {
-        'A' => "Added",
-        'D' => "Deleted",
+fn patch_change_title(kind: PatchChangeKind) -> &'static str {
+    match kind {
+        PatchChangeKind::Add => "Added",
+        PatchChangeKind::Delete => "Deleted",
         _ => "Edited",
     }
 }
 
+fn patch_change_path(change: &PatchChange) -> String {
+    match change.move_path.as_deref() {
+        Some(move_path) => format!("{} → {move_path}", change.path),
+        None => change.path.clone(),
+    }
+}
+
+fn render_patch_diff_lines(change: &PatchChange, prefix: &str) -> Vec<Line<'static>> {
+    let entries = collect_patch_diff_entries(change);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let line_no_width = entries
+        .iter()
+        .filter_map(|entry| entry.line_no)
+        .max()
+        .unwrap_or(1)
+        .to_string()
+        .len()
+        .max(1);
+
+    entries
+        .into_iter()
+        .map(|entry| render_patch_diff_line(prefix, line_no_width, entry))
+        .collect()
+}
+
+fn render_patch_diff_line(
+    prefix: &str,
+    line_no_width: usize,
+    entry: PatchDiffEntry,
+) -> Line<'static> {
+    let number = entry
+        .line_no
+        .map(|value| format!("{value:>width$}", width = line_no_width))
+        .unwrap_or_else(|| " ".repeat(line_no_width));
+    let marker = if entry.sign == ' ' {
+        " ".to_string()
+    } else {
+        entry.sign.to_string()
+    };
+
+    Line::from(vec![
+        Span::styled(
+            prefix.to_string(),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            number,
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+        Span::raw(" "),
+        Span::styled(marker, entry.style),
+        Span::styled(entry.content, entry.style),
+    ])
+}
+
+fn collect_patch_diff_entries(change: &PatchChange) -> Vec<PatchDiffEntry> {
+    match change.kind {
+        PatchChangeKind::Add => change
+            .diff
+            .lines()
+            .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+            .enumerate()
+            .map(|(index, line)| PatchDiffEntry {
+                line_no: Some(index + 1),
+                sign: '+',
+                content: line.trim_start_matches('+').to_string(),
+                style: Style::default().fg(Color::Green),
+            })
+            .collect(),
+        PatchChangeKind::Delete => change
+            .diff
+            .lines()
+            .filter(|line| line.starts_with('-') && !line.starts_with("---"))
+            .enumerate()
+            .map(|(index, line)| PatchDiffEntry {
+                line_no: Some(index + 1),
+                sign: '-',
+                content: line.trim_start_matches('-').to_string(),
+                style: Style::default().fg(Color::Red),
+            })
+            .collect(),
+        PatchChangeKind::Update => collect_update_diff_entries(&change.diff),
+    }
+}
+
+fn collect_update_diff_entries(diff: &str) -> Vec<PatchDiffEntry> {
+    let mut entries = Vec::new();
+    let mut old_ln = 1usize;
+    let mut new_ln = 1usize;
+
+    for line in diff.lines() {
+        if let Some((parsed_old, parsed_new)) = parse_hunk_header(line) {
+            old_ln = parsed_old;
+            new_ln = parsed_new;
+            continue;
+        }
+
+        if line.starts_with('+') && !line.starts_with("+++") {
+            entries.push(PatchDiffEntry {
+                line_no: Some(new_ln),
+                sign: '+',
+                content: line.trim_start_matches('+').to_string(),
+                style: Style::default().fg(Color::Green),
+            });
+            new_ln += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            entries.push(PatchDiffEntry {
+                line_no: Some(old_ln),
+                sign: '-',
+                content: line.trim_start_matches('-').to_string(),
+                style: Style::default().fg(Color::Red),
+            });
+            old_ln += 1;
+        } else if let Some(content) = line.strip_prefix(' ') {
+            entries.push(PatchDiffEntry {
+                line_no: Some(new_ln),
+                sign: ' ',
+                content: content.to_string(),
+                style: Style::default().add_modifier(Modifier::DIM),
+            });
+            old_ln += 1;
+            new_ln += 1;
+        }
+    }
+
+    entries
+}
+
+fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
+    let line = line.strip_prefix("@@ -")?;
+    let (old_part, rest) = line.split_once(" +")?;
+    let (new_part, _) = rest.split_once(" @@")?;
+    Some((parse_hunk_range_start(old_part), parse_hunk_range_start(new_part)))
+}
+
+fn parse_hunk_range_start(range: &str) -> usize {
+    range
+        .split_once(',')
+        .map(|(start, _)| start)
+        .unwrap_or(range)
+        .parse()
+        .unwrap_or(1)
+}
+
 #[derive(Debug, Clone)]
-struct PatchSummaryLine {
-    marker: char,
-    path: String,
-    added: usize,
-    removed: usize,
+struct PatchDiffEntry {
+    line_no: Option<usize>,
+    sign: char,
+    content: String,
+    style: Style,
 }
 
 fn format_tool_invocation(name: &str, input_preview: Option<&str>) -> String {

@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::logging;
 use crate::mock_provider;
 use crate::probe;
+use crate::tool_calls::PatchChange;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderKind {
@@ -70,6 +71,15 @@ pub enum ProviderEvent {
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
         source: Option<String>,
+    },
+    PatchApplyStarted {
+        call_id: Option<String>,
+        changes: Vec<PatchChange>,
+    },
+    PatchApplyFinished {
+        call_id: Option<String>,
+        changes: Vec<PatchChange>,
+        success: bool,
     },
     SessionHandle(SessionHandle),
     Error(String),
@@ -171,6 +181,8 @@ mod tests {
                 | ProviderEvent::ThinkingChunk(_)
                 | ProviderEvent::ToolCallStarted { .. }
                 | ProviderEvent::ToolCallFinished { .. }
+                | ProviderEvent::PatchApplyStarted { .. }
+                | ProviderEvent::PatchApplyFinished { .. }
                 | ProviderEvent::SessionHandle(_)
                 | ProviderEvent::Error(_) => {}
             }

@@ -203,6 +203,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         duration_ms,
                         source,
                     ),
+                    ProviderEvent::PatchApplyStarted { call_id, changes } => {
+                        state.app_mut().push_patch_apply_started(call_id, changes)
+                    }
+                    ProviderEvent::PatchApplyFinished {
+                        call_id,
+                        changes,
+                        success,
+                    } => state
+                        .app_mut()
+                        .push_patch_apply_finished(call_id, changes, success),
                     ProviderEvent::SessionHandle(handle) => {
                         state.app_mut().apply_session_handle(handle);
                         state.persist_if_changed()?;

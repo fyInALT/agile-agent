@@ -10,6 +10,7 @@ use crate::backlog::TodoStatus;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
+use crate::tool_calls::PatchChange;
 use crate::verification;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +47,7 @@ pub enum TranscriptEntry {
     },
     PatchApply {
         call_id: Option<String>,
-        summary_preview: Option<String>,
+        changes: Vec<PatchChange>,
         success: bool,
         started: bool,
     },
@@ -204,12 +205,6 @@ impl AppState {
                 exit_code: None,
                 duration_ms: None,
             }),
-            "patch_apply" => self.transcript.push(TranscriptEntry::PatchApply {
-                call_id,
-                summary_preview: input_preview,
-                success: true,
-                started: true,
-            }),
             _ => self.transcript.push(TranscriptEntry::GenericToolCall {
                 name,
                 call_id,
@@ -259,24 +254,6 @@ impl AppState {
                         return;
                     }
                 }
-                TranscriptEntry::PatchApply {
-                    call_id: existing_call_id,
-                    summary_preview,
-                    started: true,
-                    ..
-                } if name == "patch_apply" => {
-                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
-                    let matches_name = existing_call_id.is_none();
-                    if matches_call_id || matches_name {
-                        *entry = TranscriptEntry::PatchApply {
-                            call_id: existing_call_id.clone().or(call_id),
-                            summary_preview: summary_preview.clone(),
-                            success,
-                            started: false,
-                        };
-                        return;
-                    }
-                }
                 TranscriptEntry::GenericToolCall {
                     name: existing_name,
                     call_id: existing_call_id,
@@ -315,12 +292,6 @@ impl AppState {
                 exit_code,
                 duration_ms,
             }),
-            "patch_apply" => self.transcript.push(TranscriptEntry::PatchApply {
-                call_id,
-                summary_preview: None,
-                success,
-                started: false,
-            }),
             _ => self.transcript.push(TranscriptEntry::GenericToolCall {
                 name,
                 call_id,
@@ -336,6 +307,59 @@ impl AppState {
 
     pub fn finish_provider_response(&mut self) {
         self.status = AppStatus::Idle;
+    }
+
+    pub fn push_patch_apply_started(
+        &mut self,
+        call_id: Option<String>,
+        changes: Vec<PatchChange>,
+    ) {
+        self.transcript.push(TranscriptEntry::PatchApply {
+            call_id,
+            changes,
+            success: true,
+            started: true,
+        });
+    }
+
+    pub fn push_patch_apply_finished(
+        &mut self,
+        call_id: Option<String>,
+        changes: Vec<PatchChange>,
+        success: bool,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::PatchApply {
+                call_id: existing_call_id,
+                changes: existing_changes,
+                started: true,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = existing_call_id.is_none();
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::PatchApply {
+                        call_id: existing_call_id.clone().or(call_id),
+                        changes: if changes.is_empty() {
+                            existing_changes.clone()
+                        } else {
+                            changes
+                        },
+                        success,
+                        started: false,
+                    };
+                    return;
+                }
+            }
+        }
+
+        self.transcript.push(TranscriptEntry::PatchApply {
+            call_id,
+            changes,
+            success,
+            started: false,
+        });
     }
 
     pub fn set_loop_phase(&mut self, phase: LoopPhase) {
@@ -856,20 +880,28 @@ mod tests {
     #[test]
     fn patch_apply_uses_dedicated_transcript_entry() {
         let mut state = AppState::new(ProviderKind::Mock);
-        state.push_tool_call_started(
-            "patch_apply".to_string(),
+        state.push_patch_apply_started(
             Some("patch-1".to_string()),
-            Some("M README.md (+1 -1)".to_string()),
-            None,
+            vec![crate::tool_calls::PatchChange {
+                path: "README.md".to_string(),
+                move_path: None,
+                kind: crate::tool_calls::PatchChangeKind::Update,
+                diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                added: 1,
+                removed: 1,
+            }],
         );
-        state.push_tool_call_finished(
-            "patch_apply".to_string(),
+        state.push_patch_apply_finished(
             Some("patch-1".to_string()),
-            None,
+            vec![crate::tool_calls::PatchChange {
+                path: "README.md".to_string(),
+                move_path: None,
+                kind: crate::tool_calls::PatchChangeKind::Update,
+                diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                added: 1,
+                removed: 1,
+            }],
             true,
-            None,
-            None,
-            None,
         );
 
         assert_eq!(state.transcript.len(), 1);
@@ -877,12 +909,19 @@ mod tests {
             &state.transcript[0],
             TranscriptEntry::PatchApply {
                 call_id,
-                summary_preview,
+                changes,
                 success,
                 started,
             }
             if call_id.as_deref() == Some("patch-1")
-                && summary_preview.as_deref() == Some("M README.md (+1 -1)")
+                && changes == &vec![crate::tool_calls::PatchChange {
+                    path: "README.md".to_string(),
+                    move_path: None,
+                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                    added: 1,
+                    removed: 1,
+                }]
                 && *success
                 && !*started
         ));

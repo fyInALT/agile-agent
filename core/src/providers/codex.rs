@@ -21,6 +21,8 @@ use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
+use crate::tool_calls::PatchChange;
+use crate::tool_calls::PatchChangeKind;
 
 pub fn start(
     prompt: String,
@@ -641,20 +643,14 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item/started", "fileChange") => vec![ProviderEvent::ToolCallStarted {
-            name: "patch_apply".to_string(),
+        ("item/started", "fileChange") => vec![ProviderEvent::PatchApplyStarted {
             call_id: item_id,
-            input_preview: summarize_file_changes(item),
-            source: None,
+            changes: parse_patch_changes(item),
         }],
-        ("item/completed", "fileChange") => vec![ProviderEvent::ToolCallFinished {
-            name: "patch_apply".to_string(),
+        ("item/completed", "fileChange") => vec![ProviderEvent::PatchApplyFinished {
             call_id: item_id,
-            output_preview: None,
+            changes: parse_patch_changes(item),
             success: true,
-            exit_code: None,
-            duration_ms: None,
-            source: None,
         }],
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
@@ -672,31 +668,45 @@ fn parse_item_event(
     }
 }
 
-fn summarize_file_changes(item: &serde_json::Value) -> Option<String> {
-    let changes = item.get("changes")?.as_array()?;
-    if changes.is_empty() {
-        return None;
-    }
+fn parse_patch_changes(item: &serde_json::Value) -> Vec<PatchChange> {
+    item.get("changes")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(parse_patch_change)
+        .collect()
+}
 
-    let mut lines = Vec::new();
-    for change in changes {
-        let path = change.get("path").and_then(|value| value.as_str())?;
-        let kind = change
-            .get("kind")
+fn parse_patch_change(change: &serde_json::Value) -> Option<PatchChange> {
+    let path = change.get("path").and_then(|value| value.as_str())?;
+    let kind = match change
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .unwrap_or("update")
+    {
+        "add" => PatchChangeKind::Add,
+        "delete" => PatchChangeKind::Delete,
+        _ => PatchChangeKind::Update,
+    };
+    let diff = change
+        .get("diff")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let (added, removed) = summarize_diff_counts(&diff);
+
+    Some(PatchChange {
+        path: path.to_string(),
+        move_path: change
+            .get("movePath")
+            .or_else(|| change.get("move_path"))
             .and_then(|value| value.as_str())
-            .unwrap_or("update");
-        let diff = change.get("diff").and_then(|value| value.as_str()).unwrap_or("");
-        let (added, removed) = summarize_diff_counts(diff);
-        let marker = match kind {
-            "add" => "A",
-            "delete" => "D",
-            "rename" => "R",
-            _ => "M",
-        };
-        lines.push(format!("{marker} {path} (+{added} -{removed})"));
-    }
-
-    Some(lines.join("\n"))
+            .map(ToOwned::to_owned),
+        kind,
+        diff,
+        added,
+        removed,
+    })
 }
 
 fn summarize_diff_counts(diff: &str) -> (usize, usize) {
@@ -1015,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_file_change_start_into_patch_summary_preview() {
+    fn parses_file_change_start_into_structured_patch_changes() {
         let item = serde_json::json!({
             "id": "patch-1",
             "type": "fileChange",
@@ -1037,13 +1047,26 @@ mod tests {
 
         assert_eq!(
             events,
-            vec![ProviderEvent::ToolCallStarted {
-                name: "patch_apply".to_string(),
+            vec![ProviderEvent::PatchApplyStarted {
                 call_id: Some("patch-1".to_string()),
-                input_preview: Some(
-                    "M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)".to_string()
-                ),
-                source: None,
+                changes: vec![
+                    crate::tool_calls::PatchChange {
+                        path: "/repo/README.md".to_string(),
+                        move_path: None,
+                        kind: crate::tool_calls::PatchChangeKind::Update,
+                        diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                        added: 1,
+                        removed: 1,
+                    },
+                    crate::tool_calls::PatchChange {
+                        path: "/repo/src/lib.rs".to_string(),
+                        move_path: None,
+                        kind: crate::tool_calls::PatchChangeKind::Add,
+                        diff: "+fn main() {}".to_string(),
+                        added: 1,
+                        removed: 0,
+                    },
+                ],
             }]
         );
     }

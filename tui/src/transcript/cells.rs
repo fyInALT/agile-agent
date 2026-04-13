@@ -243,9 +243,25 @@ mod tests {
     fn patch_apply_renders_codex_style_change_summary() {
         let entries = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-1".to_string()),
-            summary_preview: Some(
-                "M README.md (+1 -1)\nA src/lib.rs (+1 -0)".to_string(),
-            ),
+            changes: vec![
+                agent_core::tool_calls::PatchChange {
+                    path: "README.md".to_string(),
+                    move_path: None,
+                    kind: agent_core::tool_calls::PatchChangeKind::Update,
+                    diff: "@@ -1,3 +1,3 @@\n line one\n-line two\n+line two changed\n line three"
+                        .to_string(),
+                    added: 1,
+                    removed: 1,
+                },
+                agent_core::tool_calls::PatchChange {
+                    path: "src/lib.rs".to_string(),
+                    move_path: None,
+                    kind: agent_core::tool_calls::PatchChangeKind::Add,
+                    diff: "+fn main() {}".to_string(),
+                    added: 1,
+                    removed: 0,
+                },
+            ],
             success: true,
             started: false,
         }];
@@ -261,6 +277,9 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "  └ src/lib.rs (+1 -0)"));
+        assert!(rendered.iter().any(|line| line == "    1  line one"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "    2 -line two"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "    2 +line two changed"), "{rendered:?}");
         assert!(!rendered.iter().any(|line| line.contains("applied patch")));
     }
 
