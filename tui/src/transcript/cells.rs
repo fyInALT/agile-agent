@@ -1,13 +1,7 @@
 use agent_core::app::TranscriptEntry;
-use ratatui::style::Color;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::text::Span;
-use textwrap::wrap;
 
-use crate::markdown;
-use crate::tool_output;
+use crate::history_cell::history_cell_for_entry;
 use crate::tool_output::ToolRenderMode;
 
 #[derive(Debug, Clone)]
@@ -28,10 +22,17 @@ fn build_cells_with_mode(
     width: u16,
     mode: ToolRenderMode,
 ) -> Vec<TranscriptCell> {
-    let content_width = width.max(4) as usize;
     entries
         .iter()
-        .filter_map(|entry| build_cell(entry, content_width, mode))
+        .map(|entry| {
+            let cell = history_cell_for_entry(entry);
+            let lines = match mode {
+                ToolRenderMode::Preview => cell.display_lines(width),
+                ToolRenderMode::Full => cell.transcript_lines(width),
+            };
+            TranscriptCell { lines }
+        })
+        .filter(|cell| !cell.lines.is_empty())
         .collect()
 }
 
@@ -48,74 +49,6 @@ pub fn flatten_cells(cells: &[TranscriptCell]) -> Vec<Line<'static>> {
         lines.extend(cell.lines.clone());
     }
     lines
-}
-
-fn build_cell(entry: &TranscriptEntry, width: usize, mode: ToolRenderMode) -> Option<TranscriptCell> {
-    let lines = match entry {
-        TranscriptEntry::User(text) => wrap_prefixed("› ", text, Style::default(), width),
-        TranscriptEntry::Assistant(text) => markdown::render_markdown_lines(text, width),
-        TranscriptEntry::Thinking(text) => wrap_prefixed(
-            "• thinking ",
-            text,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::DIM),
-            width,
-        ),
-        TranscriptEntry::ToolCall {
-            name,
-            input_preview,
-            output_preview,
-            success,
-            started,
-            ..
-        } => tool_output::render_tool_call_lines(
-            name,
-            input_preview.as_deref(),
-            output_preview.as_deref(),
-            *success,
-            *started,
-            width,
-            mode,
-        ),
-        TranscriptEntry::Status(text) => {
-            wrap_prefixed("• ", text, Style::default().fg(Color::DarkGray), width)
-        }
-        TranscriptEntry::Error(text) => {
-            wrap_prefixed("• error ", text, Style::default().fg(Color::Red), width)
-        }
-    };
-
-    if lines.is_empty() {
-        None
-    } else {
-        Some(TranscriptCell { lines })
-    }
-}
-
-fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
-    let content_width = width.saturating_sub(prefix.len()).max(1);
-    let wrapped = wrap(text, content_width)
-        .into_iter()
-        .map(|line| line.into_owned())
-        .collect::<Vec<_>>();
-
-    if wrapped.is_empty() {
-        return vec![Line::from(Span::styled(prefix.to_string(), style))];
-    }
-
-    wrapped
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let leader = if index == 0 {
-                prefix.to_string()
-            } else {
-                " ".repeat(prefix.len())
-            };
-            Line::from(vec![Span::styled(leader, style), Span::styled(line, style)])
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -183,5 +116,27 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("line 1")));
         assert!(rendered.iter().any(|line| line.contains("line 20")));
         assert!(!rendered.iter().any(|line| line.contains("… +")));
+    }
+
+    #[test]
+    fn preview_and_overlay_cells_diverge_for_long_tool_output() {
+        let output = (1..=20)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let entries = vec![TranscriptEntry::ToolCall {
+            name: "exec_command".to_string(),
+            call_id: Some("call-1".to_string()),
+            input_preview: Some("git log --oneline".to_string()),
+            output_preview: Some(output),
+            success: true,
+            started: false,
+        }];
+
+        let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let overlay = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
+
+        assert!(preview.iter().any(|line| line.contains("… +")));
+        assert!(!overlay.iter().any(|line| line.contains("… +")));
     }
 }

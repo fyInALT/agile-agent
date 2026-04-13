@@ -6,10 +6,13 @@ use anyhow::Result;
 
 mod app_loop;
 mod composer;
+mod diff_render;
+mod history_cell;
 mod input;
 mod markdown;
 mod render;
 mod terminal;
+mod text_formatting;
 mod tool_output;
 mod transcript;
 mod ui_state;

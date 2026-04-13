@@ -3,9 +3,12 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use diffy::Patch;
 use textwrap::wrap;
-use unicode_segmentation::UnicodeSegmentation;
+
+use crate::diff_render::render_unified_diff_lines;
+use crate::diff_render::summarize_unified_diff;
+use crate::text_formatting::format_json_compact;
+use crate::text_formatting::truncate_graphemes;
 
 const TOOL_PREVIEW_MAX_LINES: usize = 8;
 const TOOL_PREVIEW_HEAD_LINES: usize = 4;
@@ -207,7 +210,11 @@ fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
 fn render_diff_block(output: &str, _width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.extend(render_diff_summary(output));
-    let rendered = render_unified_diff_lines(output);
+    let rendered = render_unified_diff_lines(
+        output,
+        TOOL_OUTPUT_INITIAL_PREFIX,
+        TOOL_OUTPUT_CONTINUATION_PREFIX,
+    );
     lines.extend(match mode {
         ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
         ToolRenderMode::Full => rendered,
@@ -296,190 +303,6 @@ fn render_git_log_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec
     }
 }
 
-fn diff_style_for_line(line: &str) -> Style {
-    if line.starts_with('+') && !line.starts_with("+++") {
-        Style::default().fg(Color::Green)
-    } else if line.starts_with('-') && !line.starts_with("---") {
-        Style::default().fg(Color::Red)
-    } else if line.starts_with("@@") {
-        Style::default().fg(Color::Cyan)
-    } else if line.starts_with("diff --git")
-        || line.starts_with("index ")
-        || line.starts_with("--- ")
-        || line.starts_with("+++ ")
-    {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    } else {
-        Style::default().add_modifier(Modifier::DIM)
-    }
-}
-
-fn render_unified_diff_lines(output: &str) -> Vec<Line<'static>> {
-    let Ok(patch) = Patch::from_str(output) else {
-        return render_wrapped_preview_lines(
-            output.lines().map(ToOwned::to_owned).collect(),
-            120,
-            diff_style_for_line,
-        );
-    };
-
-    let max_line_number = patch
-        .hunks()
-        .iter()
-        .flat_map(|hunk| [hunk.old_range().start(), hunk.new_range().start()])
-        .max()
-        .unwrap_or(1);
-    let line_no_width = max_line_number.to_string().len().max(1);
-
-    let mut out = Vec::new();
-    let mut first_hunk = true;
-    for hunk in patch.hunks() {
-        if !first_hunk {
-            out.push(Line::from(""));
-        }
-        first_hunk = false;
-        out.push(Line::from(vec![
-            Span::styled(
-                TOOL_OUTPUT_INITIAL_PREFIX,
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-            ),
-            Span::styled(
-                format!(
-                    "@@ -{} +{} @@",
-                    format_hunk_range(hunk.old_range().start(), hunk.old_range().len()),
-                    format_hunk_range(hunk.new_range().start(), hunk.new_range().len())
-                ),
-                Style::default().fg(Color::Cyan),
-            ),
-        ]));
-
-        let mut old_ln = hunk.old_range().start();
-        let mut new_ln = hunk.new_range().start();
-        for line in hunk.lines() {
-            match line {
-                diffy::Line::Insert(text) => {
-                    let content = text.trim_end_matches('\n');
-                    out.push(diff_line(
-                        TOOL_OUTPUT_CONTINUATION_PREFIX,
-                        line_no_width,
-                        Some(new_ln),
-                        '+',
-                        content,
-                        Style::default().fg(Color::Green),
-                    ));
-                    new_ln += 1;
-                }
-                diffy::Line::Delete(text) => {
-                    let content = text.trim_end_matches('\n');
-                    out.push(diff_line(
-                        TOOL_OUTPUT_CONTINUATION_PREFIX,
-                        line_no_width,
-                        Some(old_ln),
-                        '-',
-                        content,
-                        Style::default().fg(Color::Red),
-                    ));
-                    old_ln += 1;
-                }
-                diffy::Line::Context(text) => {
-                    let content = text.trim_end_matches('\n');
-                    out.push(diff_line(
-                        TOOL_OUTPUT_CONTINUATION_PREFIX,
-                        line_no_width,
-                        Some(new_ln),
-                        ' ',
-                        content,
-                        Style::default().add_modifier(Modifier::DIM),
-                    ));
-                    old_ln += 1;
-                    new_ln += 1;
-                }
-            }
-        }
-    }
-
-    out
-}
-
-fn format_hunk_range(start: usize, len: usize) -> String {
-    if len == 1 {
-        start.to_string()
-    } else {
-        format!("{start},{len}")
-    }
-}
-
-fn diff_line(
-    prefix: &str,
-    line_no_width: usize,
-    line_no: Option<usize>,
-    sign: char,
-    content: &str,
-    style: Style,
-) -> Line<'static> {
-    let number = line_no
-        .map(|value| format!("{value:>width$}", width = line_no_width))
-        .unwrap_or_else(|| " ".repeat(line_no_width));
-    Line::from(vec![
-        Span::styled(
-            prefix.to_string(),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        ),
-        Span::styled(number, Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
-        Span::raw(" "),
-        Span::styled(format!("{sign}"), style),
-        Span::raw(" "),
-        Span::styled(content.to_string(), style),
-    ])
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DiffFileSummary {
-    path: String,
-    added: usize,
-    removed: usize,
-}
-
-fn summarize_unified_diff(diff: &str) -> Vec<DiffFileSummary> {
-    let mut summaries = Vec::new();
-    let mut current: Option<DiffFileSummary> = None;
-
-    for line in diff.lines() {
-        if let Some(rest) = line.strip_prefix("diff --git a/") {
-            if let Some(summary) = current.take() {
-                summaries.push(summary);
-            }
-            let path = rest
-                .split_whitespace()
-                .next()
-                .unwrap_or(rest)
-                .trim_end_matches(" b/")
-                .to_string();
-            current = Some(DiffFileSummary {
-                path,
-                added: 0,
-                removed: 0,
-            });
-            continue;
-        }
-
-        if let Some(summary) = current.as_mut() {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                summary.added += 1;
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                summary.removed += 1;
-            }
-        }
-    }
-
-    if let Some(summary) = current.take() {
-        summaries.push(summary);
-    }
-
-    summaries
-}
 
 fn render_text_block(name: &str, output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
@@ -589,61 +412,6 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
         .collect()
 }
 
-fn truncate_graphemes(text: &str, max_graphemes: usize) -> String {
-    let graphemes = text.graphemes(true).collect::<Vec<_>>();
-    if graphemes.len() <= max_graphemes {
-        return text.to_string();
-    }
-    if max_graphemes <= 3 {
-        return graphemes.into_iter().take(max_graphemes).collect();
-    }
-    let mut out = graphemes
-        .into_iter()
-        .take(max_graphemes - 3)
-        .collect::<String>();
-    out.push_str("...");
-    out
-}
-
-fn format_json_compact(text: &str) -> Option<String> {
-    let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
-    let pretty = serde_json::to_string_pretty(&json).ok()?;
-    let mut result = String::new();
-    let mut chars = pretty.chars().peekable();
-    let mut in_string = false;
-    let mut escape_next = false;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' if !escape_next => {
-                in_string = !in_string;
-                result.push(ch);
-            }
-            '\\' if in_string => {
-                escape_next = !escape_next;
-                result.push(ch);
-            }
-            '\n' | '\r' if !in_string => {}
-            ' ' | '\t' if !in_string => {
-                if let Some(&next_ch) = chars.peek()
-                    && let Some(last_ch) = result.chars().last()
-                    && (last_ch == ':' || last_ch == ',')
-                    && !matches!(next_ch, '}' | ']')
-                {
-                    result.push(' ');
-                }
-            }
-            _ => {
-                if escape_next && in_string {
-                    escape_next = false;
-                }
-                result.push(ch);
-            }
-        }
-    }
-
-    Some(result)
-}
 
 #[cfg(test)]
 mod tests {
