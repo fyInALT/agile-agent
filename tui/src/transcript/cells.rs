@@ -62,6 +62,7 @@ fn exploring_exec_group_cell(
     while index < entries.len() {
         let TranscriptEntry::ExecCommand {
             source,
+            allow_exploring_group,
             input_preview,
             output_preview,
             success,
@@ -73,6 +74,10 @@ fn exploring_exec_group_cell(
         else {
             break;
         };
+
+        if !allow_exploring_group {
+            break;
+        }
 
         let Some(command) = input_preview.as_deref() else {
             break;
@@ -146,6 +151,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("git diff README.md".to_string()),
             output_preview: Some(
                 "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new".to_string(),
@@ -177,6 +183,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
             success: true,
@@ -202,6 +209,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
             success: true,
@@ -222,6 +230,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("userShell".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("git status".to_string()),
             output_preview: Some("On branch main".to_string()),
             success: true,
@@ -241,6 +250,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("set -o pipefail\ncargo test -p codex-tui --quiet".to_string()),
             output_preview: Some(String::new()),
             success: true,
@@ -410,6 +420,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -420,6 +431,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -430,6 +442,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-3".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("cat bar.txt".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -455,6 +468,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("rg shimmer_spans src".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -465,6 +479,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("cat src/shimmer.rs".to_string()),
                 output_preview: None,
                 success: true,
@@ -491,6 +506,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -501,6 +517,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -522,6 +539,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             source: Some("userShell".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("cat foo.txt".to_string()),
             output_preview: Some(String::new()),
             success: true,
@@ -542,6 +560,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-6".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some(format!("rg {url_like}")),
             output_preview: Some(String::new()),
             success: true,
@@ -564,6 +583,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-7".to_string()),
             source: Some("userShell".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("bash -lc 'python3 -c '\\''print(\"Hello, world!\")'\\'''".to_string()),
             output_preview: Some("Hello, world!".to_string()),
             success: true,
@@ -585,6 +605,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-10".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("printf hello".to_string()),
             output_preview: Some("hello\nworld".to_string()),
             success: true,
@@ -607,6 +628,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-8".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("bash -lc 'ls -la'".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -617,6 +639,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-9".to_string()),
                 source: Some("agent".to_string()),
+            allow_exploring_group: true,
                 input_preview: Some("/bin/bash -lc 'cat foo.txt'".to_string()),
                 output_preview: Some(String::new()),
                 success: true,
@@ -635,10 +658,85 @@ mod tests {
     }
 
     #[test]
+    fn orphan_finished_exec_does_not_merge_into_active_exploring_group() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-exploring".to_string()),
+                source: Some("agent".to_string()),
+            allow_exploring_group: true,
+                input_preview: Some("cat /dev/null".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: true,
+                exit_code: None,
+                duration_ms: None,
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-orphan".to_string()),
+                source: Some("agent".to_string()),
+            allow_exploring_group: false,
+                input_preview: Some("echo repro-marker".to_string()),
+                output_preview: Some("repro-marker\n".to_string()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(5),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Exploring"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ Read /dev/null"), "{rendered:?}");
+        assert!(rendered
+            .iter()
+            .any(|line| line.contains("Ran echo repro-marker")), "{rendered:?}");
+        assert!(!rendered
+            .iter()
+            .any(|line| line == "    Read /dev/null, echo repro-marker"), "{rendered:?}");
+    }
+
+    #[test]
+    fn orphan_finished_exploring_exec_does_not_merge_into_completed_group() {
+        let entries = vec![
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-ls".to_string()),
+                source: Some("agent".to_string()),
+            allow_exploring_group: true,
+                input_preview: Some("ls -la".to_string()),
+                output_preview: Some(String::new()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(10),
+            },
+            TranscriptEntry::ExecCommand {
+                call_id: Some("call-after".to_string()),
+                source: Some("agent".to_string()),
+            allow_exploring_group: false,
+                input_preview: Some("cat foo.txt".to_string()),
+                output_preview: Some("hello\n".to_string()),
+                success: true,
+                started: false,
+                exit_code: Some(0),
+                duration_ms: Some(5),
+            },
+        ];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line.contains("Ran cat foo.txt")), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line == "    Read foo.txt"), "{rendered:?}");
+    }
+
+    #[test]
     fn long_exec_command_shows_command_ellipsis_before_output() {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-4".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some(
                 "echo\nthis_is_a_very_long_single_token_that_will_wrap_over_multiple_lines"
                     .to_string(),
@@ -669,6 +767,7 @@ mod tests {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-5".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: Some("seq 1 10 1>&2 && false".to_string()),
             output_preview: Some(
                 (1..=10)

@@ -50,6 +50,7 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
         TranscriptEntry::ExecCommand {
             call_id: _,
             source,
+            allow_exploring_group: _,
             input_preview,
             output_preview,
             success,

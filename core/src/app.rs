@@ -38,6 +38,7 @@ pub enum TranscriptEntry {
     ExecCommand {
         call_id: Option<String>,
         source: Option<String>,
+        allow_exploring_group: bool,
         input_preview: Option<String>,
         output_preview: Option<String>,
         success: bool,
@@ -196,6 +197,7 @@ impl AppState {
         self.transcript.push(TranscriptEntry::ExecCommand {
             call_id,
             source,
+            allow_exploring_group: true,
             input_preview,
             output_preview: None,
             success: true,
@@ -220,6 +222,7 @@ impl AppState {
                 TranscriptEntry::ExecCommand {
                     call_id: existing_call_id,
                     source: existing_source,
+                    allow_exploring_group,
                     input_preview: existing_input_preview,
                     started: true,
                     ..
@@ -230,6 +233,7 @@ impl AppState {
                         *entry = TranscriptEntry::ExecCommand {
                             call_id: existing_call_id.clone().or(call_id),
                             source: existing_source.clone().or(source),
+                            allow_exploring_group: *allow_exploring_group,
                             input_preview: existing_input_preview.clone(),
                             output_preview,
                             success,
@@ -246,6 +250,7 @@ impl AppState {
         self.transcript.push(TranscriptEntry::ExecCommand {
             call_id,
             source,
+            allow_exploring_group: false,
             input_preview: None,
             output_preview,
             success,
@@ -263,6 +268,7 @@ impl AppState {
         for entry in self.transcript.iter_mut().rev() {
             if let TranscriptEntry::ExecCommand {
                 call_id: existing_call_id,
+                allow_exploring_group: _,
                 output_preview,
                 ..
             } = entry
@@ -281,6 +287,7 @@ impl AppState {
         self.transcript.push(TranscriptEntry::ExecCommand {
             call_id,
             source: None,
+            allow_exploring_group: false,
             input_preview: None,
             output_preview: Some(delta.to_string()),
             success: true,
@@ -908,6 +915,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id,
                 source,
+                allow_exploring_group,
                 input_preview,
                 output_preview,
                 success,
@@ -917,12 +925,42 @@ mod tests {
             }
             if call_id.as_deref() == Some("call-1")
                 && source.as_deref() == Some("agent")
+                && *allow_exploring_group
                 && input_preview.as_deref() == Some("git diff README.md")
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
                 && *success
                 && !*started
                 && *exit_code == Some(0)
                 && *duration_ms == Some(180)
+        ));
+    }
+
+    #[test]
+    fn orphan_finished_exec_command_is_marked_non_coalescing() {
+        let mut state = AppState::new(ProviderKind::Mock);
+
+        state.push_exec_command_finished(
+            Some("orphan-1".to_string()),
+            Some("done".to_string()),
+            true,
+            Some(0),
+            Some(5),
+            Some("agent".to_string()),
+        );
+
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::ExecCommand {
+                call_id,
+                allow_exploring_group,
+                output_preview,
+                started,
+                ..
+            }
+            if call_id.as_deref() == Some("orphan-1")
+                && !*allow_exploring_group
+                && output_preview.as_deref() == Some("done")
+                && !*started
         ));
     }
 

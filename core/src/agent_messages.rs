@@ -148,6 +148,7 @@ fn map_entry(
         TranscriptEntry::ExecCommand {
             call_id,
             source,
+            allow_exploring_group: _,
             input_preview,
             output_preview,
             success,

@@ -409,6 +409,7 @@ mod tests {
         state.app_mut().transcript.push(TranscriptEntry::ExecCommand {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
+            allow_exploring_group: true,
             input_preview: None,
             output_preview: None,
             success: true,
