@@ -3,6 +3,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use diffy::Patch;
 use textwrap::wrap;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -203,15 +204,10 @@ fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
     !non_empty.is_empty() && non_empty.iter().all(|line| looks_like_git_log_line(line))
 }
 
-fn render_diff_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
-    let body_width = width.saturating_sub(4).max(1);
+fn render_diff_block(output: &str, _width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.extend(render_diff_summary(output));
-    let rendered = render_wrapped_preview_lines(
-        output.lines().map(ToOwned::to_owned).collect(),
-        body_width + 4,
-        diff_style_for_line,
-    );
+    let rendered = render_unified_diff_lines(output);
     lines.extend(match mode {
         ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
         ToolRenderMode::Full => rendered,
@@ -318,6 +314,125 @@ fn diff_style_for_line(line: &str) -> Style {
     } else {
         Style::default().add_modifier(Modifier::DIM)
     }
+}
+
+fn render_unified_diff_lines(output: &str) -> Vec<Line<'static>> {
+    let Ok(patch) = Patch::from_str(output) else {
+        return render_wrapped_preview_lines(
+            output.lines().map(ToOwned::to_owned).collect(),
+            120,
+            diff_style_for_line,
+        );
+    };
+
+    let max_line_number = patch
+        .hunks()
+        .iter()
+        .flat_map(|hunk| [hunk.old_range().start(), hunk.new_range().start()])
+        .max()
+        .unwrap_or(1);
+    let line_no_width = max_line_number.to_string().len().max(1);
+
+    let mut out = Vec::new();
+    let mut first_hunk = true;
+    for hunk in patch.hunks() {
+        if !first_hunk {
+            out.push(Line::from(""));
+        }
+        first_hunk = false;
+        out.push(Line::from(vec![
+            Span::styled(
+                TOOL_OUTPUT_INITIAL_PREFIX,
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!(
+                    "@@ -{} +{} @@",
+                    format_hunk_range(hunk.old_range().start(), hunk.old_range().len()),
+                    format_hunk_range(hunk.new_range().start(), hunk.new_range().len())
+                ),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+
+        let mut old_ln = hunk.old_range().start();
+        let mut new_ln = hunk.new_range().start();
+        for line in hunk.lines() {
+            match line {
+                diffy::Line::Insert(text) => {
+                    let content = text.trim_end_matches('\n');
+                    out.push(diff_line(
+                        TOOL_OUTPUT_CONTINUATION_PREFIX,
+                        line_no_width,
+                        Some(new_ln),
+                        '+',
+                        content,
+                        Style::default().fg(Color::Green),
+                    ));
+                    new_ln += 1;
+                }
+                diffy::Line::Delete(text) => {
+                    let content = text.trim_end_matches('\n');
+                    out.push(diff_line(
+                        TOOL_OUTPUT_CONTINUATION_PREFIX,
+                        line_no_width,
+                        Some(old_ln),
+                        '-',
+                        content,
+                        Style::default().fg(Color::Red),
+                    ));
+                    old_ln += 1;
+                }
+                diffy::Line::Context(text) => {
+                    let content = text.trim_end_matches('\n');
+                    out.push(diff_line(
+                        TOOL_OUTPUT_CONTINUATION_PREFIX,
+                        line_no_width,
+                        Some(new_ln),
+                        ' ',
+                        content,
+                        Style::default().add_modifier(Modifier::DIM),
+                    ));
+                    old_ln += 1;
+                    new_ln += 1;
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn format_hunk_range(start: usize, len: usize) -> String {
+    if len == 1 {
+        start.to_string()
+    } else {
+        format!("{start},{len}")
+    }
+}
+
+fn diff_line(
+    prefix: &str,
+    line_no_width: usize,
+    line_no: Option<usize>,
+    sign: char,
+    content: &str,
+    style: Style,
+) -> Line<'static> {
+    let number = line_no
+        .map(|value| format!("{value:>width$}", width = line_no_width))
+        .unwrap_or_else(|| " ".repeat(line_no_width));
+    Line::from(vec![
+        Span::styled(
+            prefix.to_string(),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        ),
+        Span::styled(number, Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+        Span::raw(" "),
+        Span::styled(format!("{sign}"), style),
+        Span::raw(" "),
+        Span::styled(content.to_string(), style),
+    ])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -562,8 +677,9 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("finished command")));
         assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
         assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
-        assert!(rendered.iter().any(|line| line.contains("diff --git a/README.md b/README.md")));
-        assert!(rendered.iter().any(|line| line.contains("+new")));
+        assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
+        assert!(rendered.iter().any(|line| line.contains("1 - old")));
+        assert!(rendered.iter().any(|line| line.contains("1 + new")));
         assert!(!rendered.iter().any(|line| line.contains("output:")));
     }
 

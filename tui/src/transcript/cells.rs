@@ -155,8 +155,10 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line.contains("finished command")));
         assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
-        assert!(rendered.iter().any(|line| line.contains("diff --git a/README.md b/README.md")));
-        assert!(rendered.iter().any(|line| line.contains("+new")));
+        assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
+        assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
+        assert!(rendered.iter().any(|line| line.contains("1 - old")));
+        assert!(rendered.iter().any(|line| line.contains("1 + new")));
         assert!(!rendered.iter().any(|line| line.contains("output:")));
     }
 
