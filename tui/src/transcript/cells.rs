@@ -537,6 +537,29 @@ mod tests {
     }
 
     #[test]
+    fn exploring_search_query_keeps_long_url_like_token_intact() {
+        let url_like = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/artifacts/reports/performance/summary/detail/with/a/very/long/path";
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-6".to_string()),
+            source: Some("agent".to_string()),
+            input_preview: Some(format!("rg {url_like}")),
+            output_preview: Some(String::new()),
+            success: true,
+            started: false,
+            exit_code: Some(0),
+            duration_ms: Some(10),
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 36)));
+
+        assert_eq!(
+            rendered.iter().filter(|line| line.contains(url_like)).count(),
+            1,
+            "{rendered:?}"
+        );
+    }
+
+    #[test]
     fn long_exec_command_shows_command_ellipsis_before_output() {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-4".to_string()),

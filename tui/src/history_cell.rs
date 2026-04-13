@@ -305,6 +305,64 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
         .collect()
 }
 
+fn wrap_prefixed_no_break_words(
+    prefix: &str,
+    text: &str,
+    style: Style,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = width.saturating_sub(prefix.len()).max(1);
+    let wrapped = wrap_words_without_breaking(text, content_width);
+
+    if wrapped.is_empty() {
+        return vec![Line::from(Span::styled(prefix.to_string(), style))];
+    }
+
+    wrapped
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let leader = if index == 0 {
+                prefix.to_string()
+            } else {
+                " ".repeat(prefix.len())
+            };
+            Line::from(vec![Span::styled(leader, style), Span::styled(line, style)])
+        })
+        .collect()
+}
+
+fn wrap_words_without_breaking(text: &str, content_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in text.split(' ') {
+        let candidate = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{current} {word}")
+        };
+
+        if current.is_empty() || candidate.chars().count() <= content_width {
+            current = candidate;
+            continue;
+        }
+
+        lines.push(std::mem::take(&mut current));
+        current = word.to_string();
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
+}
+
 fn render_exec_history_lines(
     source: Option<&str>,
     input_preview: Option<&str>,
@@ -431,7 +489,7 @@ fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<L
             DETAIL_CONTINUATION_PREFIX
         };
         let content = format!("{label} {text}");
-        lines.extend(wrap_prefixed(
+        lines.extend(wrap_prefixed_no_break_words(
             prefix,
             &content,
             Style::default().fg(Color::Cyan),
