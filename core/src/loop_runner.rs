@@ -276,28 +276,45 @@ fn consume_provider_until_finished(
                 ProviderEvent::Status(text) => state.push_status_message(text),
                 ProviderEvent::AssistantChunk(chunk) => state.append_assistant_chunk(&chunk),
                 ProviderEvent::ThinkingChunk(chunk) => state.append_thinking_chunk(&chunk),
-                ProviderEvent::ToolCallStarted {
-                    name,
+                ProviderEvent::ExecCommandStarted {
                     call_id,
                     input_preview,
                     source,
-                } => state.push_tool_call_started(name, call_id, input_preview, source),
-                ProviderEvent::ToolCallFinished {
-                    name,
+                } => state.push_exec_command_started(call_id, input_preview, source),
+                ProviderEvent::ExecCommandFinished {
                     call_id,
                     output_preview,
                     success,
                     exit_code,
                     duration_ms,
                     source,
-                } => state.push_tool_call_finished(
-                    name,
+                } => state.push_exec_command_finished(
                     call_id,
                     output_preview,
                     success,
                     exit_code,
                     duration_ms,
                     source,
+                ),
+                ProviderEvent::GenericToolCallStarted {
+                    name,
+                    call_id,
+                    input_preview,
+                } => state.push_generic_tool_call_started(name, call_id, input_preview),
+                ProviderEvent::GenericToolCallFinished {
+                    name,
+                    call_id,
+                    output_preview,
+                    success,
+                    exit_code,
+                    duration_ms,
+                } => state.push_generic_tool_call_finished(
+                    name,
+                    call_id,
+                    output_preview,
+                    success,
+                    exit_code,
+                    duration_ms,
                 ),
                 ProviderEvent::PatchApplyStarted { call_id, changes } => {
                     state.push_patch_apply_started(call_id, changes)

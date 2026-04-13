@@ -178,30 +178,51 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     ProviderEvent::ThinkingChunk(chunk) => {
                         state.app_mut().append_thinking_chunk(&chunk)
                     }
-                    ProviderEvent::ToolCallStarted {
-                        name,
+                    ProviderEvent::ExecCommandStarted {
                         call_id,
                         input_preview,
                         source,
                     } => state
                         .app_mut()
-                        .push_tool_call_started(name, call_id, input_preview, source),
-                    ProviderEvent::ToolCallFinished {
-                        name,
+                        .push_exec_command_started(call_id, input_preview, source),
+                    ProviderEvent::ExecCommandFinished {
                         call_id,
                         output_preview,
                         success,
                         exit_code,
                         duration_ms,
                         source,
-                    } => state.app_mut().push_tool_call_finished(
-                        name,
+                    } => state.app_mut().push_exec_command_finished(
                         call_id,
                         output_preview,
                         success,
                         exit_code,
                         duration_ms,
                         source,
+                    ),
+                    ProviderEvent::GenericToolCallStarted {
+                        name,
+                        call_id,
+                        input_preview,
+                    } => state.app_mut().push_generic_tool_call_started(
+                        name,
+                        call_id,
+                        input_preview,
+                    ),
+                    ProviderEvent::GenericToolCallFinished {
+                        name,
+                        call_id,
+                        output_preview,
+                        success,
+                        exit_code,
+                        duration_ms,
+                    } => state.app_mut().push_generic_tool_call_finished(
+                        name,
+                        call_id,
+                        output_preview,
+                        success,
+                        exit_code,
+                        duration_ms,
                     ),
                     ProviderEvent::PatchApplyStarted { call_id, changes } => {
                         state.app_mut().push_patch_apply_started(call_id, changes)

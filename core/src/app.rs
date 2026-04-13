@@ -187,40 +187,26 @@ impl AppState {
         }
     }
 
-    pub fn push_tool_call_started(
+    pub fn push_exec_command_started(
         &mut self,
-        name: String,
         call_id: Option<String>,
         input_preview: Option<String>,
         source: Option<String>,
     ) {
-        match name.as_str() {
-            "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
-                call_id,
-                source,
-                input_preview,
-                output_preview: None,
-                success: true,
-                started: true,
-                exit_code: None,
-                duration_ms: None,
-            }),
-            _ => self.transcript.push(TranscriptEntry::GenericToolCall {
-                name,
-                call_id,
-                input_preview,
-                output_preview: None,
-                success: true,
-                started: true,
-                exit_code: None,
-                duration_ms: None,
-            }),
-        }
+        self.transcript.push(TranscriptEntry::ExecCommand {
+            call_id,
+            source,
+            input_preview,
+            output_preview: None,
+            success: true,
+            started: true,
+            exit_code: None,
+            duration_ms: None,
+        });
     }
 
-    pub fn push_tool_call_finished(
+    pub fn push_exec_command_finished(
         &mut self,
-        name: String,
         call_id: Option<String>,
         output_preview: Option<String>,
         success: bool,
@@ -239,7 +225,7 @@ impl AppState {
                     ..
                 } => {
                     let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
-                    let matches_name = name == "exec_command" && existing_call_id.is_none();
+                    let matches_name = existing_call_id.is_none();
                     if matches_call_id || matches_name {
                         *entry = TranscriptEntry::ExecCommand {
                             call_id: existing_call_id.clone().or(call_id),
@@ -254,55 +240,85 @@ impl AppState {
                         return;
                     }
                 }
-                TranscriptEntry::GenericToolCall {
-                    name: existing_name,
-                    call_id: existing_call_id,
-                    input_preview: existing_input_preview,
-                    started: true,
-                    ..
-                } => {
-                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
-                    let matches_name = *existing_name == name;
-                    if matches_call_id || matches_name {
-                        *entry = TranscriptEntry::GenericToolCall {
-                            name: existing_name.clone(),
-                            call_id: existing_call_id.clone().or(call_id),
-                            input_preview: existing_input_preview.clone(),
-                            output_preview,
-                            success,
-                            started: false,
-                            exit_code,
-                            duration_ms,
-                        };
-                        return;
-                    }
-                }
                 _ => {}
             }
         }
-        // If not found, add as a finished entry
-        match name.as_str() {
-            "exec_command" => self.transcript.push(TranscriptEntry::ExecCommand {
-                call_id,
-                source,
-                input_preview: None,
-                output_preview,
-                success,
-                started: false,
-                exit_code,
-                duration_ms,
-            }),
-            _ => self.transcript.push(TranscriptEntry::GenericToolCall {
-                name,
-                call_id,
-                input_preview: None,
-                output_preview,
-                success,
-                started: false,
-                exit_code,
-                duration_ms,
-            }),
+        self.transcript.push(TranscriptEntry::ExecCommand {
+            call_id,
+            source,
+            input_preview: None,
+            output_preview,
+            success,
+            started: false,
+            exit_code,
+            duration_ms,
+        });
+    }
+
+    pub fn push_generic_tool_call_started(
+        &mut self,
+        name: String,
+        call_id: Option<String>,
+        input_preview: Option<String>,
+    ) {
+        self.transcript.push(TranscriptEntry::GenericToolCall {
+            name,
+            call_id,
+            input_preview,
+            output_preview: None,
+            success: true,
+            started: true,
+            exit_code: None,
+            duration_ms: None,
+        });
+    }
+
+    pub fn push_generic_tool_call_finished(
+        &mut self,
+        name: String,
+        call_id: Option<String>,
+        output_preview: Option<String>,
+        success: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::GenericToolCall {
+                name: existing_name,
+                call_id: existing_call_id,
+                input_preview: existing_input_preview,
+                started: true,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = *existing_name == name;
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::GenericToolCall {
+                        name: existing_name.clone(),
+                        call_id: existing_call_id.clone().or(call_id),
+                        input_preview: existing_input_preview.clone(),
+                        output_preview,
+                        success,
+                        started: false,
+                        exit_code,
+                        duration_ms,
+                    };
+                    return;
+                }
+            }
         }
+
+        self.transcript.push(TranscriptEntry::GenericToolCall {
+            name,
+            call_id,
+            input_preview: None,
+            output_preview,
+            success,
+            started: false,
+            exit_code,
+            duration_ms,
+        });
     }
 
     pub fn finish_provider_response(&mut self) {
@@ -836,15 +852,13 @@ mod tests {
     #[test]
     fn finished_tool_call_matches_started_entry_by_call_id_and_preserves_started_metadata() {
         let mut state = AppState::new(ProviderKind::Mock);
-        state.push_tool_call_started(
-            "exec_command".to_string(),
+        state.push_exec_command_started(
             Some("call-1".to_string()),
             Some("git diff README.md".to_string()),
             Some("agent".to_string()),
         );
 
-        state.push_tool_call_finished(
-            "tool_result".to_string(),
+        state.push_exec_command_finished(
             Some("call-1".to_string()),
             Some("diff --git a/README.md b/README.md".to_string()),
             true,
@@ -930,18 +944,16 @@ mod tests {
     #[test]
     fn generic_tool_result_uses_generic_tool_call_entry() {
         let mut state = AppState::new(ProviderKind::Mock);
-        state.push_tool_call_started(
+        state.push_generic_tool_call_started(
             "read_file".to_string(),
             Some("call-2".to_string()),
             Some("{\"path\":\"README.md\"}".to_string()),
-            None,
         );
-        state.push_tool_call_finished(
-            "tool_result".to_string(),
+        state.push_generic_tool_call_finished(
+            "read_file".to_string(),
             Some("call-2".to_string()),
             Some("done".to_string()),
             true,
-            None,
             None,
             None,
         );

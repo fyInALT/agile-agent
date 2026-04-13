@@ -289,7 +289,7 @@ fn parse_assistant_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEven
                     .input
                     .as_ref()
                     .and_then(|value| serde_json::to_string(value).ok());
-                events.push(ProviderEvent::ToolCallStarted {
+                events.push(ProviderEvent::GenericToolCallStarted {
                     name: if block.name.is_empty() {
                         "tool_use".to_string()
                     } else {
@@ -301,7 +301,6 @@ fn parse_assistant_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEven
                         Some(block.id)
                     },
                     input_preview,
-                    source: None,
                 });
             }
             _ => {}
@@ -321,14 +320,13 @@ fn parse_user_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEvent>> {
     for block in content.content {
         if block.r#type == "tool_result" {
             let output_preview = block.content.as_ref().map(render_json_value);
-            events.push(ProviderEvent::ToolCallFinished {
+            events.push(ProviderEvent::GenericToolCallFinished {
                 name: "tool_result".to_string(),
                 call_id: block.tool_use_id.clone(),
                 output_preview,
                 success: true,
                 exit_code: None,
                 duration_ms: None,
-                source: None,
             });
         }
     }
@@ -495,11 +493,10 @@ mod tests {
             events,
             vec![
                 ProviderEvent::ThinkingChunk("plan first".to_string()),
-                ProviderEvent::ToolCallStarted {
+                ProviderEvent::GenericToolCallStarted {
                     name: "read_file".to_string(),
                     call_id: Some("call_1".to_string()),
                     input_preview: Some("{\"path\":\"README.md\"}".to_string()),
-                    source: None,
                 }
             ]
         );
@@ -513,14 +510,13 @@ mod tests {
 
         assert_eq!(
             events,
-            vec![ProviderEvent::ToolCallFinished {
+            vec![ProviderEvent::GenericToolCallFinished {
                 name: "tool_result".to_string(),
                 call_id: Some("call_1".to_string()),
                 output_preview: Some("{\"ok\":true}".to_string()),
                 success: true,
                 exit_code: None,
                 duration_ms: None,
-                source: None,
             }]
         );
     }

@@ -610,8 +610,7 @@ fn parse_item_event(
                 .get("source")
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
-            vec![ProviderEvent::ToolCallStarted {
-                name: "exec_command".to_string(),
+            vec![ProviderEvent::ExecCommandStarted {
                 call_id: item_id,
                 input_preview: command,
                 source,
@@ -633,8 +632,7 @@ fn parse_item_event(
                 .get("source")
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
-            vec![ProviderEvent::ToolCallFinished {
-                name: "exec_command".to_string(),
+            vec![ProviderEvent::ExecCommandFinished {
                 call_id: item_id,
                 output_preview: output,
                 success: exit_code.unwrap_or(0) == 0,
@@ -769,7 +767,7 @@ fn parse_content_blocks(
                     }
                 }
                 "tool_use" => {
-                    events.push(ProviderEvent::ToolCallStarted {
+                    events.push(ProviderEvent::GenericToolCallStarted {
                         name: block
                             .get("name")
                             .and_then(|value| value.as_str())
@@ -782,11 +780,10 @@ fn parse_content_blocks(
                         input_preview: block
                             .get("arguments")
                             .and_then(|value| serde_json::to_string(value).ok()),
-                        source: None,
                     });
                 }
                 "tool_result" => {
-                    events.push(ProviderEvent::ToolCallFinished {
+                    events.push(ProviderEvent::GenericToolCallFinished {
                         name: block
                             .get("name")
                             .and_then(|value| value.as_str())
@@ -803,7 +800,6 @@ fn parse_content_blocks(
                         success: item_status != "error",
                         exit_code: None,
                         duration_ms: None,
-                        source: None,
                     });
                 }
                 _ => {}
@@ -1086,8 +1082,7 @@ mod tests {
 
         assert_eq!(
             events,
-            vec![ProviderEvent::ToolCallFinished {
-                name: "exec_command".to_string(),
+            vec![ProviderEvent::ExecCommandFinished {
                 call_id: Some("exec-1".to_string()),
                 output_preview: Some("done".to_string()),
                 success: false,

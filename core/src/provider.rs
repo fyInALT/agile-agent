@@ -57,20 +57,31 @@ pub enum ProviderEvent {
     Status(String),
     AssistantChunk(String),
     ThinkingChunk(String),
-    ToolCallStarted {
-        name: String,
+    ExecCommandStarted {
         call_id: Option<String>,
         input_preview: Option<String>,
         source: Option<String>,
     },
-    ToolCallFinished {
-        name: String,
+    ExecCommandFinished {
         call_id: Option<String>,
         output_preview: Option<String>,
         success: bool,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
         source: Option<String>,
+    },
+    GenericToolCallStarted {
+        name: String,
+        call_id: Option<String>,
+        input_preview: Option<String>,
+    },
+    GenericToolCallFinished {
+        name: String,
+        call_id: Option<String>,
+        output_preview: Option<String>,
+        success: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
     },
     PatchApplyStarted {
         call_id: Option<String>,
@@ -179,8 +190,10 @@ mod tests {
                 }
                 ProviderEvent::Status(_)
                 | ProviderEvent::ThinkingChunk(_)
-                | ProviderEvent::ToolCallStarted { .. }
-                | ProviderEvent::ToolCallFinished { .. }
+                | ProviderEvent::ExecCommandStarted { .. }
+                | ProviderEvent::ExecCommandFinished { .. }
+                | ProviderEvent::GenericToolCallStarted { .. }
+                | ProviderEvent::GenericToolCallFinished { .. }
                 | ProviderEvent::PatchApplyStarted { .. }
                 | ProviderEvent::PatchApplyFinished { .. }
                 | ProviderEvent::SessionHandle(_)
