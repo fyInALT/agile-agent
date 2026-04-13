@@ -86,17 +86,15 @@ fn parse_single_line(line: &str) -> Option<Vec<ExploringOp>> {
                 .unwrap_or_else(|| line.to_string());
             Some(vec![ExploringOp::List(path)])
         }
-        "find" => {
-            let path = tokens
-                .iter()
-                .skip(1)
+        "find" | "eza" | "exa" => {
+            let path = positional_args(tokens.iter().skip(1).copied())
+                .last()
                 .copied()
-                .find(|token| !token.starts_with('-'))
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| line.to_string());
+                .unwrap_or(line)
+                .to_string();
             Some(vec![ExploringOp::List(path)])
         }
-        "rg" | "grep" => {
+        "rg" | "grep" | "ag" | "ack" | "pt" | "rga" => {
             if matches!(tokens.get(1), Some(&"--files")) {
                 return Some(vec![ExploringOp::List("rg --files".to_string())]);
             }
@@ -112,6 +110,25 @@ fn parse_single_line(line: &str) -> Option<Vec<ExploringOp>> {
         }
         _ => None,
     }
+}
+
+fn positional_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut positional = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if matches!(arg, "-I" | "--ignore-glob" | "-g" | "--glob") {
+            skip_next = true;
+            continue;
+        }
+        if !arg.starts_with('-') {
+            positional.push(arg);
+        }
+    }
+    positional
 }
 
 #[cfg(test)]
@@ -140,6 +157,50 @@ mod tests {
         assert_eq!(
             parse_exploring_ops("bash -c 'rg --files | head -n 1'", Some("agent")),
             Some(vec![ExploringOp::List("rg --files".to_string())])
+        );
+    }
+
+    #[test]
+    fn supports_ag_ack_pt_and_rga_search() {
+        assert_eq!(
+            parse_exploring_ops("ag TODO src", Some("agent")),
+            Some(vec![ExploringOp::Search {
+                query: "TODO".to_string(),
+                path: Some("src".to_string()),
+            }])
+        );
+        assert_eq!(
+            parse_exploring_ops("ack TODO src", Some("agent")),
+            Some(vec![ExploringOp::Search {
+                query: "TODO".to_string(),
+                path: Some("src".to_string()),
+            }])
+        );
+        assert_eq!(
+            parse_exploring_ops("pt TODO src", Some("agent")),
+            Some(vec![ExploringOp::Search {
+                query: "TODO".to_string(),
+                path: Some("src".to_string()),
+            }])
+        );
+        assert_eq!(
+            parse_exploring_ops("rga TODO src", Some("agent")),
+            Some(vec![ExploringOp::Search {
+                query: "TODO".to_string(),
+                path: Some("src".to_string()),
+            }])
+        );
+    }
+
+    #[test]
+    fn supports_eza_and_exa_listing() {
+        assert_eq!(
+            parse_exploring_ops("eza --color=always src", Some("agent")),
+            Some(vec![ExploringOp::List("src".to_string())])
+        );
+        assert_eq!(
+            parse_exploring_ops("exa -I target .", Some("agent")),
+            Some(vec![ExploringOp::List(".".to_string())])
         );
     }
 }
