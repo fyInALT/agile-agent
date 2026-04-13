@@ -67,6 +67,27 @@ pub fn render_tool_call_lines(
     lines
 }
 
+pub(crate) fn render_tool_output_body(
+    name: &str,
+    input_preview: Option<&str>,
+    output_preview: Option<&str>,
+    width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) else {
+        return Vec::new();
+    };
+    render_output_block(name, input_preview, output, width, mode)
+}
+
+pub(crate) fn render_exec_result_line_public(
+    success: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+) -> Line<'static> {
+    render_exec_result_line(success, exit_code, duration_ms)
+}
+
 fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
     let (text, style) = if started {
         match name {

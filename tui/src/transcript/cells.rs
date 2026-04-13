@@ -88,7 +88,7 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("Ran")));
-        assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
+        assert!(rendered.iter().any(|line| line.contains("git diff README.md")));
         assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
         assert!(rendered.iter().any(|line| line.contains("1 - old")));

@@ -137,29 +137,27 @@ struct ExecHistoryCell {
 
 impl HistoryCell for ExecHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
-            "exec_command",
+        render_exec_history_lines(
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
             self.started,
             self.exit_code,
             self.duration_ms,
-            width as usize,
+            width,
             ToolRenderMode::Preview,
         )
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        tool_output::render_tool_call_lines(
-            "exec_command",
+        render_exec_history_lines(
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
             self.success,
             self.started,
             self.exit_code,
             self.duration_ms,
-            width as usize,
+            width,
             ToolRenderMode::Full,
         )
     }
@@ -255,4 +253,69 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
             Line::from(vec![Span::styled(leader, style), Span::styled(line, style)])
         })
         .collect()
+}
+
+fn render_exec_history_lines(
+    input_preview: Option<&str>,
+    output_preview: Option<&str>,
+    success: bool,
+    started: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    width: u16,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let title = if started { "Running" } else { "Ran" };
+    let bullet_style = if started {
+        Style::default().fg(Color::Blue)
+    } else if success {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+
+    let command = input_preview.unwrap_or("");
+    let mut header = format!("• {title}");
+    if !command.is_empty() {
+        header.push(' ');
+        header.push_str(command);
+    }
+
+    let wrap_width = width as usize;
+    let wrapped = wrap(&header, wrap_width.max(1));
+    if let Some((first, rest)) = wrapped.split_first() {
+        lines.push(Line::from(vec![Span::styled(
+            first.to_string(),
+            bullet_style.add_modifier(Modifier::BOLD),
+        )]));
+        for line in rest {
+            lines.push(Line::from(vec![
+                Span::styled("  │ ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::Magenta),
+                ),
+            ]));
+        }
+    }
+
+    let output_lines = tool_output::render_tool_output_body(
+        "exec_command",
+        input_preview,
+        output_preview,
+        width as usize,
+        mode,
+    );
+    lines.extend(output_lines);
+
+    if !started {
+        lines.push(tool_output::render_exec_result_line_public(
+            success,
+            exit_code,
+            duration_ms,
+        ));
+    }
+
+    lines
 }
