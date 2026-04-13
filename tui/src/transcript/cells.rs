@@ -284,6 +284,56 @@ mod tests {
     }
 
     #[test]
+    fn patch_preview_and_overlay_diverge_for_large_diff() {
+        let diff = "@@ -1,10 +1,10 @@\n line 1\n-line 2\n+line 2 changed\n line 3\n-line 4\n+line 4 changed\n line 5\n-line 6\n+line 6 changed\n line 7\n-line 8\n+line 8 changed\n line 9\n-line 10\n+line 10 changed";
+        let entries = vec![TranscriptEntry::PatchApply {
+            call_id: Some("patch-2".to_string()),
+            changes: vec![agent_core::tool_calls::PatchChange {
+                path: "README.md".to_string(),
+                move_path: None,
+                kind: agent_core::tool_calls::PatchChangeKind::Update,
+                diff: diff.to_string(),
+                added: 5,
+                removed: 5,
+            }],
+            success: true,
+            started: false,
+        }];
+
+        let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let overlay = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
+
+        assert!(preview.iter().any(|line| line.contains("… +")), "{preview:?}");
+        assert!(!overlay.iter().any(|line| line.contains("… +")), "{overlay:?}");
+        assert!(overlay
+            .iter()
+            .any(|line| line.contains("10 +line 10 changed")), "{overlay:?}");
+    }
+
+    #[test]
+    fn patch_apply_render_uses_rename_arrow() {
+        let entries = vec![TranscriptEntry::PatchApply {
+            call_id: Some("patch-3".to_string()),
+            changes: vec![agent_core::tool_calls::PatchChange {
+                path: "old_name.rs".to_string(),
+                move_path: Some("new_name.rs".to_string()),
+                kind: agent_core::tool_calls::PatchChangeKind::Update,
+                diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+                added: 1,
+                removed: 1,
+            }],
+            success: true,
+            started: false,
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered
+            .iter()
+            .any(|line| line == "• Edited old_name.rs → new_name.rs (+1 -1)"), "{rendered:?}");
+    }
+
+    #[test]
     fn long_exec_command_shows_command_ellipsis_before_output() {
         let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-4".to_string()),

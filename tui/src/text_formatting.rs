@@ -1,5 +1,7 @@
+#[cfg(test)]
 use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(test)]
 pub(crate) fn truncate_graphemes(text: &str, max_graphemes: usize) -> String {
     let graphemes = text.graphemes(true).collect::<Vec<_>>();
     if graphemes.len() <= max_graphemes {

@@ -8,6 +8,7 @@ use textwrap::wrap;
 use crate::diff_render::render_unified_diff_lines;
 use crate::diff_render::summarize_unified_diff;
 use crate::text_formatting::format_json_compact;
+#[cfg(test)]
 use crate::text_formatting::truncate_graphemes;
 
 const TOOL_PREVIEW_MAX_LINES: usize = 5;
@@ -23,6 +24,7 @@ pub enum ToolRenderMode {
     Full,
 }
 
+#[cfg(test)]
 pub fn render_tool_call_lines(
     name: &str,
     input_preview: Option<&str>,
@@ -38,11 +40,7 @@ pub fn render_tool_call_lines(
     lines.push(tool_header_line(name, success, started));
 
     if let Some(input) = input_preview.filter(|value| !value.trim().is_empty()) {
-        if name == "patch_apply" {
-            lines.extend(render_patch_summary_block(input, width));
-        } else {
-            lines.extend(render_input_block(name, input, width));
-        }
+        lines.extend(render_input_block(name, input, width));
     }
 
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
@@ -88,11 +86,11 @@ pub(crate) fn render_exec_result_line_public(
     render_exec_result_line(success, exit_code, duration_ms)
 }
 
+#[cfg(test)]
 fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
     let (text, style) = if started {
         match name {
             "exec_command" => ("• Running".to_string(), Style::default().fg(Color::Blue)),
-            "patch_apply" => ("• applying patch".to_string(), Style::default().fg(Color::Blue)),
             _ => (
                 format!("• running tool {name}"),
                 Style::default().fg(Color::Blue),
@@ -101,10 +99,6 @@ fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
     } else if success {
         match name {
             "exec_command" => ("• Ran".to_string(), Style::default().fg(Color::Green)),
-            "patch_apply" => (
-                "• applied patch".to_string(),
-                Style::default().fg(Color::Green),
-            ),
             _ => (
                 format!("• finished tool {name}"),
                 Style::default().fg(Color::Green),
@@ -114,10 +108,6 @@ fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
         match name {
             "exec_command" => (
                 "• failed command".to_string(),
-                Style::default().fg(Color::Red),
-            ),
-            "patch_apply" => (
-                "• failed patch".to_string(),
                 Style::default().fg(Color::Red),
             ),
             _ => (
@@ -175,6 +165,7 @@ fn format_duration_ms(duration_ms: u64) -> String {
     }
 }
 
+#[cfg(test)]
 fn render_input_block(name: &str, input: &str, width: usize) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let text = if name == "exec_command" {
@@ -193,35 +184,6 @@ fn render_input_block(name: &str, input: &str, width: usize) -> Vec<Line<'static
         },
         width,
     )
-}
-
-fn render_patch_summary_block(summary: &str, width: usize) -> Vec<Line<'static>> {
-    let body_width = width.saturating_sub(4).max(1);
-    let mut lines = Vec::new();
-
-    for (index, line) in summary.lines().enumerate() {
-        let style = if line.starts_with("A ") {
-            Style::default().fg(Color::Green)
-        } else if line.starts_with("D ") {
-            Style::default().fg(Color::Red)
-        } else if line.starts_with("R ") {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().add_modifier(Modifier::DIM)
-        };
-        lines.extend(wrap_prefixed(
-            if index == 0 {
-                TOOL_OUTPUT_INITIAL_PREFIX
-            } else {
-                TOOL_OUTPUT_CONTINUATION_PREFIX
-            },
-            line,
-            style,
-            body_width + 4,
-        ));
-    }
-
-    lines
 }
 
 fn render_output_block(
@@ -625,26 +587,6 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line.contains("$ git rev-parse HEAD")));
         assert!(rendered.iter().any(|line| line.contains("(no output)")));
-    }
-
-    #[test]
-    fn patch_apply_summary_renders_file_list() {
-        let lines = render_tool_call_lines(
-            "patch_apply",
-            Some("M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)"),
-            None,
-            true,
-            false,
-            None,
-            None,
-            80,
-            ToolRenderMode::Preview,
-        );
-        let rendered = lines_to_strings(&lines);
-
-        assert!(rendered.iter().any(|line| line.contains("applied patch")));
-        assert!(rendered.iter().any(|line| line.contains("M /repo/README.md (+1 -1)")));
-        assert!(rendered.iter().any(|line| line.contains("A /repo/src/lib.rs (+1 -0)")));
     }
 
     #[test]

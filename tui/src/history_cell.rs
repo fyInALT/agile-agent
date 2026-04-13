@@ -188,6 +188,7 @@ impl HistoryCell for PatchHistoryCell {
             self.success,
             self.started,
             width as usize,
+            ToolRenderMode::Preview,
         )
     }
 
@@ -197,6 +198,7 @@ impl HistoryCell for PatchHistoryCell {
             self.success,
             self.started,
             width as usize,
+            ToolRenderMode::Full,
         )
     }
 }
@@ -452,19 +454,29 @@ fn render_patch_summary_lines(
     success: bool,
     started: bool,
     width: usize,
+    mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
     if changes.is_empty() {
-        return tool_output::render_tool_call_lines(
-            "patch_apply",
-            None,
-            None,
-            success,
-            started,
-            None,
-            None,
-            width,
-            ToolRenderMode::Preview,
-        );
+        let mut lines = Vec::new();
+        let style = if started {
+            Style::default().fg(Color::Blue)
+        } else if success {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+        let title = if started {
+            "• Applying patch"
+        } else if success {
+            "• Applied patch"
+        } else {
+            "• Failed patch"
+        };
+        lines.push(Line::from(Span::styled(
+            title.to_string(),
+            style.add_modifier(Modifier::BOLD),
+        )));
+        return lines;
     }
 
     let bullet_style = if started {
@@ -491,10 +503,7 @@ fn render_patch_summary_lines(
             Span::raw(" "),
             Span::raw(format!("(+{} -{})", change.added, change.removed)),
         ]));
-        lines.extend(render_patch_diff_lines(
-            change,
-            DETAIL_CONTINUATION_PREFIX,
-        ));
+        lines.extend(render_patch_diff_lines(change, DETAIL_CONTINUATION_PREFIX, mode));
         return lines;
     }
 
@@ -524,7 +533,11 @@ fn render_patch_summary_lines(
             Style::default().add_modifier(Modifier::DIM),
             width,
         ));
-        lines.extend(render_patch_diff_lines(change, DETAIL_CONTINUATION_PREFIX));
+        lines.extend(render_patch_diff_lines(
+            change,
+            DETAIL_CONTINUATION_PREFIX,
+            mode,
+        ));
     }
 
     lines
@@ -545,7 +558,11 @@ fn patch_change_path(change: &PatchChange) -> String {
     }
 }
 
-fn render_patch_diff_lines(change: &PatchChange, prefix: &str) -> Vec<Line<'static>> {
+fn render_patch_diff_lines(
+    change: &PatchChange,
+    prefix: &str,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
     let entries = collect_patch_diff_entries(change);
     if entries.is_empty() {
         return Vec::new();
@@ -560,10 +577,15 @@ fn render_patch_diff_lines(change: &PatchChange, prefix: &str) -> Vec<Line<'stat
         .len()
         .max(1);
 
-    entries
+    let lines = entries
         .into_iter()
         .map(|entry| render_patch_diff_line(prefix, line_no_width, entry))
-        .collect()
+        .collect::<Vec<_>>();
+
+    match mode {
+        ToolRenderMode::Preview => truncate_lines_middle(lines, 5),
+        ToolRenderMode::Full => lines,
+    }
 }
 
 fn render_patch_diff_line(
