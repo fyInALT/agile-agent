@@ -15,6 +15,7 @@ const TOOL_PREVIEW_HEAD_LINES: usize = 4;
 const TOOL_PREVIEW_TAIL_LINES: usize = 3;
 const TOOL_OUTPUT_INITIAL_PREFIX: &str = "  └ ";
 const TOOL_OUTPUT_CONTINUATION_PREFIX: &str = "    ";
+const TRANSCRIPT_HINT: &str = "ctrl + t to view transcript";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRenderMode {
@@ -69,7 +70,7 @@ pub fn render_tool_call_lines(
 fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
     let (text, style) = if started {
         match name {
-            "exec_command" => ("• running command".to_string(), Style::default().fg(Color::Blue)),
+            "exec_command" => ("• Running".to_string(), Style::default().fg(Color::Blue)),
             "patch_apply" => ("• applying patch".to_string(), Style::default().fg(Color::Blue)),
             _ => (
                 format!("• running tool {name}"),
@@ -78,10 +79,7 @@ fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
         }
     } else if success {
         match name {
-            "exec_command" => (
-                "• finished command".to_string(),
-                Style::default().fg(Color::Green),
-            ),
+            "exec_command" => ("• Ran".to_string(), Style::default().fg(Color::Green)),
             "patch_apply" => (
                 "• applied patch".to_string(),
                 Style::default().fg(Color::Green),
@@ -438,7 +436,7 @@ fn ellipsis_line(omitted: usize) -> Line<'static> {
             Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
         ),
         Span::styled(
-            format!("… +{omitted} lines"),
+            format!("… +{omitted} lines ({TRANSCRIPT_HINT})"),
             Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
         ),
     ])
@@ -495,7 +493,7 @@ mod tests {
             ToolRenderMode::Preview,
         );
         let rendered = lines_to_strings(&lines);
-        assert!(rendered.iter().any(|line| line.contains("finished command")));
+        assert!(rendered.iter().any(|line| line.contains("Ran")));
         assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
         assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
@@ -525,7 +523,7 @@ mod tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("… +")));
+        assert!(rendered.iter().any(|line| line.contains("ctrl + t to view transcript")));
         assert!(rendered.iter().any(|line| line.contains("line 1")));
         assert!(rendered.iter().any(|line| line.contains("line 12")));
     }

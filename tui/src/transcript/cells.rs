@@ -88,7 +88,7 @@ mod tests {
         let lines = flatten_cells(&build_cells(&entries, 80));
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("finished command")));
+        assert!(rendered.iter().any(|line| line.contains("Ran")));
         assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
         assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
