@@ -49,7 +49,7 @@ pub enum TranscriptEntry {
         success: bool,
         started: bool,
     },
-    ToolCall {
+    GenericToolCall {
         name: String,
         call_id: Option<String>,
         input_preview: Option<String>,
@@ -207,7 +207,7 @@ impl AppState {
                 success: true,
                 started: true,
             }),
-            _ => self.transcript.push(TranscriptEntry::ToolCall {
+            _ => self.transcript.push(TranscriptEntry::GenericToolCall {
                 name,
                 call_id,
                 input_preview,
@@ -271,7 +271,7 @@ impl AppState {
                         return;
                     }
                 }
-                TranscriptEntry::ToolCall {
+                TranscriptEntry::GenericToolCall {
                     name: existing_name,
                     call_id: existing_call_id,
                     input_preview: existing_input_preview,
@@ -281,7 +281,7 @@ impl AppState {
                     let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
                     let matches_name = *existing_name == name;
                     if matches_call_id || matches_name {
-                        *entry = TranscriptEntry::ToolCall {
+                        *entry = TranscriptEntry::GenericToolCall {
                             name: existing_name.clone(),
                             call_id: existing_call_id.clone().or(call_id),
                             input_preview: existing_input_preview.clone(),
@@ -314,7 +314,7 @@ impl AppState {
                 success,
                 started: false,
             }),
-            _ => self.transcript.push(TranscriptEntry::ToolCall {
+            _ => self.transcript.push(TranscriptEntry::GenericToolCall {
                 name,
                 call_id,
                 input_preview: None,
@@ -870,6 +870,44 @@ mod tests {
             }
             if call_id.as_deref() == Some("patch-1")
                 && summary_preview.as_deref() == Some("M README.md (+1 -1)")
+                && *success
+                && !*started
+        ));
+    }
+
+    #[test]
+    fn generic_tool_result_uses_generic_tool_call_entry() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_tool_call_started(
+            "read_file".to_string(),
+            Some("call-2".to_string()),
+            Some("{\"path\":\"README.md\"}".to_string()),
+        );
+        state.push_tool_call_finished(
+            "tool_result".to_string(),
+            Some("call-2".to_string()),
+            Some("done".to_string()),
+            true,
+            None,
+            None,
+        );
+
+        assert_eq!(state.transcript.len(), 1);
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::GenericToolCall {
+                name,
+                call_id,
+                input_preview,
+                output_preview,
+                success,
+                started,
+                ..
+            }
+            if name == "read_file"
+                && call_id.as_deref() == Some("call-2")
+                && input_preview.as_deref() == Some("{\"path\":\"README.md\"}")
+                && output_preview.as_deref() == Some("done")
                 && *success
                 && !*started
         ));

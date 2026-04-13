@@ -72,8 +72,7 @@ mod tests {
 
     #[test]
     fn tool_calls_render_command_and_structured_output_preview() {
-        let entries = vec![TranscriptEntry::ToolCall {
-            name: "exec_command".to_string(),
+        let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             input_preview: Some("git diff README.md".to_string()),
             output_preview: Some(
@@ -103,8 +102,7 @@ mod tests {
             .map(|index| format!("line {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let entries = vec![TranscriptEntry::ToolCall {
-            name: "exec_command".to_string(),
+        let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
@@ -128,8 +126,7 @@ mod tests {
             .map(|index| format!("line {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let entries = vec![TranscriptEntry::ToolCall {
-            name: "exec_command".to_string(),
+        let entries = vec![TranscriptEntry::ExecCommand {
             call_id: Some("call-1".to_string()),
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),

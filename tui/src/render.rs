@@ -363,11 +363,9 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
         .filter(|entry| {
             matches!(
                 entry,
-                agent_core::app::TranscriptEntry::ToolCall {
-                    name,
-                    started: true,
-                    ..
-                } if name == "exec_command"
+                agent_core::app::TranscriptEntry::ExecCommand {
+                    started: true, ..
+                }
             )
         })
         .count();
@@ -408,8 +406,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
         state.app_mut().status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
-        state.app_mut().transcript.push(TranscriptEntry::ToolCall {
-            name: "exec_command".to_string(),
+        state.app_mut().transcript.push(TranscriptEntry::ExecCommand {
             call_id: Some("1".to_string()),
             input_preview: None,
             output_preview: None,

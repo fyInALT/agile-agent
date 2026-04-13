@@ -226,7 +226,7 @@ fn map_entry(
             ),
             created_at: captured_at,
         },
-        TranscriptEntry::ToolCall {
+        TranscriptEntry::GenericToolCall {
             name,
             call_id,
             input_preview,

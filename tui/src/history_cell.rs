@@ -59,7 +59,7 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             success: *success,
             started: *started,
         }),
-        TranscriptEntry::ToolCall {
+        TranscriptEntry::GenericToolCall {
             name,
             input_preview,
             output_preview,
