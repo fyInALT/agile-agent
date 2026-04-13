@@ -39,6 +39,8 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             output_preview,
             success,
             started,
+            exit_code,
+            duration_ms,
             ..
         } => Box::new(ToolCallHistoryCell {
             name: name.clone(),
@@ -46,6 +48,8 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             output_preview: output_preview.clone(),
             success: *success,
             started: *started,
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
         }),
         TranscriptEntry::Status(text) => Box::new(PrefixedTextCell {
             prefix: "• ",
@@ -91,6 +95,8 @@ struct ToolCallHistoryCell {
     output_preview: Option<String>,
     success: bool,
     started: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
 }
 
 impl HistoryCell for ToolCallHistoryCell {
@@ -101,6 +107,8 @@ impl HistoryCell for ToolCallHistoryCell {
             self.output_preview.as_deref(),
             self.success,
             self.started,
+            self.exit_code,
+            self.duration_ms,
             width as usize,
             ToolRenderMode::Preview,
         )
@@ -113,6 +121,8 @@ impl HistoryCell for ToolCallHistoryCell {
             self.output_preview.as_deref(),
             self.success,
             self.started,
+            self.exit_code,
+            self.duration_ms,
             width as usize,
             ToolRenderMode::Full,
         )

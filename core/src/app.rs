@@ -41,6 +41,8 @@ pub enum TranscriptEntry {
         output_preview: Option<String>,
         success: bool,
         started: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
     },
     Status(String),
     Error(String),
@@ -181,6 +183,8 @@ impl AppState {
             output_preview: None,
             success: true,
             started: true,
+            exit_code: None,
+            duration_ms: None,
         });
     }
 
@@ -190,6 +194,8 @@ impl AppState {
         call_id: Option<String>,
         output_preview: Option<String>,
         success: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
     ) {
         // Find the matching started tool call and update it
         for entry in self.transcript.iter_mut().rev() {
@@ -211,6 +217,8 @@ impl AppState {
                         output_preview,
                         success,
                         started: false,
+                        exit_code,
+                        duration_ms,
                     };
                     return;
                 }
@@ -224,6 +232,8 @@ impl AppState {
             output_preview,
             success,
             started: false,
+            exit_code,
+            duration_ms,
         });
     }
 
@@ -716,6 +726,8 @@ mod tests {
             Some("call-1".to_string()),
             Some("diff --git a/README.md b/README.md".to_string()),
             true,
+            Some(0),
+            Some(180),
         );
 
         assert_eq!(state.transcript.len(), 1);
@@ -728,6 +740,8 @@ mod tests {
                 output_preview,
                 success,
                 started,
+                exit_code,
+                duration_ms,
             }
             if name == "exec_command"
                 && call_id.as_deref() == Some("call-1")
@@ -735,6 +749,8 @@ mod tests {
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
                 && *success
                 && !*started
+                && *exit_code == Some(0)
+                && *duration_ms == Some(180)
         ));
     }
 

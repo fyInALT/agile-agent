@@ -615,11 +615,20 @@ fn parse_item_event(
                 .get("aggregatedOutput")
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
+            let exit_code = item
+                .get("exitCode")
+                .and_then(|value| value.as_i64())
+                .and_then(|value| i32::try_from(value).ok());
+            let duration_ms = item
+                .get("durationMs")
+                .and_then(|value| value.as_u64());
             vec![ProviderEvent::ToolCallFinished {
                 name: "exec_command".to_string(),
                 call_id: item_id,
                 output_preview: output,
-                success: true,
+                success: exit_code.unwrap_or(0) == 0,
+                exit_code,
+                duration_ms,
             }]
         }
         ("item/started", "fileChange") => vec![ProviderEvent::ToolCallStarted {
@@ -632,6 +641,8 @@ fn parse_item_event(
             call_id: item_id,
             output_preview: None,
             success: true,
+            exit_code: None,
+            duration_ms: None,
         }],
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
@@ -767,6 +778,8 @@ fn parse_content_blocks(
                             .and_then(|value| value.as_str())
                             .map(ToOwned::to_owned),
                         success: item_status != "error",
+                        exit_code: None,
+                        duration_ms: None,
                     });
                 }
                 _ => {}
@@ -1016,6 +1029,31 @@ mod tests {
                 input_preview: Some(
                     "M /repo/README.md (+1 -1)\nA /repo/src/lib.rs (+1 -0)".to_string()
                 ),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_command_execution_completion_metadata() {
+        let item = serde_json::json!({
+            "id": "exec-1",
+            "type": "commandExecution",
+            "aggregatedOutput": "done",
+            "exitCode": 7,
+            "durationMs": 1234
+        });
+
+        let events = parse_item_event("item/completed", &item, &HashSet::new());
+
+        assert_eq!(
+            events,
+            vec![ProviderEvent::ToolCallFinished {
+                name: "exec_command".to_string(),
+                call_id: Some("exec-1".to_string()),
+                output_preview: Some("done".to_string()),
+                success: false,
+                exit_code: Some(7),
+                duration_ms: Some(1234),
             }]
         );
     }

@@ -81,6 +81,8 @@ mod tests {
             ),
             success: true,
             started: false,
+            exit_code: Some(0),
+            duration_ms: Some(1234),
         }];
 
         let lines = flatten_cells(&build_cells(&entries, 80));
@@ -108,6 +110,8 @@ mod tests {
             output_preview: Some(output),
             success: true,
             started: false,
+            exit_code: Some(0),
+            duration_ms: Some(1000),
         }];
 
         let lines = flatten_cells(&build_overlay_cells(&entries, 80));
@@ -131,6 +135,8 @@ mod tests {
             output_preview: Some(output),
             success: true,
             started: false,
+            exit_code: Some(0),
+            duration_ms: Some(1000),
         }];
 
         let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));

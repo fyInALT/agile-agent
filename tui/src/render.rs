@@ -415,6 +415,8 @@ mod tests {
             output_preview: None,
             success: true,
             started: true,
+            exit_code: None,
+            duration_ms: None,
         });
 
         let rendered = line_to_string(&build_working_line(&state, 120, Instant::now()));

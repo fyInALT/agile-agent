@@ -66,6 +66,8 @@ pub enum ProviderEvent {
         call_id: Option<String>,
         output_preview: Option<String>,
         success: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
     },
     SessionHandle(SessionHandle),
     Error(String),

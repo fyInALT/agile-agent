@@ -325,6 +325,8 @@ fn parse_user_message(message: ClaudeSdkMessage) -> Result<Vec<ProviderEvent>> {
                 call_id: block.tool_use_id.clone(),
                 output_preview,
                 success: true,
+                exit_code: None,
+                duration_ms: None,
             });
         }
     }
@@ -512,7 +514,9 @@ mod tests {
                 name: "tool_result".to_string(),
                 call_id: Some("call_1".to_string()),
                 output_preview: Some("{\"ok\":true}".to_string()),
-                success: true
+                success: true,
+                exit_code: None,
+                duration_ms: None,
             }]
         );
     }

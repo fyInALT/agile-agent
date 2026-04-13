@@ -286,7 +286,16 @@ fn consume_provider_until_finished(
                     call_id,
                     output_preview,
                     success,
-                } => state.push_tool_call_finished(name, call_id, output_preview, success),
+                    exit_code,
+                    duration_ms,
+                } => state.push_tool_call_finished(
+                    name,
+                    call_id,
+                    output_preview,
+                    success,
+                    exit_code,
+                    duration_ms,
+                ),
                 ProviderEvent::SessionHandle(handle) => {
                     state.apply_session_handle(handle);
                     on_state_change(state)?;

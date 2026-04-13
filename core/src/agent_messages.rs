@@ -151,6 +151,8 @@ fn map_entry(
             output_preview,
             started,
             success,
+            exit_code,
+            duration_ms,
         } => AgentMessageEnvelope {
             sequence,
             direction: AgentMessageDirection::Internal,
@@ -174,12 +176,20 @@ fn map_entry(
             kind: AgentMessageKind::ToolCall,
             correlation_id: call_id.clone(),
             summary: format!(
-                "{}:{}:{}:{}:{}",
+                "{}:{}:{}:{}:{}:{}:{}",
                 name,
                 started,
                 success,
                 input_preview.as_deref().unwrap_or(""),
                 output_preview.as_deref().unwrap_or(""),
+                exit_code
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or(""),
+                duration_ms
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or(""),
             ),
             created_at: captured_at,
         },

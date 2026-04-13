@@ -28,6 +28,8 @@ pub fn render_tool_call_lines(
     output_preview: Option<&str>,
     success: bool,
     started: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
     width: usize,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
@@ -55,6 +57,10 @@ pub fn render_tool_call_lines(
                 Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
             ),
         ]));
+    }
+
+    if !started && name == "exec_command" {
+        lines.push(render_exec_result_line(success, exit_code, duration_ms));
     }
 
     lines
@@ -103,6 +109,51 @@ fn tool_header_line(name: &str, success: bool, started: bool) -> Line<'static> {
     };
 
     Line::from(Span::styled(text, style))
+}
+
+fn render_exec_result_line(
+    success: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.push(Span::styled(
+        TOOL_OUTPUT_CONTINUATION_PREFIX,
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+    ));
+    if success {
+        spans.push(Span::styled(
+            "✓",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            "✗",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+        if let Some(code) = exit_code {
+            spans.push(Span::raw(format!(" ({code})")));
+        }
+    }
+
+    if let Some(duration_ms) = duration_ms {
+        spans.push(Span::styled(
+            format!(" • {}", format_duration_ms(duration_ms)),
+            Style::default().add_modifier(Modifier::DIM),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+fn format_duration_ms(duration_ms: u64) -> String {
+    if duration_ms < 1_000 {
+        format!("{duration_ms}ms")
+    } else if duration_ms < 60_000 {
+        format!("{:.1}s", duration_ms as f64 / 1000.0)
+    } else {
+        format!("{:.1}m", duration_ms as f64 / 60_000.0)
+    }
 }
 
 fn render_input_block(name: &str, input: &str, width: usize) -> Vec<Line<'static>> {
@@ -438,6 +489,8 @@ mod tests {
             Some("diff --git a/README.md b/README.md\nindex 123..456 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new"),
             true,
             false,
+            Some(0),
+            Some(1234),
             80,
             ToolRenderMode::Preview,
         );
@@ -448,6 +501,7 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
         assert!(rendered.iter().any(|line| line.contains("1 - old")));
         assert!(rendered.iter().any(|line| line.contains("1 + new")));
+        assert!(rendered.iter().any(|line| line.contains("✓ • 1.2s")));
         assert!(!rendered.iter().any(|line| line.contains("output:")));
     }
 
@@ -464,6 +518,8 @@ mod tests {
             Some(&output),
             true,
             false,
+            Some(0),
+            Some(500),
             80,
             ToolRenderMode::Preview,
         );
@@ -482,6 +538,8 @@ mod tests {
             Some("{\"ok\":true,\"items\":[1,2,3]}"),
             true,
             false,
+            None,
+            None,
             80,
             ToolRenderMode::Preview,
         );
@@ -499,6 +557,8 @@ mod tests {
             Some("On branch main\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    old.txt"),
             true,
             false,
+            Some(0),
+            Some(45),
             80,
             ToolRenderMode::Preview,
         );
@@ -518,6 +578,8 @@ mod tests {
             Some("927a1e4 feat: add end-to-end debug observability\n0d7485f feat: log codex jsonrpc transport"),
             true,
             false,
+            Some(0),
+            Some(89),
             80,
             ToolRenderMode::Preview,
         );
@@ -535,6 +597,8 @@ mod tests {
             Some(""),
             true,
             false,
+            Some(0),
+            Some(12),
             80,
             ToolRenderMode::Preview,
         );
@@ -552,6 +616,8 @@ mod tests {
             None,
             true,
             false,
+            None,
+            None,
             80,
             ToolRenderMode::Preview,
         );
@@ -574,6 +640,8 @@ mod tests {
             Some(&output),
             true,
             false,
+            Some(0),
+            Some(10_000),
             80,
             ToolRenderMode::Full,
         );
@@ -582,5 +650,23 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("line 1")));
         assert!(rendered.iter().any(|line| line.contains("line 20")));
         assert!(!rendered.iter().any(|line| line.contains("… +")));
+    }
+
+    #[test]
+    fn failed_exec_command_shows_exit_code_in_result_line() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git status --porcelain"),
+            Some("fatal: not a git repository"),
+            false,
+            false,
+            Some(128),
+            Some(250),
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("✗ (128) • 250ms")));
     }
 }
