@@ -574,8 +574,20 @@ fn handle_notification(
         | "account/rateLimits/updated"
         | "thread/tokenUsage/updated"
         | "serverRequest/resolved"
-        | "item/commandExecution/outputDelta"
         | "item/fileChange/outputDelta" => {}
+        "item/commandExecution/outputDelta" => {
+            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
+                && !delta.is_empty()
+            {
+                let _ = event_tx.send(ProviderEvent::ExecCommandOutputDelta {
+                    call_id: params
+                        .get("itemId")
+                        .and_then(|value| value.as_str())
+                        .map(ToOwned::to_owned),
+                    delta: delta.to_string(),
+                });
+            }
+        }
         other => {
             let _ = event_tx.send(ProviderEvent::Status(format!(
                 "ignored codex event: {other}"
@@ -985,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn suppresses_noisy_codex_notifications() {
+    fn streams_command_execution_output_delta_notifications() {
         let (tx, rx) = mpsc::channel();
         let mut turn_started = false;
         let mut turn_completed = false;
@@ -994,7 +1006,10 @@ mod tests {
         let finished = handle_notification(
             "item/commandExecution/outputDelta".to_string(),
             Some(serde_json::json!({
-                "delta": "partial output"
+                "delta": "partial output",
+                "itemId": "cmd-1",
+                "threadId": "thr-1",
+                "turnId": "turn-1"
             })),
             &tx,
             &mut turn_started,
@@ -1004,7 +1019,13 @@ mod tests {
         .expect("handle notification");
 
         assert!(!finished);
-        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            rx.recv().expect("exec output delta"),
+            ProviderEvent::ExecCommandOutputDelta {
+                call_id: Some("cmd-1".to_string()),
+                delta: "partial output".to_string(),
+            }
+        );
     }
 
     #[test]

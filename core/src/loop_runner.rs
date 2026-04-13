@@ -296,6 +296,9 @@ fn consume_provider_until_finished(
                     duration_ms,
                     source,
                 ),
+                ProviderEvent::ExecCommandOutputDelta { call_id, delta } => {
+                    state.append_exec_command_output(call_id, &delta)
+                }
                 ProviderEvent::GenericToolCallStarted {
                     name,
                     call_id,

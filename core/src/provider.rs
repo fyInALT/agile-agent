@@ -70,6 +70,10 @@ pub enum ProviderEvent {
         duration_ms: Option<u64>,
         source: Option<String>,
     },
+    ExecCommandOutputDelta {
+        call_id: Option<String>,
+        delta: String,
+    },
     GenericToolCallStarted {
         name: String,
         call_id: Option<String>,
@@ -192,6 +196,7 @@ mod tests {
                 | ProviderEvent::ThinkingChunk(_)
                 | ProviderEvent::ExecCommandStarted { .. }
                 | ProviderEvent::ExecCommandFinished { .. }
+                | ProviderEvent::ExecCommandOutputDelta { .. }
                 | ProviderEvent::GenericToolCallStarted { .. }
                 | ProviderEvent::GenericToolCallFinished { .. }
                 | ProviderEvent::PatchApplyStarted { .. }

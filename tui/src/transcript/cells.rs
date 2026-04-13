@@ -581,6 +581,27 @@ mod tests {
     }
 
     #[test]
+    fn started_exec_renders_live_output_delta_preview() {
+        let entries = vec![TranscriptEntry::ExecCommand {
+            call_id: Some("call-10".to_string()),
+            source: Some("agent".to_string()),
+            input_preview: Some("printf hello".to_string()),
+            output_preview: Some("hello\nworld".to_string()),
+            success: true,
+            started: true,
+            exit_code: None,
+            duration_ms: None,
+        }];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line == "• Running printf hello"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "  └ hello"), "{rendered:?}");
+        assert!(rendered.iter().any(|line| line == "    world"), "{rendered:?}");
+        assert!(!rendered.iter().any(|line| line.contains("✓")), "{rendered:?}");
+    }
+
+    #[test]
     fn exploring_cluster_uses_unwrapped_shell_commands() {
         let entries = vec![
             TranscriptEntry::ExecCommand {

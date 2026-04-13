@@ -200,6 +200,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         duration_ms,
                         source,
                     ),
+                    ProviderEvent::ExecCommandOutputDelta { call_id, delta } => {
+                        state.app_mut().append_exec_command_output(call_id, &delta)
+                    }
                     ProviderEvent::GenericToolCallStarted {
                         name,
                         call_id,

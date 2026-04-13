@@ -255,6 +255,41 @@ impl AppState {
         });
     }
 
+    pub fn append_exec_command_output(&mut self, call_id: Option<String>, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::ExecCommand {
+                call_id: existing_call_id,
+                output_preview,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_latest_in_flight = call_id.is_none();
+                if matches_call_id || matches_latest_in_flight {
+                    output_preview
+                        .get_or_insert_with(String::new)
+                        .push_str(delta);
+                    return;
+                }
+            }
+        }
+
+        self.transcript.push(TranscriptEntry::ExecCommand {
+            call_id,
+            source: None,
+            input_preview: None,
+            output_preview: Some(delta.to_string()),
+            success: true,
+            started: true,
+            exit_code: None,
+            duration_ms: None,
+        });
+    }
+
     pub fn push_generic_tool_call_started(
         &mut self,
         name: String,
@@ -888,6 +923,34 @@ mod tests {
                 && !*started
                 && *exit_code == Some(0)
                 && *duration_ms == Some(180)
+        ));
+    }
+
+    #[test]
+    fn exec_output_delta_appends_to_started_exec_entry() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.push_exec_command_started(
+            Some("call-1".to_string()),
+            Some("printf hello".to_string()),
+            Some("agent".to_string()),
+        );
+
+        state.append_exec_command_output(Some("call-1".to_string()), "hello");
+        state.append_exec_command_output(Some("call-1".to_string()), "\nworld");
+
+        assert!(matches!(
+            &state.transcript[0],
+            TranscriptEntry::ExecCommand {
+                call_id,
+                input_preview,
+                output_preview,
+                started,
+                ..
+            }
+            if call_id.as_deref() == Some("call-1")
+                && input_preview.as_deref() == Some("printf hello")
+                && output_preview.as_deref() == Some("hello\nworld")
+                && *started
         ));
     }
 
