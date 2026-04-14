@@ -23,8 +23,7 @@ use crate::transcript::overlay::TranscriptOverlayState;
 #[derive(Debug)]
 pub struct TuiState {
     pub session: RuntimeSession,
-    pub active_tool: Option<ActiveTool>,
-    pub active_stream: Option<ActiveStream>,
+    pub active_cell: Option<ActiveCell>,
     pub active_entries_revision: u64,
     pub composer: TextArea,
     pub composer_state: TextAreaState,
@@ -44,8 +43,7 @@ impl TuiState {
         let composer = TextArea::from_text(session.app.input.clone());
         Self {
             session,
-            active_tool: None,
-            active_stream: None,
+            active_cell: None,
             active_entries_revision: 0,
             composer,
             composer_state: TextAreaState::default(),
@@ -69,16 +67,66 @@ impl TuiState {
         &mut self.session.app
     }
 
-    pub fn active_entries_for_display(&self) -> Vec<TranscriptEntry> {
-        let mut entries = self
-            .active_tool
-            .as_ref()
-            .map(ActiveTool::as_transcript_entries)
-            .unwrap_or_default();
-        if let Some(stream) = self.active_stream.as_ref().filter(|stream| !stream.tail.is_empty()) {
-            entries.push(stream.as_transcript_entry());
+    fn active_tool_ref(&self) -> Option<&ActiveTool> {
+        match self.active_cell.as_ref() {
+            Some(ActiveCell::Tool(tool)) => Some(tool),
+            _ => None,
         }
-        entries
+    }
+
+    fn active_tool_mut(&mut self) -> Option<&mut ActiveTool> {
+        match self.active_cell.as_mut() {
+            Some(ActiveCell::Tool(tool)) => Some(tool),
+            _ => None,
+        }
+    }
+
+    fn take_active_tool(&mut self) -> Option<ActiveTool> {
+        match self.active_cell.take() {
+            Some(ActiveCell::Tool(tool)) => Some(tool),
+            Some(cell) => {
+                self.active_cell = Some(cell);
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub(crate) fn set_active_tool(&mut self, tool: ActiveTool) {
+        self.active_cell = Some(ActiveCell::Tool(tool));
+    }
+
+    fn active_stream_ref(&self) -> Option<&ActiveStream> {
+        match self.active_cell.as_ref() {
+            Some(ActiveCell::Stream(stream)) => Some(stream),
+            _ => None,
+        }
+    }
+
+    fn active_stream_mut(&mut self) -> Option<&mut ActiveStream> {
+        match self.active_cell.as_mut() {
+            Some(ActiveCell::Stream(stream)) => Some(stream),
+            _ => None,
+        }
+    }
+
+    fn take_active_stream(&mut self) -> Option<ActiveStream> {
+        match self.active_cell.take() {
+            Some(ActiveCell::Stream(stream)) => Some(stream),
+            Some(cell) => {
+                self.active_cell = Some(cell);
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub(crate) fn set_active_stream(&mut self, stream: ActiveStream) {
+        self.active_cell = Some(ActiveCell::Stream(stream));
+    }
+
+    pub fn active_entries_for_display(&self) -> Vec<TranscriptEntry> {
+        self.active_cell.as_ref().map(ActiveCell::as_transcript_entries).unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -90,7 +138,7 @@ impl TuiState {
 
     #[cfg(test)]
     pub fn set_active_entry_for_test(&mut self, entry: TranscriptEntry) {
-        self.active_tool = match entry {
+        self.active_cell = match entry {
             TranscriptEntry::ExecCommand {
                 call_id,
                 source,
@@ -100,7 +148,7 @@ impl TuiState {
                 status,
                 exit_code,
                 duration_ms,
-            } => Some(ActiveTool::Exec(vec![ActiveExecCall {
+            } => Some(ActiveCell::Tool(ActiveTool::Exec(vec![ActiveExecCall {
                 call_id,
                 source,
                 allow_exploring_group,
@@ -109,7 +157,7 @@ impl TuiState {
                 status,
                 exit_code,
                 duration_ms,
-            }])),
+            }]))),
             TranscriptEntry::GenericToolCall {
                 name,
                 call_id,
@@ -119,7 +167,7 @@ impl TuiState {
                 started,
                 exit_code,
                 duration_ms,
-            } => Some(ActiveTool::Generic(ActiveGenericToolCall {
+            } => Some(ActiveCell::Tool(ActiveTool::Generic(ActiveGenericToolCall {
                 name,
                 call_id,
                 input_preview,
@@ -128,29 +176,29 @@ impl TuiState {
                 started,
                 exit_code,
                 duration_ms,
-            })),
+            }))),
             TranscriptEntry::PatchApply {
                 call_id,
                 changes,
                 status,
                 output_preview,
-            } => Some(ActiveTool::Patch(ActivePatchApply {
+            } => Some(ActiveCell::Tool(ActiveTool::Patch(ActivePatchApply {
                 call_id,
                 changes,
                 status,
                 output_preview,
-            })),
+            }))),
             TranscriptEntry::WebSearch {
                 call_id,
                 query,
                 action,
                 started,
-            } => Some(ActiveTool::WebSearch(ActiveWebSearch {
+            } => Some(ActiveCell::Tool(ActiveTool::WebSearch(ActiveWebSearch {
                 call_id,
                 query,
                 action,
                 started,
-            })),
+            }))),
             TranscriptEntry::McpToolCall {
                 call_id,
                 invocation,
@@ -158,16 +206,16 @@ impl TuiState {
                 error,
                 status,
                 is_error,
-            } => Some(ActiveTool::Mcp(ActiveMcpToolCall {
+            } => Some(ActiveCell::Tool(ActiveTool::Mcp(ActiveMcpToolCall {
                 call_id,
                 invocation,
                 result_blocks,
                 error,
                 status,
                 is_error,
-            })),
+            }))),
             TranscriptEntry::Assistant(text) => {
-                self.active_stream = Some(ActiveStream {
+                self.set_active_stream(ActiveStream {
                     kind: StreamTextKind::Assistant,
                     tail: text,
                     pending_commits: VecDeque::new(),
@@ -177,7 +225,7 @@ impl TuiState {
                 return;
             }
             TranscriptEntry::Thinking(text) => {
-                self.active_stream = Some(ActiveStream {
+                self.set_active_stream(ActiveStream {
                     kind: StreamTextKind::Thinking,
                     tail: text,
                     pending_commits: VecDeque::new(),
@@ -192,28 +240,31 @@ impl TuiState {
     }
 
     pub fn active_entries_revision_key(&self) -> Option<u64> {
-        (self.active_tool.is_some() || self.active_stream.is_some())
-            .then_some(self.active_entries_revision)
+        self.active_cell.as_ref().map(|_| self.active_entries_revision)
     }
 
     #[cfg(test)]
     pub(crate) fn active_tool_is_empty(&self) -> bool {
-        self.active_tool.is_none()
+        self.active_tool_ref().is_none()
     }
 
     #[cfg(test)]
     fn active_tool_entries_len(&self) -> usize {
-        self.active_tool
-            .as_ref()
+        self.active_tool_ref()
             .map(|tool| tool.as_transcript_entries().len())
             .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_stream_for_test(&self) -> Option<&ActiveStream> {
+        self.active_stream_ref()
     }
 
     pub fn live_tail_is_stream_continuation(&self) -> bool {
         matches!(
             (
                 self.app().transcript.last(),
-                self.active_stream.as_ref().map(|stream| stream.kind),
+                self.active_stream_ref().map(|stream| stream.kind),
             ),
             (Some(TranscriptEntry::Assistant(_)), Some(StreamTextKind::Assistant))
                 | (Some(TranscriptEntry::Thinking(_)), Some(StreamTextKind::Thinking))
@@ -221,8 +272,7 @@ impl TuiState {
     }
 
     pub fn has_pending_active_stream_commits(&self) -> bool {
-        self.active_stream
-            .as_ref()
+        self.active_stream_ref()
             .is_some_and(|stream| !stream.pending_commits.is_empty())
     }
 
@@ -246,7 +296,7 @@ impl TuiState {
         if chunk.is_empty() {
             return;
         }
-        if self.active_tool.is_some() {
+        if matches!(self.active_cell, Some(ActiveCell::Tool(_))) {
             self.flush_active_entries_to_transcript();
         }
 
@@ -273,38 +323,39 @@ impl TuiState {
 
     fn ensure_active_stream(&mut self, kind: StreamTextKind) -> &mut ActiveStream {
         if self
-            .active_stream
-            .as_ref()
+            .active_stream_ref()
             .is_some_and(|stream| stream.kind != kind && !stream.tail.is_empty())
         {
-            if let Some(stream) = self.active_stream.take() {
+            if let Some(stream) = self.take_active_stream() {
                 self.flush_stream_to_transcript(stream);
             }
         }
 
-        let stream = self.active_stream.get_or_insert(ActiveStream {
-            kind,
-            tail: String::new(),
-            pending_commits: VecDeque::new(),
-            policy: AdaptiveChunkingPolicy::default(),
-        });
+        if self.active_stream_ref().is_none() {
+            self.set_active_stream(ActiveStream {
+                kind,
+                tail: String::new(),
+                pending_commits: VecDeque::new(),
+                policy: AdaptiveChunkingPolicy::default(),
+            });
+        }
+        let stream = self.active_stream_mut().expect("active stream exists");
         stream.kind = kind;
         stream
     }
 
     fn drop_empty_active_stream(&mut self) {
         if self
-            .active_stream
-            .as_ref()
+            .active_stream_ref()
             .is_some_and(|stream| stream.tail.is_empty() && stream.pending_commits.is_empty())
         {
-            self.active_stream = None;
+            self.active_cell = None;
         }
     }
 
     pub fn drain_active_stream_commit_tick(&mut self) -> bool {
         let now = Instant::now();
-        let next = self.active_stream.as_mut().and_then(|stream| {
+        let next = self.active_stream_mut().and_then(|stream| {
             let snapshot = QueueSnapshot {
                 queued_lines: stream.pending_commits.len(),
                 oldest_age: stream.oldest_queued_age(now),
@@ -350,7 +401,7 @@ impl TuiState {
             exit_code: None,
             duration_ms: None,
         };
-        match self.active_tool.as_mut() {
+        match self.active_tool_mut() {
             Some(ActiveTool::Exec(group)) => {
                 group.retain(|existing| {
                     !(call.call_id.is_some() && existing.call_id == call.call_id)
@@ -358,7 +409,7 @@ impl TuiState {
                 group.push(call);
             }
             _ => {
-                self.active_tool = Some(ActiveTool::Exec(vec![call]));
+                self.set_active_tool(ActiveTool::Exec(vec![call]));
             }
         }
         self.bump_active_entries_revision();
@@ -369,7 +420,7 @@ impl TuiState {
             return;
         }
 
-        if let Some(ActiveTool::Exec(group)) = self.active_tool.as_mut() {
+        if let Some(ActiveTool::Exec(group)) = self.active_tool_mut() {
             for entry in group.iter_mut().rev() {
                 let matches_call_id = call_id.is_some() && entry.call_id == call_id;
                 let matches_latest = call_id.is_none();
@@ -393,7 +444,7 @@ impl TuiState {
         duration_ms: Option<u64>,
         source: Option<String>,
     ) {
-        if let Some(ActiveTool::Exec(group)) = self.active_tool.as_mut()
+        if let Some(ActiveTool::Exec(mut group)) = self.take_active_tool()
             && let Some(index) = group.iter().rposition(|entry| {
                 call_id.is_some() && entry.call_id == call_id
             })
@@ -410,10 +461,14 @@ impl TuiState {
                 duration_ms,
             });
             if group.is_empty() {
-                self.active_tool = None;
+                self.active_cell = None;
+            } else {
+                self.set_active_tool(ActiveTool::Exec(group));
             }
             self.bump_active_entries_revision();
             return;
+        } else if let Some(tool) = self.take_active_tool() {
+            self.set_active_tool(tool);
         }
 
         self.session.app.push_exec_command_finished(
@@ -434,7 +489,7 @@ impl TuiState {
     ) {
         self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
-        self.active_tool = Some(ActiveTool::Generic(ActiveGenericToolCall {
+        self.set_active_tool(ActiveTool::Generic(ActiveGenericToolCall {
             name,
             call_id,
             input_preview,
@@ -456,7 +511,7 @@ impl TuiState {
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
     ) {
-        if let Some(ActiveTool::Generic(entry)) = self.active_tool.take() {
+        if let Some(ActiveTool::Generic(entry)) = self.take_active_tool() {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_name = entry.name == name;
             if matches_call_id || matches_name {
@@ -473,7 +528,7 @@ impl TuiState {
                 self.bump_active_entries_revision();
                 return;
             }
-            self.active_tool = Some(ActiveTool::Generic(entry));
+            self.set_active_tool(ActiveTool::Generic(entry));
         }
 
         self.session.app.push_generic_tool_call_finished(
@@ -493,7 +548,7 @@ impl TuiState {
     ) {
         self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
-        self.active_tool = Some(ActiveTool::Patch(ActivePatchApply {
+        self.set_active_tool(ActiveTool::Patch(ActivePatchApply {
             call_id,
             changes,
             status: PatchApplyStatus::InProgress,
@@ -507,7 +562,7 @@ impl TuiState {
             return;
         }
 
-        if let Some(ActiveTool::Patch(entry)) = self.active_tool.as_mut() {
+        if let Some(ActiveTool::Patch(entry)) = self.active_tool_mut() {
             {
                 let existing_call_id = &entry.call_id;
                 let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
@@ -531,7 +586,7 @@ impl TuiState {
         changes: Vec<PatchChange>,
         status: PatchApplyStatus,
     ) {
-        if let Some(ActiveTool::Patch(entry)) = self.active_tool.take() {
+        if let Some(ActiveTool::Patch(entry)) = self.take_active_tool() {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
@@ -548,7 +603,7 @@ impl TuiState {
                 self.bump_active_entries_revision();
                 return;
             }
-            self.active_tool = Some(ActiveTool::Patch(entry));
+            self.set_active_tool(ActiveTool::Patch(entry));
         }
 
         self.session
@@ -559,7 +614,7 @@ impl TuiState {
     pub fn push_active_web_search_started(&mut self, call_id: Option<String>, query: String) {
         self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
-        self.active_tool = Some(ActiveTool::WebSearch(ActiveWebSearch {
+        self.set_active_tool(ActiveTool::WebSearch(ActiveWebSearch {
             call_id,
             query,
             action: None,
@@ -574,7 +629,7 @@ impl TuiState {
         query: String,
         action: Option<WebSearchAction>,
     ) {
-        if let Some(ActiveTool::WebSearch(entry)) = self.active_tool.take() {
+        if let Some(ActiveTool::WebSearch(entry)) = self.take_active_tool() {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
@@ -587,7 +642,7 @@ impl TuiState {
                 self.bump_active_entries_revision();
                 return;
             }
-            self.active_tool = Some(ActiveTool::WebSearch(entry));
+            self.set_active_tool(ActiveTool::WebSearch(entry));
         }
 
         self.session
@@ -602,7 +657,7 @@ impl TuiState {
     ) {
         self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
-        self.active_tool = Some(ActiveTool::Mcp(ActiveMcpToolCall {
+        self.set_active_tool(ActiveTool::Mcp(ActiveMcpToolCall {
             call_id,
             invocation,
             result_blocks: Vec::new(),
@@ -622,7 +677,7 @@ impl TuiState {
         status: McpToolCallStatus,
         is_error: bool,
     ) {
-        if let Some(ActiveTool::Mcp(entry)) = self.active_tool.take() {
+        if let Some(ActiveTool::Mcp(entry)) = self.take_active_tool() {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
@@ -637,7 +692,7 @@ impl TuiState {
                 self.bump_active_entries_revision();
                 return;
             }
-            self.active_tool = Some(ActiveTool::Mcp(entry));
+            self.set_active_tool(ActiveTool::Mcp(entry));
         }
 
         self.session.app.push_mcp_tool_call_finished(
@@ -740,8 +795,7 @@ impl TuiState {
         self.composer = TextArea::new();
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;
-        self.active_tool = None;
-        self.active_stream = None;
+        self.active_cell = None;
         self.bump_active_entries_revision();
         self.transcript_scroll_offset = 0;
         self.transcript_max_scroll = 0;
@@ -755,15 +809,13 @@ impl TuiState {
 
 impl TuiState {
     fn drain_active_entries(&mut self, failure_reason: Option<&str>) {
-        if self.active_tool.is_none() && self.active_stream.is_none() {
+        if self.active_cell.is_none() {
             return;
         }
-        if let Some(stream) = self.active_stream.take() {
-            self.flush_stream_to_transcript(stream);
-        }
-        if let Some(tool) = self.active_tool.take() {
-            match (failure_reason, tool) {
-                (Some(_), ActiveTool::Exec(group)) => {
+        if let Some(cell) = self.active_cell.take() {
+            match (failure_reason, cell) {
+                (_, ActiveCell::Stream(stream)) => self.flush_stream_to_transcript(stream),
+                (Some(_), ActiveCell::Tool(ActiveTool::Exec(group))) => {
                     for entry in group {
                         self.session.app.transcript.push(TranscriptEntry::ExecCommand {
                             call_id: entry.call_id,
@@ -777,7 +829,7 @@ impl TuiState {
                         });
                     }
                 }
-                (Some(_), ActiveTool::Generic(entry)) => {
+                (Some(_), ActiveCell::Tool(ActiveTool::Generic(entry))) => {
                     self.session.app.transcript.push(TranscriptEntry::GenericToolCall {
                         name: entry.name,
                         call_id: entry.call_id,
@@ -789,7 +841,7 @@ impl TuiState {
                         duration_ms: None,
                     });
                 }
-                (Some(_), ActiveTool::Patch(entry)) => {
+                (Some(_), ActiveCell::Tool(ActiveTool::Patch(entry))) => {
                     self.session.app.transcript.push(TranscriptEntry::PatchApply {
                         call_id: entry.call_id,
                         changes: entry.changes,
@@ -797,7 +849,7 @@ impl TuiState {
                         output_preview: entry.output_preview,
                     });
                 }
-                (Some(_), ActiveTool::WebSearch(entry)) => {
+                (Some(_), ActiveCell::Tool(ActiveTool::WebSearch(entry))) => {
                     self.session.app.transcript.push(TranscriptEntry::WebSearch {
                         call_id: entry.call_id,
                         query: entry.query,
@@ -805,7 +857,7 @@ impl TuiState {
                         started: false,
                     });
                 }
-                (Some(reason), ActiveTool::Mcp(entry)) => {
+                (Some(reason), ActiveCell::Tool(ActiveTool::Mcp(entry))) => {
                     self.session.app.transcript.push(TranscriptEntry::McpToolCall {
                         call_id: entry.call_id,
                         invocation: entry.invocation,
@@ -815,7 +867,7 @@ impl TuiState {
                         is_error: true,
                     });
                 }
-                (_, tool) => {
+                (_, ActiveCell::Tool(tool)) => {
                     for entry in tool.as_transcript_entries() {
                         self.session.app.transcript.push(entry);
                     }
@@ -881,7 +933,7 @@ impl TuiState {
     }
 
     fn flush_active_stream_to_transcript(&mut self) {
-        if let Some(stream) = self.active_stream.take() {
+        if let Some(stream) = self.take_active_stream() {
             self.flush_stream_to_transcript(stream);
             self.bump_active_entries_revision();
         }
@@ -889,11 +941,8 @@ impl TuiState {
 
     fn prepare_for_active_tool_start(&mut self, start: ActiveToolStart) {
         let should_flush = match start {
-            ActiveToolStart::Exec => matches!(
-                self.active_tool.as_ref(),
-                Some(tool) if !matches!(tool, ActiveTool::Exec(_))
-            ),
-            ActiveToolStart::Other => self.active_tool.is_some(),
+            ActiveToolStart::Exec => matches!(self.active_tool_ref(), Some(tool) if !matches!(tool, ActiveTool::Exec(_))),
+            ActiveToolStart::Other => self.active_tool_ref().is_some(),
         };
         if should_flush {
             self.flush_active_entries_to_transcript();
@@ -956,6 +1005,21 @@ impl ActiveTool {
                 status: entry.status,
                 is_error: entry.is_error,
             }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActiveCell {
+    Tool(ActiveTool),
+    Stream(ActiveStream),
+}
+
+impl ActiveCell {
+    fn as_transcript_entries(&self) -> Vec<TranscriptEntry> {
+        match self {
+            ActiveCell::Tool(tool) => tool.as_transcript_entries(),
+            ActiveCell::Stream(stream) => vec![stream.as_transcript_entry()],
         }
     }
 }
@@ -1370,7 +1434,7 @@ mod tests {
 
         assert!(state.active_tool_is_empty());
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
@@ -1411,7 +1475,7 @@ mod tests {
         );
         assert!(state.active_tool_is_empty());
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
@@ -1444,7 +1508,7 @@ mod tests {
             }) if call_id.as_deref() == Some("call-1")
         ));
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
@@ -1467,7 +1531,7 @@ mod tests {
             Some("agent".to_string()),
         );
 
-        assert!(state.active_stream.is_none());
+        assert!(state.active_stream_for_test().is_none());
         assert!(matches!(
             state.app().transcript.last(),
             Some(TranscriptEntry::Assistant(text)) if text == "streaming answer"
@@ -1527,7 +1591,7 @@ mod tests {
 
         assert!(state.active_tool_is_empty());
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Thinking,
                 tail,
@@ -1585,7 +1649,7 @@ mod tests {
         );
         assert!(state.active_tool_is_empty());
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Thinking,
                 tail,
@@ -1610,7 +1674,7 @@ mod tests {
             Some(TranscriptEntry::Assistant(text)) if text == "hello world\n"
         ));
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
@@ -1638,7 +1702,7 @@ mod tests {
                 if text == "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
         ));
         assert!(matches!(
-            state.active_stream.as_ref(),
+            state.active_stream_for_test(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,

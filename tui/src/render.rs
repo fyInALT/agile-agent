@@ -452,7 +452,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
         state.app_mut().status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
-        state.active_tool = Some(ActiveTool::Exec(vec![ActiveExecCall {
+        state.set_active_tool(ActiveTool::Exec(vec![ActiveExecCall {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
             allow_exploring_group: true,
@@ -479,7 +479,7 @@ mod tests {
             .app_mut()
             .transcript
             .push(TranscriptEntry::Status("committed".to_string()));
-        state.active_tool = Some(ActiveTool::Exec(vec![ActiveExecCall {
+        state.set_active_tool(ActiveTool::Exec(vec![ActiveExecCall {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
             allow_exploring_group: true,
@@ -514,7 +514,7 @@ mod tests {
             .app_mut()
             .transcript
             .push(TranscriptEntry::Assistant("hello world\n".to_string()));
-        state.active_stream = Some(ActiveStream {
+        state.set_active_stream(ActiveStream {
             kind: StreamTextKind::Assistant,
             tail: "next".to_string(),
             pending_commits: std::collections::VecDeque::new(),
