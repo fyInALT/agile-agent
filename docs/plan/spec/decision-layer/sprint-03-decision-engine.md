@@ -1,43 +1,51 @@
-# Sprint 3: Decision Engine
+# Sprint 3: Decision Engine (Trait-Based)
 
 ## Metadata
 
 - Sprint ID: `decision-sprint-003`
-- Title: `Decision Engine`
+- Title: `Decision Engine (Trait-Based)`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
 - Status: `Backlog`
 - Created: 2026-04-14
+- Updated: 2026-04-14 (Architecture Evolution)
 
 ## TDD Reference
 
 See [Test Specification](test-specification.md) for detailed TDD test tasks:
-- Sprint 3 Tests: T3.1.T1-T3.5.T6 (26 tests)
+- Sprint 3 Tests: T3.1.T1-T3.6.T8 (34 tests)
 - Test execution: Write failing tests first, implement minimum, refactor
+
+## Architecture Evolution
+
+Decision engines now:
+- Return **DecisionOutput with Vec<Box<dyn DecisionAction>>** (action sequence)
+- Use **ActionRegistry** for parsing LLM output
+- Use **ConditionExpr** for rule-based engine (expression engine)
 
 ## Sprint Goal
 
-Implement decision engines (LLM, CLI, RuleBased, Mock) that produce DecisionOutput from DecisionContext. Each engine has its own session for multi-turn decisions.
+Implement decision engines that produce action sequences from decision context, using ActionRegistry for parsing and extensible rule expression engine.
 
 ## Stories
 
-### Story 3.1: DecisionEngine Trait
+### Story 3.1: DecisionEngine Trait (Action-Based)
 
 **Priority**: P0
 **Effort**: 2 points
 **Status**: Backlog
 
-Define the DecisionEngine trait that all engines implement.
+Define DecisionEngine trait that returns action sequences.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
 | T3.1.1 | Create `DecisionEngine` trait | Todo | - |
-| T3.1.2 | Define `decide()` method signature | Todo | - |
-| T3.1.3 | Define `build_prompt()` helper | Todo | - |
-| T3.1.4 | Define `persist_session()` method | Todo | - |
-| T3.1.5 | Define `restore_session()` method | Todo | - |
+| T3.1.2 | Define `decide()` returning DecisionOutput with actions | Todo | - |
+| T3.1.3 | Define `build_prompt()` using situation.to_prompt_text() | Todo | - |
+| T3.1.4 | Define `parse_response()` using ActionRegistry | Todo | - |
+| T3.1.5 | Define session management methods | Todo | - |
 | T3.1.6 | Write trait documentation | Todo | - |
 
 #### TDD Test Tasks
@@ -45,37 +53,44 @@ Define the DecisionEngine trait that all engines implement.
 | Test ID | Definition |
 |---------|------------|
 | T3.1.T1 | engine_type() returns correct type |
-| T3.1.T2 | decide() takes Context, returns Output |
-| T3.1.T3 | build_prompt() generates valid prompt |
-| T3.1.T4 | session_handle() returns Option |
-| T3.1.T5 | is_healthy() returns bool |
-| T3.1.T6 | reset() clears state |
+| T3.1.T2 | decide() returns DecisionOutput with actions |
+| T3.1.T3 | build_prompt() uses situation trait |
+| T3.1.T4 | parse_response() uses ActionRegistry |
+| T3.1.T5 | session_handle() returns Option |
+| T3.1.T6 | is_healthy() returns bool |
+| T3.1.T7 | reset() clears state |
 
 #### Acceptance Criteria
 
-- Trait defines all required methods
-- Trait supports async decision making
-- Session persistence methods defined
+- Trait returns action sequences (Vec<Box<dyn DecisionAction>>)
+- Prompt built from situation trait
+- Response parsed via ActionRegistry
 
 #### Technical Notes
 
 ```rust
-/// Decision engine trait
+/// Decision engine trait - returns action sequences
 pub trait DecisionEngine: Send + Sync {
     /// Engine type
     fn engine_type(&self) -> DecisionEngineType;
     
     /// Make a decision based on context
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput>;
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput>;
     
     /// Build decision prompt from context
-    fn build_prompt(&self, context: &DecisionContext) -> String;
+    fn build_prompt(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String;
     
-    /// Persist session for multi-turn
-    fn persist_session(&self, path: &Path) -> Result<()>;
-    
-    /// Restore session from persistence
-    fn restore_session(&mut self, path: &Path) -> Result<()>;
+    /// Parse response to action sequence
+    fn parse_response(
+        &self,
+        response: &str,
+        situation: &dyn DecisionSituation,
+        action_registry: &ActionRegistry,
+    ) -> Result<Vec<Box<dyn DecisionAction>>>;
     
     /// Get current session handle
     fn session_handle(&self) -> Option<&SessionHandle>;
@@ -85,101 +100,131 @@ pub trait DecisionEngine: Send + Sync {
     
     /// Reset engine state
     fn reset(&mut self) -> Result<()>;
+    
+    /// Persist session for multi-turn
+    fn persist_session(&self, path: &Path) -> Result<()>;
+    
+    /// Restore session from persistence
+    fn restore_session(&mut self, path: &Path) -> Result<()>;
+}
+
+/// Decision output - action sequence
+pub struct DecisionOutput {
+    /// Action sequence to execute
+    actions: Vec<Box<dyn DecisionAction>>,
+    
+    /// Reasoning explanation
+    reasoning: String,
+    
+    /// Confidence level (0.0-1.0)
+    confidence: f64,
+    
+    /// Whether requested human intervention
+    human_requested: bool,
+}
+
+impl DecisionOutput {
+    pub fn new(actions: Vec<Box<dyn DecisionAction>>, reasoning: String, confidence: f64) -> Self {
+        Self {
+            actions,
+            reasoning,
+            confidence,
+            human_requested: false,
+        }
+    }
+    
+    pub fn with_human_request(mut self) -> Self {
+        self.human_requested = true;
+        self
+    }
+    
+    pub fn actions(&self) -> &[Box<dyn DecisionAction>] {
+        &self.actions
+    }
+    
+    pub fn first_action(&self) -> Option<&dyn DecisionAction> {
+        self.actions.first().map(|b| b.as_ref())
+    }
+    
+    /// Execute all actions sequentially
+    pub fn execute(
+        &self,
+        context: &DecisionContext,
+        agent: &mut MainAgentConnection,
+    ) -> Result<Vec<ActionResult>> {
+        let mut results = Vec::new();
+        for action in &self.actions {
+            let result = action.execute(context, agent)?;
+            results.push(result);
+            
+            // Stop if action failed
+            if let ActionResult::Failed { .. } = &result {
+                break;
+            }
+        }
+        Ok(results)
+    }
+}
+
+/// Decision engine type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionEngineType {
+    LLM { provider: ProviderKind },
+    CLI { provider: ProviderKind },
+    RuleBased,
+    Mock,
+    Custom { name: String },
 }
 ```
 
 ---
 
-### Story 3.2a: Decision Prompt Templates
+### Story 3.2: LLM Decision Engine
 
 **Priority**: P0
-**Effort**: 2 points
+**Effort**: 4 points
 **Status**: Backlog
 
-Implement prompt templates for four decision situations.
+Implement LLM-based decision engine with ActionRegistry parsing.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.2a.1 | Create `DecisionPromptTemplates` struct | Todo | - |
-| T3.2a.2 | Implement `choice_prompt()` for WaitingForChoice | Todo | - |
-| T3.2a.3 | Implement `reflection_prompt()` for ClaimsCompletion | Todo | - |
-| T3.2a.4 | Implement `verification_prompt()` for final DoD check | Todo | - |
-| T3.2a.5 | Implement `continue_prompt()` for PartialCompletion | Todo | - |
-| T3.2a.6 | Implement `retry_prompt()` for Error situations | Todo | - |
-| T3.2a.7 | Write unit tests for prompt templates | Todo | - |
+| T3.2.1 | Create `LLMDecisionEngine` struct | Todo | - |
+| T3.2.2 | Implement `build_prompt()` using situation trait | Todo | - |
+| T3.2.3 | Implement prompt templates for situation types | Todo | - |
+| T3.2.4 | Implement `call_llm_with_timeout()` | Todo | - |
+| T3.2.5 | Implement `parse_response()` via ActionRegistry | Todo | - |
+| T3.2.6 | Implement session persistence | Todo | - |
+| T3.2.7 | Write unit tests with mock LLM | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T3.2.T1 | Choice prompt contains all required sections |
-| T3.2.T2 | Reflection prompt contains correct round number |
-| T3.2.T3 | Verification prompt for DoD check |
-| T3.2.T4 | Continue prompt with focus_items |
-| T3.2.T5 | Retry prompt for each ErrorType |
+| T3.2.T1 | Prompt contains situation.to_prompt_text() |
+| T3.2.T2 | Prompt contains available actions from registry |
+| T3.2.T3 | Response parsed to SelectOptionAction |
+| T3.2.T4 | Response parsed to ReflectAction |
+| T3.2.T5 | Response parsed to ConfirmCompletionAction |
+| T3.2.T6 | Timeout handled gracefully |
+| T3.2.T7 | Session persisted and restored |
 
 #### Acceptance Criteria
 
-- All four situation prompts implemented
-- Prompts contain required sections (project rules, story, context)
-- Template format documented
-
----
-
-### Story 3.2b: LLM Decision Engine API Integration
-
-**Priority**: P0
-**Effort**: 3 points
-**Status**: Backlog
-
-Implement LLM API call integration with response parsing.
-
-#### Tasks
-
-| ID | Task | Status | Assignee |
-|----|------|--------|----------|
-| T3.2b.1 | Create `LLMDecisionEngine` struct | Todo | - |
-| T3.2b.2 | Implement `decide()` with LLM API call | Todo | - |
-| T3.2b.3 | Implement response parsing to DecisionOutput | Todo | - |
-| T3.2b.4 | Implement timeout handling | Todo | - |
-| T3.2b.5 | Implement session persistence | Todo | - |
-| T3.2b.6 | Implement health check | Todo | - |
-| T3.2b.7 | Write unit tests with mock LLM responses | Todo | - |
-
-#### TDD Test Tasks
-
-| Test ID | Definition |
-|---------|------------|
-| T3.2.T6 | Parse LLM response to Choice output |
-| T3.2.T7 | Parse LLM response to ReflectionRequest |
-| T3.2.T8 | Parse LLM response to CompletionConfirm |
-| T3.2.T9 | Timeout returns error or fallback |
-| T3.2.T10 | Session persists and restores |
-| T3.2.T11 | Mock LLM responses for testing |
-
-#### Acceptance Criteria
-
-- LLM calls produce valid DecisionOutput
-- Session persists correctly
+- Prompt uses situation trait for context
+- Response parsed via ActionRegistry
 - Timeout handled gracefully
 
 #### Technical Notes
 
 ```rust
+/// LLM decision engine
 pub struct LLMDecisionEngine {
-    /// Provider to use for LLM calls
     provider: ProviderKind,
-    
-    /// Current session handle
     session: Option<SessionHandle>,
-    
-    /// Engine configuration
     config: DecisionAgentConfig,
-    
-    /// Decision prompt templates
-    prompts: DecisionPromptTemplates,
 }
 
 impl DecisionEngine for LLMDecisionEngine {
@@ -187,271 +232,141 @@ impl DecisionEngine for LLMDecisionEngine {
         DecisionEngineType::LLM { provider: self.provider }
     }
     
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput> {
-        // 1. Build prompt based on trigger status
-        let prompt = self.build_prompt(&context);
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput> {
+        // 1. Build prompt from situation + available actions
+        let prompt = self.build_prompt(&context, action_registry);
         
         // 2. Call LLM with timeout
         let response = self.call_llm_with_timeout(prompt)?;
         
-        // 3. Parse response to DecisionOutput
-        let output = self.parse_response(response, &context.trigger_status)?;
+        // 3. Parse response to actions
+        let actions = self.parse_response(
+            &response,
+            context.trigger_situation.as_ref(),
+            action_registry,
+        )?;
         
-        // 4. Persist session
-        self.persist_session()?;
+        // 4. Calculate confidence from response
+        let confidence = self.extract_confidence(&response);
         
-        Ok(output)
+        // 5. Extract reasoning
+        let reasoning = self.extract_reasoning(&response);
+        
+        Ok(DecisionOutput::new(actions, reasoning, confidence))
     }
     
-    fn build_prompt(&self, context: &DecisionContext) -> String {
-        match &context.trigger_status {
-            ProviderStatus::WaitingForChoice { options } => {
-                self.prompts.choice_prompt(context, options)
-            }
-            ProviderStatus::ClaimsCompletion { summary, reflection_rounds } => {
-                if *reflection_rounds < self.config.max_reflection_rounds {
-                    self.prompts.reflection_prompt(context, summary, *reflection_rounds)
-                } else {
-                    self.prompts.verification_prompt(context, summary)
-                }
-            }
-            ProviderStatus::PartialCompletion { progress } => {
-                self.prompts.continue_prompt(context, progress)
-            }
-            ProviderStatus::Error { error_type } => {
-                self.prompts.retry_prompt(context, error_type)
-            }
-        }
-    }
-    
-    fn call_llm_with_timeout(&self, prompt: String) -> Result<String> {
-        // Use timeout from config
-        let timeout = Duration::from_millis(self.config.decision_timeout_ms);
-        
-        // Call provider (Claude/Codex/etc.)
-        // ...
-    }
-}
-
-/// Decision prompt templates
-pub struct DecisionPromptTemplates;
-
-impl DecisionPromptTemplates {
-    pub fn choice_prompt(&self, context: &DecisionContext, options: &[ChoiceOption]) -> String {
+    fn build_prompt(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
         format!(
             "You are a decision helper for a development agent.\n\
+            \n\
+            ## Current Situation\n\
+            {}\n\
+            \n\
+            ## Available Actions\n\
+            {}\n\
             \n\
             ## Project Rules\n\
             {}\n\
             \n\
-            ## Current Story\n\
-            {}\n\
-            \n\
-            ## Running Context Summary\n\
-            {}\n\
-            \n\
-            ## Available Options\n\
-            {}\n\
-            \n\
-            ## Task\n\
-            Select the most appropriate option based on project rules and story requirements.\n\
-            Output format:\n\
-            - Selection: [Option ID]\n\
-            - Reason: [Brief explanation]",
-            context.project_rules.summary(),
-            context.current_story.map(|s| s.definition()).unwrap_or_default(),
-            context.running_context.summary(),
-            options.iter().map(|o| format!("[{}] {}", o.id, o.label)).collect::<Vec<_>>().join("\n")
-        )
-    }
-    
-    pub fn reflection_prompt(&self, context: &DecisionContext, summary: &str, round: u8) -> String {
-        format!(
-            "The development agent claims to have completed the task.\n\
-            Reflection round: {}\n\
-            \n\
-            ## Claimed Completion\n\
+            ## Current Task\n\
             {}\n\
             \n\
             ## Running Context\n\
             {}\n\
             \n\
-            ## Story Definition\n\
-            {}\n\
-            \n\
-            ## Task\n\
-            Please reflect:\n\
-            1. Are all code files correctly modified?\n\
-            2. Are there missing edge cases?\n\
-            3. Does it comply with project rules?\n\
-            4. Are tests covering new functionality?\n\
-            \n\
-            If there are gaps, state them explicitly. If truly complete, say 'CONFIRMED COMPLETE'.",
-            round,
-            summary,
-            context.running_context.summary(),
-            context.current_story.map(|s| s.definition()).unwrap_or_default()
-        )
-    }
-    
-    pub fn verification_prompt(&self, context: &DecisionContext, summary: &str) -> String {
-        format!(
-            "Final verification after reflection rounds.\n\
-            \n\
-            ## Completion Content\n\
-            {}\n\
-            \n\
-            ## Story Acceptance Criteria\n\
-            {}\n\
-            \n\
-            ## Running Records\n\
-            {}\n\
-            \n\
-            ## Task\n\
-            Verify if Story acceptance criteria are satisfied.\n\
+            ## Instructions\n\
+            Select an action from Available Actions.\n\
             Output format:\n\
-            - Complete: [yes/no]\n\
-            - Missing: [list if any]",
-            summary,
-            context.current_story.map(|s| s.acceptance_criteria()).unwrap_or_default(),
-            context.running_context.summary()
+            {}\n\
+            \n\
+            Confidence: [0.0-1.0]\n\
+            Reasoning: [Brief explanation]",
+            context.trigger_situation.to_prompt_text(),
+            action_registry.generate_prompt_formats(),
+            context.project_rules.summary(),
+            context.current_task.map(|t| t.definition()).unwrap_or_default(),
+            context.running_context.summary(),
+            context.trigger_situation.available_actions()
+                .iter()
+                .map(|a| action_registry.get(a)
+                    .map(|act| act.to_prompt_format())
+                    .unwrap_or_else(|| a.name.clone()))
+                .collect::<Vec<_>>()
+                .join("\nOR\n")
         )
     }
     
-    pub fn continue_prompt(&self, context: &DecisionContext, progress: &CompletionProgress) -> String {
-        format!(
-            "The development agent has partially completed.\n\
-            \n\
-            ## Completed Items\n\
-            {}\n\
-            \n\
-            ## Remaining Items\n\
-            {}\n\
-            \n\
-            ## Task\n\
-            Provide instruction to continue:\n\
-            'Please continue completing story-xxx remaining parts:\n\
-            - Feature A is not yet implemented\n\
-            - Feature B is only half done'",
-            progress.completed_items.join("\n"),
-            progress.remaining_items.join("\n")
-        )
-    }
-    
-    pub fn retry_prompt(&self, context: &DecisionContext, error_type: &ErrorType) -> String {
-        match error_type {
-            ErrorType::Failure { message } => format!(
-                "The agent encountered an error: {}\n\
-                \n\
-                ## Task\n\
-                Provide retry instruction:\n\
-                'Please retry the task. The previous failure was: {}'",
-                message, message
-            ),
-            ErrorType::Gibberish => "The agent produced nonsensical output.\n\n## Task\nProvide restart instruction: 'Please restart the task from the beginning.'".to_string(),
-            ErrorType::Repetition { .. } => "The agent repeated previous output.\n\n## Task\nProvide continuation instruction: 'You seem to have repeated your output. Please continue with new content.'".to_string(),
+    fn parse_response(
+        &self,
+        response: &str,
+        situation: &dyn DecisionSituation,
+        action_registry: &ActionRegistry,
+    ) -> Result<Vec<Box<dyn DecisionAction>>> {
+        // Try each available action type
+        for action_type in situation.available_actions() {
+            if let Some(action) = action_registry.parse(action_type.clone(), response) {
+                return Ok(vec![action]);
+            }
         }
+        
+        // Fallback: parse generic output
+        self.parse_generic_response(response)
     }
 }
 ```
 
 ---
 
-### Story 3.3a: CLI Decision Engine Session Management
+### Story 3.3: CLI Decision Engine (Independent Session)
 
 **Priority**: P0
-**Effort**: 2 points
+**Effort**: 4 points
 **Status**: Backlog
 
-Implement independent session management for CLI decision engine.
+Implement CLI decision engine with independent provider session.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.3a.1 | Create `CLIDecisionEngine` struct | Todo | - |
-| T3.3a.2 | Implement `parent_agent_id` reference | Todo | - |
-| T3.3a.3 | Implement session creation (independent) | Todo | - |
-| T3.3a.4 | Implement session persistence/restore | Todo | - |
-| T3.3a.5 | Implement session isolation from main agent | Todo | - |
-| T3.3a.6 | Write unit tests for session management | Todo | - |
+| T3.3.1 | Create `CLIDecisionEngine` struct | Todo | - |
+| T3.3.2 | Implement independent session spawning | Todo | - |
+| T3.3.3 | Implement provider thread management | Todo | - |
+| T3.3.4 | Implement event channel collection | Todo | - |
+| T3.3.5 | Implement output parsing to actions | Todo | - |
+| T3.3.6 | Write unit tests for CLI engine | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
 | T3.3.T1 | CLI session different from main agent |
-| T3.3.T2 | parent_agent_id stored correctly |
-| T3.3.T7 | New session created for decision |
-| T3.3.T8 | Existing session resumed |
+| T3.3.T2 | Provider thread spawns correctly |
+| T3.3.T3 | Events collected until blocked |
+| T3.3.T4 | Output parsed to actions |
+| T3.3.T5 | Session persists and restores |
 
 #### Acceptance Criteria
 
-- CLI engine uses independent session (not recursive)
-- Parent agent ID tracked
-- Session isolation verified
-
----
-
-### Story 3.3b: CLI Decision Engine Provider Integration
-
-**Priority**: P0
-**Effort**: 3 points
-**Status**: Backlog
-
-Implement provider thread spawning and output collection.
-
-#### Tasks
-
-| ID | Task | Status | Assignee |
-|----|------|--------|----------|
-| T3.3b.1 | Implement provider thread spawning | Todo | - |
-| T3.3b.2 | Implement event channel for CLI output | Todo | - |
-| T3.3b.3 | Implement `send_prompt()` to provider | Todo | - |
-| T3.3b.4 | Implement `collect_output()` until blocked | Todo | - |
-| T3.3b.5 | Implement `parse_cli_output()` to DecisionOutput | Todo | - |
-| T3.3b.6 | Implement `decide()` via CLI provider | Todo | - |
-| T3.3b.7 | Write unit tests for CLI engine | Todo | - |
-
-#### TDD Test Tasks
-
-| Test ID | Definition |
-|---------|------------|
-| T3.3.T3 | Provider thread spawns correctly |
-| T3.3.T4 | Events received via channel |
-| T3.3.T5 | Output collected until blocked |
-| T3.3.T6 | Provider output parsed to DecisionOutput |
-
-#### Acceptance Criteria
-
-- Provider thread spawns correctly
-- Events received via channel
-- Output parsed to DecisionOutput
+- CLI engine uses independent session
+- Provider thread managed correctly
+- Output parsed via ActionRegistry
 
 #### Technical Notes
 
 ```rust
 /// CLI decision engine with independent session
 pub struct CLIDecisionEngine {
-    /// Provider type for decision (can differ from main agent)
     provider: ProviderKind,
-    
-    /// Independent session handle
     session: Option<SessionHandle>,
-    
-    /// Decision agent ID
     agent_id: AgentId,
-    
-    /// Parent main agent ID
     parent_agent_id: AgentId,
-    
-    /// Configuration
     config: DecisionAgentConfig,
-    
-    /// Event channel from provider
     event_rx: Option<mpsc::Receiver<ProviderEvent>>,
-    
-    /// Provider thread handle
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -460,163 +375,327 @@ impl DecisionEngine for CLIDecisionEngine {
         DecisionEngineType::CLI { provider: self.provider }
     }
     
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput> {
-        // 1. Build prompt
-        let prompt = self.build_prompt(&context);
-        
-        // 2. Spawn or resume provider session
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput> {
+        // 1. Spawn or resume provider session
         if self.session.is_none() {
             self.spawn_provider_session()?;
         }
         
-        // 3. Send prompt to provider
+        // 2. Build and send prompt
+        let prompt = self.build_prompt(&context, action_registry);
         self.send_prompt(prompt)?;
         
-        // 4. Collect output until blocked
+        // 3. Collect output until blocked
         let output = self.collect_output()?;
         
-        // 5. Parse output to DecisionOutput
-        self.parse_cli_output(output, &context.trigger_status)
-    }
-    
-    fn session_handle(&self) -> Option<&SessionHandle> {
-        self.session.as_ref()
-    }
-}
-
-impl CLIDecisionEngine {
-    fn spawn_provider_session(&mut self) -> Result<()> {
-        // Create new independent session
-        // NOT recursive - separate from main agent
-        let cwd = self.get_parent_cwd()?;
-        
-        // Spawn provider thread
-        let (event_tx, event_rx) = mpsc::channel();
-        let thread = provider::start_provider_thread(
-            self.provider,
-            self.agent_id.clone(),
-            String::new(), // Initial empty prompt
-            cwd,
-            None, // New session
-            event_tx,
+        // 4. Parse via ActionRegistry
+        let actions = self.parse_response(
+            &output,
+            context.trigger_situation.as_ref(),
+            action_registry,
         )?;
         
-        self.event_rx = Some(event_rx);
-        self.thread_handle = Some(thread);
-        
-        // Wait for session handle
-        self.collect_session_handle()?;
-        
-        Ok(())
-    }
-    
-    fn send_prompt(&self, prompt: String) -> Result<()> {
-        // Send prompt via stdin
-        // ...
-    }
-    
-    fn collect_output(&mut self) -> Result<String> {
-        // Collect events until Finished or WaitingForChoice
-        // ...
-    }
-    
-    fn get_parent_cwd(&self) -> Result<PathBuf> {
-        // Get working directory from parent agent
-        // ...
+        Ok(DecisionOutput::new(actions, "CLI decision".into(), 0.8))
     }
 }
-
-/// Session independence explained:
-/// 
-/// Main Agent:
-///   - provider: claude
-///   - session: sess-main-xxx
-///   - role: development execution
-/// 
-/// Decision Agent (CLI engine):
-///   - provider: claude (can be different)
-///   - session: sess-decision-yyy (INDEPENDENT)
-///   - role: decision judgment
-/// 
-/// Why independent session:
-/// 1. Context isolation - decision history doesn't pollute main transcript
-/// 2. Role separation - developer vs decision-maker
-/// 3. State management - reflection rounds, retry counts independent
-/// 4. Debuggability - decision history tracked separately
-/// 5. Parallel decisions - multiple agents can decide simultaneously
 ```
 
 ---
 
-### Story 3.4: Rule-Based Decision Engine
+### Story 3.4: Rule-Based Decision Engine with Expression Engine
 
 **Priority**: P1
-**Effort**: 3 points
+**Effort**: 4 points
 **Status**: Backlog
 
-Implement simple rule-based decision engine for quick decisions.
+Implement rule-based engine with condition expression engine.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.4.1 | Create `RuleBasedDecisionEngine` struct | Todo | - |
-| T3.4.2 | Define decision rules format | Todo | - |
-| T3.4.3 | Implement rule matching logic | Todo | - |
-| T3.4.4 | Implement default rules | Todo | - |
-| T3.4.5 | Implement custom rules loading | Todo | - |
-| T3.4.6 | Write unit tests for rule engine | Todo | - |
+| T3.4.1 | Create `ConditionExpr` enum (AND/OR/NOT) | Todo | - |
+| T3.4.2 | Create `Condition` enum with variants | Todo | - |
+| T3.4.3 | Create `ConditionEvaluatorRegistry` | Todo | - |
+| T3.4.4 | Create `DecisionRule` with condition + actions | Todo | - |
+| T3.4.5 | Implement `RuleBasedDecisionEngine` | Todo | - |
+| T3.4.6 | Implement default rules | Todo | - |
+| T3.4.7 | Implement custom rule loading from TOML | Todo | - |
+| T3.4.8 | Write unit tests for expression engine | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T3.4.T1 | Rules match WaitingForChoice status |
-| T3.4.T2 | Rules match ClaimsCompletion status |
-| T3.4.T3 | Rules match Error status |
-| T3.4.T4 | Project keyword matching works |
-| T3.4.T5 | Default rules cover common scenarios |
-| T3.4.T6 | Custom rules load from file |
-| T3.4.T7 | No matching rule returns continue |
+| T3.4.T1 | ConditionExpr::And evaluates correctly |
+| T3.4.T2 | ConditionExpr::Or evaluates correctly |
+| T3.4.T3 | Condition::StatusType matches |
+| T3.4.T4 | Condition::ProjectKeyword matches |
+| T3.4.T5 | Condition::Custom evaluates via registry |
+| T3.4.T6 | Default rules cover common cases |
+| T3.4.T7 | TOML rules loaded correctly |
 
 #### Acceptance Criteria
 
-- Rules match against context
-- Default rules cover common scenarios
-- Custom rules loadable from config
+- Expression engine supports AND/OR/NOT/Custom
+- Rules produce action sequences
+- Custom condition evaluators can be registered
 
 #### Technical Notes
 
 ```rust
-/// Rule-based decision engine (fast, low-cost)
-pub struct RuleBasedDecisionEngine {
-    /// Decision rules
-    rules: Vec<DecisionRule>,
+/// Condition expression - supports complex logic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConditionExpr {
+    /// Single condition
+    Single(Condition),
     
-    /// Default rules
-    default_rules: Vec<DecisionRule>,
+    /// AND combination - all must match
+    And(Vec<ConditionExpr>),
+    
+    /// OR combination - any must match
+    Or(Vec<ConditionExpr>),
+    
+    /// NOT - negates inner expression
+    Not(ConditionExpr),
 }
 
+impl ConditionExpr {
+    /// Evaluate against context
+    pub fn evaluate(&self, context: &DecisionContext, evaluator_registry: &ConditionEvaluatorRegistry) -> bool {
+        match self {
+            ConditionExpr::Single(cond) => cond.evaluate(context, evaluator_registry),
+            
+            ConditionExpr::And(exprs) => exprs.iter()
+                .all(|e| e.evaluate(context, evaluator_registry)),
+            
+            ConditionExpr::Or(exprs) => exprs.iter()
+                .any(|e| e.evaluate(context, evaluator_registry)),
+            
+            ConditionExpr::Not(expr) => !expr.evaluate(context, evaluator_registry),
+        }
+    }
+}
+
+/// Single condition type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Condition {
+    /// Situation type matches
+    SituationType { type: String },
+    
+    /// Project rule keyword present
+    ProjectKeyword { keyword: String },
+    
+    /// Story type matches
+    StoryType { type: String },
+    
+    /// Reflection rounds within range
+    ReflectionRounds { min: u8, max: u8 },
+    
+    /// Confidence below threshold
+    ConfidenceBelow { threshold: f64 },
+    
+    /// Time since last action
+    TimeSinceLastAction { min_seconds: u64, max_seconds: Option<u64> },
+    
+    /// Custom condition (extensible)
+    Custom { name: String, params: HashMap<String, String> },
+}
+
+impl Condition {
+    pub fn evaluate(&self, context: &DecisionContext, registry: &ConditionEvaluatorRegistry) -> bool {
+        match self {
+            Condition::SituationType { type } => {
+                context.trigger_situation.situation_type().name == *type
+            }
+            
+            Condition::ProjectKeyword { keyword } => {
+                context.project_rules.contains_keyword(keyword)
+            }
+            
+            Condition::StoryType { type } => {
+                context.current_story
+                    .map(|s| s.story_type() == *type)
+                    .unwrap_or(false)
+            }
+            
+            Condition::ReflectionRounds { min, max } => {
+                // Extract from situation if ClaimsCompletion
+                false // TODO: implement
+            }
+            
+            Condition::ConfidenceBelow { threshold } => {
+                // From situation if available
+                false
+            }
+            
+            Condition::Custom { name, params } => {
+                registry.evaluate(name, context, params)
+            }
+            
+            _ => false,
+        }
+    }
+}
+
+/// Custom condition evaluator registry
+pub struct ConditionEvaluatorRegistry {
+    evaluators: HashMap<String, Box<dyn ConditionEvaluator>>,
+}
+
+pub trait ConditionEvaluator: Send + Sync {
+    fn evaluate(&self, context: &DecisionContext, params: &HashMap<String, String>) -> bool;
+}
+
+impl ConditionEvaluatorRegistry {
+    pub fn new() -> Self {
+        Self { evaluators: HashMap::new() }
+    }
+    
+    pub fn register(&mut self, name: impl Into<String>, evaluator: Box<dyn ConditionEvaluator>) {
+        self.evaluators.insert(name.into(), evaluator);
+    }
+    
+    pub fn evaluate(&self, name: &str, context: &DecisionContext, params: &HashMap<String, String>) -> bool {
+        self.evaluators.get(name)
+            .map(|e| e.evaluate(context, params))
+            .unwrap_or(false)
+    }
+}
+
+/// Decision rule - condition + action sequence
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionRule {
-    /// Rule name
-    name: String,
-    
-    /// Trigger conditions
-    conditions: RuleConditions,
-    
-    /// Decision output when matched
-    output: DecisionOutput,
+    pub name: String,
+    pub condition: ConditionExpr,
+    pub actions: Vec<ActionSpec>,
+    pub priority: RulePriority,
 }
 
-pub struct RuleConditions {
-    /// Provider status to match
-    status: Option<ProviderStatusPattern>,
+/// Action specification for rule output
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionSpec {
+    pub type: String,
+    pub params: HashMap<String, String>,
+}
+
+impl ActionSpec {
+    pub fn to_action(&self, registry: &ActionRegistry) -> Option<Box<dyn DecisionAction>> {
+        // Build action from spec
+        // TODO: implement action factory
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RulePriority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+/// Rule-based decision engine
+pub struct RuleBasedDecisionEngine {
+    rules: Vec<DecisionRule>,
+    default_rules: Vec<DecisionRule>,
+    evaluator_registry: ConditionEvaluatorRegistry,
+}
+
+impl RuleBasedDecisionEngine {
+    pub fn new() -> Self {
+        Self {
+            rules: Vec::new(),
+            default_rules: Self::builtin_rules(),
+            evaluator_registry: ConditionEvaluatorRegistry::new(),
+        }
+    }
     
-    /// Project rule keywords
-    project_rule_keywords: Vec<String>,
+    pub fn with_custom_rules(rules: Vec<DecisionRule>) -> Self {
+        Self {
+            rules,
+            default_rules: Self::builtin_rules(),
+            evaluator_registry: ConditionEvaluatorRegistry::new(),
+        }
+    }
     
-    /// Story type pattern
-    story_type: Option<String>,
+    pub fn register_evaluator(&mut self, name: impl Into<String>, evaluator: Box<dyn ConditionEvaluator>) {
+        self.evaluator_registry.register(name, evaluator);
+    }
+    
+    fn builtin_rules() -> Vec<DecisionRule> {
+        vec![
+            // Rule: Approve safe reads
+            DecisionRule {
+                name: "approve-read".into(),
+                condition: ConditionExpr::Single(Condition::SituationType { 
+                    type: "waiting_for_choice".into() 
+                }),
+                actions: vec![ActionSpec { 
+                    type: "select_first".into(), 
+                    params: HashMap::new() 
+                }],
+                priority: RulePriority::Medium,
+            },
+            
+            // Rule: Reflect on first completion claim
+            DecisionRule {
+                name: "reflect-first".into(),
+                condition: ConditionExpr::And(vec![
+                    ConditionExpr::Single(Condition::SituationType { 
+                        type: "claims_completion".into() 
+                    }),
+                    ConditionExpr::Single(Condition::ReflectionRounds { min: 0, max: 1 }),
+                ]),
+                actions: vec![ActionSpec { 
+                    type: "reflect".into(), 
+                    params: HashMap::new() 
+                }],
+                priority: RulePriority::High,
+            },
+            
+            // Rule: Retry on recoverable error
+            DecisionRule {
+                name: "retry-error".into(),
+                condition: ConditionExpr::Single(Condition::SituationType { 
+                    type: "error".into() 
+                }),
+                actions: vec![ActionSpec { 
+                    type: "retry".into(), 
+                    params: HashMap::new() 
+                }],
+                priority: RulePriority::Medium,
+            },
+        ]
+    }
+    
+    fn find_matching_rule(&self, context: &DecisionContext) -> Option<&DecisionRule> {
+        // Sort by priority, find first match
+        let all_rules: Vec<&DecisionRule> = self.rules.iter()
+            .chain(self.default_rules.iter())
+            .collect();
+        
+        // Sort by priority (Critical > High > Medium > Low)
+        let sorted = all_rules.into_iter()
+            .sorted_by_key(|r| match r.priority {
+                RulePriority::Critical => 0,
+                RulePriority::High => 1,
+                RulePriority::Medium => 2,
+                RulePriority::Low => 3,
+            });
+        
+        for rule in sorted {
+            if rule.condition.evaluate(context, &self.evaluator_registry) {
+                return Some(rule);
+            }
+        }
+        
+        None
+    }
 }
 
 impl DecisionEngine for RuleBasedDecisionEngine {
@@ -624,122 +703,71 @@ impl DecisionEngine for RuleBasedDecisionEngine {
         DecisionEngineType::RuleBased
     }
     
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput> {
-        // Find matching rule
-        for rule in &self.rules {
-            if rule.matches(&context) {
-                return Ok(rule.output.clone());
-            }
-        }
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput> {
+        let rule = self.find_matching_rule(&context);
         
-        // Fallback to default rules
-        for rule in &self.default_rules {
-            if rule.matches(&context) {
-                return Ok(rule.output.clone());
-            }
-        }
-        
-        // No rule matched - return continue instruction
-        Ok(DecisionOutput::ContinueInstruction {
-            prompt: "Continue with current task.".to_string(),
-            focus_items: vec![],
-        })
-    }
-}
-
-impl DecisionRule {
-    fn matches(&self, context: &DecisionContext) -> bool {
-        // Check status pattern
-        if let Some(pattern) = &self.conditions.status {
-            if !pattern.matches(&context.trigger_status) {
-                return false;
-            }
-        }
-        
-        // Check project rule keywords
-        for keyword in &self.conditions.project_rule_keywords {
-            if !context.project_rules.contains_keyword(keyword) {
-                return false;
-            }
-        }
-        
-        true
-    }
-}
-
-/// Default rules
-impl RuleBasedDecisionEngine {
-    pub fn default_rules() -> Vec<DecisionRule> {
-        vec![
-            // Rule: Always approve first read file
-            DecisionRule {
-                name: "approve-read".to_string(),
-                conditions: RuleConditions {
-                    status: Some(ProviderStatusPattern::WaitingForChoice { 
-                        permission_type: "read".to_string() 
-                    }),
-                    project_rule_keywords: vec![],
-                    story_type: None,
-                },
-                output: DecisionOutput::Choice {
-                    selected: "once".to_string(),
-                    reason: "Reading files is safe".to_string(),
-                },
-            },
+        if let Some(rule) = rule {
+            let actions = rule.actions.iter()
+                .filter_map(|spec| spec.to_action(action_registry))
+                .collect();
             
-            // Rule: Reflection on first completion claim
-            DecisionRule {
-                name: "reflect-first".to_string(),
-                conditions: RuleConditions {
-                    status: Some(ProviderStatusPattern::ClaimsCompletion { 
-                        reflection_rounds: 0 
-                    }),
-                    project_rule_keywords: vec![],
-                    story_type: None,
-                },
-                output: DecisionOutput::ReflectionRequest {
-                    prompt: "Please reflect on whether you truly completed the task.".to_string(),
-                },
-            },
-            
-            // Rule: Retry on error
-            DecisionRule {
-                name: "retry-error".to_string(),
-                conditions: RuleConditions {
-                    status: Some(ProviderStatusPattern::Error),
-                    project_rule_keywords: vec![],
-                    story_type: None,
-                },
-                output: DecisionOutput::RetryInstruction {
-                    prompt: "Please retry the task.".to_string(),
-                    cooldown_ms: 10000,
-                },
-            },
-        ]
+            return Ok(DecisionOutput::new(
+                actions,
+                format!("Rule: {}", rule.name),
+                0.9,
+            ));
+        }
+        
+        // No matching rule - default action
+        Ok(DecisionOutput::new(
+            vec![Box::new(CustomInstructionAction::new("Continue with current task"))],
+            "No matching rule".into(),
+            0.5,
+        ))
     }
+    
+    fn is_healthy(&self) -> bool { true }
+    
+    fn reset(&mut self) -> Result<()> { Ok(()) }
 }
 ```
 
-**Rule Configuration File**:
+**TOML Rule Configuration**:
 
 ```toml
 [[decision_layer.rules]]
 name = "approve-write-safe"
-conditions.status = "waiting_for_choice"
-conditions.permission_type = "write"
-conditions.project_rule_keywords = ["safe_write"]
-output.type = "choice"
-output.selected = "once"
-output.reason = "Safe write operation"
+priority = "medium"
+
+[decision_layer.rules.condition]
+type = "and"
+conditions = [
+    { type = "single", condition = { situation_type = { type = "waiting_for_choice" } } },
+    { type = "single", condition = { project_keyword = { keyword = "safe_write" } } }
+]
+
+[[decision_layer.rules.actions]]
+type = "select_option"
+params = { option_id = "approved", reason = "Safe write operation" }
 
 [[decision_layer.rules]]
 name = "deny-dangerous"
-conditions.status = "waiting_for_choice"
-conditions.permission_type = "exec"
-conditions.command_contains = "rm -rf"
-output.type = "choice"
-output.selected = "reject"
-output.reason = "Dangerous command"
+priority = "critical"
+
+[decision_layer.rules.condition]
+type = "or"
+conditions = [
+    { type = "single", condition = { custom = { name = "command_contains", params = { pattern = "rm -rf" } } } },
+    { type = "single", condition = { custom = { name = "command_contains", params = { pattern = "sudo" } } } }
+]
+
+[[decision_layer.rules.actions]]
+type = "select_option"
+params = { option_id = "denied", reason = "Dangerous command" }
 ```
 
 ---
@@ -757,7 +785,7 @@ Implement mock decision engine for testing.
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
 | T3.5.1 | Create `MockDecisionEngine` struct | Todo | - |
-| T3.5.2 | Implement configurable mock outputs | Todo | - |
+| T3.5.2 | Implement configurable mock responses | Todo | - |
 | T3.5.3 | Implement decision recording | Todo | - |
 | T3.5.4 | Write unit tests for mock engine | Todo | - |
 
@@ -765,31 +793,25 @@ Implement mock decision engine for testing.
 
 | Test ID | Definition |
 |---------|------------|
-| T3.5.T1 | Returns first option for choice |
-| T3.5.T2 | Reflection for rounds < 2 |
-| T3.5.T3 | Completion for rounds >= 2 |
-| T3.5.T4 | Retry on Error status |
-| T3.5.T5 | History recorded for each decision |
-| T3.5.T6 | is_healthy() always true |
+| T3.5.T1 | Returns first option for waiting_for_choice |
+| T3.5.T2 | Returns reflect for claims_completion round 0 |
+| T3.5.T3 | Returns confirm for claims_completion round >= 2 |
+| T3.5.T4 | Returns retry for error |
+| T3.5.T5 | History recorded |
+| T3.5.T6 | Always healthy |
 
 #### Acceptance Criteria
 
-- Mock returns predefined outputs
+- Mock returns predefined action sequences
 - Decision history recorded
-- Useful for testing decision layer
+- Useful for testing
 
 #### Technical Notes
 
 ```rust
 /// Mock decision engine for testing
 pub struct MockDecisionEngine {
-    /// Predefined outputs by situation
-    outputs: HashMap<ProviderStatusPattern, DecisionOutput>,
-    
-    /// Decision history (for test verification)
     history: Vec<DecisionRecord>,
-    
-    /// Current configuration
     config: DecisionAgentConfig,
 }
 
@@ -798,65 +820,53 @@ impl DecisionEngine for MockDecisionEngine {
         DecisionEngineType::Mock
     }
     
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput> {
-        // Record decision
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        _action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput> {
+        let situation = context.trigger_situation.as_ref();
+        let actions = self.get_mock_actions(situation);
+        
         let record = DecisionRecord {
             decision_id: DecisionId::new(),
             timestamp: Utc::now(),
-            trigger_status: context.trigger_status.clone(),
-            output: self.get_mock_output(&context.trigger_status),
+            situation_type: situation.situation_type(),
+            actions: actions.iter().map(|a| a.action_type()).collect(),
+            reasoning: "Mock decision".into(),
+            confidence: 0.8,
             engine_type: DecisionEngineType::Mock,
         };
         
         self.history.push(record);
         
-        Ok(record.output.clone())
+        Ok(DecisionOutput::new(actions, "Mock".into(), 0.8))
     }
+    
+    fn is_healthy(&self) -> bool { true }
     
     fn reset(&mut self) -> Result<()> {
         self.history.clear();
         Ok(())
     }
-    
-    fn is_healthy(&self) -> bool {
-        true // Mock is always healthy
-    }
 }
 
 impl MockDecisionEngine {
-    fn get_mock_output(&self, status: &ProviderStatus) -> DecisionOutput {
-        match status {
-            ProviderStatus::WaitingForChoice { options } => {
-                // Always select first option
-                DecisionOutput::Choice {
-                    selected: options.first().map(|o| o.id.clone()).unwrap_or_default(),
-                    reason: "Mock: first option".to_string(),
-                }
-            }
-            ProviderStatus::ClaimsCompletion { reflection_rounds, .. } => {
-                if *reflection_rounds < 2 {
-                    DecisionOutput::ReflectionRequest {
-                        prompt: "Mock: please reflect".to_string(),
-                    }
-                } else {
-                    DecisionOutput::CompletionConfirm {
-                        submit_pr: true,
-                        next_task: None,
-                    }
-                }
-            }
-            ProviderStatus::PartialCompletion { .. } => {
-                DecisionOutput::ContinueInstruction {
-                    prompt: "Mock: continue".to_string(),
-                    focus_items: vec!["Mock focus".to_string()],
-                }
-            }
-            ProviderStatus::Error { .. } => {
-                DecisionOutput::RetryInstruction {
-                    prompt: "Mock: retry".to_string(),
-                    cooldown_ms: 1000,
-                }
-            }
+    fn get_mock_actions(&self, situation: &dyn DecisionSituation) -> Vec<Box<dyn DecisionAction>> {
+        match situation.situation_type().name.as_str() {
+            "waiting_for_choice" => vec![
+                Box::new(SelectOptionAction::new("A", "Mock: first option"))
+            ],
+            "claims_completion" => {
+                // Need to check reflection_rounds from situation data
+                vec![Box::new(ReflectAction::new("Mock: please reflect"))]
+            },
+            "error" => vec![
+                Box::new(RetryAction::new("Mock: retry", 1000, false))
+            ],
+            _ => vec![
+                Box::new(CustomInstructionAction::new("Mock: continue"))
+            ],
         }
     }
     
@@ -868,28 +878,177 @@ impl MockDecisionEngine {
 
 ---
 
+### Story 3.6: Tiered Decision Engine
+
+**Priority**: P2
+**Effort**: 3 points
+**Status**: Backlog
+
+Implement tiered engine that selects engine based on complexity.
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T3.6.1 | Create `TieredDecisionEngine` struct | Todo | - |
+| T3.6.2 | Implement complexity calculation | Todo | - |
+| T3.6.3 | Implement engine selection logic | Todo | - |
+| T3.6.4 | Write unit tests for tiered selection | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T3.6.T1 | Low complexity → RuleBased |
+| T3.6.T2 | High complexity → LLM |
+| T3.6.T3 | RuleBased fallback when LLM unavailable |
+| T3.6.T4 | Complexity threshold configurable |
+| T3.6.T5 | Complexity score calculated correctly |
+| T3.6.T6 | LLM timeout → RuleBased fallback |
+| T3.6.T7 | Budget check before LLM call |
+| T3.6.T8 | Budget tracked correctly |
+
+#### Acceptance Criteria
+
+- Low complexity uses rule-based engine
+- High complexity uses LLM engine
+- Fallback on timeout/error
+
+#### Technical Notes
+
+```rust
+/// Tiered decision engine - selects based on complexity
+pub struct TieredDecisionEngine {
+    rule_engine: RuleBasedDecisionEngine,
+    llm_engine: Option<LLMDecisionEngine>,
+    complexity_threshold: u8,
+    config: TieredConfig,
+}
+
+pub struct TieredConfig {
+    /// Complexity threshold for LLM
+    complexity_threshold: u8,
+    
+    /// Always use rule for certain situation types
+    always_rule_types: Vec<String>,
+    
+    /// Budget tracking
+    budget: DecisionBudget,
+}
+
+impl TieredDecisionEngine {
+    fn calculate_complexity(&self, context: &DecisionContext) -> u8 {
+        let mut score = 0;
+        
+        let situation = context.trigger_situation.as_ref();
+        let type_name = situation.situation_type().name.as_str();
+        
+        // Claims completion = high complexity (needs verification)
+        if type_name == "claims_completion" {
+            score += 2;
+        }
+        
+        // Critical situation = high complexity
+        if situation.requires_human() {
+            score += 2;
+        }
+        
+        // Large context = more complex
+        if context.running_context.size_estimate() > 5000 {
+            score += 1;
+        }
+        
+        // Project rules complexity
+        if context.project_rules.rules.len() > 10 {
+            score += 1;
+        }
+        
+        score
+    }
+}
+
+impl DecisionEngine for TieredDecisionEngine {
+    fn engine_type(&self) -> DecisionEngineType {
+        DecisionEngineType::Custom { name: "tiered".into() }
+    }
+    
+    fn decide(
+        &mut self,
+        context: DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> Result<DecisionOutput> {
+        let situation = context.trigger_situation.as_ref();
+        let type_name = situation.situation_type().name.as_str();
+        
+        // Check always-rule types
+        if self.config.always_rule_types.contains(&type_name.to_string()) {
+            return self.rule_engine.decide(context, action_registry);
+        }
+        
+        // Calculate complexity
+        let complexity = self.calculate_complexity(&context);
+        
+        // Low complexity → Rule engine
+        if complexity < self.complexity_threshold {
+            return self.rule_engine.decide(context, action_registry);
+        }
+        
+        // High complexity → LLM engine (with budget check)
+        if let Some(llm) = &mut self.llm_engine {
+            // Check budget
+            let estimated_cost = self.estimate_llm_cost(&context);
+            if !self.config.budget.check(estimated_cost)? {
+                // Budget exceeded → use rule engine
+                return self.rule_engine.decide(context, action_registry);
+            }
+            
+            // Try LLM
+            let result = llm.decide(context.clone(), action_registry);
+            
+            match result {
+                Ok(output) => {
+                    self.config.budget.record_usage(estimated_cost);
+                    Ok(output)
+                }
+                Err(_) => {
+                    // LLM failed → fallback to rule engine
+                    self.rule_engine.decide(context, action_registry)
+                }
+            }
+        } else {
+            // No LLM available → use rule engine
+            self.rule_engine.decide(context, action_registry)
+        }
+    }
+}
+```
+
+---
+
 ## Sprint Risks
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| LLM API rate limits | Medium | Medium | Rate limiting, fallback to RuleBased |
-| CLI session spawning delay | Low | Low | Lazy creation policy |
-| Prompt template effectiveness | Medium | Medium | Iterative refinement based on outcomes |
+| LLM parsing complexity | Medium | Medium | Standardized output format |
+| Rule expression complexity | Low | Low | Clear TOML schema |
+| Tiered engine selection | Low | Medium | Complexity threshold tuning |
 
 ## Sprint Deliverables
 
 - `decision/src/engine.rs` - DecisionEngine trait
+- `decision/src/output.rs` - DecisionOutput with actions
 - `decision/src/llm_engine.rs` - LLMDecisionEngine
 - `decision/src/cli_engine.rs` - CLIDecisionEngine
-- `decision/src/rule_engine.rs` - RuleBasedDecisionEngine
+- `decision/src/rule_engine.rs` - RuleBasedDecisionEngine with ConditionExpr
+- `decision/src/condition.rs` - ConditionExpr, Condition, ConditionEvaluatorRegistry
 - `decision/src/mock_engine.rs` - MockDecisionEngine
-- `decision/src/prompts.rs` - Decision prompt templates
+- `decision/src/tiered_engine.rs` - TieredDecisionEngine
 
 ## Dependencies
 
-- Sprint 1: Core Types (DecisionOutput, DecisionContext)
-- Sprint 2: Output Classifier (ProviderStatus)
+- Sprint 1: DecisionSituation trait, DecisionAction trait, ActionRegistry
+- Sprint 2: SituationRegistry (for situation type matching)
 
 ## Next Sprint
 
-After completing this sprint, proceed to [Sprint 4: Context Cache](./sprint-04-context-cache.md) for running context caching with size limits.
+After completing this sprint, proceed to [Sprint 4: Context Cache](sprint-04-context-cache.md) for running context caching with size limits.

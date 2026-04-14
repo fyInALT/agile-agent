@@ -1,13 +1,14 @@
-# Sprint 2: Output Classifier
+# Sprint 2: Output Classifier (Trait-Based)
 
 ## Metadata
 
 - Sprint ID: `decision-sprint-002`
-- Title: `Output Classifier`
+- Title: `Output Classifier (Trait-Based)`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
 - Status: `Backlog`
 - Created: 2026-04-14
+- Updated: 2026-04-14 (Architecture Evolution)
 
 ## TDD Reference
 
@@ -15,577 +16,797 @@ See [Test Specification](test-specification.md) for detailed TDD test tasks:
 - Sprint 2 Tests: T2.1.T1-T2.4.T5 (25 tests)
 - Provider samples: Collect 12 real samples before implementation (S-CL-001 through S-KM-003)
 
+## Architecture Evolution
+
+Classifiers produce **SituationType** identifiers, then use **SituationRegistry** to build concrete DecisionSituation objects. This enables:
+- Adding new provider without modifying situation enum
+- Provider-specific situation subtypes (e.g., `finished.claude`, `waiting_for_choice.codex`)
+- Custom situation builders per provider
+
 ## Sprint Goal
 
-Implement provider-specific output classifiers to detect decision trigger points based on actual provider protocols (Claude stream-json, Codex App Server Protocol, ACP for OpenCode/Kimi).
+Implement provider-specific output classifiers using SituationType and SituationRegistry pattern.
 
 ## Stories
 
-### Story 2.1: Claude Output Classifier
+### Story 2.1: OutputClassifier Trait and Registry Integration
 
 **Priority**: P0
-**Effort**: 4 points
+**Effort**: 2 points
 **Status**: Backlog
 
-Implement classifier for Claude Code stream-json protocol.
+Define OutputClassifier trait that integrates with SituationRegistry.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.1.1 | Create `ClaudeOutputClassifier` struct | Todo | - |
-| T2.1.2 | Implement `classify()` method for Claude events | Todo | - |
-| T2.1.3 | Handle `AssistantChunk` → Running | Todo | - |
-| T2.1.4 | Handle `ThinkingChunk` → Running | Todo | - |
-| T2.1.5 | Handle `GenericToolCallStarted/Finished` → Running | Todo | - |
-| T2.1.6 | Handle `Finished` event → ClaimsCompletion | Todo | - |
-| T2.1.7 | Handle `Error` event → Error | Todo | - |
-| T2.1.8 | Handle `SessionHandle` → Running (info) | Todo | - |
-| T2.1.9 | Write unit tests with real Claude event samples | Todo | - |
+| T2.1.1 | Define `OutputClassifier` trait | Todo | - |
+| T2.1.2 | Define `ClassifierRegistry` struct | Todo | - |
+| T2.1.3 | Implement registry dispatch by ProviderKind | Todo | - |
+| T2.1.4 | Implement situation builder registration | Todo | - |
+| T2.1.5 | Write unit tests for trait and registry | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T2.1.T1 | Classifier returns SituationType |
+| T2.1.T2 | Classifier builds situation via registry |
+| T2.1.T3 | Registry dispatches by provider |
+| T2.1.T4 | Unknown provider uses fallback |
+
+#### Acceptance Criteria
+
+- Trait defines classify method returning SituationType
+- ClassifierRegistry dispatches by ProviderKind
+- Situation building delegated to SituationRegistry
+
+#### Technical Notes
+
+```rust
+/// Output classifier trait - produces SituationType
+pub trait OutputClassifier: Send + Sync + 'static {
+    /// Provider kind this classifier handles
+    fn provider_kind(&self) -> ProviderKind;
+    
+    /// Classify event to situation type (or None for Running)
+    fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType>;
+    
+    /// Build situation from event (using registry)
+    fn build_situation(
+        &self,
+        event: &ProviderEvent,
+        registry: &SituationRegistry,
+    ) -> Option<Box<dyn DecisionSituation>>;
+    
+    /// Extract context data for cache update
+    fn extract_context(&self, event: &ProviderEvent) -> Option<ContextUpdate>;
+}
+
+/// Context update from event
+pub enum ContextUpdate {
+    ToolCall(ToolCallRecord),
+    FileChange(FileChangeRecord),
+    Thinking(String),
+    KeyOutput(String),
+}
+
+/// Classifier registry - dispatches to provider-specific classifiers
+pub struct ClassifierRegistry {
+    /// Per-provider classifiers
+    classifiers: HashMap<ProviderKind, Box<dyn OutputClassifier>>,
+    
+    /// Fallback classifier (for unknown providers)
+    fallback: Box<dyn OutputClassifier>,
+    
+    /// Situation registry (shared reference)
+    situation_registry: Arc<SituationRegistry>,
+}
+
+impl ClassifierRegistry {
+    pub fn new(situation_registry: Arc<SituationRegistry>) -> Self {
+        Self {
+            classifiers: HashMap::new(),
+            fallback: Box::new(FallbackClassifier),
+            situation_registry,
+        }
+    }
+    
+    /// Register classifier for provider
+    pub fn register(&mut self, classifier: Box<dyn OutputClassifier>) {
+        self.classifiers.insert(classifier.provider_kind(), classifier);
+    }
+    
+    /// Classify event
+    pub fn classify(&self, event: &ProviderEvent, provider: ProviderKind) 
+        -> ClassifyResult {
+        let classifier = self.classifiers.get(&provider)
+            .unwrap_or(&self.fallback);
+        
+        match classifier.classify_type(event) {
+            Some(situation_type) => {
+                let situation = classifier.build_situation(
+                    event,
+                    &self.situation_registry,
+                );
+                
+                ClassifyResult::NeedsDecision {
+                    situation_type,
+                    situation,
+                }
+            }
+            None => ClassifyResult::Running {
+                context_update: classifier.extract_context(event),
+            },
+        }
+    }
+}
+
+/// Classify result
+pub enum ClassifyResult {
+    /// Running output - update context
+    Running {
+        context_update: Option<ContextUpdate>,
+    },
+    
+    /// Needs decision
+    NeedsDecision {
+        situation_type: SituationType,
+        situation: Option<Box<dyn DecisionSituation>>,
+    },
+}
+
+/// Fallback classifier - minimal classification
+pub struct FallbackClassifier;
+
+impl OutputClassifier for FallbackClassifier {
+    fn provider_kind(&self) -> ProviderKind {
+        ProviderKind::Unknown
+    }
+    
+    fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType> {
+        match event {
+            ProviderEvent::Finished => Some(builtin_situations::CLAIMS_COMPLETION.clone()),
+            ProviderEvent::Error { .. } => Some(builtin_situations::ERROR.clone()),
+            _ => None,
+        }
+    }
+    
+    fn build_situation(
+        &self,
+        event: &ProviderEvent,
+        registry: &SituationRegistry,
+    ) -> Option<Box<dyn DecisionSituation>> {
+        let type = self.classify_type(event)?;
+        registry.build_from_event(type, event)
+    }
+    
+    fn extract_context(&self, _event: &ProviderEvent) -> Option<ContextUpdate> {
+        None
+    }
+}
+```
+
+---
+
+### Story 2.2: Claude Classifier with Situation Builders
+
+**Priority**: P0
+**Effort**: 3 points
+**Status**: Backlog
+
+Implement Claude classifier with Claude-specific situation builders.
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T2.2.1 | Create `ClaudeClassifier` struct | Todo | - |
+| T2.2.2 | Implement `classify_type()` for Claude events | Todo | - |
+| T2.2.3 | Create `ClaudeFinishedBuilder` for Claude Finished events | Todo | - |
+| T2.2.4 | Create `ClaudeErrorBuilder` for Claude Error events | Todo | - |
+| T2.2.5 | Register Claude situation builders in registry | Todo | - |
+| T2.2.6 | Write unit tests with real Claude samples | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T2.2.T1 | AssistantChunk → Running (no situation) |
+| T2.2.T2 | ThinkingChunk → Running (context update) |
+| T2.2.T3 | ToolCall → Running (context update) |
+| T2.2.T4 | Finished → SituationType::CLAUDE_FINISHED |
+| T2.2.T5 | Error → SituationType::ERROR |
+| T2.2.T6 | Claude builder extracts summary from transcript |
 
 #### Acceptance Criteria
 
 - Claude events classified correctly
-- No waiting-for-choice detection (bypassPermissions)
-- Finished event triggers ClaimsCompletion
-- Error event triggers Error status
+- Claude-specific situation subtype used
+- Context extracted for Running events
 
 #### Technical Notes
 
 Based on source code analysis (`core/src/providers/claude.rs`):
 
 ```rust
-/// Claude Code output classifier
-pub struct ClaudeOutputClassifier;
+/// Claude classifier
+pub struct ClaudeClassifier;
 
-impl OutputClassifier for ClaudeOutputClassifier {
+impl OutputClassifier for ClaudeClassifier {
     fn provider_kind(&self) -> ProviderKind {
         ProviderKind::Claude
     }
     
-    fn classify(&self, event: &ProviderEvent) -> ProviderOutputType {
+    fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType> {
         match event {
-            // Running events - collect but don't act
-            ProviderEvent::AssistantChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::ThinkingChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::GenericToolCallStarted { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::GenericToolCallFinished { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::Status { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::SessionHandle { .. } => ProviderOutputType::Running { event: event.clone() },
+            // Running events - no situation
+            ProviderEvent::AssistantChunk { .. } => None,
+            ProviderEvent::ThinkingChunk { .. } => None,
+            ProviderEvent::GenericToolCallStarted { .. } => None,
+            ProviderEvent::GenericToolCallFinished { .. } => None,
+            ProviderEvent::Status { .. } => None,
+            ProviderEvent::SessionHandle { .. } => None,
             
-            // Finished - claims completion (Situation 2)
-            ProviderEvent::Finished => ProviderOutputType::Finished {
-                status: ProviderStatus::ClaimsCompletion {
-                    summary: String::new(), // Will be filled from transcript analysis
-                    reflection_rounds: 0,
-                },
-            },
+            // Finished - Claude-specific subtype
+            ProviderEvent::Finished => Some(
+                builtin_situations::CLAUDE_FINISHED.clone()
+            ),
             
-            // Error - Situation 4
-            ProviderEvent::Error { message } => ProviderOutputType::Finished {
-                status: ProviderStatus::Error {
-                    error_type: ErrorType::Failure { message: message.clone() },
-                },
-            },
+            // Error
+            ProviderEvent::Error { .. } => Some(
+                builtin_situations::ERROR.clone()
+            ),
             
-            _ => ProviderOutputType::Running { event: event.clone() },
+            _ => None,
         }
     }
     
-    fn extract_options(&self, _event: &ProviderEvent) -> Option<Vec<ChoiceOption>> {
-        // Claude uses --permission-mode bypassPermissions
-        // No waiting-for-choice events expected
-        None
+    fn build_situation(
+        &self,
+        event: &ProviderEvent,
+        registry: &SituationRegistry,
+    ) -> Option<Box<dyn DecisionSituation>> {
+        let type = self.classify_type(event)?;
+        
+        // Use registry builder (registered in initialization)
+        registry.build_from_event(type, event)
     }
     
-    fn extract_completion_summary(&self, event: &ProviderEvent) -> Option<String> {
+    fn extract_context(&self, event: &ProviderEvent) -> Option<ContextUpdate> {
         match event {
-            ProviderEvent::AssistantChunk { text } => Some(text.clone()),
+            ProviderEvent::ThinkingChunk { text } => Some(ContextUpdate::Thinking(text.clone())),
+            ProviderEvent::AssistantChunk { text } if self.is_key_output(text) => {
+                Some(ContextUpdate::KeyOutput(text.clone()))
+            }
+            ProviderEvent::GenericToolCallStarted { name, input } => {
+                Some(ContextUpdate::ToolCall(ToolCallRecord {
+                    name: name.clone(),
+                    input_preview: Some(input.clone()),
+                    output_preview: None,
+                    timestamp: Utc::now(),
+                    success: true,
+                }))
+            }
+            ProviderEvent::GenericToolCallFinished { name, output } => {
+                // Update previous tool call with output
+                Some(ContextUpdate::ToolCall(ToolCallRecord {
+                    name: name.clone(),
+                    input_preview: None,
+                    output_preview: Some(output.clone()),
+                    timestamp: Utc::now(),
+                    success: true,
+                }))
+            }
             _ => None,
         }
     }
 }
+
+/// Claude situation builders - registered in SituationRegistry
+pub fn register_claude_builders(registry: &mut SituationRegistry) {
+    // Claude Finished builder
+    registry.register_builder(
+        builtin_situations::CLAUDE_FINISHED.clone(),
+        |event: &ProviderEvent| {
+            // Claude Finished needs summary extraction from transcript
+            // This is ClaimsCompletion situation with Claude-specific data
+            Some(Box::new(ClaimsCompletionSituation {
+                summary: "Extracted from transcript".to_string(), // Will be filled
+                reflection_rounds: 0,
+                max_reflection_rounds: 2,
+                confidence: 0.0, // Will be calculated
+            }))
+        },
+    );
+    
+    // Claude Error builder
+    registry.register_builder(
+        builtin_situations::ERROR.clone(),
+        |event: &ProviderEvent| {
+            match event {
+                ProviderEvent::Error { message } => Some(Box::new(ErrorSituation {
+                    error: ErrorInfo {
+                        error_type: "claude_error".to_string(),
+                        message: message.clone(),
+                        recoverable: true,
+                        retry_count: 0,
+                    },
+                })),
+                _ => None,
+            }
+        },
+    );
+}
+
+/// Key output detection
+impl ClaudeClassifier {
+    fn is_key_output(&self, text: &str) -> bool {
+        // Detect decision-related keywords
+        text.contains("完成") || 
+        text.contains("finished") ||
+        text.contains("done") ||
+        text.contains("成功") ||
+        text.contains("success")
+    }
+}
 ```
 
-**Key Finding**: Claude Code uses `--permission-mode bypassPermissions` (see `claude.rs:169`), so it never returns waiting-for-choice events. Decision layer only handles:
-- ClaimsCompletion (from `Finished`)
-- Error (from `Error`)
+**Key Finding**: Claude Code uses `--permission-mode bypassPermissions` (see `claude.rs:169`), so it never returns waiting-for-choice events.
 
 ---
 
-### Story 2.2: Codex Output Classifier
+### Story 2.3: Codex Classifier with Approval Request Builders
 
 **Priority**: P0
-**Effort**: 5 points
+**Effort**: 4 points
 **Status**: Backlog
 
-Implement classifier for Codex App Server Protocol.
+Implement Codex classifier with approval request situation builders.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.2.1 | Create `CodexOutputClassifier` struct | Todo | - |
-| T2.2.2 | Implement `classify()` method for Codex requests | Todo | - |
-| T2.2.3 | Handle `execCommandApproval` → WaitingForChoice | Todo | - |
-| T2.2.4 | Handle `applyPatchApproval` → WaitingForChoice | Todo | - |
-| T2.2.5 | Handle `item/tool/requestUserInput` → WaitingForChoice | Todo | - |
-| T2.2.6 | Handle `item/permissions/requestApproval` → WaitingForChoice | Todo | - |
-| T2.2.7 | Parse `ReviewDecision` response options | Todo | - |
-| T2.2.8 | Write unit tests with Codex request samples | Todo | - |
+| T2.3.1 | Create `CodexClassifier` struct | Todo | - |
+| T2.3.2 | Implement approval request detection | Todo | - |
+| T2.3.3 | Create `CodexApprovalBuilder` for approval requests | Todo | - |
+| T2.3.4 | Parse `ReviewDecision` options from params | Todo | - |
+| T2.3.5 | Register Codex situation builders | Todo | - |
+| T2.3.6 | Write unit tests with Codex samples | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T2.3.T1 | execCommandApproval → CODEX_APPROVAL type |
+| T2.3.T2 | applyPatchApproval → CODEX_APPROVAL type |
+| T2.3.T3 | ReviewDecision options parsed |
+| T2.3.T4 | Codex builder creates WaitingForChoiceSituation |
+| T2.3.T5 | Dangerous command detected (critical=true) |
 
 #### Acceptance Criteria
 
-- All approval requests detected as WaitingForChoice
+- All approval requests detected
 - ReviewDecision options parsed correctly
-- Codex is the provider needing most decision intervention
+- Critical commands flagged
 
 #### Technical Notes
 
 Based on source code analysis (`../codex/codex-rs/app-server-protocol`):
 
 ```rust
-/// Codex output classifier
-pub struct CodexOutputClassifier;
+/// Codex classifier
+pub struct CodexClassifier;
 
-impl OutputClassifier for CodexOutputClassifier {
+impl OutputClassifier for CodexClassifier {
     fn provider_kind(&self) -> ProviderKind {
         ProviderKind::Codex
     }
     
-    fn classify(&self, event: &ProviderEvent) -> ProviderOutputType {
-        // Codex uses ServerRequest pattern for approvals
+    fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType> {
         match event {
-            // Approval requests = WaitingForChoice (Situation 1)
-            ProviderEvent::CodexApprovalRequest { method, params } => {
-                self.classify_approval_request(method, params)
+            // Approval requests = WaitingForChoice (Codex subtype)
+            ProviderEvent::CodexApprovalRequest { method, .. } => {
+                match method.as_str() {
+                    "execCommandApproval" |
+                    "item/commandExecution/requestApproval" |
+                    "applyPatchApproval" |
+                    "item/patch/requestApproval" |
+                    "item/tool/requestUserInput" |
+                    "item/permissions/requestApproval" => Some(
+                        builtin_situations::CODEX_APPROVAL.clone()
+                    ),
+                    _ => None,
+                }
             }
-            
-            // Running events
-            ProviderEvent::AssistantChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::ThinkingChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::GenericToolCallStarted { .. } => ProviderOutputType::Running { event: event.clone() },
             
             // Finished
-            ProviderEvent::Finished => ProviderOutputType::Finished {
-                status: ProviderStatus::ClaimsCompletion {
-                    summary: String::new(),
-                    reflection_rounds: 0,
-                },
-            },
+            ProviderEvent::Finished => Some(builtin_situations::CLAIMS_COMPLETION.clone()),
             
             // Error
-            ProviderEvent::Error { message } => ProviderOutputType::Finished {
-                status: ProviderStatus::Error {
-                    error_type: ErrorType::Failure { message: message.clone() },
-                },
-            },
+            ProviderEvent::CodexError { kind, .. } => Some(
+                SituationType::with_subtype("error", kind.as_str())
+            ),
             
-            _ => ProviderOutputType::Running { event: event.clone() },
-        }
-    }
-    
-    fn classify_approval_request(&self, method: &str, params: &Value) -> ProviderOutputType {
-        match method {
-            // Command execution approval
-            "execCommandApproval" |
-            "item/commandExecution/requestApproval" => {
-                ProviderOutputType::Finished {
-                    status: ProviderStatus::WaitingForChoice {
-                        options: vec![
-                            ChoiceOption { id: "approved".to_string(), label: "Approve".to_string() },
-                            ChoiceOption { id: "approved_for_session".to_string(), label: "Approve for session".to_string() },
-                            ChoiceOption { id: "denied".to_string(), label: "Deny".to_string() },
-                            ChoiceOption { id: "abort".to_string(), label: "Abort".to_string() },
-                        ],
-                    },
-                }
-            }
-            
-            // File modification approval
-            "applyPatchApproval" |
-            "item/fileChange/requestApproval" => {
-                ProviderOutputType::Finished {
-                    status: ProviderStatus::WaitingForChoice {
-                        options: vec![
-                            ChoiceOption { id: "approved".to_string(), label: "Approve".to_string() },
-                            ChoiceOption { id: "denied".to_string(), label: "Deny".to_string() },
-                            ChoiceOption { id: "abort".to_string(), label: "Abort".to_string() },
-                        ],
-                    },
-                }
-            }
-            
-            // User input request
-            "item/tool/requestUserInput" => {
-                ProviderOutputType::Finished {
-                    status: ProviderStatus::WaitingForChoice {
-                        options: vec![
-                            ChoiceOption { id: "input".to_string(), label: "Provide input".to_string() },
-                        ],
-                    },
-                }
-            }
-            
-            // Permission request
-            "item/permissions/requestApproval" => {
-                ProviderOutputType::Finished {
-                    status: ProviderStatus::WaitingForChoice {
-                        options: vec![
-                            ChoiceOption { id: "approved".to_string(), label: "Approve".to_string() },
-                            ChoiceOption { id: "denied".to_string(), label: "Deny".to_string() },
-                        ],
-                    },
-                }
-            }
-            
-            _ => ProviderOutputType::Running { event: ProviderEvent::Status(format!("Unknown Codex request: {}", method)) },
-        }
-    }
-    
-    fn extract_options(&self, event: &ProviderEvent) -> Option<Vec<ChoiceOption>> {
-        match event {
-            ProviderEvent::CodexApprovalRequest { method, .. } => {
-                Some(self.get_approval_options(method))
-            }
+            // Running
             _ => None,
         }
     }
     
-    fn get_approval_options(&self, method: &str) -> Vec<ChoiceOption> {
-        // Based on ReviewDecision type from Codex protocol
-        match method {
-            "execCommandApproval" => vec![
-                ChoiceOption { id: "approved", label: "Approve" },
-                ChoiceOption { id: "approved_for_session", label: "Approve for session" },
-                ChoiceOption { id: "approved_execpolicy_amendment", label: "Approve with policy change" },
-                ChoiceOption { id: "denied", label: "Deny" },
-                ChoiceOption { id: "abort", label: "Abort" },
-            ],
-            "applyPatchApproval" => vec![
-                ChoiceOption { id: "approved", label: "Approve" },
-                ChoiceOption { id: "denied", label: "Deny" },
-                ChoiceOption { id: "abort", label: "Abort" },
-            ],
-            _ => vec![],
+    fn build_situation(
+        &self,
+        event: &ProviderEvent,
+        registry: &SituationRegistry,
+    ) -> Option<Box<dyn DecisionSituation>> {
+        let type = self.classify_type(event)?;
+        registry.build_from_event(type, event)
+    }
+    
+    fn extract_context(&self, event: &ProviderEvent) -> Option<ContextUpdate> {
+        match event {
+            ProviderEvent::PatchApplyStarted { path, .. } => Some(ContextUpdate::FileChange(
+                FileChangeRecord {
+                    path: path.clone(),
+                    change_type: ChangeType::Modified,
+                    diff_preview: None,
+                }
+            )),
+            _ => None,
         }
     }
 }
+
+/// Codex situation builders
+pub fn register_codex_builders(registry: &mut SituationRegistry) {
+    // Codex approval builder
+    registry.register_builder(
+        builtin_situations::CODEX_APPROVAL.clone(),
+        |event: &ProviderEvent| {
+            match event {
+                ProviderEvent::CodexApprovalRequest { method, params, .. } => {
+                    Some(Box::new(WaitingForChoiceSituation {
+                        options: parse_codex_options(method, params),
+                        permission_type: Some(method.clone()),
+                        critical: is_critical_command(params),
+                    }))
+                }
+                _ => None,
+            }
+        },
+    );
+    
+    // Codex error builders
+    registry.register_builder(
+        SituationType::with_subtype("error", "timed_out"),
+        |event: &ProviderEvent| {
+            Some(Box::new(ErrorSituation {
+                error: ErrorInfo {
+                    error_type: "timed_out".to_string(),
+                    message: "Codex timed out".to_string(),
+                    recoverable: true,
+                    retry_count: 0,
+                },
+            }))
+        },
+    );
+}
+
+/// Parse Codex approval options
+fn parse_codex_options(method: &str, params: &serde_json::Value) -> Vec<ChoiceOption> {
+    match method {
+        "execCommandApproval" => vec![
+            ChoiceOption { id: "approved".into(), label: "Approve".into(), description: None },
+            ChoiceOption { id: "approved_for_session".into(), label: "Approve for session".into(), description: None },
+            ChoiceOption { id: "denied".into(), label: "Deny".into(), description: None },
+            ChoiceOption { id: "abort".into(), label: "Abort".into(), description: None },
+        ],
+        "applyPatchApproval" => vec![
+            ChoiceOption { id: "approved".into(), label: "Approve patch".into(), description: None },
+            ChoiceOption { id: "approved_for_session".into(), label: "Approve for session".into(), description: None },
+            ChoiceOption { id: "denied".into(), label: "Deny".into(), description: None },
+            ChoiceOption { id: "abort".into(), label: "Abort".into(), description: None },
+        ],
+        "item/tool/requestUserInput" => {
+            // Parse from params
+            params.get("options")
+                .and_then(|o| o.as_array())
+                .map(|arr| arr.iter().filter_map(|v| {
+                    v.get("id").and_then(|id| id.as_str())
+                        .map(|id| ChoiceOption { 
+                            id: id.into(), 
+                            label: v.get("label").and_then(|l| l.as_str()).unwrap_or(id).into(),
+                            description: None,
+                        })
+                }).collect())
+                .unwrap_or_default()
+        },
+        _ => vec![
+            ChoiceOption { id: "approved".into(), label: "Approve".into(), description: None },
+            ChoiceOption { id: "denied".into(), label: "Deny".into(), description: None },
+        ],
+    }
+}
+
+/// Detect critical commands
+fn is_critical_command(params: &serde_json::Value) -> bool {
+    params.get("command")
+        .and_then(|c| c.as_str())
+        .map(|cmd| {
+            cmd.contains("rm -rf") ||
+            cmd.contains("sudo") ||
+            cmd.contains("chmod") ||
+            cmd.contains("drop table") ||
+            cmd.contains("delete from")
+        })
+        .unwrap_or(false)
+}
 ```
 
-**Codex ServerRequest Types** (from `ServerRequest.ts:18`):
-
-| Method | Trigger | Options |
-|--------|---------|---------|
-| `execCommandApproval` | Command execution | approved, approved_for_session, denied, abort |
-| `applyPatchApproval` | File modification | approved, denied, abort |
-| `item/commandExecution/requestApproval` | V2 command | Same as execCommandApproval |
-| `item/fileChange/requestApproval` | V2 file change | Same as applyPatchApproval |
-| `item/tool/requestUserInput` | User input needed | Custom input |
-| `item/permissions/requestApproval` | Permission | approved, denied |
+**Key Finding**: Codex is the provider needing most decision intervention with multiple approval request types.
 
 ---
 
-### Story 2.3: ACP Output Classifier (OpenCode/Kimi)
+### Story 2.4: ACP Classifier (OpenCode/Kimi)
 
 **Priority**: P0
 **Effort**: 4 points
 **Status**: Backlog
 
-Implement unified classifier for ACP protocol used by OpenCode and Kimi-CLI.
+Implement ACP classifier for OpenCode and Kimi permission.asked events.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.3.1 | Create `ACPOutputClassifier` struct | Todo | - |
-| T2.3.2 | Implement `classify()` method for ACP notifications | Todo | - |
-| T2.3.3 | Handle `permission.asked` → WaitingForChoice | Todo | - |
-| T2.3.4 | Handle `session.status.idle` → ClaimsCompletion | Todo | - |
-| T2.3.5 | Handle `session.status.retry` → Error if exhausted | Todo | - |
-| T2.3.6 | Parse permission request patterns | Todo | - |
-| T2.3.7 | Write unit tests with ACP notification samples | Todo | - |
+| T2.4.1 | Create `ACPClassifier` struct | Todo | - |
+| T2.4.2 | Detect `permission.asked` notification | Todo | - |
+| T2.4.3 | Parse permission options (once/always/reject) | Todo | - |
+| T2.4.4 | Detect `session.status.idle` completion | Todo | - |
+| T2.4.5 | Handle retry status (attempt count) | Todo | - |
+| T2.4.6 | Register ACP situation builders | Todo | - |
+| T2.4.7 | Write unit tests with ACP samples | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T2.4.T1 | permission.asked → ACP_PERMISSION type |
+| T2.4.T2 | Permission options parsed (once/always/reject) |
+| T2.4.T3 | session.status.idle → CLAIMS_COMPLETION |
+| T2.4.T4 | session.status.busy → Running |
+| T2.4.T5 | retry (attempt <= 3) → Running |
+| T2.4.T6 | retry (attempt > 3) → ERROR |
 
 #### Acceptance Criteria
 
-- `permission.asked` detected as WaitingForChoice
-- `session.status.idle` detected as ClaimsCompletion
-- Retry exhaustion detected as Error
-- Works for both OpenCode and Kimi-CLI
+- permission.asked detected as WaitingForChoice
+- session.status.idle detected as ClaimsCompletion
+- Retry exhaustion handled as Error
 
 #### Technical Notes
 
-Based on source code analysis (`../opencode/packages/opencode/src/permission/index.ts`, `../opencode/packages/opencode/src/session/status.ts`):
+Based on source code analysis (`../opencode`, `../kimi-cli`):
 
 ```rust
-/// ACP protocol output classifier (OpenCode/Kimi-CLI)
-pub struct ACPOutputClassifier;
+/// ACP classifier (OpenCode/Kimi)
+pub struct ACPClassifier;
 
-impl OutputClassifier for ACPOutputClassifier {
+impl OutputClassifier for ACPClassifier {
     fn provider_kind(&self) -> ProviderKind {
-        // Works for both OpenCode and Kimi
-        ProviderKind::OpenCode // or ProviderKind::Kimi
+        ProviderKind::ACP // Covers both OpenCode and Kimi
     }
     
-    fn classify(&self, event: &ProviderEvent) -> ProviderOutputType {
+    fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType> {
         match event {
-            // ACP notification
-            ProviderEvent::ACPNotification { method, params } => {
-                self.classify_acp_notification(method, params)
+            // Permission asked = WaitingForChoice (ACP subtype)
+            ProviderEvent::ACPNotification { method, params } if method == "permission.asked" => {
+                Some(builtin_situations::ACP_PERMISSION.clone())
+            }
+            
+            // Session status idle = Completion
+            ProviderEvent::ACPNotification { method, params } if method == "session.status" => {
+                let status = params.get("status").and_then(|s| s.as_str()).unwrap_or("busy");
+                match status {
+                    "idle" => Some(builtin_situations::CLAIMS_COMPLETION.clone()),
+                    "retry" => {
+                        let attempt = params.get("attempt").and_then(|a| a.as_u64()).unwrap_or(0);
+                        if attempt > 3 {
+                            Some(SituationType::with_subtype("error", "retry_exhausted"))
+                        } else {
+                            None // Running
+                        }
+                    }
+                    _ => None, // busy, running
+                }
             }
             
             // ACP error
-            ProviderEvent::ACPError { code, message } => ProviderOutputType::Finished {
-                status: ProviderStatus::Error {
-                    error_type: ErrorType::Failure { 
-                        message: format!("{}: {}", code, message) 
-                    },
-                },
-            },
+            ProviderEvent::ACPError { code, .. } => Some(
+                SituationType::with_subtype("error", code.as_str())
+            ),
             
-            // Running events
-            ProviderEvent::AssistantChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            ProviderEvent::ThinkingChunk { .. } => ProviderOutputType::Running { event: event.clone() },
-            
-            _ => ProviderOutputType::Running { event: event.clone() },
+            _ => None,
         }
     }
     
-    fn classify_acp_notification(&self, method: &str, params: &Value) -> ProviderOutputType {
-        match method {
-            // Permission asked = WaitingForChoice (Situation 1)
-            "permission.asked" => ProviderOutputType::Finished {
-                status: ProviderStatus::WaitingForChoice {
-                    options: self.parse_permission_options(params),
-                },
-            },
-            
-            // Session status
-            "session.status" => {
-                let status_type = params.get("status")
-                    .and_then(|s| s.get("type"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("busy");
-                
-                match status_type {
-                    // Idle = ClaimsCompletion (Situation 2)
-                    "idle" => ProviderOutputType::Finished {
-                        status: ProviderStatus::ClaimsCompletion {
-                            summary: String::new(),
-                            reflection_rounds: 0,
-                        },
-                    },
-                    
-                    // Retry exhausted = Error (Situation 4)
-                    "retry" => {
-                        let attempt = params.get("status")
-                            .and_then(|s| s.get("attempt"))
-                            .and_then(|a| a.as_u64())
-                            .unwrap_or(0);
-                        
-                        if attempt > 3 {
-                            ProviderOutputType::Finished {
-                                status: ProviderStatus::Error {
-                                    error_type: ErrorType::Failure {
-                                        message: "Retry exhausted".to_string(),
-                                    },
-                                },
-                            }
-                        } else {
-                            ProviderOutputType::Running { event: ProviderEvent::Status(format!("Retry attempt {}", attempt)) }
-                        }
-                    }
-                    
-                    // Busy = Running
-                    "busy" => ProviderOutputType::Running { event: ProviderEvent::Status("ACP busy".to_string()) },
-                    
-                    _ => ProviderOutputType::Running { event: ProviderEvent::Status(format!("ACP status: {}", status_type)) },
-                }
-            },
-            
-            // Other = Running
-            _ => ProviderOutputType::Running { event: ProviderEvent::Status(format!("ACP notification: {}", method)) },
-        }
+    fn build_situation(
+        &self,
+        event: &ProviderEvent,
+        registry: &SituationRegistry,
+    ) -> Option<Box<dyn DecisionSituation>> {
+        let type = self.classify_type(event)?;
+        registry.build_from_event(type, event)
     }
     
-    fn parse_permission_options(&self, params: &Value) -> Vec<ChoiceOption> {
-        // ACP permission.asked format:
-        // { "permission": "write", "patterns": [...], "always": [...] }
-        vec![
-            ChoiceOption { id: "once".to_string(), label: "Approve once".to_string() },
-            ChoiceOption { id: "always".to_string(), label: "Always approve".to_string() },
-            ChoiceOption { id: "reject".to_string(), label: "Reject".to_string() },
-        ]
-    }
-    
-    fn extract_options(&self, event: &ProviderEvent) -> Option<Vec<ChoiceOption>> {
+    fn extract_context(&self, event: &ProviderEvent) -> Option<ContextUpdate> {
         match event {
-            ProviderEvent::ACPNotification { method, .. } if method == "permission.asked" => {
-                Some(self.parse_permission_options(&serde_json::Value::Null))
+            ProviderEvent::ACPNotification { method, params } if method == "assistant/message" => {
+                params.get("text")
+                    .map(|t| ContextUpdate::KeyOutput(t.as_str().unwrap_or("").into()))
             }
             _ => None,
         }
     }
 }
-```
 
-**ACP Permission Event Format** (from `permission/index.ts:43-61`):
-
-```typescript
-// permission.asked params
-{
-  id: PermissionID,
-  sessionID: SessionID,
-  permission: string,       // "write", "edit", "exec"
-  patterns: string[],       // File paths
-  metadata: object,
-  always: string[],         // "always allow" patterns
-  tool?: { messageID, callID }
+/// ACP situation builders
+pub fn register_acp_builders(registry: &mut SituationRegistry) {
+    // ACP permission builder
+    registry.register_builder(
+        builtin_situations::ACP_PERMISSION.clone(),
+        |event: &ProviderEvent| {
+            match event {
+                ProviderEvent::ACPNotification { params, .. } => {
+                    let permission_type = params.get("permission")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("unknown");
+                    
+                    Some(Box::new(WaitingForChoiceSituation {
+                        options: vec![
+                            ChoiceOption { id: "once".into(), label: "Once".into(), description: None },
+                            ChoiceOption { id: "always".into(), label: "Always for session".into(), description: None },
+                            ChoiceOption { id: "reject".into(), label: "Reject".into(), description: None },
+                        ],
+                        permission_type: Some(permission_type.into()),
+                        critical: is_critical_permission(permission_type, params),
+                    }))
+                }
+                _ => None,
+            }
+        },
+    );
+    
+    // ACP completion builder
+    registry.register_builder(
+        builtin_situations::CLAIMS_COMPLETION.clone(),
+        |event: &ProviderEvent| {
+            Some(Box::new(ClaimsCompletionSituation {
+                summary: "ACP session idle".into(),
+                reflection_rounds: 0,
+                max_reflection_rounds: 2,
+                confidence: 0.8,
+            }))
+        },
+    );
 }
 
-// Reply types
-type Reply = "once" | "always" | "reject"
+/// Detect critical permissions
+fn is_critical_permission(permission_type: &str, params: &serde_json::Value) -> bool {
+    match permission_type {
+        "write" | "edit" => {
+            params.get("path")
+                .and_then(|p| p.as_str())
+                .map(|path| path.contains(".env") || path.contains("credentials"))
+                .unwrap_or(false)
+        },
+        "execute" => {
+            params.get("command")
+                .and_then(|c| c.as_str())
+                .map(|cmd| cmd.contains("rm") || cmd.contains("sudo"))
+                .unwrap_or(false)
+        },
+        _ => false,
+    }
+}
 ```
 
 ---
 
-### Story 2.4: Unified OutputClassifierRegistry
+### Story 2.5: Classifier Initialization and Registration
 
 **Priority**: P0
-**Effort**: 3 points
+**Effort**: 2 points
 **Status**: Backlog
 
-Create registry for provider-specific classifiers with fallback support.
+Implement initialization logic to register all classifiers and builders.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.4.1 | Create `OutputClassifier` trait | Todo | - |
-| T2.4.2 | Create `OutputClassifierRegistry` struct | Todo | - |
-| T2.4.3 | Register Claude classifier | Todo | - |
-| T2.4.4 | Register Codex classifier | Todo | - |
-| T2.4.5 | Register ACP classifier for OpenCode | Todo | - |
-| T2.4.6 | Register ACP classifier for Kimi | Todo | - |
-| T2.4.7 | Implement fallback classifier for unknown providers | Todo | - |
-| T2.4.8 | Write unit tests for registry dispatch | Todo | - |
+| T2.5.1 | Create `DecisionLayerInitializer` struct | Todo | - |
+| T2.5.2 | Implement `initialize_situation_registry()` | Todo | - |
+| T2.5.3 | Implement `initialize_classifier_registry()` | Todo | - |
+| T2.5.4 | Implement `initialize_action_registry()` | Todo | - |
+| T2.5.5 | Write unit tests for initialization | Todo | - |
+
+#### TDD Test Tasks
+
+| Test ID | Definition |
+|---------|------------|
+| T2.5.T1 | All built-in situations registered |
+| T2.5.T2 | All provider classifiers registered |
+| T2.5.T3 | All built-in actions registered |
+| T2.5.T4 | Registry lookup works for all types |
 
 #### Acceptance Criteria
 
-- Registry dispatches to correct classifier by provider
-- Unknown providers handled gracefully
-- All classifiers implement OutputClassifier trait
+- All built-in situations, actions, classifiers registered
+- Initialization order documented
+- Registry ready for use after init
 
 #### Technical Notes
 
 ```rust
-/// Output classifier trait
-pub trait OutputClassifier: Send + Sync {
-    /// Provider kind this classifier handles
-    fn provider_kind(&self) -> ProviderKind;
-    
-    /// Classify provider event
-    fn classify(&self, event: &ProviderEvent) -> ProviderOutputType;
-    
-    /// Extract choice options (if WaitingForChoice)
-    fn extract_options(&self, event: &ProviderEvent) -> Option<Vec<ChoiceOption>>;
-    
-    /// Extract completion summary (if ClaimsCompletion)
-    fn extract_completion_summary(&self, event: &ProviderEvent) -> Option<String>;
+/// Decision layer initializer
+pub struct DecisionLayerInitializer {
+    config: DecisionLayerConfig,
 }
 
-/// Registry for provider-specific classifiers
-pub struct OutputClassifierRegistry {
-    /// Provider-specific classifiers
-    classifiers: HashMap<ProviderKind, Box<dyn OutputClassifier>>,
-    
-    /// Fallback classifier for unknown providers
-    fallback: Box<dyn OutputClassifier>,
-}
-
-impl OutputClassifierRegistry {
-    pub fn new() -> Self {
-        let mut classifiers = HashMap::new();
+impl DecisionLayerInitializer {
+    /// Initialize complete decision layer
+    pub fn initialize(config: DecisionLayerConfig) -> DecisionLayerComponents {
+        // 1. Initialize situation registry with built-ins
+        let mut situation_registry = SituationRegistry::with_builtins();
+        register_claude_builders(&mut situation_registry);
+        register_codex_builders(&mut situation_registry);
+        register_acp_builders(&mut situation_registry);
         
-        // Register provider-specific classifiers
-        classifiers.insert(ProviderKind::Claude, Box::new(ClaudeOutputClassifier));
-        classifiers.insert(ProviderKind::Codex, Box::new(CodexOutputClassifier));
-        classifiers.insert(ProviderKind::OpenCode, Box::new(ACPOutputClassifier));
-        classifiers.insert(ProviderKind::Kimi, Box::new(ACPOutputClassifier));
+        // 2. Initialize action registry with built-ins
+        let mut action_registry = ActionRegistry::with_builtins();
+        // Custom actions can be registered here
+        if let Some(custom_actions) = &config.custom_actions {
+            for action in custom_actions {
+                action_registry.register(action.clone());
+            }
+        }
         
-        Self {
-            classifiers,
-            fallback: Box::new(FallbackClassifier),
-        }
-    }
-    
-    pub fn classify(&self, provider: ProviderKind, event: &ProviderEvent) -> ProviderOutputType {
-        match self.classifiers.get(&provider) {
-            Some(classifier) => classifier.classify(event),
-            None => self.fallback.classify(event),
-        }
-    }
-    
-    pub fn extract_options(&self, provider: ProviderKind, event: &ProviderEvent) -> Option<Vec<ChoiceOption>> {
-        match self.classifiers.get(&provider) {
-            Some(classifier) => classifier.extract_options(event),
-            None => self.fallback.extract_options(event),
+        // 3. Initialize classifier registry
+        let mut classifier_registry = ClassifierRegistry::new(
+            Arc::new(situation_registry)
+        );
+        classifier_registry.register(Box::new(ClaudeClassifier));
+        classifier_registry.register(Box::new(CodexClassifier));
+        classifier_registry.register(Box::new(ACPClassifier));
+        
+        // 4. Return components
+        DecisionLayerComponents {
+            situation_registry: Arc::new(situation_registry),
+            action_registry: Arc::new(action_registry),
+            classifier_registry: Arc::new(classifier_registry),
         }
     }
 }
 
-/// Fallback classifier for unknown providers
-pub struct FallbackClassifier;
-
-impl OutputClassifier for FallbackClassifier {
-    fn provider_kind(&self) -> ProviderKind {
-        ProviderKind::Mock // Placeholder
-    }
-    
-    fn classify(&self, event: &ProviderEvent) -> ProviderOutputType {
-        match event {
-            ProviderEvent::Finished => ProviderOutputType::Finished {
-                status: ProviderStatus::ClaimsCompletion {
-                    summary: String::new(),
-                    reflection_rounds: 0,
-                },
-            },
-            ProviderEvent::Error { message } => ProviderOutputType::Finished {
-                status: ProviderStatus::Error {
-                    error_type: ErrorType::Failure { message: message.clone() },
-                },
-            },
-            _ => ProviderOutputType::Running { event: event.clone() },
-        }
-    }
-    
-    fn extract_options(&self, _event: &ProviderEvent) -> Option<Vec<ChoiceOption>> {
-        None
-    }
-    
-    fn extract_completion_summary(&self, _event: &ProviderEvent) -> Option<String> {
-        None
-    }
+/// Initialized decision layer components
+pub struct DecisionLayerComponents {
+    pub situation_registry: Arc<SituationRegistry>,
+    pub action_registry: Arc<ActionRegistry>,
+    pub classifier_registry: Arc<ClassifierRegistry>,
 }
 ```
 
 ---
 
-## Provider Decision Trigger Summary
+## Architecture Benefits
 
-Based on source code research:
-
-| Provider | Waiting for Choice | Completion | Error |
-|----------|-------------------|------------|-------|
-| **Claude** | None (bypassPermissions) | `Finished` event | `Error` event |
-| **Codex** | `execCommandApproval`, `applyPatchApproval`, `requestUserInput` | No explicit marker | `timed_out`, `abort` |
-| **ACP (OpenCode/Kimi)** | `permission.asked` | `session.status.idle` | No explicit ACP error |
-
-**Key Insights**:
-
-1. **Claude**: Least decision intervention needed - only claims completion and errors
-2. **Codex**: Most decision intervention - many approval requests
-3. **ACP**: Standardized protocol with clear waiting markers
+| Aspect | Before (Enum) | After (Trait) |
+|--------|--------------|---------------|
+| New provider support | Modify enum + all match branches | Implement classifier + register |
+| Provider-specific data | Fixed fields in enum | Custom situation struct |
+| Critical detection | Hardcoded logic | Builder function logic |
 
 ---
 
@@ -593,22 +814,22 @@ Based on source code research:
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| Protocol changes in providers | Low | Medium | Sample collection, version detection |
-| Missing edge cases | Medium | Low | Comprehensive test samples |
-| Classifier performance | Low | Low | Benchmark tests |
+| Builder registration order | Low | Medium | Clear init order documentation |
+| Parser complexity for LLM output | Medium | Medium | Standardized output format |
 
 ## Sprint Deliverables
 
 - `decision/src/classifier.rs` - OutputClassifier trait
-- `decision/src/claude_classifier.rs` - Claude classifier
-- `decision/src/codex_classifier.rs` - Codex classifier
-- `decision/src/acp_classifier.rs` - ACP classifier
-- Unit tests with real provider event samples
+- `decision/src/classifier_registry.rs` - ClassifierRegistry
+- `decision/src/claude_classifier.rs` - ClaudeClassifier + builders
+- `decision/src/codex_classifier.rs` - CodexClassifier + builders
+- `decision/src/acp_classifier.rs` - ACPClassifier + builders
+- `decision/src/initializer.rs` - DecisionLayerInitializer
 
 ## Dependencies
 
-- Sprint 1: Core Types (ProviderStatus, ProviderOutputType)
+- Sprint 1: DecisionSituation trait, SituationRegistry, ActionType
 
 ## Next Sprint
 
-After completing this sprint, proceed to [Sprint 3: Decision Engine](./sprint-03-decision-engine.md) for decision engine implementations.
+After completing this sprint, proceed to [Sprint 3: Decision Engine](sprint-03-decision-engine.md) for decision engine implementations using ActionRegistry.

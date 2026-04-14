@@ -1,4 +1,4 @@
-# Sprint 8: Integration
+# Sprint 8: Integration (With Concurrent Processing)
 
 ## Metadata
 
@@ -8,53 +8,119 @@
 - Priority: P0 (Critical)
 - Status: `Backlog`
 - Created: 2026-04-14
+- Updated: 2026-04-14 (Architecture Evolution)
 
 ## TDD Reference
 
 See [Test Specification](test-specification.md) for detailed TDD test tasks:
-- Sprint 8 Tests: T8.1.T1-T8.5.T5 (23 tests)
+- Sprint 8 Tests: T8.1.T1-T8.6.T6 (30 tests)
 - Test execution: Write failing tests first, implement minimum, refactor
+
+## Architecture Evolution
+
+Added **Concurrent Processing Design**:
+- DecisionSessionPool - reuse sessions across agents
+- DecisionRateLimiter - prevent API overload
+- HumanDecisionArbitrator - handle multiple human requests
 
 ## Sprint Goal
 
-Complete integration of Decision Layer with existing agile-agent components: AgentPool, Backlog, Kanban, WorkplaceStore, TUI, and observability systems.
+Complete integration of Decision Layer with existing agile-agent components, plus concurrent processing support for multi-agent scenarios.
 
 ## Stories
 
-### Story 8.1a: AgentSlot Extension for Decision Agent
+### Story 8.1: AgentSlot Extension (Generic Blocked)
 
 **Priority**: P0
 **Effort**: 2 points
 **Status**: Backlog
 
-Extend AgentSlot with Decision Agent support and blocked status.
+Extend AgentSlot to use generic Blocked(BlockedState).
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.1a.1 | Extend `AgentSlotStatus` with BlockedForHumanDecision | Todo | - |
-| T8.1a.2 | Add Decision Agent field to AgentSlot | Todo | - |
-| T8.1a.3 | Add decision_policy field | Todo | - |
-| T8.1a.4 | Implement blocked status setter/getter | Todo | - |
-| T8.1a.5 | Write unit tests for slot extension | Todo | - |
+| T8.1.1 | Update AgentSlotStatus with Blocked(BlockedState) | Todo | - |
+| T8.1.2 | Add Decision Agent field to AgentSlot | Todo | - |
+| T8.1.3 | Implement blocked setter/getter | Todo | - |
+| T8.1.4 | Implement is_blocked_for_human helper | Todo | - |
+| T8.1.5 | Write unit tests for slot extension | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.1.T1 | BlockedForHumanDecision status set correctly |
-| T8.1.T2 | Blocked task stays with blocked agent (KeepAssigned policy) |
+| T8.1.T1 | BlockedForHumanDecision via Blocked(BlockedState) |
+| T8.1.T2 | Blocked task stays with blocked agent |
+| T8.1.T3 | is_blocked() returns true |
+| T8.1.T4 | blocking_reason() returns trait reference |
 
 #### Acceptance Criteria
 
-- AgentSlot holds Decision Agent
-- BlockedForHumanDecision status defined
-- Blocked status setter/getter work
+- AgentSlot uses generic Blocked(BlockedState)
+- BlockingReason trait reference accessible
+- Helper methods work correctly
+
+#### Technical Notes
+
+```rust
+/// Extended AgentSlot (from Sprint 1 Story 1.6)
+pub struct AgentSlot {
+    /// Main agent
+    main_agent: MainAgent,
+    
+    /// Decision Agent for this slot
+    decision_agent: Option<DecisionAgent>,
+    
+    /// Decision Agent creation policy
+    decision_policy: DecisionAgentCreationPolicy,
+    
+    /// Current status
+    status: AgentSlotStatus,
+}
+
+/// Generic status - supports any BlockingReason
+pub enum AgentSlotStatus {
+    Running,
+    Blocked(BlockedState),
+    Idle,
+    Stopped,
+}
+
+impl AgentSlot {
+    pub fn is_blocked(&self) -> bool {
+        matches!(self.status, AgentSlotStatus::Blocked(_))
+    }
+    
+    pub fn is_blocked_for_human(&self) -> bool {
+        match &self.status {
+            AgentSlotStatus::Blocked(state) => {
+                state.reason().reason_type() == "human_decision"
+            }
+            _ => false,
+        }
+    }
+    
+    pub fn blocking_reason(&self) -> Option<&dyn BlockingReason> {
+        match &self.status {
+            AgentSlotStatus::Blocked(state) => Some(state.reason()),
+            _ => None,
+        }
+    }
+    
+    pub fn blocked_elapsed(&self) -> Option<Duration> {
+        match &self.status {
+            AgentSlotStatus::Blocked(state) => Some(state.elapsed()),
+            _ => None,
+        }
+    }
+}
+```
 
 ---
 
-### Story 8.1b: AgentPool Blocked Agent Handling
+### Story 8.2: AgentPool Blocked Handling
 
 **Priority**: P0
 **Effort**: 3 points
@@ -66,77 +132,62 @@ Implement blocked agent handling logic in AgentPool.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.1b.1 | Implement `process_agent_blocked()` in AgentPool | Todo | - |
-| T8.1b.2 | Implement blocked task policy (Keep/Reassign/MarkWaiting) | Todo | - |
-| T8.1b.3 | Implement agent mail notification for blocked | Todo | - |
-| T8.1b.4 | Implement `process_human_response()` for clearing blocked | Todo | - |
-| T8.1b.5 | Implement decision execution on main agent | Todo | - |
-| T8.1b.6 | Write integration tests for blocked flow | Todo | - |
+| T8.2.1 | Implement `process_agent_blocked()` | Todo | - |
+| T8.2.2 | Implement blocked task policy | Todo | - |
+| T8.2.3 | Implement agent mail notification | Todo | - |
+| T8.2.4 | Implement `process_human_response()` | Todo | - |
+| T8.2.5 | Implement decision execution | Todo | - |
+| T8.2.6 | Write integration tests | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.1.T3 | Blocked task reassigned to idle agent (ReassignIfPossible) |
-| T8.1.T4 | Other agents notified via mail |
-| T8.1.T5 | Blocked status cleared on human response |
-| T8.1.T6 | Decision executed on main agent |
+| T8.2.T1 | Blocked status set correctly |
+| T8.2.T2 | Blocked task reassigned (ReassignIfPossible) |
+| T8.2.T3 | Other agents notified via mail |
+| T8.2.T4 | Status cleared on response |
+| T8.2.T5 | Decision executed on main agent |
+| T8.2.T6 | Blocked history recorded |
 
 #### Acceptance Criteria
 
 - AgentPool handles blocked state correctly
 - Blocked task policy configurable
-- Other agents notified when agent blocked
+- Other agents notified when blocked
 
 #### Technical Notes
 
 ```rust
-// Extend AgentSlot in core/src/agent_slot.rs
-pub struct AgentSlot {
-    // Existing fields...
-    
-    /// Decision Agent for this slot
-    decision_agent: Option<DecisionAgent>,
-    
-    /// Decision Agent creation policy
-    decision_policy: DecisionAgentCreationPolicy,
-}
-
-pub enum AgentSlotStatus {
-    // Existing statuses...
-    
-    /// Blocked waiting for human decision
-    BlockedForHumanDecision {
-        decision_request_id: DecisionRequestId,
-        reason: CriticalDecisionReason,
-        blocked_at: Instant,
-        preliminary_analysis: String,
-        options: Vec<ChoiceOption>,
-        recommended: Option<String>,
-    },
-}
-
 impl AgentPool {
-    fn process_agent_blocked(&mut self, agent_id: AgentId, request: HumanDecisionRequest) {
-        // 1. Set blocked status
+    /// Process agent blocked
+    fn process_agent_blocked(&mut self, agent_id: AgentId, blocking: Box<dyn BlockingReason>) {
+        // 1. Create BlockedState
+        let blocked_state = BlockedState::new(blocking);
+        
+        // 2. Set slot status
         let slot = self.get_slot_mut(&agent_id);
-        slot.status = AgentSlotStatus::BlockedForHumanDecision {
-            decision_request_id: request.id.clone(),
-            reason: request.reason.clone(),
-            blocked_at: Instant::now(),
-            preliminary_analysis: request.analysis.context_summary.clone(),
-            options: request.options.clone(),
-            recommended: request.recommendation.clone().map(|r| r.selected),
-        };
+        slot.status = AgentSlotStatus::Blocked(blocked_state.clone());
         
-        // 2. Add to human decision queue
-        self.human_queue.push(request.clone());
-        
-        // 3. Send notification to TUI
-        self.notify_blocked(agent_id, &request);
+        // 3. Handle by blocking type
+        match blocking.reason_type() {
+            "human_decision" => {
+                let request = self.build_human_request(agent_id, blocked_state);
+                self.human_queue.push(request);
+                self.notify_blocked(agent_id, &request);
+            }
+            "resource_waiting" => {
+                // Resource blocking - different handling
+                self.resource_manager.handle_blocked(agent_id);
+            }
+            _ => {
+                // Unknown blocking type - use default
+                self.handle_unknown_blocking(agent_id);
+            }
+        }
         
         // 4. Send mail to other agents
-        self.notify_other_agents(agent_id, request);
+        self.notify_other_agents(agent_id, blocking.description());
         
         // 5. Handle blocked task
         self.handle_blocked_task(agent_id);
@@ -148,71 +199,67 @@ impl AgentPool {
                 // Task stays with blocked agent
             }
             BlockedTaskPolicy::ReassignIfPossible => {
-                // Try to assign to idle agent
-                let task_id = self.get_assigned_task(agent_id);
-                if let Some(idle_agent) = self.find_idle_agent() {
-                    self.reassign_task(task_id, idle_agent);
+                if let Some(task_id) = self.get_assigned_task(agent_id) {
+                    if let Some(idle_agent) = self.find_idle_agent() {
+                        self.reassign_task(task_id, idle_agent);
+                    }
                 }
             }
             BlockedTaskPolicy::MarkWaiting => {
-                // Mark task as waiting in backlog
-                let task_id = self.get_assigned_task(agent_id);
-                self.backlog.mark_waiting(task_id);
-            }
-        }
-    }
-    
-    fn notify_other_agents(&mut self, blocked_agent: AgentId, request: HumanDecisionRequest) {
-        for agent in self.active_agents() {
-            if agent.id != blocked_agent {
-                self.send_mail(MailMessage {
-                    from: blocked_agent.clone(),
-                    to: agent.id.clone(),
-                    type: MailType::AgentBlocked {
-                        agent_id: blocked_agent.clone(),
-                        reason: format!("Waiting for human decision: {}", request.decision_type),
-                    },
-                    priority: MailPriority::Info,
-                });
+                if let Some(task_id) = self.get_assigned_task(agent_id) {
+                    self.backlog.mark_waiting(task_id);
+                }
             }
         }
     }
     
     fn process_human_response(&mut self, response: HumanDecisionResponse) {
-        // 1. Remove from queue
-        let request = self.human_queue.complete(response.request_id.clone());
+        // 1. Get request from queue
+        let request = self.human_queue.complete(response.clone());
         
-        // 2. Clear blocked status
-        let agent_id = request.agent_id.clone();
-        self.clear_blocked_status(&agent_id);
+        // 2. Get agent
+        let agent_id = request.agent_id;
+        let slot = self.get_slot_mut(&agent_id);
         
-        // 3. Execute decision
+        // 3. Clear blocked status
+        slot.status = AgentSlotStatus::Running;
+        
+        // 4. Execute decision
         self.execute_decision(agent_id, response.selection);
-        
-        // 4. Record in history
-        self.human_queue.history.push(response);
     }
-}
-
-/// Blocked task policy
-pub enum BlockedTaskPolicy {
-    /// Keep task assigned to blocked agent
-    KeepAssigned,
     
-    /// Try to reassign to idle agent
-    ReassignIfPossible,
-    
-    /// Mark task as waiting in backlog
-    MarkWaiting,
+    fn execute_decision(&mut self, agent_id: AgentId, selection: HumanSelection) {
+        let slot = self.get_slot(&agent_id);
+        
+        match selection {
+            HumanSelection::Selected { option_id } => {
+                slot.main_agent.send_selection(option_id)?;
+            }
+            HumanSelection::AcceptedRecommendation => {
+                if let Some(rec) = &slot.blocking_reason().unwrap().recommendation() {
+                    rec.action.execute(&context, &mut slot.main_agent)?;
+                }
+            }
+            HumanSelection::Custom { instruction } => {
+                slot.main_agent.send_prompt(instruction)?;
+            }
+            HumanSelection::Skipped => {
+                self.skip_current_task(agent_id);
+            }
+            HumanSelection::Cancelled => {
+                slot.main_agent.cancel_current_operation();
+            }
+        }
+    }
 }
 ```
 
 ---
 
-### Story 8.2: Integration with Backlog and Kanban
+### Story 8.3: Integration with Backlog and Kanban
 
 **Priority**: P0
-**Effort**: 4 points
+**Effort**: 3 points
 **Status**: Backlog
 
 Integrate Decision Layer with task management.
@@ -221,22 +268,21 @@ Integrate Decision Layer with task management.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.2.1 | Implement task completion notification | Todo | - |
-| T8.2.2 | Implement task failure marking | Todo | - |
-| T8.2.3 | Implement next task selection | Todo | - |
-| T8.2.4 | Implement PR submission trigger | Todo | - |
-| T8.2.5 | Implement story completion detection | Todo | - |
-| T8.2.6 | Write integration tests with kanban | Todo | - |
+| T8.3.1 | Implement task completion notification | Todo | - |
+| T8.3.2 | Implement task failure marking | Todo | - |
+| T8.3.3 | Implement next task selection | Todo | - |
+| T8.3.4 | Implement PR submission trigger | Todo | - |
+| T8.3.5 | Write integration tests | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.2.T1 | Task completion moves Kanban to Done |
-| T8.2.T2 | Task failure moves Kanban to Failed |
-| T8.2.T3 | Next task selected from Todo |
-| T8.2.T4 | Story definition loaded correctly |
-| T8.2.T5 | Task definition loaded correctly |
+| T8.3.T1 | Task completion moves Kanban to Done |
+| T8.3.T2 | Task failure moves Kanban to Failed |
+| T8.3.T3 | Next task selected from Todo |
+| T8.3.T4 | Story definition loaded |
+| T8.3.T5 | Task definition loaded |
 
 #### Acceptance Criteria
 
@@ -244,71 +290,12 @@ Integrate Decision Layer with task management.
 - Task failure handled correctly
 - Next task selection works
 
-#### Technical Notes
-
-```rust
-impl DecisionAgent {
-    fn on_task_complete(&mut self, task_id: TaskId) -> Result<()> {
-        // 1. Update Kanban status
-        let kanban = self.workplace.kanban()?;
-        kanban.move_task(task_id, KanbanColumn::Done)?;
-        
-        // 2. Clear task context
-        self.archive_task(&task_id)?;
-        
-        // 3. Select next task
-        self.select_next_task()?;
-        
-        Ok(())
-    }
-    
-    fn on_task_failed(&mut self, task_id: TaskId) -> Result<()> {
-        // 1. Update Kanban status
-        let kanban = self.workplace.kanban()?;
-        kanban.move_task(task_id, KanbanColumn::Failed)?;
-        
-        // 2. Annotate with failure reason
-        kanban.annotate_task(task_id, "Failed after recovery exhausted")?;
-        
-        // 3. Select next task
-        self.select_next_task()?;
-        
-        Ok(())
-    }
-    
-    fn select_next_task(&mut self) -> Result<Option<TaskId>> {
-        // 1. Get backlog
-        let backlog = self.workplace.backlog()?;
-        
-        // 2. Pick from Todo column
-        let next = backlog.pick_from_todo()?;
-        
-        // 3. Assign to main agent
-        if let Some(task_id) = next {
-            self.main_agent.assign_task(task_id)?;
-        }
-        
-        Ok(next)
-    }
-    
-    fn load_task_definition(&self, task_id: TaskId) -> Result<TaskDefinition> {
-        let backlog = self.workplace.backlog()?;
-        backlog.get_task(task_id)
-    }
-    
-    fn load_story_definition(&self, story_id: StoryId) -> Result<StoryDefinition> {
-        let backlog = self.workplace.backlog()?;
-        backlog.get_story(story_id)
-    }
-}
-```
-
 ---
 
-### Story 8.3: Integration with WorkplaceStore
+### Story 8.4: Integration with WorkplaceStore
 
 **Priority**: P0
-**Effort**: 3 points
+**Effort**: 2 points
 **Status**: Backlog
 
 Integrate Decision Layer persistence with WorkplaceStore.
@@ -317,20 +304,20 @@ Integrate Decision Layer persistence with WorkplaceStore.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.3.1 | Create decision persistence directory structure | Todo | - |
-| T8.3.2 | Implement Decision Agent persistence integration | Todo | - |
-| T8.3.3 | Implement Decision Agent restore on startup | Todo | - |
-| T8.3.4 | Implement project rules loading (CLAUDE.md) | Todo | - |
-| T8.3.5 | Write integration tests for persistence | Todo | - |
+| T8.4.1 | Create decision persistence path | Todo | - |
+| T8.4.2 | Implement Decision Agent persistence | Todo | - |
+| T8.4.3 | Implement Decision Agent restore | Todo | - |
+| T8.4.4 | Implement project rules loading | Todo | - |
+| T8.4.5 | Write integration tests | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.3.T1 | Decision directory created |
-| T8.3.T2 | Decision state persisted |
-| T8.3.T3 | Decision agent restored |
-| T8.3.T4 | CLAUDE.md rules loaded |
+| T8.4.T1 | Decision directory created |
+| T8.4.T2 | Decision state persisted |
+| T8.4.T3 | Decision agent restored |
+| T8.4.T4 | CLAUDE.md rules loaded |
 
 #### Acceptance Criteria
 
@@ -338,63 +325,12 @@ Integrate Decision Layer persistence with WorkplaceStore.
 - Decision Agent restored on startup
 - Project rules loaded from workplace
 
-#### Technical Notes
-
-```rust
-// Persistence path structure
-// ~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/decision/
-// ├── state.json           # DecisionAgentState
-// ├── context_cache.json   # RunningContextCache
-// ├── transcript.json      # Decision history
-// └── session.json         # Provider session
-
-impl WorkplaceStore {
-    fn decision_path(&self, agent_id: &AgentId) -> PathBuf {
-        self.agents_path()
-            .join(agent_id.to_string())
-            .join("decision")
-    }
-    
-    fn ensure_decision_path(&self, agent_id: &AgentId) -> Result<()> {
-        let path = self.decision_path(agent_id);
-        std::fs::create_dir_all(&path)?;
-        Ok(())
-    }
-    
-    fn load_project_rules(&self) -> Result<ProjectRules> {
-        // Load from CLAUDE.md/AGENTS.md in project root
-        let claude_md = self.project_path().join("CLAUDE.md");
-        if claude_md.exists() {
-            ProjectRules::from_file(&claude_md)
-        } else {
-            Ok(ProjectRules::default())
-        }
-    }
-    
-    fn restore_decision_agents(&self) -> Result<Vec<DecisionAgent>> {
-        let mut agents = Vec::new();
-        
-        for agent_dir in self.agents_path().read_dir()? {
-            let agent_id = AgentId::from_path(agent_dir.path());
-            let decision_path = self.decision_path(&agent_id);
-            
-            if decision_path.exists() {
-                let agent = DecisionAgent::restore(&decision_path, self)?;
-                agents.push(agent);
-            }
-        }
-        
-        Ok(agents)
-    }
-}
-```
-
 ---
 
-### Story 8.4: Decision Observability (Metrics, Logs)
+### Story 8.5: Decision Observability
 
 **Priority**: P1
-**Effort**: 4 points
+**Effort**: 3 points
 **Status**: Backlog
 
 Implement observability for Decision Layer.
@@ -403,256 +339,367 @@ Implement observability for Decision Layer.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.4.1 | Create `DecisionMetrics` struct | Todo | - |
-| T8.4.2 | Implement metrics collection | Todo | - |
-| T8.4.3 | Implement decision logging format | Todo | - |
-| T8.4.4 | Implement metrics aggregation | Todo | - |
-| T8.4.5 | Implement quality tracking | Todo | - |
-| T8.4.6 | Implement CLI metrics commands | Todo | - |
-| T8.4.7 | Write unit tests for observability | Todo | - |
+| T8.5.1 | Create DecisionMetrics struct | Todo | - |
+| T8.5.2 | Implement metrics collection | Todo | - |
+| T8.5.3 | Implement decision logging | Todo | - |
+| T8.5.4 | Implement CLI metrics commands | Todo | - |
+| T8.5.5 | Write unit tests | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.4.T1 | Total decisions tracked |
-| T8.4.T2 | Success rate calculated |
-| T8.4.T3 | Decisions by type tracked |
-| T8.4.T4 | Log format valid JSON |
-| T8.4.T5 | CLI metrics output valid |
+| T8.5.T1 | Total decisions tracked |
+| T8.5.T2 | Success rate calculated |
+| T8.5.T3 | Decisions by type tracked |
+| T8.5.T4 | Log format valid JSON |
+| T8.5.T5 | CLI metrics output valid |
 
 #### Acceptance Criteria
 
 - Metrics collected per decision
 - Logs structured and queryable
-- Quality tracking works
-
-#### Technical Notes
-
-```rust
-pub struct DecisionMetrics {
-    /// Total decisions made
-    total_decisions: u64,
-    
-    /// Successful decisions
-    successful_decisions: u64,
-    
-    /// Success rate
-    success_rate: f64,
-    
-    /// Decisions by type
-    by_type: HashMap<DecisionType, TypeMetrics>,
-    
-    /// Average decision duration
-    avg_duration_ms: u64,
-    
-    /// Timeout count
-    timeout_count: u64,
-    
-    /// Human intervention count
-    human_intervention_count: u64,
-    
-    /// Reflection effectiveness
-    reflection_effectiveness: f64,
-}
-
-impl DecisionAgent {
-    fn record_decision(&mut self, record: DecisionRecord) {
-        // Update metrics
-        self.metrics.total_decisions += 1;
-        
-        if record.output.is_success() {
-            self.metrics.successful_decisions += 1;
-        }
-        
-        // Update type metrics
-        let type_metrics = self.metrics.by_type
-            .entry(record.decision_type())
-            .or_default();
-        type_metrics.count += 1;
-        type_metrics.total_duration_ms += record.duration_ms;
-        
-        // Recalculate averages
-        self.metrics.recalculate();
-    }
-}
-
-/// Decision log format
-pub struct DecisionLog {
-    decision_id: DecisionId,
-    agent_id: AgentId,
-    task_id: Option<TaskId>,
-    timestamp: DateTime<Utc>,
-    trigger_status: ProviderStatus,
-    output: DecisionOutput,
-    engine_type: DecisionEngineType,
-    duration_ms: u64,
-    success: bool,
-    reflection_round: u8,
-    retry_count: u8,
-    context_size_bytes: usize,
-    critical: bool,
-    human_requested: bool,
-}
-
-/// CLI commands
-// agile-agent decision metrics --agent alpha
-// agile-agent decision history --agent alpha --period "last 7 days"
-// agile-agent decision analyze --quality
-
-pub fn decision_metrics_summary(metrics: &DecisionMetrics) -> String {
-    format!(
-        "Decision Metrics:\n\
-         Total: {}\n\
-         Success Rate: {:.1}%\n\
-         Avg Duration: {}ms\n\
-         Human Interventions: {}\n\
-         Reflection Effectiveness: {:.1}%\n\
-         \n\
-         By Type:\n\
-         {}",
-        metrics.total_decisions,
-        metrics.success_rate * 100,
-        metrics.avg_duration_ms,
-        metrics.human_intervention_count,
-        metrics.reflection_effectiveness * 100,
-        metrics.by_type.iter()
-            .map(|(t, m)| format!("  {}: {} decisions", t, m.count))
-            .collect::<Vec<_>>()
-            .join("\n")
-    )
-}
-```
+- CLI commands work
 
 ---
 
-### Story 8.5: Cost Optimization Strategies
+### Story 8.6: Concurrent Processing (Session Pool + Rate Limiter)
 
-**Priority**: P2
-**Effort**: 3 points
+**Priority**: P0
+**Effort**: 4 points
 **Status**: Backlog
 
-Implement cost optimization for decision layer.
+Implement concurrent processing support for multi-agent scenarios.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T8.5.1 | Implement tiered engine selection | Todo | - |
-| T8.5.2 | Implement decision result caching | Todo | - |
-| T8.5.3 | Implement context compression for prompts | Todo | - |
-| T8.5.4 | Implement reflection policy optimization | Todo | - |
-| T8.5.5 | Implement budget tracking | Todo | - |
-| T8.5.6 | Write unit tests for optimization | Todo | - |
+| T8.6.1 | Create `DecisionSessionPool` struct | Todo | - |
+| T8.6.2 | Implement session acquire/release | Todo | - |
+| T8.6.3 | Create `DecisionRateLimiter` struct | Todo | - |
+| T8.6.4 | Implement rate limiting logic | Todo | - |
+| T8.6.5 | Create `HumanDecisionArbitrator` struct | Todo | - |
+| T8.6.6 | Implement arbitration strategies | Todo | - |
+| T8.6.7 | Integrate with AgentPool | Todo | - |
+| T8.6.8 | Write unit tests for concurrent handling | Todo | - |
 
 #### TDD Test Tasks
 
 | Test ID | Definition |
 |---------|------------|
-| T8.5.T1 | Complexity threshold works |
-| T8.5.T2 | Rule engine used for low complexity |
-| T8.5.T3 | LLM engine used for high complexity |
-| T8.5.T4 | Cache returns cached decision |
-| T8.5.T5 | Budget tracked correctly |
+| T8.6.T1 | Session pool acquires session |
+| T8.6.T2 | Session pool releases session |
+| T8.6.T3 | Pool exhausted error returned |
+| T8.6.T4 | Rate limiter blocks over-limit |
+| T8.6.T5 | Rate limiter resets after minute |
+| T8.6.T6 | Arbitrator pops highest priority |
+| T8.6.T7 | Sequential arbitration blocks others |
+| T8.6.T8 | Concurrent requests handled correctly |
 
 #### Acceptance Criteria
 
-- Cost reduced through tiered engines
-- Caching works correctly
-- Budget tracked
+- Session pool manages sessions per provider
+- Rate limiter prevents API overload
+- Human decision arbitrator handles multiple requests
 
 #### Technical Notes
 
 ```rust
-/// Tiered decision engine - use cheaper engine for simple decisions
-pub struct TieredDecisionEngine {
-    /// Rule-based engine (fast, cheap)
-    rule_engine: RuleBasedDecisionEngine,
+/// Decision session pool - reuse sessions across agents
+pub struct DecisionSessionPool {
+    /// Available sessions per provider type
+    available: HashMap<ProviderKind, VecDeque<SessionHandle>>,
     
-    /// LLM engine (expensive, powerful)
-    llm_engine: Option<LLMDecisionEngine>,
+    /// Active sessions (agent_id -> session)
+    active: HashMap<AgentId, SessionHandle>,
     
-    /// Complexity threshold for LLM
-    complexity_threshold: u8,
+    /// Max sessions per provider
+    max_per_provider: usize,
+    
+    /// Session idle timeout
+    idle_timeout_ms: u64,
+    
+    /// Provider factory for creating new sessions
+    provider_factory: ProviderFactory,
 }
 
-impl DecisionEngine for TieredDecisionEngine {
-    fn decide(&mut self, context: DecisionContext) -> Result<DecisionOutput> {
-        // Calculate complexity
-        let complexity = self.calculate_complexity(&context);
-        
-        // Low complexity -> Rule engine
-        if complexity < self.complexity_threshold {
-            return self.rule_engine.decide(context);
+impl DecisionSessionPool {
+    pub fn new(config: SessionPoolConfig, provider_factory: ProviderFactory) -> Self {
+        Self {
+            available: HashMap::new(),
+            active: HashMap::new(),
+            max_per_provider: config.max_per_provider,
+            idle_timeout_ms: config.idle_timeout_ms,
+            provider_factory,
+        }
+    }
+    
+    /// Acquire session for agent
+    pub fn acquire(&mut self, provider: ProviderKind, agent_id: AgentId) -> Result<SessionHandle> {
+        // Check if agent already has session
+        if let Some(session) = self.active.get(&agent_id) {
+            return Ok(session.clone());
         }
         
-        // High complexity -> LLM engine
-        if let Some(llm) = &mut self.llm_engine {
-            return llm.decide(context);
+        // Check available pool
+        if let Some(pool) = self.available.get_mut(&provider) {
+            // Remove expired sessions
+            pool.retain(|s| !s.is_expired());
+            
+            if let Some(session) = pool.pop_front() {
+                self.active.insert(agent_id, session.clone());
+                return Ok(session);
+            }
         }
         
-        // Fallback to rule engine
-        self.rule_engine.decide(context)
-    }
-    
-    fn calculate_complexity(&self, context: &DecisionContext) -> u8 {
-        let mut score = 0;
+        // Create new if under limit
+        let active_count = self.active.values()
+            .filter(|s| s.provider == provider)
+            .count();
         
-        // Many options = complex
-        if let ProviderStatus::WaitingForChoice { options } = &context.trigger_status {
-            if options.len() > 3 { score += 1; }
+        if active_count < self.max_per_provider {
+            let session = self.provider_factory.create_session(provider)?;
+            self.active.insert(agent_id, session.clone());
+            return Ok(session);
         }
         
-        // Completion verification = complex
-        if context.trigger_status.is_completion() { score += 2; }
-        
-        // Large context = complex
-        if context.running_context.size() > 5000 { score += 1; }
-        
-        score
-    }
-}
-
-/// Decision result cache
-pub struct DecisionCache {
-    cache: HashMap<DecisionCacheKey, DecisionOutput>,
-    ttl: Duration,
-}
-
-impl DecisionCache {
-    fn get(&self, context: &DecisionContext) -> Option<DecisionOutput> {
-        let key = DecisionCacheKey::from_context(context);
-        self.cache.get(&key).cloned()
+        // Pool exhausted - wait or error
+        Err(Error::SessionPoolExhausted { provider })
     }
     
-    fn put(&mut self, context: &DecisionContext, output: DecisionOutput) {
-        let key = DecisionCacheKey::from_context(context);
-        self.cache.insert(key, output);
+    /// Release session back to pool
+    pub fn release(&mut self, agent_id: AgentId) {
+        if let Some(session) = self.active.remove(&agent_id) {
+            // Return to available pool
+            self.available.get_mut(&session.provider)
+                .map(|pool| {
+                    // Don't exceed pool size
+                    if pool.len() < self.max_per_provider {
+                        pool.push_back(session);
+                    }
+                });
+        }
+    }
+    
+    /// Cleanup expired sessions
+    pub fn cleanup_expired(&mut self) {
+        for pool in self.available.values_mut() {
+            pool.retain(|s| !s.is_expired());
+        }
+    }
+    
+    /// Get pool statistics
+    pub fn stats(&self) -> SessionPoolStats {
+        SessionPoolStats {
+            total_active: self.active.len(),
+            by_provider: self.available.iter()
+                .map(|(k, v)| (k.clone(), v.len()))
+                .collect(),
+        }
     }
 }
 
-/// Budget tracking
-pub struct DecisionBudget {
-    total_budget: f64,
-    used: f64,
-    warning_threshold: f64,
+/// Session pool configuration
+pub struct SessionPoolConfig {
+    /// Max sessions per provider (default: 3)
+    pub max_per_provider: usize,
+    
+    /// Session idle timeout (default: 30 minutes)
+    pub idle_timeout_ms: u64,
+    
+    /// Enable session reuse
+    pub reuse_enabled: bool,
 }
 
-impl DecisionBudget {
-    fn check(&self, estimated_cost: f64) -> Result<()> {
-        if self.used + estimated_cost > self.total_budget {
-            Err(Error::BudgetExceeded)
-        } else if self.used + estimated_cost > self.warning_threshold {
-            log::warn!("Budget approaching limit: {:.2}/{:.2}", self.used, self.total_budget);
-            Ok(())
+impl Default for SessionPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_per_provider: 3,
+            idle_timeout_ms: 1800000,
+            reuse_enabled: true,
+        }
+    }
+}
+
+/// Decision rate limiter
+pub struct DecisionRateLimiter {
+    /// Requests per minute limit
+    requests_per_minute: u32,
+    
+    /// Current minute counter
+    current_count: u32,
+    
+    /// Minute start time
+    minute_start: Instant,
+    
+    /// Waiting queue
+    waiting: VecDeque<AgentId>,
+}
+
+impl DecisionRateLimiter {
+    pub fn new(requests_per_minute: u32) -> Self {
+        Self {
+            requests_per_minute,
+            current_count: 0,
+            minute_start: Instant::now(),
+            waiting: VecDeque::new(),
+        }
+    }
+    
+    /// Check if request allowed
+    pub fn check(&mut self, agent_id: AgentId) -> RateLimitResult {
+        // Reset counter if minute passed
+        if self.minute_start.elapsed() > Duration::from_secs(60) {
+            self.current_count = 0;
+            self.minute_start = Instant::now();
+            
+            // Process waiting queue
+            if let Some(waiting_id) = self.waiting.pop_front() {
+                self.current_count += 1;
+                return RateLimitResult::Allowed { agent_id: waiting_id };
+            }
+        }
+        
+        if self.current_count < self.requests_per_minute {
+            self.current_count += 1;
+            RateLimitResult::Allowed { agent_id }
         } else {
-            Ok(())
+            self.waiting.push_back(agent_id);
+            RateLimitResult::Waiting { position: self.waiting.len() }
         }
     }
     
-    fn record_usage(&mut self, cost: f64) {
-        self.used += cost;
+    /// Get current status
+    pub fn status(&self) -> RateLimitStatus {
+        RateLimitStatus {
+            current_count: self.current_count,
+            limit: self.requests_per_minute,
+            waiting_count: self.waiting.len(),
+            remaining_in_minute: 60 - self.minute_start.elapsed().as_secs(),
+        }
     }
+}
+
+pub enum RateLimitResult {
+    Allowed { agent_id: AgentId },
+    Waiting { position: usize },
+}
+
+pub struct RateLimitStatus {
+    pub current_count: u32,
+    pub limit: u32,
+    pub waiting_count: usize,
+    pub remaining_in_minute: u64,
+}
+
+/// Human decision arbitrator - handle multiple human requests
+pub struct HumanDecisionArbitrator {
+    /// Pending requests
+    queue: HumanDecisionQueue,
+    
+    /// Current request being handled
+    current: Option<HumanDecisionRequest>,
+    
+    /// Arbitration strategy
+    strategy: ArbitrationStrategy,
+}
+
+pub enum ArbitrationStrategy {
+    /// Handle one at a time, block others
+    Sequential,
+    
+    /// Batch similar requests, handle together
+    BatchSimilar { similarity_threshold: f64 },
+    
+    /// Parallel handling (multiple TUI modals - experimental)
+    Parallel { max_concurrent: usize },
+}
+
+impl HumanDecisionArbitrator {
+    pub fn new(strategy: ArbitrationStrategy, queue: HumanDecisionQueue) -> Self {
+        Self {
+            queue,
+            current: None,
+            strategy,
+        }
+    }
+    
+    /// Submit new request
+    pub fn submit(&mut self, request: HumanDecisionRequest) -> ArbitrationResult {
+        match &self.strategy {
+            ArbitrationStrategy::Sequential => {
+                if self.current.is_some() {
+                    // Add to queue, wait for current to complete
+                    self.queue.push(request);
+                    ArbitrationResult::Queued { position: self.queue.total_pending() }
+                } else {
+                    // Handle immediately
+                    self.current = Some(request.clone());
+                    ArbitrationResult::Immediate { request }
+                }
+            }
+            
+            ArbitrationStrategy::BatchSimilar { similarity_threshold } => {
+                // Check if similar to current
+                if let Some(current) = &self.current {
+                    if self.is_similar(&request, current, *similarity_threshold) {
+                        // Batch with current
+                        self.queue.push(request);
+                        ArbitrationResult::Batched { with: current.id.clone() }
+                    } else {
+                        self.queue.push(request);
+                        ArbitrationResult::Queued { position: self.queue.total_pending() }
+                    }
+                } else {
+                    self.current = Some(request.clone());
+                    ArbitrationResult::Immediate { request }
+                }
+            }
+            
+            ArbitrationStrategy::Parallel { max_concurrent } => {
+                // Allow multiple concurrent (experimental)
+                if self.queue.total_pending() < *max_concurrent {
+                    ArbitrationResult::Immediate { request }
+                } else {
+                    self.queue.push(request);
+                    ArbitrationResult::Queued { position: self.queue.total_pending() }
+                }
+            }
+        }
+    }
+    
+    /// Complete current request
+    pub fn complete(&mut self, response: HumanDecisionResponse) -> Option<HumanDecisionRequest> {
+        let request = self.queue.complete(response);
+        
+        // Move to next in queue
+        self.current = self.queue.pop();
+        
+        request
+    }
+    
+    fn is_similar(&self, a: &HumanDecisionRequest, b: &HumanDecisionRequest, threshold: f64) -> bool {
+        // Similar if same situation type and similar options
+        a.situation_type == b.situation_type &&
+        self.options_similarity(&a.options, &b.options) > threshold
+    }
+    
+    fn options_similarity(&self, a: &[ChoiceOption], b: &[ChoiceOption]) -> f64 {
+        if a.is_empty() || b.is_empty() { return 0.0; }
+        
+        let matching = a.iter()
+            .filter(|opt_a| b.iter().any(|opt_b| opt_a.id == opt_b.id))
+            .count();
+        
+        matching as f64 / a.len().max(b.len()) as f64
+    }
+}
+
+pub enum ArbitrationResult {
+    Immediate { request: HumanDecisionRequest },
+    Queued { position: usize },
+    Batched { with: DecisionRequestId },
 }
 ```
 
@@ -667,38 +714,47 @@ Multi-Agent Runtime with Decision Layer:
 │  MultiAgentRuntime                                                   │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐│
+│  │ DecisionSessionPool                                              ││
+│  │  - Claude sessions: [s1, s2, s3]                                 ││
+│  │  - Codex sessions: [t1, t2]                                      ││
+│  │  - Acquire/Release management                                    ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │ DecisionRateLimiter                                              ││
+│  │  - 20 requests/minute limit                                      ││
+│  │  - Waiting queue                                                 ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │ HumanDecisionArbitrator                                          ││
+│  │  - Sequential strategy (default)                                 ││
+│  │  - Current request + waiting queue                               ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐│
 │  │ AgentPool                                                        ││
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                         ││
 │  │  │ Slot A   │ │ Slot B   │ │ Slot C   │                         ││
-│  │  │ Main     │ │ Main     │ │ Main     │                         ││
-│  │  │ Agent    │ │ Agent    │ │ Agent    │                         ││
-│  │  │ ┌──────┐ │ │ ┌──────┐ │ │ ┌──────┐ │                         ││
-│  │  │ │Dec   │ │ │ │Dec   │ │ │ │Dec   │ │                         ││
-│  │  │ │Agent │ │ │ │Agent │ │ │ │Agent │ │                         ││
-│  │  │ └──────┘ │ │ └──────┘ │ │ └──────┘ │                         ││
+│  │  │ Running  │ │ Blocked  │ │ Running  │                         ││
+│  │  │          │ │(human)   │ │          │                         ││
 │  │  └──────────┘ └──────────┘ └──────────┘                         ││
 │  └─────────────────────────────────────────────────────────────────┘│
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐│
-│  │ HumanDecisionQueue                                               ││
-│  │  - Pending requests                                              ││
-│  │  - History                                                       ││
-│  └─────────────────────────────────────────────────────────────────┘│
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────┐│
 │  │ Shared Components                                                ││
-│  │  - WorkplaceStore                                                ││
-│  │  - Backlog                                                       ││
-│  │  - Kanban                                                        ││
-│  │  - Mail System                                                   ││
-│  │  - ProjectRules                                                  ││
+│  │  - SituationRegistry                                             ││
+│  │  - ActionRegistry                                                ││
+│  │  - ClassifierRegistry                                            ││
+│  │  - BlockingReasonRegistry                                        ││
 │  └─────────────────────────────────────────────────────────────────┘│
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐│
 │  │ Observability                                                    ││
 │  │  - DecisionMetrics                                               ││
 │  │  - DecisionLog                                                   ││
-│  │  - BudgetTracker                                                 ││
+│  │  - SessionPoolStats                                              ││
+│  │  - RateLimitStatus                                               ││
 │  └─────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -709,15 +765,17 @@ Multi-Agent Runtime with Decision Layer:
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| Integration complexity | Medium | Medium | Incremental integration, tests |
-| Blocked state handling | Low | Medium | Clear policy configuration |
-| Metrics overhead | Low | Low | Async collection |
+| Session pool exhaustion | Medium | Medium | Pool size tuning, fallback |
+| Rate limiter starvation | Low | Medium | Priority queue in rate limiter |
+| Arbitration complexity | Low | Low | Start with Sequential strategy |
 
 ## Sprint Deliverables
 
-- `core/src/agent_slot.rs` - Extended with Decision Agent
+- `core/src/agent_slot.rs` - Extended with Blocked(BlockedState)
 - `core/src/agent_pool.rs` - Blocked handling
-- `core/src/decision_integration.rs` - Integration helpers
+- `decision/src/session_pool.rs` - DecisionSessionPool
+- `decision/src/rate_limiter.rs` - DecisionRateLimiter
+- `decision/src/arbitrator.rs` - HumanDecisionArbitrator
 - `decision/src/metrics.rs` - Observability
 - Integration tests
 
@@ -731,17 +789,20 @@ Multi-Agent Runtime with Decision Layer:
 
 After Sprint 8, validate:
 
-1. [ ] Decision Agent created for each Main Agent
-2. [ ] Provider output classified correctly (Claude/Codex/ACP)
-3. [ ] Decision engines work (LLM/CLI/RuleBased)
-4. [ ] Context cache respects limits
-5. [ ] Human intervention works (blocked state)
-6. [ ] Error recovery escalates correctly
-7. [ ] Integration with AgentPool works
-8. [ ] Integration with Kanban works
-9. [ ] Metrics collected
-10. [ ] All tests pass
+1. [ ] SituationRegistry populated with built-in + provider-specific
+2. [ ] ActionRegistry populated with built-in actions
+3. [ ] ClassifierRegistry dispatches correctly
+4. [ ] DecisionSituation trait used throughout
+5. [ ] DecisionAction trait used for output
+6. [ ] BlockingReason trait used for blocked states
+7. [ ] SessionPool manages sessions correctly
+8. [ ] RateLimiter prevents overload
+9. [ ] HumanDecisionArbitrator handles concurrent requests
+10. [ ] Integration with AgentPool works
+11. [ ] Integration with Kanban works
+12. [ ] Metrics collected
+13. [ ] All tests pass
 
 ## Project Complete
 
-This is the final sprint. After completion, the Decision Layer is production-ready and integrated with agile-agent.
+This is the final sprint. After completion, the Decision Layer is production-ready with extensible trait-based architecture and concurrent processing support.
