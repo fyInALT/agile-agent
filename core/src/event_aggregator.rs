@@ -145,6 +145,7 @@ impl PollResult {
 ///
 /// Provides non-blocking polling across all registered channels,
 /// returning events tagged with their source agent ID.
+#[derive(Debug)]
 pub struct EventAggregator {
     /// Map of agent IDs to their event receivers
     receivers: HashMap<AgentId, Receiver<ProviderEvent>>,

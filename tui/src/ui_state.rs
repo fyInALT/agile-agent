@@ -1,11 +1,13 @@
 use agent_core::agent_pool::AgentPool;
 use agent_core::agent_pool::AgentStatusSnapshot;
+use agent_core::agent_runtime::AgentId;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
 use agent_core::app::TranscriptEntry;
+use agent_core::event_aggregator::EventAggregator;
 use agent_core::logging;
-use agent_core::provider::ProviderKind;
+use agent_core::provider::{ProviderEvent, ProviderKind};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::tool_calls::ExecCommandStatus;
@@ -16,6 +18,7 @@ use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::WebSearchAction;
 use anyhow::Result;
 use std::collections::VecDeque;
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
@@ -73,6 +76,8 @@ pub struct TuiState {
     pub agent_view_states: std::collections::HashMap<String, AgentViewState>,
     /// Agent pool for multi-agent management (None in single-agent mode)
     pub agent_pool: Option<AgentPool>,
+    /// Event aggregator for polling all agent channels
+    pub event_aggregator: EventAggregator,
     /// Provider selection overlay (for agent creation)
     pub provider_overlay: Option<ProviderSelectionOverlay>,
     /// Confirmation overlay (for agent stop)
@@ -100,6 +105,7 @@ impl TuiState {
             busy_started_at: None,
             agent_view_states: std::collections::HashMap::new(),
             agent_pool: None,
+            event_aggregator: EventAggregator::new(),
             provider_overlay: None,
             confirmation_overlay: None,
         }
@@ -361,6 +367,90 @@ impl TuiState {
         } else {
             "alpha"
         }
+    }
+
+    /// Start provider request for focused agent in pool
+    ///
+    /// Creates provider thread and registers event channel with AgentSlot.
+    /// Returns the event receiver for polling.
+    pub fn start_provider_for_focused_agent(
+        &mut self,
+        prompt: String,
+        provider: ProviderKind,
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+        // Create agent pool if it doesn't exist
+        if self.agent_pool.is_none() {
+            let workplace_id = self.session.workplace().workplace_id.clone();
+            self.agent_pool = Some(AgentPool::new(workplace_id, 10));
+            // Spawn first agent
+            self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+        }
+
+        let pool = self.agent_pool.as_mut()?;
+        let focused = pool.focused_slot_mut()?;
+
+        // Create event channel
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+        // Get session handle if available
+        let session_handle = focused.session_handle().cloned();
+
+        // Start provider thread
+        let cwd = self.session.app.cwd.clone();
+        if let Err(e) = agent_core::provider::start_provider(
+            provider,
+            prompt,
+            cwd,
+            session_handle,
+            event_tx,
+        ) {
+            self.app_mut().push_error_message(format!("Failed to start provider: {}", e));
+            return None;
+        }
+
+        // Update agent slot status
+        let _ = focused.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+
+        // Note: We don't store the thread handle in AgentSlot here
+        // because start_provider() creates its own thread internally
+        // For full integration, we'd need to refactor start_provider to return the handle
+
+        Some(event_rx)
+    }
+
+    /// Register an event receiver with the event aggregator
+    ///
+    /// This is used for polling events from multiple agents.
+    pub fn register_agent_channel(&mut self, agent_id: AgentId, rx: Receiver<ProviderEvent>) {
+        self.event_aggregator.add_receiver(agent_id.clone(), rx);
+        crate::logging::debug_event(
+            "tui.agent_channel.register",
+            "registered agent event channel",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "total_channels": self.event_aggregator.receiver_count(),
+            }),
+        );
+    }
+
+    /// Unregister an agent's event channel (after agent finishes)
+    pub fn unregister_agent_channel(&mut self, agent_id: &AgentId) {
+        self.event_aggregator.remove_receiver(agent_id);
+    }
+
+    /// Poll all agent event channels
+    pub fn poll_agent_events(&self) -> agent_core::event_aggregator::PollResult {
+        self.event_aggregator.poll_all()
+    }
+
+    /// Poll agent events with timeout
+    pub fn poll_agent_events_with_timeout(&self, timeout: std::time::Duration) -> agent_core::event_aggregator::PollResult {
+        self.event_aggregator.poll_with_timeout(timeout)
+    }
+
+    /// Get count of registered agent channels
+    pub fn agent_channel_count(&self) -> usize {
+        self.event_aggregator.receiver_count()
     }
 
     /// Clear all cached agent view states
