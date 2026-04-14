@@ -258,6 +258,15 @@ impl MailViewState {
         Self::default()
     }
 
+    /// Clamp selected_mail_index to valid range
+    pub fn clamp_selection(&mut self, total_mails: usize) {
+        if total_mails == 0 {
+            self.selected_mail_index = 0;
+        } else if self.selected_mail_index >= total_mails {
+            self.selected_mail_index = total_mails - 1;
+        }
+    }
+
     /// Select next mail
     pub fn select_next(&mut self, total_mails: usize) {
         if total_mails > 0 && self.selected_mail_index < total_mails - 1 {
@@ -516,6 +525,25 @@ mod tests {
         state.cancel_compose();
         assert!(!state.composing);
         assert_eq!(state.compose_buffer, "");
+    }
+
+    #[test]
+    fn mail_view_clamp_selection() {
+        let mut state = MailViewState::new();
+        state.selected_mail_index = 5;
+
+        // Clamp to smaller inbox
+        state.clamp_selection(3);
+        assert_eq!(state.selected_mail_index, 2);
+
+        // Clamp to empty inbox
+        state.clamp_selection(0);
+        assert_eq!(state.selected_mail_index, 0);
+
+        // Clamp when already in range
+        state.selected_mail_index = 1;
+        state.clamp_selection(5);
+        assert_eq!(state.selected_mail_index, 1);
     }
 
     #[test]

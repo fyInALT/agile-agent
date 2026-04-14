@@ -1006,7 +1006,7 @@ fn render_mail_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_mail_list(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+fn render_mail_list(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     if area.height == 0 {
         return;
     }
@@ -1032,6 +1032,8 @@ fn render_mail_list(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     }
 
     let mails = inbox.unwrap();
+    // Clamp selection to valid range (handles inbox shrinking)
+    state.view_state.mail.clamp_selection(mails.len());
     let selected_idx = state.view_state.mail.selected_mail_index;
 
     let lines: Vec<Line> = mails.iter().enumerate().map(|(i, mail)| {
