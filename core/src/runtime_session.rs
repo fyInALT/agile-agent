@@ -261,6 +261,110 @@ impl RuntimeSession {
         self.mark_stopped_and_persist()
     }
 
+    /// Check for shutdown snapshot and restore if exists
+    pub fn check_shutdown_snapshot(&self) -> Option<ShutdownSnapshot> {
+        self.agent_runtime
+            .workplace()
+            .load_shutdown_snapshot()
+            .ok()
+            .flatten()
+    }
+
+    /// Restore session from shutdown snapshot
+    pub fn restore_from_snapshot(
+        launch_cwd: PathBuf,
+        snapshot: ShutdownSnapshot,
+        default_provider: ProviderKind,
+    ) -> Result<Self> {
+        // Use first agent's meta if available, otherwise create new
+        let (agent_meta, was_active, assigned_task_id) = if let Some(first_agent) = snapshot.agents.first() {
+            (first_agent.meta.clone(), first_agent.was_active, first_agent.assigned_task_id.clone())
+        } else {
+            // No agent in snapshot, create default
+            let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
+            workplace.ensure()?;
+            let store = crate::agent_store::AgentStore::new(workplace.clone());
+            let index = store.next_agent_index()?;
+            let runtime = AgentRuntime::new(&workplace, index, default_provider);
+            runtime.persist()?;
+            (runtime.meta().clone(), false, None)
+        };
+
+        let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
+        workplace.ensure()?;
+        let agent_runtime = AgentRuntime::from_meta(agent_meta, workplace.clone());
+
+        let backlog = snapshot.backlog.clone();
+        let skills = SkillRegistry::discover(&launch_cwd);
+
+        let mut workplace_state = SharedWorkplaceState::with_backlog(
+            agent_runtime.meta().workplace_id.clone(),
+            backlog,
+        );
+        workplace_state.skills = skills;
+
+        let mut app = AppState::new(default_provider);
+        app.cwd = launch_cwd.clone();
+
+        // Restore agent state
+        for warning in agent_runtime.apply_to_app_state(&mut app) {
+            app.push_error_message(warning);
+        }
+
+        // Restore transcript
+        if let Err(err) = agent_runtime.restore_transcript(&mut app) {
+            app.push_error_message(format!("failed to restore transcript: {err}"));
+        }
+
+        // Restore state
+        match agent_runtime.restore_state(&mut app) {
+            Ok(result) => {
+                for warning in result.warnings {
+                    app.push_error_message(warning);
+                }
+            }
+            Err(err) => {
+                app.push_error_message(format!("failed to restore state: {err}"));
+            }
+        }
+
+        // Add restore message
+        if was_active {
+            app.push_status_message(format!(
+                "restored agent {} (was interrupted during execution)",
+                agent_runtime.summary()
+            ));
+        } else {
+            app.push_status_message(format!("restored agent {}", agent_runtime.summary()));
+        }
+
+        // Set task if agent had one
+        if let Some(task_id) = assigned_task_id {
+            app.active_task_id = Some(task_id);
+        }
+
+        let session = Self {
+            app,
+            agent_runtime,
+            workplace: workplace_state,
+        };
+
+        // Clear the snapshot after successful restore
+        workplace.clear_shutdown_snapshot()?;
+
+        logging::debug_event(
+            "session.restore_from_snapshot",
+            "restored session from shutdown snapshot",
+            serde_json::json!({
+                "agent_id": session.agent_runtime.agent_id().as_str(),
+                "was_active": was_active,
+                "resume_count": snapshot.resume_count(),
+            }),
+        );
+
+        Ok(session)
+    }
+
     pub fn switch_agent(&mut self, provider_kind: ProviderKind) -> Result<String> {
         self.sync_app_to_workplace();
         self.agent_runtime.sync_from_app_state(&self.app);
@@ -533,5 +637,43 @@ mod tests {
 
         assert!(snapshot.has_active_agents());
         assert!(snapshot.agents[0].needs_resume());
+    }
+
+    #[test]
+    fn restore_from_snapshot_recovers_session() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut first =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap first");
+        first.app.input = "draft input".to_string();
+        first.app.active_task_id = Some("task-restore-1".to_string());
+        let snapshot = first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+
+        let restored =
+            RuntimeSession::restore_from_snapshot(temp.path().into(), snapshot, ProviderKind::Mock)
+                .expect("restore");
+
+        assert_eq!(restored.app.input, "draft input");
+        assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
+    }
+
+    #[test]
+    fn restore_from_snapshot_clears_snapshot_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+        let snapshot = session.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+
+        // Snapshot file exists before restore
+        assert!(session.agent_runtime.workplace().has_shutdown_snapshot());
+
+        RuntimeSession::restore_from_snapshot(temp.path().into(), snapshot, ProviderKind::Mock)
+            .expect("restore");
+
+        // Snapshot file should be cleared after restore
+        let workplace = crate::workplace_store::WorkplaceStore::for_cwd(temp.path())
+            .expect("workplace");
+        assert!(!workplace.has_shutdown_snapshot());
     }
 }
