@@ -69,6 +69,10 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_overlay_open() {
         render_transcript_overlay(frame, state);
     }
+
+    if state.is_provider_overlay_open() {
+        render_provider_selection_overlay(frame, state);
+    }
 }
 
 /// Render the agent status bar showing all agent indicators
@@ -134,6 +138,52 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
+}
+
+/// Render provider selection overlay for agent creation
+fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    use crate::provider_overlay::ProviderSelectionOverlay;
+
+    let overlay = state.provider_overlay.as_ref().expect("overlay should be open");
+    let area = centered_rect(50, 40, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let title = " New Agent - Select Provider ";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    for (index, provider) in overlay.providers.iter().enumerate() {
+        let label = ProviderSelectionOverlay::provider_label(*provider);
+        let selected = index == overlay.selected_index;
+        let marker = if selected { ">" } else { " " };
+        let style = if selected {
+            Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker, style),
+            Span::styled(" ", Style::default()),
+            Span::styled(label, style),
+        ]));
+    }
+
+    // Add hint line
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Enter: select  Esc: cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner_area);
 }
 
 fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rect) {

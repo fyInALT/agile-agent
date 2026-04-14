@@ -24,13 +24,23 @@ fn renders_shell_footer_and_prompt() {
 }
 
 #[test]
-fn tab_creates_new_agent_and_updates_provider_label() {
+fn tab_shows_focus_next_message_when_idle() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
 
     shell.press(KeyCode::Tab, KeyModifiers::NONE);
     let rendered = shell.render_to_string(100, 24);
 
-    assert!(rendered.contains("bravo"));
+    // In single-agent mode, Tab shows focus message
+    assert!(rendered.contains("focus next"));
+}
+
+#[test]
+fn ctrl_p_switches_provider() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+
+    shell.press(KeyCode::Char('p'), KeyModifiers::CONTROL);
+    let rendered = shell.render_to_string(100, 24);
+
     assert!(rendered.contains("codex"));
 }
 

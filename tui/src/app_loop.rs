@@ -26,6 +26,7 @@ use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
 use crate::render::render_app;
 use crate::terminal::AppTerminal;
+use crate::provider_overlay::ProviderSelectionCommand;
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
 
@@ -69,6 +70,30 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key_event) => {
+                    // Handle provider selection overlay
+                    if state.is_provider_overlay_open() {
+                        if let Some(overlay) = state.provider_overlay.as_mut() {
+                            if let Some(command) = overlay.handle_key_event(key_event) {
+                                match command {
+                                    ProviderSelectionCommand::Close => {
+                                        state.close_provider_overlay();
+                                    }
+                                    ProviderSelectionCommand::Select(provider) => {
+                                        state.close_provider_overlay();
+                                        // In multi-agent mode, this would spawn a new agent
+                                        // For now, show status message
+                                        state.app_mut().push_status_message(format!(
+                                            "spawn agent with {} (multi-agent: coming soon)",
+                                            provider.label()
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Handle transcript overlay
                     if state.is_overlay_open() {
                         if key_event.code == KeyCode::Char('t')
                             && key_event.modifiers.contains(KeyModifiers::CONTROL)
@@ -131,7 +156,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             ));
                         }
                         InputOutcome::SpawnAgent => {
-                            state.app_mut().push_status_message("spawn agent (multi-agent: coming soon)");
+                            state.open_provider_overlay();
                         }
                         InputOutcome::StopFocusedAgent => {
                             state.app_mut().push_status_message("stop agent (multi-agent: coming soon)");

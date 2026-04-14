@@ -22,6 +22,7 @@ use crate::streaming::QueueSnapshot;
 use crate::composer::textarea::TextAreaState;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
+use crate::provider_overlay::ProviderSelectionOverlay;
 
 /// Per-agent transcript view state
 ///
@@ -68,6 +69,8 @@ pub struct TuiState {
     pub agent_view_states: std::collections::HashMap<String, AgentViewState>,
     /// Currently focused agent ID (for multi-agent mode)
     pub focused_agent_id: Option<String>,
+    /// Provider selection overlay (for agent creation)
+    pub provider_overlay: Option<ProviderSelectionOverlay>,
 }
 
 impl TuiState {
@@ -91,6 +94,7 @@ impl TuiState {
             busy_started_at: None,
             agent_view_states: std::collections::HashMap::new(),
             focused_agent_id: None,
+            provider_overlay: None,
         }
     }
 
@@ -156,6 +160,26 @@ impl TuiState {
     /// Clear all cached agent view states
     pub fn clear_agent_view_states(&mut self) {
         self.agent_view_states.clear();
+    }
+
+    /// Open provider selection overlay for agent creation
+    pub fn open_provider_overlay(&mut self) {
+        self.provider_overlay = Some(ProviderSelectionOverlay::new());
+    }
+
+    /// Close provider selection overlay
+    pub fn close_provider_overlay(&mut self) {
+        self.provider_overlay = None;
+    }
+
+    /// Check if provider overlay is open
+    pub fn is_provider_overlay_open(&self) -> bool {
+        self.provider_overlay.is_some()
+    }
+
+    /// Check if any overlay is open (transcript or provider)
+    pub fn is_any_overlay_open(&self) -> bool {
+        self.is_overlay_open() || self.is_provider_overlay_open()
     }
 
     fn active_tool_ref(&self) -> Option<&ActiveTool> {

@@ -340,13 +340,36 @@ mod tests {
     }
 
     #[test]
-    fn tab_requests_provider_toggle() {
-        let app = AppState::new(ProviderKind::Mock);
+    fn tab_requests_focus_next_when_idle() {
+        let mut app = AppState::new(ProviderKind::Mock);
+        app.status = AppStatus::Idle;
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::FocusNextAgent));
+    }
+
+    #[test]
+    fn tab_requests_provider_toggle_when_not_idle() {
+        let mut app = AppState::new(ProviderKind::Mock);
+        app.status = AppStatus::Responding;
         let mut state = state_from_app(app);
 
         let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::ToggleProvider));
+    }
+
+    #[test]
+    fn backtab_requests_focus_previous_when_idle() {
+        let mut app = AppState::new(ProviderKind::Mock);
+        app.status = AppStatus::Idle;
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::FocusPreviousAgent));
     }
 
     #[test]

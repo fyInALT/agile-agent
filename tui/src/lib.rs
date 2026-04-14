@@ -13,6 +13,7 @@ mod history_cell;
 mod input;
 mod markdown;
 mod markdown_stream;
+mod provider_overlay;
 mod render;
 mod streaming;
 mod terminal;

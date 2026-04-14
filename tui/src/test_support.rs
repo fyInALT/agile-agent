@@ -108,8 +108,12 @@ impl ShellHarness {
             InputOutcome::ScrollTranscriptDown(rows) => self.state.scroll_transcript_down(rows),
             InputOutcome::ScrollTranscriptHome => self.state.scroll_transcript_home(),
             InputOutcome::ScrollTranscriptEnd => self.state.scroll_transcript_end(),
-            InputOutcome::FocusNextAgent => {}
-            InputOutcome::FocusPreviousAgent => {}
+            InputOutcome::FocusNextAgent => {
+                self.state.app_mut().push_status_message("focus next (multi-agent: coming soon)");
+            }
+            InputOutcome::FocusPreviousAgent => {
+                self.state.app_mut().push_status_message("focus previous (multi-agent: coming soon)");
+            }
             InputOutcome::FocusAgent(_) => {}
             InputOutcome::SpawnAgent => {}
             InputOutcome::StopFocusedAgent => {}
