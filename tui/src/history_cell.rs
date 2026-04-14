@@ -6,6 +6,7 @@ use agent_core::tool_calls::PatchApplyStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
 use agent_core::tool_calls::WebSearchAction;
+use diffy::Patch;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -1443,11 +1444,9 @@ fn render_edit_tool_lines(
     output_preview: Option<&str>,
     success: bool,
     started: bool,
-    width: usize,
-    mode: ToolRenderMode,
+    _width: usize,
+    _mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
-    use crate::diff_render::render_unified_diff_lines;
-
     let mut lines = Vec::new();
 
     let bullet_style = if started {
@@ -1484,19 +1483,11 @@ fn render_edit_tool_lines(
         ]));
     }
 
-    // Render diff lines using unified diff format
+    // Render full diff lines (no truncation) with background colors
     if !started {
         if let Some(diff_text) = build_edit_diff_text(&edit_input) {
-            let diff_lines = render_unified_diff_lines(
-                &diff_text,
-                DETAIL_INITIAL_PREFIX,
-                DETAIL_CONTINUATION_PREFIX,
-            );
-            let truncated = match mode {
-                ToolRenderMode::Preview => truncate_lines_middle(diff_lines, GENERIC_TOOL_PREVIEW_MAX_LINES),
-                ToolRenderMode::Full => diff_lines,
-            };
-            lines.extend(truncated);
+            let diff_lines = render_edit_diff_with_background(&diff_text);
+            lines.extend(diff_lines);
         }
     }
 
@@ -1507,17 +1498,185 @@ fn render_edit_tool_lines(
             || output.trim() == "The file was edited successfully."
             || output.contains("successfully edited");
         if !is_success_message {
-            lines.extend(render_prefixed_tool_output(
-                output,
-                width,
-                DETAIL_INITIAL_PREFIX,
-                DETAIL_CONTINUATION_PREFIX,
-                mode,
-            ));
+            lines.push(Line::from(""));
+            for line in output.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        DETAIL_CONTINUATION_PREFIX,
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(line.to_string(), Style::default().add_modifier(Modifier::DIM)),
+                ]));
+            }
         }
     }
 
     lines
+}
+
+/// Renders diff with background colors for added/removed lines.
+fn render_edit_diff_with_background(diff_text: &str) -> Vec<Line<'static>> {
+    let Ok(patch) = Patch::from_str(diff_text) else {
+        return Vec::new();
+    };
+
+    // Compute line number width
+    let max_line_no = patch
+        .hunks()
+        .iter()
+        .flat_map(|hunk| [hunk.old_range().start(), hunk.new_range().start()])
+        .max()
+        .unwrap_or(1);
+    let line_no_width = max_line_no.to_string().len().max(1);
+
+    let mut lines = Vec::new();
+    let mut first_hunk = true;
+
+    for hunk in patch.hunks() {
+        // Add spacing between hunks
+        if !first_hunk {
+            lines.push(Line::from(""));
+        }
+        first_hunk = false;
+
+        // Render hunk header @@ -X,Y +X,Y @@
+        lines.push(Line::from(vec![
+            Span::styled(
+                DETAIL_CONTINUATION_PREFIX,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!(
+                    "@@ -{} +{} @@",
+                    format_hunk_range(hunk.old_range().start(), hunk.old_range().len()),
+                    format_hunk_range(hunk.new_range().start(), hunk.new_range().len())
+                ),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+
+        let mut old_ln = hunk.old_range().start();
+        let mut new_ln = hunk.new_range().start();
+
+        for line in hunk.lines() {
+            match line {
+                diffy::Line::Insert(text) => {
+                    // Added line: light green background
+                    let content = text.trim_end_matches('\n');
+                    lines.push(render_edit_diff_line(
+                        line_no_width,
+                        None,
+                        Some(new_ln),
+                        '+',
+                        content,
+                        Color::Green,
+                        true, // has background
+                    ));
+                    new_ln += 1;
+                }
+                diffy::Line::Delete(text) => {
+                    // Removed line: light red background
+                    let content = text.trim_end_matches('\n');
+                    lines.push(render_edit_diff_line(
+                        line_no_width,
+                        Some(old_ln),
+                        None,
+                        '-',
+                        content,
+                        Color::Red,
+                        true, // has background
+                    ));
+                    old_ln += 1;
+                }
+                diffy::Line::Context(text) => {
+                    // Context line: no special styling
+                    let content = text.trim_end_matches('\n');
+                    lines.push(render_edit_diff_line(
+                        line_no_width,
+                        Some(old_ln),
+                        Some(new_ln),
+                        ' ',
+                        content,
+                        Color::Reset,
+                        false,
+                    ));
+                    old_ln += 1;
+                    new_ln += 1;
+                }
+            }
+        }
+    }
+
+    lines
+}
+
+fn render_edit_diff_line(
+    line_no_width: usize,
+    old_line_no: Option<usize>,
+    new_line_no: Option<usize>,
+    sign: char,
+    content: &str,
+    fg_color: Color,
+    has_bg: bool,
+) -> Line<'static> {
+    // Line number from the appropriate side
+    let line_no = new_line_no.or(old_line_no);
+    let number = line_no
+        .map(|value| format!("{value:>width$}", width = line_no_width))
+        .unwrap_or_else(|| " ".repeat(line_no_width));
+
+    // Style with light background colors
+    let (bg_color, fg_for_sign) = if has_bg {
+        if fg_color == Color::Green {
+            // Added line: light green background
+            (Some(Color::Indexed(194)), Color::Green) // Light green (#e5f5e5)
+        } else {
+            // Removed line: light red background
+            (Some(Color::Indexed(224)), Color::Red) // Light red (#ffe5e5)
+        }
+    } else {
+        (None, Color::DarkGray)
+    };
+
+    let content_style = if let Some(bg) = bg_color {
+        Style::default().fg(Color::DarkGray).bg(bg)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+
+    let sign_style = if let Some(bg) = bg_color {
+        Style::default().fg(fg_for_sign).bg(bg)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+
+    Line::from(vec![
+        Span::styled(
+            DETAIL_CONTINUATION_PREFIX,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            number,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::raw(" "),
+        Span::styled(sign.to_string(), sign_style),
+        Span::styled(content.to_string(), content_style),
+    ])
+}
+
+fn format_hunk_range(start: usize, len: usize) -> String {
+    if len == 1 {
+        start.to_string()
+    } else {
+        format!("{start},{len}")
+    }
 }
 
 /// Builds a unified diff text from Edit tool input for rendering.
