@@ -283,6 +283,7 @@ impl AgentRuntime {
 
     pub fn persist(&self) -> Result<std::path::PathBuf> {
         self.workplace.touch_meta()?;
+        self.workplace.register_agent(self.meta.agent_id.as_str())?;
         AgentStore::new(self.workplace.clone()).save_meta(&self.meta)
     }
 

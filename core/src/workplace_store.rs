@@ -25,6 +25,8 @@ pub struct WorkplaceMeta {
     pub root_cwd: String,
     pub created_at: String,
     pub updated_at: String,
+    /// List of agent IDs in this workplace (for multi-agent discovery)
+    pub agent_ids: Vec<String>,
 }
 
 impl WorkplaceStore {
@@ -163,6 +165,58 @@ impl WorkplaceStore {
         Ok(())
     }
 
+    /// Register an agent ID in the workplace meta
+    pub fn register_agent(&self, agent_id: &str) -> Result<()> {
+        let mut meta = if self.meta_path().exists() {
+            self.load_meta()?
+        } else {
+            self.default_meta()
+        };
+        if !meta.agent_ids.contains(&agent_id.to_string()) {
+            meta.agent_ids.push(agent_id.to_string());
+            meta.updated_at = Utc::now().to_rfc3339();
+            self.save_meta(&meta)?;
+            logging::debug_event(
+                "workplace.meta.register_agent",
+                "registered agent in workplace metadata",
+                serde_json::json!({
+                    "workplace_id": self.workplace_id.as_str(),
+                    "agent_id": agent_id,
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Unregister an agent ID from the workplace meta
+    pub fn unregister_agent(&self, agent_id: &str) -> Result<()> {
+        if !self.meta_path().exists() {
+            return Ok(());
+        }
+        let mut meta = self.load_meta()?;
+        meta.agent_ids.retain(|id| id != agent_id);
+        meta.updated_at = Utc::now().to_rfc3339();
+        self.save_meta(&meta)?;
+        logging::debug_event(
+            "workplace.meta.unregister_agent",
+            "unregistered agent from workplace metadata",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "agent_id": agent_id,
+            }),
+        );
+        Ok(())
+    }
+
+    /// Get list of agent IDs from workplace meta
+    pub fn agent_ids(&self) -> Result<Vec<String>> {
+        if !self.meta_path().exists() {
+            return Ok(Vec::new());
+        }
+        let meta = self.load_meta()?;
+        Ok(meta.agent_ids)
+    }
+
     fn ensure_meta(&self) -> Result<()> {
         if !self.meta_path().exists() {
             self.save_meta(&self.default_meta())?;
@@ -177,6 +231,7 @@ impl WorkplaceStore {
             root_cwd: self.cwd.display().to_string(),
             created_at: now.clone(),
             updated_at: now,
+            agent_ids: Vec::new(),
         }
     }
 }
@@ -306,6 +361,7 @@ mod tests {
             root_cwd: store.root_cwd().display().to_string(),
             created_at: "2026-04-12T00:00:00Z".to_string(),
             updated_at: "2026-04-12T00:10:00Z".to_string(),
+            agent_ids: vec!["agent_001".to_string()],
         };
 
         store.save_meta(&meta).expect("save meta");
@@ -313,6 +369,40 @@ mod tests {
 
         assert_eq!(loaded.workplace_id, *store.workplace_id());
         assert_eq!(loaded.root_cwd, store.root_cwd().display().to_string());
+        assert_eq!(loaded.agent_ids, vec!["agent_001"]);
+    }
+
+    #[test]
+    fn register_agent_adds_to_list() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        store.register_agent("agent_001").expect("register");
+        let ids = store.agent_ids().expect("agent ids");
+
+        assert_eq!(ids, vec!["agent_001"]);
+
+        // Duplicate registration should not add again
+        store.register_agent("agent_001").expect("register again");
+        let ids = store.agent_ids().expect("agent ids");
+
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn unregister_agent_removes_from_list() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        store.register_agent("agent_001").expect("register 1");
+        store.register_agent("agent_002").expect("register 2");
+
+        store.unregister_agent("agent_001").expect("unregister");
+        let ids = store.agent_ids().expect("agent ids");
+
+        assert_eq!(ids, vec!["agent_002"]);
     }
 
     #[test]
