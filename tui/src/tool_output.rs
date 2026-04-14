@@ -210,6 +210,11 @@ fn render_output_block(
     width: usize,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
+    // Check more specific patterns first (e.g., --stat before general diff)
+    if looks_like_git_diff_stat(input_preview, output) {
+        return render_git_diff_stat_block(output, width, mode);
+    }
+
     if looks_like_diff(input_preview, output) {
         return render_diff_block(output, width, mode);
     }
@@ -220,6 +225,18 @@ fn render_output_block(
 
     if looks_like_git_log(input_preview, output) {
         return render_git_log_block(output, width, mode);
+    }
+
+    if looks_like_git_add(input_preview, output) {
+        return render_git_add_block(output, width, mode);
+    }
+
+    if looks_like_git_commit(input_preview, output) {
+        return render_git_commit_block(output, width, mode);
+    }
+
+    if looks_like_git_branch(input_preview, output) {
+        return render_git_branch_block(output, width, mode);
     }
 
     let formatted = if let Some(compact_json) = format_json_compact(output) {
@@ -240,6 +257,36 @@ fn looks_like_diff(input_preview: Option<&str>, output: &str) -> bool {
 fn looks_like_git_status(input_preview: Option<&str>, output: &str) -> bool {
     input_preview.is_some_and(|input| input.contains("git status"))
         || output.starts_with("On branch ")
+}
+
+fn looks_like_git_diff_stat(input_preview: Option<&str>, output: &str) -> bool {
+    // Check if command contains --stat flag
+    if input_preview.is_some_and(|input| input.contains("git diff") && input.contains("--stat")) {
+        return true;
+    }
+    // git diff --stat output format: "file | +++--- ..." followed by summary line
+    if output.contains("|") && output.contains("+") && output.contains("changed,") {
+        let lines: Vec<&str> = output.lines().collect();
+        if lines.len() >= 2 {
+            let last = lines[lines.len() - 1];
+            return last.contains("file changed") || last.contains("files changed");
+        }
+    }
+    false
+}
+
+fn looks_like_git_add(input_preview: Option<&str>, _output: &str) -> bool {
+    input_preview.is_some_and(|input| input.contains("git add ") && !input.contains("git add --"))
+}
+
+fn looks_like_git_commit(input_preview: Option<&str>, output: &str) -> bool {
+    input_preview.is_some_and(|input| input.contains("git commit"))
+        && !output.is_empty()
+}
+
+fn looks_like_git_branch(input_preview: Option<&str>, output: &str) -> bool {
+    input_preview.is_some_and(|input| input.contains("git branch"))
+        || output.starts_with("* ")
 }
 
 fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
@@ -348,6 +395,125 @@ fn render_git_log_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec
             .collect(),
         body_width + 4,
         |_| Style::default().add_modifier(Modifier::DIM),
+    );
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
+}
+
+fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut file_lines = Vec::new();
+    let mut summary_line = String::new();
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.contains("|") {
+            // Parse diff stat line: "filename | +++--- ###"
+            if let Some((path_part, _changes_part)) = trimmed.split_once('|') {
+                let path = path_part.trim().to_string();
+                file_lines.push(path);
+            }
+        } else if trimmed.contains("changed,") || trimmed.contains("insertion") || trimmed.contains("deletion") {
+            // Summary line like "2 files changed, 180 insertions(+), 21 deletions(-)"
+            summary_line = trimmed.to_string();
+        }
+    }
+
+    // Render file lines with additions/deletions summary
+    for (i, path) in file_lines.iter().enumerate() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                if i == 0 { TOOL_OUTPUT_INITIAL_PREFIX } else { "    " },
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::styled(path.clone(), Style::default().fg(Color::Cyan)),
+        ]));
+    }
+
+    // Render summary line if we have one
+    if !summary_line.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  ",
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::styled(summary_line, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(lines, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => lines,
+    }
+}
+
+fn render_git_add_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+    // git add doesn't produce output on success, but we can show staged files
+    let lines = output.lines().filter(|l| !l.trim().is_empty()).collect::<Vec<_>>();
+    if lines.is_empty() {
+        return vec![Line::from(vec![
+            Span::styled(TOOL_OUTPUT_INITIAL_PREFIX, Style::default().add_modifier(Modifier::DIM)),
+            Span::styled("staged", Style::default().fg(Color::Green)),
+        ])];
+    }
+
+    let body_width = width.saturating_sub(4).max(1);
+    let rendered = render_wrapped_preview_lines(
+        lines.iter().map(|s| s.to_string()).collect(),
+        body_width + 4,
+        |line| {
+            if line.trim().starts_with("'") || line.contains("'") {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().add_modifier(Modifier::DIM)
+            }
+        },
+    );
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
+}
+
+fn render_git_commit_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+    let body_width = width.saturating_sub(4).max(1);
+    let rendered = render_wrapped_preview_lines(
+        output.lines().map(|s| s.to_string()).collect(),
+        body_width + 4,
+        |line| {
+            if line.starts_with("[main") || line.starts_with("[master") || line.starts_with("[") {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().add_modifier(Modifier::DIM)
+            }
+        },
+    );
+    match mode {
+        ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
+        ToolRenderMode::Full => rendered,
+    }
+}
+
+fn render_git_branch_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+    let body_width = width.saturating_sub(4).max(1);
+    let rendered = render_wrapped_preview_lines(
+        output.lines().map(|s| s.to_string()).collect(),
+        body_width + 4,
+        |line| {
+            if line.starts_with('*') {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().add_modifier(Modifier::DIM)
+            }
+        },
     );
     match mode {
         ToolRenderMode::Preview => truncate_rendered_lines_middle(rendered, TOOL_PREVIEW_MAX_LINES),
@@ -710,5 +876,90 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("✗ (128) • 250ms")));
+    }
+
+    #[test]
+    fn git_diff_stat_is_rendered_with_file_changes() {
+        let output_preview = "tui/src/history_cell.rs | 201 ++++++++++++++++++++++++++++----\n1 file changed, 180 insertions(+), 21 deletions(-)";
+        let input_preview = "git diff --stat";
+
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some(&input_preview),
+            Some(&output_preview),
+            true,
+            false,
+            Some(0),
+            Some(150),
+            80,
+            ToolRenderMode::Full,  // Use Full mode to see all output
+        );
+        let rendered = lines_to_strings(&lines);
+
+        eprintln!("Rendered lines: {:?}", rendered);
+
+        // Should show the file path
+        assert!(rendered.iter().any(|line| line.contains("history_cell.rs")), "Expected to find history_cell.rs in output");
+        // Should show summary line
+        assert!(rendered.iter().any(|line| line.contains("1 file changed")), "Expected to find summary in output");
+    }
+
+    #[test]
+    fn git_add_shows_staged_message() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git add src/main.rs"),
+            Some(""),  // git add has no output on success
+            true,
+            false,
+            Some(0),
+            Some(50),
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Empty output from git add should show "(no output)" marker
+        // because the success result line is what indicates completion
+        assert!(rendered.iter().any(|line| line.contains("✓")));
+    }
+
+    #[test]
+    fn git_commit_shows_commit_info() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git commit -m \"fix: update deps\""),
+            Some("[main abc1234] fix: update deps\n 1 file changed, 10 insertions(+), 5 deletions(-)")
+,
+            true,
+            false,
+            Some(0),
+            Some(200),
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show branch name in cyan
+        assert!(rendered.iter().any(|line| line.contains("[main")));
+    }
+
+    #[test]
+    fn git_branch_shows_current_branch() {
+        let lines = render_tool_call_lines(
+            "exec_command",
+            Some("git branch"),
+            Some("  develop\n* main\n  feature/test"),
+            true,
+            false,
+            Some(0),
+            Some(30),
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Current branch should be styled differently
+        assert!(rendered.iter().any(|line| line.contains("* main")));
     }
 }
