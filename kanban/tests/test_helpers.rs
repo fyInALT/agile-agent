@@ -7,7 +7,6 @@ use agent_kanban::events::{KanbanEvent, KanbanEventBus, KanbanEventSubscriber};
 use agent_kanban::repository::KanbanElementRepository;
 use agent_kanban::service::KanbanService;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// Test repository with in-memory storage
@@ -147,19 +146,6 @@ impl EventCollector {
     pub fn clear(&self) {
         self.events.write().unwrap().clear();
     }
-
-    pub fn find_events<F>(&self, predicate: F) -> Vec<KanbanEvent>
-    where
-        F: Fn(&KanbanEvent) -> bool,
-    {
-        self.events
-            .read()
-            .unwrap()
-            .iter()
-            .filter(|e| predicate(e))
-            .cloned()
-            .collect()
-    }
 }
 
 impl KanbanEventSubscriber for EventCollector {
@@ -194,33 +180,6 @@ impl KanbanEventSubscriber for SharedEventCollector {
     }
 }
 
-/// Counting subscriber for verifying event delivery
-pub struct CountingSubscriber {
-    count: Arc<AtomicUsize>,
-}
-
-impl CountingSubscriber {
-    pub fn new() -> Self {
-        CountingSubscriber {
-            count: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    pub fn get_count(&self) -> usize {
-        self.count.load(Ordering::SeqCst)
-    }
-
-    pub fn reset(&self) {
-        self.count.store(0, Ordering::SeqCst);
-    }
-}
-
-impl KanbanEventSubscriber for CountingSubscriber {
-    fn on_event(&self, _event: &KanbanEvent) {
-        self.count.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
 /// Create a fully wired KanbanService with TestRepository and real EventBus
 pub fn create_test_service() -> (
     KanbanService<TestRepository>,
@@ -235,12 +194,4 @@ pub fn create_test_service() -> (
     event_bus.subscribe(Box::new(shared.clone()));
     let service = KanbanService::new(repo.clone(), event_bus.clone());
     (service, repo, event_bus, shared)
-}
-
-/// Create a simple service without subscriber for basic tests
-pub fn create_service() -> (KanbanService<TestRepository>, Arc<TestRepository>) {
-    let repo = Arc::new(TestRepository::new());
-    let event_bus = Arc::new(KanbanEventBus::new());
-    let service = KanbanService::new(repo.clone(), event_bus);
-    (service, repo)
 }

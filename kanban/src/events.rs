@@ -149,9 +149,6 @@ mod tests {
                 count: AtomicUsize::new(0),
             }
         }
-        fn get_count(&self) -> usize {
-            self.count.load(Ordering::SeqCst)
-        }
     }
 
     impl KanbanEventSubscriber for CountingSubscriber {
@@ -169,9 +166,6 @@ mod tests {
             EventCollector {
                 events: RwLock::new(Vec::new()),
             }
-        }
-        fn get_events(&self) -> Vec<KanbanEvent> {
-            self.events.read().unwrap().clone()
         }
     }
 

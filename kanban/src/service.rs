@@ -168,6 +168,12 @@ impl<R: KanbanElementRepository> KanbanService<R> {
 
     /// Add a dependency to an element
     pub fn add_dependency(&self, id: &ElementId, dependency: ElementId) -> Result<(), KanbanError> {
+        if id == &dependency {
+            return Err(KanbanError::InvalidInput(
+                "element cannot depend on itself".to_string(),
+            ));
+        }
+
         let mut element = self
             .repository
             .get(id)?

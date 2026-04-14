@@ -48,6 +48,21 @@ fn test_clear_effort() {
 }
 
 #[test]
+fn test_blocked_reason_accessor() {
+    let mut task = KanbanElement::new_task("Task");
+    assert!(task.blocked_reason().is_none());
+
+    // Block the task
+    task.transition(Status::Backlog).unwrap();
+    task.block("Waiting for deps").unwrap();
+    assert_eq!(task.blocked_reason(), Some("Waiting for deps"));
+
+    // Unblock clears it
+    task.unblock().unwrap();
+    assert!(task.blocked_reason().is_none());
+}
+
+#[test]
 fn test_kanban_element_keywords_accessor() {
     let task = KanbanElement::new_task("Task");
     assert!(task.keywords().is_empty()); // Default is empty
@@ -297,6 +312,43 @@ fn test_block_from_invalid_status_fails() {
     let result = task.block("Some reason");
     assert!(result.is_err());
     assert_eq!(task.status(), Status::Plan);
+}
+
+#[test]
+fn test_block_from_ready_fails() {
+    let mut task = KanbanElement::new_task("Task");
+    task.transition(Status::Backlog).unwrap();
+    task.transition(Status::Ready).unwrap();
+
+    // Ready cannot go to Blocked
+    let result = task.block("Some reason");
+    assert!(result.is_err());
+    assert_eq!(task.status(), Status::Ready);
+}
+
+#[test]
+fn test_block_from_todo_fails() {
+    let mut task = KanbanElement::new_task("Task");
+    task.transition(Status::Backlog).unwrap();
+    task.transition(Status::Ready).unwrap();
+    task.transition(Status::Todo).unwrap();
+
+    // Todo cannot go to Blocked
+    let result = task.block("Some reason");
+    assert!(result.is_err());
+    assert_eq!(task.status(), Status::Todo);
+}
+
+#[test]
+fn test_block_from_blocked_fails() {
+    let mut task = KanbanElement::new_task("Task");
+    task.transition(Status::Backlog).unwrap();
+    task.block("First block").unwrap();
+
+    // Already blocked, cannot block again
+    let result = task.block("Second block");
+    assert!(result.is_err());
+    assert_eq!(task.status(), Status::Blocked);
 }
 
 #[test]

@@ -713,6 +713,17 @@ impl KanbanElement {
         }
     }
 
+    pub fn blocked_reason(&self) -> Option<&str> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.blocked_reason.as_deref(),
+            KanbanElement::Story(s) => s.base.blocked_reason.as_deref(),
+            KanbanElement::Task(t) => t.base.blocked_reason.as_deref(),
+            KanbanElement::Idea(i) => i.base.blocked_reason.as_deref(),
+            KanbanElement::Issue(i) => i.base.blocked_reason.as_deref(),
+            KanbanElement::Tips(t) => t.base.blocked_reason.as_deref(),
+        }
+    }
+
     pub fn keywords(&self) -> &[String] {
         match self {
             KanbanElement::Sprint(s) => &s.base.keywords,

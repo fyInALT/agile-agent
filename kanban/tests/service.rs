@@ -433,6 +433,54 @@ mod dependency_tests {
     }
 
     #[test]
+    fn test_can_start_false_when_dependency_blocked() {
+        let (service, _repo) = create_service();
+
+        // Create dependency task
+        let dep_task = service
+            .create_element(KanbanElement::new_task("Dependency"))
+            .unwrap();
+        let dep_id = dep_task.id().unwrap().clone();
+
+        // Create main task that depends on dep_task
+        let mut main_task = KanbanElement::new_task("Main Task");
+        main_task.base_mut().dependencies.push(dep_id.clone());
+        let main_task = service.create_element(main_task).unwrap();
+        let main_id = main_task.id().unwrap().clone();
+
+        // Plan status blocks can_start
+        assert!(!service.can_start(&main_id).unwrap());
+
+        // Complete the dependency: Plan -> Backlog -> Ready -> Todo -> InProgress -> Done
+        service
+            .update_status(&dep_id, Status::Backlog, "agent-1")
+            .unwrap();
+        assert!(!service.can_start(&main_id).unwrap());
+
+        service
+            .update_status(&dep_id, Status::Ready, "agent-1")
+            .unwrap();
+        assert!(!service.can_start(&main_id).unwrap());
+
+        service
+            .update_status(&dep_id, Status::Todo, "agent-1")
+            .unwrap();
+        assert!(!service.can_start(&main_id).unwrap());
+
+        service
+            .update_status(&dep_id, Status::InProgress, "agent-1")
+            .unwrap();
+        assert!(!service.can_start(&main_id).unwrap());
+
+        service
+            .update_status(&dep_id, Status::Done, "agent-1")
+            .unwrap();
+
+        // Now can_start should return true
+        assert!(service.can_start(&main_id).unwrap());
+    }
+
+    #[test]
     fn test_dependency_blocks_in_progress() {
         let (service, _repo) = create_service();
 
@@ -594,5 +642,23 @@ mod dependency_tests {
 
         let result = service.append_tip(&story_id, "agent-1", "This won't work");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_self_dependency_fails() {
+        let (service, _repo) = create_service();
+
+        let task = service
+            .create_element(KanbanElement::new_task("Task"))
+            .unwrap();
+        let task_id = task.id().unwrap().clone();
+
+        // Try to add self as dependency
+        let result = service.add_dependency(&task_id, task_id.clone());
+        assert!(result.is_err());
+
+        // Verify no dependency was added
+        let updated = service.get_element(&task_id).unwrap().unwrap();
+        assert!(updated.dependencies().is_empty());
     }
 }

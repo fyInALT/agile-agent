@@ -11,30 +11,15 @@ use agent_kanban::service::KanbanService;
 use std::sync::{Arc, RwLock};
 
 /// Full integration test repository that wraps FileKanbanRepository
-/// but also tracks events for verification
 struct IntegrationRepository {
     repo: FileKanbanRepository,
-    events: RwLock<Vec<KanbanEvent>>,
 }
 
 impl IntegrationRepository {
     fn new(path: &std::path::Path) -> Result<Self, agent_kanban::KanbanError> {
         Ok(IntegrationRepository {
             repo: FileKanbanRepository::new(path)?,
-            events: RwLock::new(Vec::new()),
         })
-    }
-
-    fn record_event(&self, event: KanbanEvent) {
-        self.events.write().unwrap().push(event);
-    }
-
-    fn get_events(&self) -> Vec<KanbanEvent> {
-        self.events.read().unwrap().clone()
-    }
-
-    fn clear_events(&self) {
-        self.events.write().unwrap().clear();
     }
 }
 
