@@ -680,6 +680,83 @@ impl KanbanElement {
         }
     }
 
+    pub fn content(&self) -> &str {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.content,
+            KanbanElement::Story(s) => &s.base.content,
+            KanbanElement::Task(t) => &t.base.content,
+            KanbanElement::Idea(i) => &i.base.content,
+            KanbanElement::Issue(i) => &i.base.content,
+            KanbanElement::Tips(t) => &t.base.content,
+        }
+    }
+
+    pub fn priority(&self) -> Priority {
+        match self {
+            KanbanElement::Sprint(s) => s.base.priority,
+            KanbanElement::Story(s) => s.base.priority,
+            KanbanElement::Task(t) => t.base.priority,
+            KanbanElement::Idea(i) => i.base.priority,
+            KanbanElement::Issue(i) => i.base.priority,
+            KanbanElement::Tips(t) => t.base.priority,
+        }
+    }
+
+    pub fn effort(&self) -> Option<u32> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.effort,
+            KanbanElement::Story(s) => s.base.effort,
+            KanbanElement::Task(t) => t.base.effort,
+            KanbanElement::Idea(i) => i.base.effort,
+            KanbanElement::Issue(i) => i.base.effort,
+            KanbanElement::Tips(t) => t.base.effort,
+        }
+    }
+
+    pub fn keywords(&self) -> &[String] {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.keywords,
+            KanbanElement::Story(s) => &s.base.keywords,
+            KanbanElement::Task(t) => &t.base.keywords,
+            KanbanElement::Idea(i) => &i.base.keywords,
+            KanbanElement::Issue(i) => &i.base.keywords,
+            KanbanElement::Tips(t) => &t.base.keywords,
+        }
+    }
+
+    pub fn created_at(&self) -> &chrono::DateTime<chrono::Utc> {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.created_at,
+            KanbanElement::Story(s) => &s.base.created_at,
+            KanbanElement::Task(t) => &t.base.created_at,
+            KanbanElement::Idea(i) => &i.base.created_at,
+            KanbanElement::Issue(i) => &i.base.created_at,
+            KanbanElement::Tips(t) => &t.base.created_at,
+        }
+    }
+
+    pub fn updated_at(&self) -> &chrono::DateTime<chrono::Utc> {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.updated_at,
+            KanbanElement::Story(s) => &s.base.updated_at,
+            KanbanElement::Task(t) => &t.base.updated_at,
+            KanbanElement::Idea(i) => &i.base.updated_at,
+            KanbanElement::Issue(i) => &i.base.updated_at,
+            KanbanElement::Tips(t) => &t.base.updated_at,
+        }
+    }
+
+    pub fn base(&self) -> &BaseElement {
+        match self {
+            KanbanElement::Sprint(s) => &s.base,
+            KanbanElement::Story(s) => &s.base,
+            KanbanElement::Task(t) => &t.base,
+            KanbanElement::Idea(i) => &i.base,
+            KanbanElement::Issue(i) => &i.base,
+            KanbanElement::Tips(t) => &t.base,
+        }
+    }
+
     pub fn base_mut(&mut self) -> &mut BaseElement {
         match self {
             KanbanElement::Sprint(s) => &mut s.base,

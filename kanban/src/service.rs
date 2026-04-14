@@ -205,6 +205,53 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         Ok(())
     }
 
+    /// Update element properties (title, content, priority, assignee)
+    pub fn update_element(
+        &self,
+        id: &ElementId,
+        title: Option<&str>,
+        content: Option<&str>,
+        priority: Option<crate::domain::Priority>,
+        assignee: Option<&str>,
+    ) -> Result<KanbanElement, KanbanError> {
+        let mut element = self
+            .repository
+            .get(id)?
+            .ok_or_else(|| KanbanError::NotFound(id.as_str().to_string()))?;
+
+        let mut changes = Vec::new();
+
+        if let Some(t) = title {
+            element.base_mut().title = t.to_string();
+            changes.push("title".to_string());
+        }
+
+        if let Some(c) = content {
+            element.base_mut().content = c.to_string();
+            changes.push("content".to_string());
+        }
+
+        if let Some(p) = priority {
+            element.base_mut().priority = p;
+            changes.push("priority".to_string());
+        }
+
+        if let Some(a) = assignee {
+            element.base_mut().assignee = Some(a.to_string());
+            changes.push("assignee".to_string());
+        }
+
+        if !changes.is_empty() {
+            self.repository.save(element.clone())?;
+            self.event_bus.publish(KanbanEvent::Updated {
+                element_id: id.clone(),
+                changes,
+            });
+        }
+
+        Ok(element)
+    }
+
     /// Append a tip to a task
     pub fn append_tip(
         &self,
