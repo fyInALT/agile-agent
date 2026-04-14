@@ -14,12 +14,7 @@ pub struct TranscriptCell {
 }
 
 pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
-    build_cells_with_mode(
-        entries,
-        width,
-        ToolRenderMode::Preview,
-        CellSelection::Committed,
-    )
+    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::All)
 }
 
 #[allow(dead_code)]
@@ -1009,15 +1004,12 @@ mod tests {
             "{committed:?}"
         );
         assert!(
-            !committed
+            committed
                 .iter()
                 .any(|line| line.contains("Running printf hello")),
             "{committed:?}"
         );
-        assert!(
-            active.iter().any(|line| line == "• Running printf hello"),
-            "{active:?}"
-        );
+        assert!(active.iter().any(|line| line == "• Running printf hello"), "{active:?}");
     }
 
     #[test]
@@ -1032,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_cells_omit_in_progress_patch_web_search_and_mcp_entries() {
+    fn committed_cells_include_in_progress_patch_web_search_and_mcp_entries() {
         let entries = vec![
             TranscriptEntry::Status("done before".to_string()),
             TranscriptEntry::PatchApply {
@@ -1072,17 +1064,17 @@ mod tests {
             "{committed:?}"
         );
         assert!(
-            !committed.iter().any(|line| line.contains("Applying patch")),
+            committed.iter().any(|line| line.contains("Applying patch")),
             "{committed:?}"
         );
         assert!(
-            !committed
+            committed
                 .iter()
                 .any(|line| line.contains("Searching the web")),
             "{committed:?}"
         );
         assert!(
-            !committed
+            committed
                 .iter()
                 .any(|line| line.contains("Calling search.find_docs")),
             "{committed:?}"

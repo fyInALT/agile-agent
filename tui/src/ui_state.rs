@@ -117,6 +117,9 @@ impl TuiState {
         if chunk.is_empty() {
             return;
         }
+        if !self.active_entries.is_empty() {
+            self.flush_active_entries_to_transcript();
+        }
 
         let mut committed = None;
         let stream = self.ensure_active_stream(kind);
@@ -1126,6 +1129,38 @@ mod tests {
                 kind: StreamTextKind::Assistant,
                 tail,
             }) if tail == "next"
+        ));
+    }
+
+    #[test]
+    fn assistant_stream_flushes_active_exec_entries_into_committed_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.push_active_exec_started(
+            Some("call-1".to_string()),
+            Some("printf hello".to_string()),
+            Some("agent".to_string()),
+        );
+        state.append_active_assistant_chunk("answer");
+
+        assert!(state.active_entries.is_empty());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::ExecCommand {
+                call_id,
+                status: ExecCommandStatus::InProgress,
+                ..
+            }) if call_id.as_deref() == Some("call-1")
+        ));
+        assert!(matches!(
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Assistant,
+                tail,
+            }) if tail == "answer"
         ));
     }
 
