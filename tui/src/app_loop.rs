@@ -26,6 +26,7 @@ use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
 use crate::render::render_app;
 use crate::terminal::AppTerminal;
+use crate::confirmation_overlay::ConfirmationCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
@@ -86,6 +87,28 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                             "spawn agent with {} (multi-agent: coming soon)",
                                             provider.label()
                                         ));
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Handle confirmation overlay
+                    if state.is_confirmation_overlay_open() {
+                        if let Some(overlay) = state.confirmation_overlay.as_mut() {
+                            if let Some(command) = overlay.handle_key_event(key_event) {
+                                match command {
+                                    ConfirmationCommand::Cancel => {
+                                        state.close_confirmation_overlay();
+                                    }
+                                    ConfirmationCommand::Confirm => {
+                                        state.close_confirmation_overlay();
+                                        // In multi-agent mode, this would stop the focused agent
+                                        // For now, show status message
+                                        state.app_mut().push_status_message(
+                                            "stop focused agent (multi-agent: coming soon)",
+                                        );
                                     }
                                 }
                             }
@@ -159,7 +182,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.open_provider_overlay();
                         }
                         InputOutcome::StopFocusedAgent => {
-                            state.app_mut().push_status_message("stop agent (multi-agent: coming soon)");
+                            state.open_stop_confirmation("alpha");
                         }
                         InputOutcome::Quit => state.app_mut().request_quit(),
                         InputOutcome::Submit(user_input) => {

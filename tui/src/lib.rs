@@ -6,6 +6,7 @@ use anyhow::Result;
 
 mod app_loop;
 mod composer;
+mod confirmation_overlay;
 mod diff_render;
 mod exec_command;
 mod exec_semantics;

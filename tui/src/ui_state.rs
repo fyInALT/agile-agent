@@ -23,6 +23,7 @@ use crate::composer::textarea::TextAreaState;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
 use crate::provider_overlay::ProviderSelectionOverlay;
+use crate::confirmation_overlay::ConfirmationOverlay;
 
 /// Per-agent transcript view state
 ///
@@ -71,6 +72,8 @@ pub struct TuiState {
     pub focused_agent_id: Option<String>,
     /// Provider selection overlay (for agent creation)
     pub provider_overlay: Option<ProviderSelectionOverlay>,
+    /// Confirmation overlay (for agent stop)
+    pub confirmation_overlay: Option<ConfirmationOverlay>,
 }
 
 impl TuiState {
@@ -95,6 +98,7 @@ impl TuiState {
             agent_view_states: std::collections::HashMap::new(),
             focused_agent_id: None,
             provider_overlay: None,
+            confirmation_overlay: None,
         }
     }
 
@@ -179,7 +183,22 @@ impl TuiState {
 
     /// Check if any overlay is open (transcript or provider)
     pub fn is_any_overlay_open(&self) -> bool {
-        self.is_overlay_open() || self.is_provider_overlay_open()
+        self.is_overlay_open() || self.is_provider_overlay_open() || self.is_confirmation_overlay_open()
+    }
+
+    /// Open confirmation overlay for stopping agent
+    pub fn open_stop_confirmation(&mut self, agent_name: &str) {
+        self.confirmation_overlay = Some(ConfirmationOverlay::for_stop_agent(agent_name));
+    }
+
+    /// Close confirmation overlay
+    pub fn close_confirmation_overlay(&mut self) {
+        self.confirmation_overlay = None;
+    }
+
+    /// Check if confirmation overlay is open
+    pub fn is_confirmation_overlay_open(&self) -> bool {
+        self.confirmation_overlay.is_some()
     }
 
     fn active_tool_ref(&self) -> Option<&ActiveTool> {

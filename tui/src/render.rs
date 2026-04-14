@@ -73,6 +73,10 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_provider_overlay_open() {
         render_provider_selection_overlay(frame, state);
     }
+
+    if state.is_confirmation_overlay_open() {
+        render_confirmation_overlay(frame, state);
+    }
 }
 
 /// Render the agent status bar showing all agent indicators
@@ -179,6 +183,63 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Enter: select  Esc: cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner_area);
+}
+
+/// Render confirmation overlay for agent stop
+fn render_confirmation_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    use crate::confirmation_overlay::ConfirmationOverlay;
+
+    let overlay = state.confirmation_overlay.as_ref().expect("overlay should be open");
+    let area = centered_rect(40, 30, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let title = " Confirmation ";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+
+    // Action description
+    lines.push(Line::from(Span::styled(
+        overlay.action.clone(),
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )));
+
+    lines.push(Line::from(""));
+
+    // Options
+    let confirm_style = if overlay.selected_index == 0 {
+        Style::default().fg(Color::Black).bg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let cancel_style = if overlay.selected_index == 1 {
+        Style::default().fg(Color::Black).bg(Color::White)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(" [Y] Confirm ", confirm_style),
+        Span::raw("  "),
+        Span::styled(" [N] Cancel ", cancel_style),
+    ]));
+
+    // Hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Y/N or ←→ + Enter",
         Style::default().fg(Color::DarkGray),
     )));
 
