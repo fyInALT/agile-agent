@@ -24,6 +24,7 @@ pub mod provider;
 pub mod provider_thread;
 pub mod providers;
 pub mod runtime_session;
+pub mod shutdown_snapshot;
 pub mod session_store;
 pub mod shared_state;
 pub mod skills;
