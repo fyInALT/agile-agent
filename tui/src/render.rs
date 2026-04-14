@@ -423,7 +423,9 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
 mod tests {
     use super::build_transcript_overlay_lines;
     use super::build_working_line;
+    use crate::ui_state::ActiveExecCall;
     use crate::ui_state::ActiveStream;
+    use crate::ui_state::ActiveTool;
     use crate::ui_state::StreamTextKind;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
@@ -450,7 +452,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
         state.app_mut().status = AppStatus::Responding;
         state.busy_started_at = Some(Instant::now() - Duration::from_secs(8));
-        state.active_entries.push(TranscriptEntry::ExecCommand {
+        state.active_tool = Some(ActiveTool::Exec(vec![ActiveExecCall {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
             allow_exploring_group: true,
@@ -459,7 +461,7 @@ mod tests {
             status: agent_core::tool_calls::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
-        });
+        }]));
 
         let rendered = line_to_string(&build_working_line(&state, 120, Instant::now()));
 
@@ -477,7 +479,7 @@ mod tests {
             .app_mut()
             .transcript
             .push(TranscriptEntry::Status("committed".to_string()));
-        state.active_entries.push(TranscriptEntry::ExecCommand {
+        state.active_tool = Some(ActiveTool::Exec(vec![ActiveExecCall {
             call_id: Some("1".to_string()),
             source: Some("agent".to_string()),
             allow_exploring_group: true,
@@ -486,7 +488,7 @@ mod tests {
             status: agent_core::tool_calls::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
-        });
+        }]));
 
         let entries = state.overlay_entries_for_display();
 

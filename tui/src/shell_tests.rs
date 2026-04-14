@@ -374,16 +374,12 @@ fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
 #[test]
 fn active_cell_height_accounts_for_wrapped_rows() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
-    shell
-        .state
-        .active_entries
-        .push(TranscriptEntry::WebSearch {
-            call_id: Some("search-1".to_string()),
-            query: "example search query with several generic words to exercise wrapping"
-                .to_string(),
-            action: None,
-            started: true,
-        });
+    shell.state.set_active_entry_for_test(TranscriptEntry::WebSearch {
+        call_id: Some("search-1".to_string()),
+        query: "example search query with several generic words to exercise wrapping".to_string(),
+        action: None,
+        started: true,
+    });
 
     let rendered = shell.render_to_string(30, 12);
 

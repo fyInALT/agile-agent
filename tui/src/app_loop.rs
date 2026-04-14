@@ -538,7 +538,7 @@ mod tests {
         handle_provider_terminal_error(&mut state, "provider crashed".to_string())
             .expect("handle error");
 
-        assert!(state.active_entries.is_empty());
+        assert!(state.active_tool_is_empty());
         assert_eq!(state.app().status, AppStatus::Idle);
         assert!(state.app().active_task_had_error);
         assert!(state.app().transcript.iter().any(|entry| {
