@@ -2762,7 +2762,662 @@ impl BackgroundCellBuilder {
 | `memory_usage_many_agents` | Measure memory with 10+ agents |
 | `fps_under_load` | Measure FPS with all agents streaming |
 
-## 16. References
+## 16. Scrum-Style Coordination (Future Vision)
+
+Based on README.md's vision of "Scrum-style coordination between sub-agents", Mail is the foundation but Scrum coordination is the next level.
+
+### 16.1 Scrum Roles for Agents
+
+```rust
+pub enum AgentRole {
+    /// Product Owner - manages backlog priority, acceptance criteria
+    ProductOwner,
+    
+    /// Scrum Master - coordinates agents, removes blockers
+    ScrumMaster,
+    
+    /// Developer - executes tasks, writes code
+    Developer,
+    
+    /// Reviewer - verifies completed work
+    Reviewer,
+}
+
+pub struct RoleAssignment {
+    agent_id: AgentId,
+    role: AgentRole,
+    
+    /// Role-specific permissions
+    permissions: RolePermissions,
+    
+    /// Role-specific responsibilities
+    responsibilities: Vec<Responsibility>,
+}
+
+pub struct RolePermissions {
+    /// Can modify backlog
+    can_modify_backlog: bool,
+    
+    /// Can assign tasks to others
+    can_assign_tasks: bool,
+    
+    /// Can mark tasks complete
+    can_complete_tasks: bool,
+    
+    /// Can escalate blockers
+    can_escalate: bool,
+    
+    /// Can coordinate other agents
+    can_coordinate: bool,
+}
+```
+
+### 16.2 Scrum Events
+
+```rust
+pub enum ScrumEvent {
+    /// Daily sync between agents
+    DailySync {
+        participants: Vec<AgentId>,
+        updates: Vec<AgentDailyUpdate>,
+    },
+    
+    /// Sprint planning - assign backlog items
+    SprintPlanning {
+        sprint_id: SprintId,
+        sprint_goals: Vec<String>,
+        task_assignments: HashMap<AgentId, Vec<TaskId>>,
+    },
+    
+    /// Sprint review - show completed work
+    SprintReview {
+        sprint_id: SprintId,
+        completed_tasks: Vec<TaskCompletionReport>,
+        demo_requests: Vec<DemoRequest>,
+    },
+    
+    /// Sprint retrospective - improve process
+    SprintRetrospective {
+        sprint_id: SprintId,
+        what_went_well: Vec<String>,
+        what_to_improve: Vec<String>,
+        action_items: Vec<ActionItem>,
+    },
+}
+
+pub struct AgentDailyUpdate {
+    agent_id: AgentId,
+    
+    /// What I did yesterday
+    completed: Vec<String>,
+    
+    /// What I'm doing today
+    planned: Vec<String>,
+    
+    /// blockers I'm facing
+    blockers: Vec<String>,
+}
+```
+
+### 16.3 Scrum Coordination Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Sprint Lifecycle                            │
+│                                                                  │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐         │
+│  │Sprint        │   │Daily         │   │Sprint        │         │
+│  │Planning      │──▶│Syncs         │──▶│Review        │         │
+│  │              │   │(multiple)    │   │              │         │
+│  └──────────────┘   └──────────────┘   └──────────────┘         │
+│        │                                        │               │
+│        │                                        │               │
+│        ▼                                        ▼               │
+│  ┌──────────────┐                         ┌──────────────┐      │
+│  │Backlog       │                         │Retrospective │      │
+│  │Assignment    │                         │              │      │
+│  └──────────────┘                         └──────────────┘      │
+│                                                                  │
+│  Agents participate based on their roles                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 16.4 Role-Based Mail Types
+
+```rust
+pub enum ScrumMail {
+    /// Request daily update from agent
+    RequestDailyUpdate { sprint_id: SprintId },
+    
+    /// Submit daily update
+    SubmitDailyUpdate { update: AgentDailyUpdate },
+    
+    /// Report blocker (escalation to Scrum Master)
+    ReportBlocker { 
+        task_id: TaskId,
+        blocker_description: String,
+        needs_help_from: Option<AgentId>,
+    },
+    
+    /// Assign task to agent (Product Owner/Scrum Master)
+    AssignTask { task_id: TaskId },
+    
+    /// Request sprint planning input
+    RequestSprintPlanningInput { sprint_id: SprintId },
+    
+    /// Announce sprint review
+    AnnounceSprintReview { sprint_id: SprintId, time: String },
+}
+```
+
+**Note**: Scrum-style coordination is a future phase. Current design focuses on Mail/Chat as the foundation that enables Scrum later.
+
+## 17. Headless Multi-Agent Support
+
+### 17.1 CLI Commands for Multi-Agent
+
+Current CLI supports single-agent headless. Multi-agent needs new commands:
+
+```bash
+# List all agents in workplace
+agile-agent agent list --all
+
+# Create new agent in headless mode
+agile-agent agent create --provider claude --name my-feature-agent
+
+# Run specific agent headlessly
+agile-agent agent run <agent-id> --task <task-id>
+
+# Run multi-agent sprint
+agile-agent sprint run --max-iterations 5 --agents 3
+
+# Check agent status
+agile-agent agent status <agent-id>
+
+# Stop specific agent
+agile-agent agent stop <agent-id>
+
+# Send mail to agent
+agile-agent agent mail <agent-id> --subject "Help needed" --body "..."
+```
+
+### 17.2 Headless Multi-Agent Run Loop
+
+```rust
+pub struct HeadlessMultiAgentRunner {
+    session: MultiAgentSession,
+    
+    /// Sprint configuration
+    sprint_config: SprintConfig,
+    
+    /// Output format (json, text)
+    output_format: OutputFormat,
+    
+    /// Log file for structured output
+    log_path: PathBuf,
+}
+
+pub struct SprintConfig {
+    /// Max concurrent agents
+    max_agents: usize,
+    
+    /// Max sprint iterations
+    max_iterations: usize,
+    
+    /// Sprint duration limit
+    max_duration: Duration,
+    
+    /// Provider distribution
+    provider_distribution: HashMap<ProviderKind, usize>,
+}
+
+impl HeadlessMultiAgentRunner {
+    pub fn run(&mut self) -> Result<SprintSummary> {
+        // 1. Bootstrap agents based on config
+        self.bootstrap_agents()?;
+        
+        // 2. Assign tasks from backlog
+        self.assign_tasks()?;
+        
+        // 3. Run loop until completion/guardrail
+        loop {
+            // Poll agent events
+            let events = self.session.poll_events(Duration::from_millis(100));
+            
+            for event in events {
+                self.process_event(event)?;
+                self.log_event(&event)?;
+            }
+            
+            // Check guardrails
+            if self.should_stop() {
+                break;
+            }
+        }
+        
+        // 4. Collect sprint summary
+        self.collect_summary()
+    }
+    
+    fn log_event(&self, event: &AgentEvent) -> Result<()> {
+        let entry = json!({
+            "timestamp": Utc::now().to_rfc3339(),
+            "event": event,
+        });
+        // Append to log file
+        Ok(())
+    }
+}
+```
+
+### 17.3 Output Format
+
+```json
+{
+  "sprint_summary": {
+    "sprint_id": "sprint-1",
+    "started_at": "2026-04-13T10:00:00Z",
+    "finished_at": "2026-04-13T12:00:00Z",
+    "agents": [
+      {
+        "agent_id": "agent_001",
+        "provider": "claude",
+        "tasks_completed": 3,
+        "tasks_failed": 0,
+        "tasks_blocked": 1
+      },
+      {
+        "agent_id": "agent_002",
+        "provider": "codex",
+        "tasks_completed": 2,
+        "tasks_failed": 1,
+        "tasks_blocked": 0
+      }
+    ],
+    "total_tasks_completed": 5,
+    "total_tasks_failed": 1,
+    "total_tasks_blocked": 1
+  }
+}
+```
+
+## 18. Integration with V2 Verification/Escalation
+
+### 18.1 Per-Agent Verification
+
+Current verification runs on single agent. Multi-agent needs per-agent verification:
+
+```rust
+pub struct MultiAgentVerificationCoordinator {
+    /// Per-agent verification queues
+    verification_queues: HashMap<AgentId, Vec<VerificationRequest>>,
+    
+    /// Shared verification resources (cargo check, tests)
+    shared_verifications: Vec<SharedVerification>,
+    
+    /// Verification results per agent
+    results: HashMap<AgentId, Vec<VerificationResult>>,
+}
+
+pub struct VerificationRequest {
+    task_id: TaskId,
+    agent_id: AgentId,
+    
+    /// Agent-specific verification (output non-empty)
+    agent_specific: Vec<VerificationCheck>,
+    
+    /// Shared verification (project-wide)
+    shared: Vec<VerificationCheck>,
+}
+
+pub enum VerificationCheck {
+    /// Assistant output non-empty
+    OutputNonEmpty,
+    
+    /// Cargo check passes
+    CargoCheck,
+    
+    /// Cargo test passes for specific package
+    CargoTest { package: String },
+    
+    /// Custom command passes
+    Custom { command: String },
+}
+```
+
+### 18.2 Cross-Agent Verification Dependencies
+
+When multiple agents work on same codebase, verification must coordinate:
+
+```rust
+pub struct VerificationDependency {
+    /// This verification depends on other agents completing
+    depends_on: Vec<AgentId>,
+    
+    /// Wait strategy
+    wait_strategy: WaitStrategy,
+}
+
+pub enum WaitStrategy {
+    /// Wait for all dependencies
+    WaitForAll,
+    
+    /// Wait for any one dependency
+    WaitForAny,
+    
+    /// Proceed after timeout even if dependencies not done
+    ProceedAfterTimeout { timeout: Duration },
+}
+```
+
+### 18.3 Escalation in Multi-Agent Context
+
+Current escalation writes to file. Multi-agent escalation should notify other agents:
+
+```rust
+pub struct MultiAgentEscalation {
+    /// Original escalation content
+    escalation: EscalationRecord,
+    
+    /// Agents to notify
+    notify_agents: Vec<AgentId>,
+    
+    /// Priority level
+    priority: EscalationPriority,
+    
+    /// Requested action from other agents
+    requested_action: Option<CoordinationAction>,
+}
+
+pub enum EscalationPriority {
+    /// Informational, no immediate action needed
+    Info,
+    
+    /// Warning, should be addressed soon
+    Warning,
+    
+    /// Critical, blocks work
+    Critical,
+    
+    /// Emergency, needs immediate attention
+    Emergency,
+}
+```
+
+## 19. Skills Sharing Strategy
+
+### 19.1 Skills Scope Options
+
+Skills can be shared or isolated:
+
+```rust
+pub enum SkillsScope {
+    /// Skills shared across all agents
+    Shared {
+        registry: SkillRegistry,
+    },
+    
+    /// Each agent has its own skill set
+    PerAgent {
+        registries: HashMap<AgentId, SkillRegistry>,
+    },
+    
+    /// Mix: base skills shared, agent-specific skills private
+    Hybrid {
+        shared: SkillRegistry,
+        per_agent: HashMap<AgentId, SkillRegistry>,
+    },
+}
+```
+
+### 19.2 Skill Recommendations
+
+Agents can recommend skills to other agents:
+
+```rust
+pub struct SkillRecommendation {
+    from_agent: AgentId,
+    to_agent: AgentId,
+    
+    /// Recommended skill
+    skill_name: String,
+    
+    /// Reason for recommendation
+    reason: String,
+    
+    /// Context (related task or blocker)
+    context: Option<TaskId>,
+}
+```
+
+### 19.3 Skill Discovery Coordination
+
+When new skills are discovered, notify relevant agents:
+
+```rust
+pub struct SkillDiscoveryEvent {
+    /// New skill discovered
+    skill: SkillMetadata,
+    
+    /// Agents that might benefit
+    suggested_agents: Vec<AgentId>,
+    
+    /// Discovery source
+    source: SkillDiscoverySource,
+}
+
+pub enum SkillDiscoverySource {
+    /// User manually added
+    UserAdded,
+    
+    /// Agent discovered during execution
+    AgentDiscovery { agent_id: AgentId },
+    
+    /// System scan found new file
+    SystemScan,
+}
+```
+
+## 20. Workflow Self-Improvement Foundation
+
+Per README.md: "workflow self-improvement" is future vision. Current design should enable this later.
+
+### 20.1 Performance Metrics Collection
+
+```rust
+pub struct AgentPerformanceMetrics {
+    agent_id: AgentId,
+    
+    /// Task completion rate
+    task_completion_rate: f32,
+    
+    /// Average task duration
+    avg_task_duration: Duration,
+    
+    /// Error rate
+    error_rate: f32,
+    
+    /// Escalation rate
+    escalation_rate: f32,
+    
+    /// Verification pass rate
+    verification_pass_rate: f32,
+    
+    /// Token efficiency (output tokens per task)
+    token_efficiency: f32,
+}
+```
+
+### 20.2 Workflow Improvement Suggestions
+
+```rust
+pub struct WorkflowImprovement {
+    /// Improvement type
+    improvement_type: ImprovementType,
+    
+    /// Data backing the suggestion
+    evidence: PerformanceEvidence,
+    
+    /// Suggested action
+    suggestion: String,
+}
+
+pub enum ImprovementType {
+    /// Agent performing poorly, consider replacement
+    AgentPerformance,
+    
+    /// Task type consistently failing
+    TaskPattern,
+    
+    /// Verification strategy not effective
+    VerificationStrategy,
+    
+    /// Coordination bottleneck
+    CoordinationBottleneck,
+    
+    /// Resource allocation issue
+    ResourceAllocation,
+}
+```
+
+### 20.3 Self-Improvement Loop
+
+Future feature: agents analyze their own performance and suggest improvements:
+
+```rust
+pub fn self_improvement_prompt(metrics: &AgentPerformanceMetrics) -> String {
+    format!(
+        "Analyze your recent performance metrics:\n\
+        - Task completion rate: {:.1}%\n\
+        - Average task duration: {}s\n\
+        - Error rate: {:.1}%\n\
+        - Escalation rate: {:.1}%\n\
+        \n\
+        Suggest improvements to your workflow.",
+        metrics.task_completion_rate * 100,
+        metrics.avg_task_duration.as_secs(),
+        metrics.error_rate * 100,
+        metrics.escalation_rate * 100,
+    )
+}
+```
+
+## 21. Migration Path from Current V2
+
+### 21.1 Compatibility Strategy
+
+Multi-agent must be backward compatible with V2:
+
+```rust
+pub enum RuntimeMode {
+    /// Current V2 single-agent mode (default)
+    SingleAgent {
+        session: RuntimeSession,
+    },
+    
+    /// Multi-agent mode (opt-in)
+    MultiAgent {
+        session: MultiAgentSession,
+    },
+}
+
+impl RuntimeMode {
+    /// Detect mode from workplace state
+    pub fn detect(workplace: &WorkplaceStore) -> Self {
+        // If multiple agents exist, use multi-agent mode
+        // Otherwise, use single-agent mode
+        let agent_count = workplace.count_agents()?;
+        
+        if agent_count > 1 {
+            RuntimeMode::MultiAgent {
+                session: MultiAgentSession::restore_from_snapshot(workplace.path())?,
+            }
+        } else {
+            RuntimeMode::SingleAgent {
+                session: RuntimeSession::bootstrap(workplace.path().into(), ...)?,
+            }
+        }
+    }
+}
+```
+
+### 21.2 Migration Steps
+
+| Step | Description | Breaking Changes |
+|------|-------------|------------------|
+| 1 | Add AgentPool alongside AgentRuntime | None |
+| 2 | Create MultiAgentSession (parallel to RuntimeSession) | None |
+| 3 | Add mode detection logic | None |
+| 4 | Update TUI to support mode detection | None |
+| 5 | Add multi-agent TUI overlays (opt-in) | None |
+| 6 | Add headless multi-agent commands | None |
+| 7 | Gradual rollout with config flag | None |
+
+### 21.3 Feature Flags
+
+```rust
+pub struct RuntimeConfig {
+    /// Enable multi-agent mode
+    pub multi_agent_enabled: bool,
+    
+    /// Max agents (default: 1 for V2 compatibility)
+    pub max_agents: usize,
+    
+    /// Enable Scrum coordination
+    pub scrum_enabled: bool,
+    
+    /// Enable cross-agent mail
+    pub mail_enabled: bool,
+}
+```
+
+## 22. Gap Analysis Against Vision
+
+### 22.1 README.md Vision Coverage
+
+| Vision Item | Document Coverage | Status |
+|------------|-------------------|--------|
+| multi-agent parallel development | Sections 3-10, 15 | ✅ Covered |
+| Scrum-style coordination | Section 16 | 🟡 Foundation designed |
+| workflow self-improvement | Section 20 | 🟡 Foundation designed |
+| TUI parity with codex | Section 15 | ✅ Covered |
+| headless mode | Section 17 | ✅ Covered |
+| Verification integration | Section 18 | ✅ Covered |
+| Skills support | Section 19 | ✅ Covered |
+
+### 22.2 Document Completeness Assessment
+
+**Strengths**:
+- Comprehensive architecture analysis (Section 2)
+- Detailed data structures (Section 3-4)
+- Thread safety model (Section 7)
+- TUI implementation deep dive (Section 15)
+- Graceful shutdown/restore (Section 11)
+- Cross-agent communication (Section 12)
+
+**Areas for Future Enhancement**:
+- Scrum coordination implementation details (foundation only)
+- Workflow self-improvement algorithms (foundation only)
+- Actual code migration execution (not yet done)
+- Performance benchmarks with real multi-agent scenarios
+- Security considerations (multi-agent trust boundaries)
+
+### 22.3 Implementation Priority
+
+Based on this analysis, recommended implementation order:
+
+| Phase | Focus | Dependencies |
+|-------|-------|--------------|
+| Phase 1 | AgentPool + MultiAgentSession (core) | None |
+| Phase 2 | Thread-safe event loop | Phase 1 |
+| Phase 3 | TUI multi-agent foundation (Focused View) | Phase 1, 2 |
+| Phase 4 | Graceful shutdown/restore | Phase 1, 2 |
+| Phase 5 | Mail system | Phase 1, 2 |
+| Phase 6 | TUI Split/Dashboard views | Phase 3 |
+| Phase 7 | Headless multi-agent | Phase 1, 2, 4 |
+| Phase 8 | Scrum coordination | Phase 5 |
+
+## 23. References
 
 - `agent_runtime.rs`: Current single-agent runtime
 - `runtime_session.rs`: Current session model
@@ -2770,22 +3425,26 @@ impl BackgroundCellBuilder {
 - `app_loop.rs`: Current TUI event loop
 - `loop_runner.rs`: Autonomous loop logic
 - `workplace_store.rs`: Workplace persistence
+- `README.md`: Project vision and current boundaries
+- `docs/plan/spec/v2-sprint-4-loop-operations-spec.md`: Loop operations spec
+- `docs/plan/spec/tui-parity-with-codex-spec.md`: TUI parity spec
 
-## 13. Appendix: Code Migration Checklist
+## 24. Appendix: Code Migration Checklist
 
 ### Files to Modify
 
 | File | Changes |
 |------|---------|
 | `core/src/agent_runtime.rs` | Add AgentSlot, AgentPool |
-| `core/src/runtime_session.rs` | Replace with MultiAgentSession |
-| `core/src/app.rs` | Split into SharedWorkplaceState + per-agent |
+| `core/src/runtime_session.rs` | Add MultiAgentSession alongside |
+| `core/src/app.rs` | Extract SharedWorkplaceState |
 | `core/src/provider.rs` | Return thread handle |
-| `core/src/loop_runner.rs` | Adapt for multi-agent |
-| `tui/src/app_loop.rs` | Multi-agent event loop |
-| `tui/src/ui_state.rs` | MultiAgentTuiState |
-| `tui/src/render.rs` | Multi-agent rendering |
-| `tui/src/input.rs` | Multi-agent key bindings |
+| `core/src/loop_runner.rs` | Add multi-agent loop variant |
+| `tui/src/app_loop.rs` | Add multi-agent event loop variant |
+| `tui/src/ui_state.rs` | Add MultiAgentTuiState |
+| `tui/src/render.rs` | Add multi-agent render variants |
+| `tui/src/input.rs` | Add multi-agent input handling |
+| `cli/src/main.rs` | Add multi-agent CLI commands |
 
 ### New Files to Create
 
@@ -2795,5 +3454,11 @@ impl BackgroundCellBuilder {
 | `core/src/agent_event.rs` | AgentEvent, EventAggregator |
 | `core/src/persistence_coordinator.rs` | Concurrent persistence |
 | `core/src/shared_state.rs` | SharedWorkplaceState |
-| `tui/src/agent_browser.rs` | Agent selection overlay |
-| `tui/src/status_bar.rs` | Agent status bar rendering |
+| `core/src/mailbox.rs` | AgentMailbox, AgentMail |
+| `tui/src/multi_agent/mod.rs` | Multi-agent TUI module |
+| `tui/src/multi_agent/state.rs` | MultiAgentTuiState |
+| `tui/src/multi_agent/render.rs` | Multi-agent rendering |
+| `tui/src/multi_agent/input.rs` | Multi-agent input handling |
+| `tui/src/overlay/agent_browser.rs` | Agent selection overlay |
+| `tui/src/overlay/mail_view.rs` | Mail overlay |
+| `tui/src/overlay/task_matrix.rs` | Task matrix overlay |
