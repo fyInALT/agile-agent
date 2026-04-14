@@ -69,7 +69,7 @@ impl Default for LlmConfig {
 }
 
 /// Type of model to use for a request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelType {
     /// Simple/fast model for basic tasks
     Simple,

@@ -2,19 +2,19 @@
 
 use anyhow::Result;
 
-use crate::client::LlmClient;
 use crate::models::ModelType;
+use crate::provider::LlmProvider;
 
 /// Text processor using LLM for various text operations.
 #[derive(Debug, Clone)]
-pub struct TextProcessor {
-    client: LlmClient,
+pub struct TextProcessor<P: LlmProvider> {
+    provider: P,
 }
 
-impl TextProcessor {
-    /// Create a new text processor with the given client.
-    pub fn new(client: LlmClient) -> Self {
-        Self { client }
+impl<P: LlmProvider> TextProcessor<P> {
+    /// Create a new text processor with the given provider.
+    pub fn new(provider: P) -> Self {
+        Self { provider }
     }
 
     /// Summarize the given text using the thinking model.
@@ -25,7 +25,7 @@ impl TextProcessor {
             "Summarize the following text concisely:\n\n{}",
             text
         );
-        self.client.send_with_model(&prompt, ModelType::Thinking)
+        self.provider.complete_with_model(&prompt, ModelType::Thinking).map(|r| r.content)
     }
 
     /// Async version: Summarize text.
@@ -34,7 +34,7 @@ impl TextProcessor {
             "Summarize the following text concisely:\n\n{}",
             text
         );
-        self.client.send_async_with_model(&prompt, ModelType::Thinking).await
+        self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await.map(|r| r.content)
     }
 
     /// Compress text to approximately the given number of tokens using the simple model.
@@ -45,7 +45,7 @@ impl TextProcessor {
             "Compress the following text to approximately {} tokens, preserving key information:\n\n{}",
             max_tokens, text
         );
-        self.client.send_with_model(&prompt, ModelType::Simple)
+        self.provider.complete_with_model(&prompt, ModelType::Simple).map(|r| r.content)
     }
 
     /// Async version: Compress text.
@@ -54,7 +54,7 @@ impl TextProcessor {
             "Compress the following text to approximately {} tokens, preserving key information:\n\n{}",
             max_tokens, text
         );
-        self.client.send_async_with_model(&prompt, ModelType::Simple).await
+        self.provider.complete_async_with_model(&prompt, ModelType::Simple).await.map(|r| r.content)
     }
 
     /// Extract key points from text using the thinking model.
@@ -65,9 +65,9 @@ impl TextProcessor {
             "Extract the key points from the following text. Return each point on a separate line:\n\n{}",
             text
         );
-        let response = self.client.send_with_model(&prompt, ModelType::Thinking)?;
+        let response = self.provider.complete_with_model(&prompt, ModelType::Thinking)?;
 
-        Ok(response
+        Ok(response.content
             .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -80,9 +80,9 @@ impl TextProcessor {
             "Extract the key points from the following text. Return each point on a separate line:\n\n{}",
             text
         );
-        let response = self.client.send_async_with_model(&prompt, ModelType::Thinking).await?;
+        let response = self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await?;
 
-        Ok(response
+        Ok(response.content
             .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -98,7 +98,7 @@ impl TextProcessor {
             "Classify the following text into one of these categories: {}.\n\nText: {}\n\nCategory:",
             categories_str, text
         );
-        self.client.send_with_model(&prompt, ModelType::Simple)
+        self.provider.complete_with_model(&prompt, ModelType::Simple).map(|r| r.content)
     }
 
     /// Async version: Classify text.
@@ -108,7 +108,7 @@ impl TextProcessor {
             "Classify the following text into one of these categories: {}.\n\nText: {}\n\nCategory:",
             categories_str, text
         );
-        self.client.send_async_with_model(&prompt, ModelType::Simple).await
+        self.provider.complete_async_with_model(&prompt, ModelType::Simple).await.map(|r| r.content)
     }
 
     /// Rewrite text to match a target style using the thinking model.
@@ -117,7 +117,7 @@ impl TextProcessor {
             "Rewrite the following text in the style of {}:\n\n{}",
             style, text
         );
-        self.client.send_with_model(&prompt, ModelType::Thinking)
+        self.provider.complete_with_model(&prompt, ModelType::Thinking).map(|r| r.content)
     }
 
     /// Async version: Rewrite text.
@@ -126,7 +126,7 @@ impl TextProcessor {
             "Rewrite the following text in the style of {}:\n\n{}",
             style, text
         );
-        self.client.send_async_with_model(&prompt, ModelType::Thinking).await
+        self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await.map(|r| r.content)
     }
 
     /// Count approximate tokens in text (rough estimate).
@@ -141,12 +141,12 @@ impl TextProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::MockLlmProvider;
 
     #[test]
     fn estimate_tokens() {
-        let processor = TextProcessor::new(crate::LlmClient::new(
-            crate::models::LlmConfig::new("test".to_string())
-        ));
+        let mock = MockLlmProvider::new().with_response("x".to_string());
+        let processor = TextProcessor::new(mock);
 
         // Simple test - just verify it doesn't panic
         let tokens = processor.estimate_tokens("Hello world");

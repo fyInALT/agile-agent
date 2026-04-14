@@ -1,5 +1,6 @@
 //! OpenAI API client implementation.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -11,6 +12,7 @@ use crate::error::LlmError;
 use crate::models::{
     ChatMessage, ChatRequest, ChatResponse, LlmConfig, ModelType, StreamChunk,
 };
+use crate::provider::{LlmProvider, LlmResponse, LlmStreamChunk};
 
 type StdResult<T, E> = std::result::Result<T, E>;
 
@@ -193,6 +195,90 @@ impl LlmClient {
     }
 }
 
+impl LlmProvider for LlmClient {
+    fn complete(&self, prompt: &str) -> anyhow::Result<LlmResponse> {
+        self.send(prompt).map(|content| LlmResponse {
+            content,
+            usage: None,
+        })
+    }
+
+    fn complete_with_model(&self, prompt: &str, model: ModelType) -> anyhow::Result<LlmResponse> {
+        self.send_with_model(prompt, model).map(|content| LlmResponse {
+            content,
+            usage: None,
+        })
+    }
+
+    fn complete_streaming<F>(&self, prompt: &str, callback: F) -> anyhow::Result<()>
+    where
+        F: Fn(LlmStreamChunk) + Send + 'static,
+    {
+        let callback = Arc::new(Mutex::new(Some(callback)));
+        let cb = callback.clone();
+        self.send_streaming(prompt, move |chunk| {
+            if let Some(ref mut cb) = *cb.lock().unwrap() {
+                cb(LlmStreamChunk {
+                    content: chunk,
+                    is_finished: false,
+                });
+            }
+        })?;
+        if let Some(ref mut cb) = *callback.lock().unwrap() {
+            cb(LlmStreamChunk {
+                content: String::new(),
+                is_finished: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn complete_streaming_with_model<F>(&self, prompt: &str, model: ModelType, callback: F) -> anyhow::Result<()>
+    where
+        F: Fn(LlmStreamChunk) + Send + 'static,
+    {
+        let callback = Arc::new(Mutex::new(Some(callback)));
+        let cb = callback.clone();
+        self.send_streaming_with_model(prompt, model, move |chunk| {
+            if let Some(ref mut cb) = *cb.lock().unwrap() {
+                cb(LlmStreamChunk {
+                    content: chunk,
+                    is_finished: false,
+                });
+            }
+        })?;
+        if let Some(ref mut cb) = *callback.lock().unwrap() {
+            cb(LlmStreamChunk {
+                content: String::new(),
+                is_finished: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn complete_async(&self, prompt: &str) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
+        async move {
+            Ok(LlmResponse {
+                content: self.send(prompt)?,
+                usage: None,
+            })
+        }
+    }
+
+    fn complete_async_with_model(
+        &self,
+        prompt: &str,
+        model: ModelType,
+    ) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
+        async move {
+            Ok(LlmResponse {
+                content: self.send_with_model(prompt, model)?,
+                usage: None,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +288,31 @@ mod tests {
         let config = LlmConfig::new("test-key".to_string());
         let client = LlmClient::new(config);
         assert_eq!(client.config.api_key, "test-key");
+    }
+
+    #[test]
+    fn llm_client_default_config() {
+        let config = LlmConfig::default();
+        let client = LlmClient::new(config);
+        assert_eq!(client.config.simple_model, "gpt-4o-mini");
+        assert_eq!(client.config.thinking_model, "gpt-4o");
+        assert_eq!(client.config.base_url, "https://api.openai.com/v1");
+    }
+
+    #[test]
+    fn llm_client_custom_models() {
+        let config = LlmConfig::new("key".to_string())
+            .with_simple_model("gpt-3.5-turbo")
+            .with_thinking_model("gpt-4-turbo");
+        let client = LlmClient::new(config);
+        assert_eq!(client.config.simple_model, "gpt-3.5-turbo");
+        assert_eq!(client.config.thinking_model, "gpt-4-turbo");
+    }
+
+    #[test]
+    fn llm_client_timeout() {
+        let config = LlmConfig::new("key".to_string()).with_timeout(120);
+        let client = LlmClient::new(config);
+        assert_eq!(client.config.timeout_secs, 120);
     }
 }

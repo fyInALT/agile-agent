@@ -10,6 +10,7 @@
 //! - Streaming response support
 //! - Text processing utilities (summarize, compress, extract key points)
 //! - Configuration via environment variables or config files
+//! - Provider trait abstraction for easy testing with mock implementations
 //!
 //! ## Quick Start
 //!
@@ -30,6 +31,25 @@
 //! let _summary = processor.summarize("Long text to summarize...");
 //! ```
 //!
+//! ## Using Traits for Testing
+//!
+//! Use the `LlmProvider` trait to abstract over implementations:
+//!
+//! ```rust,ignore
+//! use agent_llm_provider::provider::{LlmProvider, LlmResponse};
+//! use agent_llm_provider::mock::MockLlmProvider;
+//! use agent_llm_provider::models::ModelType;
+//!
+//! // Your code depends on the trait, not the implementation
+//! fn do_llm_stuff<P: LlmProvider>(provider: &P) -> LlmResponse {
+//!     provider.complete("Hello").unwrap()
+//! }
+//!
+//! // Test with mock
+//! let mock = MockLlmProvider::new().with_response("Mock response");
+//! let result = do_llm_stuff(&mock);
+//! ```
+//!
 //! ## Configuration
 //!
 //! Set environment variables:
@@ -42,7 +62,9 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod mock;
 pub mod models;
+pub mod provider;
 pub mod text;
 
 // Re-export commonly used types
@@ -50,4 +72,5 @@ pub use client::LlmClient;
 pub use config::ConfigFile;
 pub use error::LlmError;
 pub use models::{ChatMessage, LlmConfig, ModelType, MessageRole};
+pub use provider::{LlmProvider, LlmResponse, LlmStreamChunk, LlmUsage};
 pub use text::TextProcessor;
