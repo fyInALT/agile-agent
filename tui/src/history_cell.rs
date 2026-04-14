@@ -2131,3 +2131,284 @@ mod edit_tool_tests {
         assert!(rendered.iter().any(|line| line.contains("Edited")));
     }
 }
+
+#[cfg(test)]
+mod git_detection_tests {
+    use super::*;
+
+    fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_diff() {
+        assert!(detect_git_command("git diff").is_some());
+        assert!(detect_git_command("git diff --staged").is_some());
+        assert!(detect_git_command("git diff --cached").is_some());
+        assert!(detect_git_command("git diff --stat").is_some());
+        assert!(detect_git_command("git diff --stat HEAD~1").is_some());
+        assert!(detect_git_command("git diff HEAD").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_status() {
+        assert!(detect_git_command("git status").is_some());
+        assert!(detect_git_command("git status --porcelain").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_commit() {
+        assert!(detect_git_command("git commit -m \"fix: update\"").is_some());
+        assert!(detect_git_command("git commit").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_add() {
+        assert!(detect_git_command("git add src/main.rs").is_some());
+        assert!(detect_git_command("git add .").is_some());
+        assert!(detect_git_command("git add -A").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_branch() {
+        assert!(detect_git_command("git branch").is_some());
+        assert!(detect_git_command("git branch -a").is_some());
+        assert!(detect_git_command("git branch feature/test").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_checkout() {
+        assert!(detect_git_command("git checkout main").is_some());
+        assert!(detect_git_command("git checkout -b feature/test").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_push() {
+        assert!(detect_git_command("git push").is_some());
+        assert!(detect_git_command("git push origin main").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_pull() {
+        assert!(detect_git_command("git pull").is_some());
+        assert!(detect_git_command("git pull origin main").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_fetch() {
+        assert!(detect_git_command("git fetch").is_some());
+        assert!(detect_git_command("git fetch origin").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_stash() {
+        assert!(detect_git_command("git stash").is_some());
+        assert!(detect_git_command("git stash pop").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_merge() {
+        assert!(detect_git_command("git merge feature/test").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_rebase() {
+        assert!(detect_git_command("git rebase main").is_some());
+        assert!(detect_git_command("git rebase -i HEAD~3").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_clone() {
+        assert!(detect_git_command("git clone https://github.com/user/repo").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_show() {
+        assert!(detect_git_command("git show HEAD").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_log() {
+        assert!(detect_git_command("git log").is_some());
+        assert!(detect_git_command("git log --oneline -5").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_remote() {
+        assert!(detect_git_command("git remote -v").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_config() {
+        assert!(detect_git_command("git config --global user.name").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_reset() {
+        assert!(detect_git_command("git reset HEAD~1").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_rejects_non_git_commands() {
+        assert!(detect_git_command("ls -la").is_none());
+        assert!(detect_git_command("npm install").is_none());
+        assert!(detect_git_command("cargo build").is_none());
+        assert!(detect_git_command("echo hello").is_none());
+    }
+
+    #[test]
+    fn detect_git_command_handles_whitespace() {
+        let result = detect_git_command("  git diff  ");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_diff() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git diff --stat"),
+            Some("file.rs | 10 +++----"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show "Git Diff" label instead of full command
+        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_commit() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git commit -m \"fix: update\""),
+            Some("[main abc123] fix: update"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Commit")), "Expected 'Git Commit' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_status() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git status"),
+            Some("On branch main"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Status")), "Expected 'Git Status' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_add() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git add src/main.rs"),
+            Some(""),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Add")), "Expected 'Git Add' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_branch() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git branch"),
+            Some("  develop\n* main"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Branch")), "Expected 'Git Branch' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_git_label_for_git_push() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git push origin main"),
+            Some("To https://github.com/user/repo\n   abc123..def456  main -> main"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Push")), "Expected 'Git Push' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_shows_non_git_tool_invocation() {
+        let lines = render_generic_tool_call_lines(
+            "some_tool",
+            Some("file.txt"),
+            Some("output"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show tool name in parentheses
+        assert!(rendered.iter().any(|line| line.contains("some_tool(file.txt)")), "Expected 'some_tool(file.txt)' in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_uses_magenta_color_for_git_commands() {
+        let lines = render_generic_tool_call_lines(
+            "exec_command",
+            Some("git diff"),
+            Some(""),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+
+        // Find the line with the Git Diff label
+        for line in &lines {
+            let line_str = line.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+            if line_str.contains("Git Diff") {
+                // All spans should use magenta color (or style)
+                for span in &line.spans {
+                    if let Some(fg) = span.style.fg {
+                        assert_eq!(fg, Color::Magenta, "Expected magenta color for git command");
+                    }
+                }
+                return;
+            }
+        }
+        panic!("Expected to find Git Diff label in output: {:?}", lines);
+    }
+}
