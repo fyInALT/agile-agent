@@ -226,7 +226,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             let codename = state.focused_agent_codename().to_string();
                             state.open_stop_confirmation(&codename);
                         }
-                        InputOutcome::Quit => state.app_mut().request_quit(),
+                        InputOutcome::Quit => {
+    state.app_mut().request_quit();
+    // Sync quit flag to workplace immediately for loop exit
+    state.session.workplace_mut().loop_control.should_quit = true;
+}
                         InputOutcome::Submit(user_input) => {
                             if let Some(command_result) = parse_local_command(&user_input) {
                                 match command_result {
@@ -633,6 +637,8 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
         }
         LocalCommand::Quit => {
             state.app_mut().request_quit();
+            // Sync quit flag to workplace immediately for loop exit
+            state.session.workplace_mut().loop_control.should_quit = true;
             None
         }
     }
@@ -844,5 +850,27 @@ mod tests {
             registered.empty_channels.contains(&agent_id),
             "spawned agent should have an empty channel registered"
         );
+    }
+
+    #[test]
+    fn quit_command_syncs_to_workplace_immediately() {
+        use super::handle_local_command;
+        use agent_core::commands::LocalCommand;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Initially not quitting
+        assert!(!state.workplace().loop_control.should_quit);
+        assert!(!state.app().should_quit);
+
+        // Execute quit command
+        handle_local_command(&mut state, LocalCommand::Quit);
+
+        // Both should be set immediately
+        assert!(state.app().should_quit);
+        assert!(state.workplace().loop_control.should_quit);
     }
 }
