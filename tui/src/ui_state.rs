@@ -86,6 +86,17 @@ impl TuiState {
             .then_some(self.active_entries_revision)
     }
 
+    pub fn live_tail_is_stream_continuation(&self) -> bool {
+        matches!(
+            (
+                self.app().transcript.last(),
+                self.active_stream.as_ref().map(|stream| stream.kind),
+            ),
+            (Some(TranscriptEntry::Assistant(_)), Some(StreamTextKind::Assistant))
+                | (Some(TranscriptEntry::Thinking(_)), Some(StreamTextKind::Thinking))
+        )
+    }
+
     fn bump_active_entries_revision(&mut self) {
         self.active_entries_revision = self.active_entries_revision.wrapping_add(1);
     }
@@ -735,8 +746,8 @@ impl TuiState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveStream {
-    kind: StreamTextKind,
-    tail: String,
+    pub(crate) kind: StreamTextKind,
+    pub(crate) tail: String,
 }
 
 impl ActiveStream {
@@ -749,7 +760,7 @@ impl ActiveStream {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamTextKind {
+pub(crate) enum StreamTextKind {
     Assistant,
     Thinking,
 }

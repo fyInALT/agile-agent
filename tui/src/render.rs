@@ -235,23 +235,8 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let mut lines = cells::flatten_cells(&cells::build_overlay_cells(
-        &state.app().transcript,
-        chunks[1].width,
-    ));
-    let active_revision = state.active_entries_revision_key();
-    let active_entries = state.active_entries_for_display();
+    let lines = build_transcript_overlay_lines(state, chunks[1].width);
     let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
-    overlay.sync_live_tail(chunks[1].width, active_revision, || {
-        cells::flatten_cells(&cells::build_overlay_cells(
-            &active_entries,
-            chunks[1].width,
-        ))
-    });
-    if !lines.is_empty() && !overlay.live_tail_lines().is_empty() {
-        lines.push(Line::from(""));
-    }
-    lines.extend_from_slice(overlay.live_tail_lines());
     let content_height = lines.len();
     let max_scroll = content_height.saturating_sub(chunks[1].height as usize);
     overlay.set_max_scroll(max_scroll);
@@ -276,6 +261,22 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
         ),
     ]));
     frame.render_widget(footer, chunks[2]);
+}
+
+fn build_transcript_overlay_lines(state: &mut TuiState, width: u16) -> Vec<Line<'static>> {
+    let mut lines = cells::flatten_cells(&cells::build_overlay_cells(&state.app().transcript, width));
+    let active_revision = state.active_entries_revision_key();
+    let active_entries = state.active_entries_for_display();
+    let is_stream_continuation = state.live_tail_is_stream_continuation();
+    let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
+    overlay.sync_live_tail(width, active_revision, || {
+        cells::flatten_cells(&cells::build_overlay_cells(&active_entries, width))
+    });
+    if !lines.is_empty() && !overlay.live_tail_lines().is_empty() && !is_stream_continuation {
+        lines.push(Line::from(""));
+    }
+    lines.extend_from_slice(overlay.live_tail_lines());
+    lines
 }
 
 fn render_skill_browser(frame: &mut Frame<'_>, state: &TuiState) {
@@ -420,7 +421,10 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::build_transcript_overlay_lines;
     use super::build_working_line;
+    use crate::ui_state::ActiveStream;
+    use crate::ui_state::StreamTextKind;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
@@ -496,6 +500,38 @@ mod tests {
             Some(TranscriptEntry::ExecCommand { status, .. })
                 if *status == agent_core::tool_calls::ExecCommandStatus::InProgress
         ));
+    }
+
+    #[test]
+    fn overlay_does_not_insert_blank_separator_for_assistant_stream_continuation() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state
+            .app_mut()
+            .transcript
+            .push(TranscriptEntry::Assistant("hello world\n".to_string()));
+        state.active_stream = Some(ActiveStream {
+            kind: StreamTextKind::Assistant,
+            tail: "next".to_string(),
+        });
+        state.open_transcript_overlay();
+
+        let rendered = build_transcript_overlay_lines(&mut state, 80)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered[rendered.len().saturating_sub(2)..],
+            ["hello world".to_string(), "next".to_string()]
+        );
     }
 
     #[test]
