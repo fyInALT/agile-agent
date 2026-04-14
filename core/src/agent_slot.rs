@@ -65,8 +65,9 @@ impl AgentSlotStatus {
     /// Check if agent can transition to a new status
     pub fn can_transition_to(&self, target: &AgentSlotStatus) -> bool {
         match (self, target) {
-            // Idle can go to Starting
+            // Idle can go to Starting or Stopped (user can stop idle agent)
             (Self::Idle, Self::Starting) => true,
+            (Self::Idle, Self::Stopped { .. }) => true,
             // Starting can go to Responding or Error
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Error { .. }) => true,
@@ -345,6 +346,12 @@ mod tests {
     fn status_stopped_can_transition_to_starting() {
         let status = AgentSlotStatus::stopped("user requested");
         assert!(status.can_transition_to(&AgentSlotStatus::starting()));
+    }
+
+    #[test]
+    fn status_idle_can_transition_to_stopped() {
+        let status = AgentSlotStatus::idle();
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
     }
 
     #[test]
