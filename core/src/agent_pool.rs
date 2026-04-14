@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType, WorkplaceId};
-use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskId};
+use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
+use crate::backlog::BacklogState;
 use crate::provider::ProviderKind;
 
 /// Snapshot of an agent's status for display
@@ -228,9 +229,108 @@ impl AgentPool {
         slot.assign_task(task_id)
     }
 
+    /// Assign a task to an idle agent with backlog validation
+    ///
+    /// Validates that:
+    /// - Agent exists and is idle
+    /// - Task exists in backlog with Ready status
+    /// - Updates backlog status to Running on success
+    pub fn assign_task_with_backlog(
+        &mut self,
+        agent_id: &AgentId,
+        task_id: TaskId,
+        backlog: &mut BacklogState,
+    ) -> Result<(), String> {
+        // Validate task exists and is ready
+        if !backlog.can_assign_task(task_id.as_str()) {
+            return Err(format!(
+                "Task {} cannot be assigned (not found or not ready)",
+                task_id.as_str()
+            ));
+        }
+
+        // Assign to agent
+        let slot = self
+            .get_slot_mut_by_id(agent_id)
+            .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
+        slot.assign_task(task_id.clone())?;
+
+        // Update backlog status
+        backlog.start_task(task_id.as_str());
+
+        Ok(())
+    }
+
+    /// Complete a task for an agent with backlog update
+    ///
+    /// Updates backlog status based on completion result:
+    /// - Success: task marked Done
+    /// - Failure: task marked Failed
+    pub fn complete_task_with_backlog(
+        &mut self,
+        agent_id: &AgentId,
+        result: TaskCompletionResult,
+        backlog: &mut BacklogState,
+    ) -> Result<TaskId, String> {
+        let slot = self
+            .get_slot_mut_by_id(agent_id)
+            .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
+
+        // Get assigned task before clearing
+        let task_id = slot
+            .assigned_task_id()
+            .cloned()
+            .ok_or_else(|| format!("Agent {} has no assigned task", agent_id.as_str()))?;
+
+        // Update backlog based on result
+        match result {
+            TaskCompletionResult::Success => {
+                backlog.complete_task(task_id.as_str(), Some("Task completed successfully".to_string()));
+            }
+            TaskCompletionResult::Failure { error } => {
+                backlog.fail_task(task_id.as_str(), error);
+            }
+        }
+
+        // Clear assignment
+        slot.clear_task();
+
+        Ok(task_id)
+    }
+
     /// Find an idle agent that can accept a task
     pub fn find_idle_agent(&self) -> Option<&AgentSlot> {
         self.slots.iter().find(|s| *s.status() == AgentSlotStatus::Idle)
+    }
+
+    /// Find an idle agent and return its ID for assignment
+    pub fn find_idle_agent_id(&self) -> Option<AgentId> {
+        self.slots
+            .iter()
+            .find(|s| *s.status() == AgentSlotStatus::Idle)
+            .map(|s| s.agent_id().clone())
+    }
+
+    /// Auto-assign a ready task to an available idle agent
+    ///
+    /// Returns the assigned agent ID if successful.
+    pub fn auto_assign_task(
+        &mut self,
+        backlog: &mut BacklogState,
+    ) -> Option<(AgentId, TaskId)> {
+        // Find an idle agent
+        let agent_id = self.find_idle_agent_id()?;
+
+        // Find a ready task
+        let ready_tasks = backlog.ready_tasks();
+        let ready_task = ready_tasks.first()?;
+        let task_id_str = ready_task.id.clone();
+        let task_id = TaskId::new(&task_id_str);
+
+        // Attempt assignment
+        self.assign_task_with_backlog(&agent_id, task_id.clone(), backlog)
+            .ok()
+            .map(|_| (agent_id, task_id))
     }
 
     /// Check if any agent is active (responding or executing)
@@ -447,5 +547,162 @@ mod tests {
         pool.remove_agent(&id1).unwrap();
         // Focus should adjust to valid index
         assert_eq!(pool.focused_slot_index(), 0);
+    }
+
+    // Backlog Integration Tests
+
+    fn make_backlog_with_ready_task() -> BacklogState {
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Test objective".to_string(),
+            scope: "Test scope".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Ready,
+            result_summary: None,
+        });
+        backlog
+    }
+
+    #[test]
+    fn assign_task_with_backlog_updates_status() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task with backlog validation
+        let result = pool.assign_task_with_backlog(
+            &agent_id,
+            TaskId::new("task-001"),
+            &mut backlog,
+        );
+        assert!(result.is_ok());
+
+        // Agent should have task assigned
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.assigned_task_id().is_some());
+
+        // Backlog task should be Running
+        let task = backlog.find_task("task-001").unwrap();
+        assert_eq!(task.status, crate::backlog::TaskStatus::Running);
+    }
+
+    #[test]
+    fn assign_task_with_backlog_fails_for_non_ready_task() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Test".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Running, // Already running
+            result_summary: None,
+        });
+
+        let result = pool.assign_task_with_backlog(
+            &agent_id,
+            TaskId::new("task-001"),
+            &mut backlog,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn complete_task_with_backlog_success() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Complete task successfully
+        let completed_task = pool.complete_task_with_backlog(
+            &agent_id,
+            TaskCompletionResult::Success,
+            &mut backlog,
+        );
+        assert!(completed_task.is_ok());
+
+        // Task should be Done in backlog
+        let task = backlog.find_task("task-001").unwrap();
+        assert_eq!(task.status, crate::backlog::TaskStatus::Done);
+
+        // Agent should have no assigned task
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.assigned_task_id().is_none());
+    }
+
+    #[test]
+    fn complete_task_with_backlog_failure() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Complete task with failure
+        let completed_task = pool.complete_task_with_backlog(
+            &agent_id,
+            TaskCompletionResult::Failure { error: "test error".to_string() },
+            &mut backlog,
+        );
+        assert!(completed_task.is_ok());
+
+        // Task should be Failed in backlog
+        let task = backlog.find_task("task-001").unwrap();
+        assert_eq!(task.status, crate::backlog::TaskStatus::Failed);
+        assert_eq!(task.result_summary, Some("test error".to_string()));
+    }
+
+    #[test]
+    fn auto_assign_task_assigns_to_idle_agent() {
+        let mut pool = make_pool(2);
+        pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Auto-assign should work
+        let result = pool.auto_assign_task(&mut backlog);
+        assert!(result.is_some());
+
+        let (_agent_id, task_id) = result.unwrap();
+        assert_eq!(task_id.as_str(), "task-001");
+
+        // Task should be Running
+        let task = backlog.find_task("task-001").unwrap();
+        assert_eq!(task.status, crate::backlog::TaskStatus::Running);
+    }
+
+    #[test]
+    fn auto_assign_task_returns_none_when_no_idle_agents() {
+        let mut pool = make_pool(1);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        // Manually mark agent as starting (not idle)
+        // Idle -> Starting is valid, then Starting -> Responding
+        pool.get_slot_mut_by_id(&agent_id)
+            .unwrap()
+            .transition_to(AgentSlotStatus::starting())
+            .unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        let result = pool.auto_assign_task(&mut backlog);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn auto_assign_task_returns_none_when_no_ready_tasks() {
+        let mut pool = make_pool(2);
+        pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let backlog = BacklogState::default(); // No tasks
+
+        let result = pool.auto_assign_task(&mut backlog.clone());
+        assert!(result.is_none());
     }
 }
