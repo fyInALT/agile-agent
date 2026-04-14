@@ -2,7 +2,8 @@
 //!
 //! Thread-safe registries using RwLock for concurrent registration and retrieval.
 
-use crate::traits::{KanbanStatus, KanbanElementTypeTrait};
+use crate::domain::ElementId;
+use crate::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
 use crate::types::{StatusType, ElementTypeIdentifier};
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -127,6 +128,94 @@ impl ElementTypeRegistry {
 }
 
 impl Default for ElementTypeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// ElementRegistry - thread-safe registry for KanbanElementTrait implementations
+///
+/// Uses RwLock for concurrent registration and retrieval.
+/// Stores elements indexed by ID for efficient lookup.
+pub struct ElementRegistry {
+    elements: RwLock<Vec<Box<dyn KanbanElementTrait>>>,
+}
+
+impl ElementRegistry {
+    /// Create a new empty registry
+    pub fn new() -> Self {
+        Self {
+            elements: RwLock::new(Vec::new()),
+        }
+    }
+
+    /// Register an element implementation (thread-safe)
+    pub fn register(&self, element: Box<dyn KanbanElementTrait>) {
+        self.elements.write().unwrap().push(element);
+    }
+
+    /// Get an element by ID (thread-safe)
+    pub fn get_by_id(&self, id: &ElementId) -> Option<Box<dyn KanbanElementTrait>> {
+        self.elements
+            .read()
+            .unwrap()
+            .iter()
+            .find(|e| e.id() == Some(id.clone()))
+            .map(|e| e.clone_boxed())
+    }
+
+    /// List all elements (thread-safe)
+    pub fn list(&self) -> Vec<Box<dyn KanbanElementTrait>> {
+        self.elements
+            .read()
+            .unwrap()
+            .iter()
+            .map(|e| e.clone_boxed())
+            .collect()
+    }
+
+    /// List elements by type (thread-safe)
+    pub fn list_by_type(&self, type_: &ElementTypeIdentifier) -> Vec<Box<dyn KanbanElementTrait>> {
+        self.elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.element_type().name() == type_.name())
+            .map(|e| e.clone_boxed())
+            .collect()
+    }
+
+    /// List elements by status (thread-safe)
+    pub fn list_by_status(&self, status: &StatusType) -> Vec<Box<dyn KanbanElementTrait>> {
+        self.elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.status().name() == status.name())
+            .map(|e| e.clone_boxed())
+            .collect()
+    }
+
+    /// Check if registry is empty
+    pub fn is_empty(&self) -> bool {
+        self.elements.read().unwrap().is_empty()
+    }
+
+    /// Get the number of registered elements
+    pub fn len(&self) -> usize {
+        self.elements.read().unwrap().len()
+    }
+
+    /// Delete an element by ID (thread-safe)
+    pub fn delete(&self, id: &ElementId) {
+        self.elements
+            .write()
+            .unwrap()
+            .retain(|e| e.id() != Some(id.clone()));
+    }
+}
+
+impl Default for ElementRegistry {
     fn default() -> Self {
         Self::new()
     }

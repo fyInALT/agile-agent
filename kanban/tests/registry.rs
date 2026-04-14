@@ -1,9 +1,9 @@
-//! Unit tests for registry implementations: StatusRegistry, ElementTypeRegistry
+//! Unit tests for registry implementations: StatusRegistry, ElementTypeRegistry, ElementRegistry
 //!
 //! TDD: These tests define the expected registry API before implementation
 
-use agent_kanban::registry::{StatusRegistry, ElementTypeRegistry};
-use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait};
+use agent_kanban::registry::{StatusRegistry, ElementTypeRegistry, ElementRegistry};
+use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
 use agent_kanban::types::{StatusType, ElementTypeIdentifier};
 use std::sync::Arc;
 use std::thread;
@@ -239,5 +239,150 @@ mod element_type_registry_tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+}
+
+mod element_registry_tests {
+    use super::*;
+    use agent_kanban::domain::ElementId;
+
+    /// Test implementation of KanbanElementTrait
+    struct TestElement {
+        id: Option<ElementId>,
+        element_type: ElementTypeIdentifier,
+        status: StatusType,
+        title: String,
+    }
+
+    impl KanbanElementTrait for TestElement {
+        fn id(&self) -> Option<ElementId> {
+            self.id.clone()
+        }
+
+        fn element_type(&self) -> ElementTypeIdentifier {
+            self.element_type.clone()
+        }
+
+        fn status(&self) -> StatusType {
+            self.status.clone()
+        }
+
+        fn title(&self) -> String {
+            self.title.clone()
+        }
+
+        fn implementation_type(&self) -> &'static str {
+            "TestElement"
+        }
+
+        fn clone_boxed(&self) -> Box<dyn KanbanElementTrait> {
+            Box::new(TestElement {
+                id: self.id.clone(),
+                element_type: self.element_type.clone(),
+                status: self.status.clone(),
+                title: self.title.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn test_element_registry_new() {
+        let registry = ElementRegistry::new();
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_element_registry_register() {
+        let registry = ElementRegistry::new();
+        let element = TestElement {
+            id: None,
+            element_type: ElementTypeIdentifier::new("task"),
+            status: StatusType::new("plan"),
+            title: "Test Task".to_string(),
+        };
+        registry.register(Box::new(element));
+        assert!(!registry.is_empty());
+        assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn test_element_registry_get_by_id() {
+        let registry = ElementRegistry::new();
+        let id = ElementId::new(agent_kanban::domain::ElementType::Task, 1);
+        let element = TestElement {
+            id: Some(id.clone()),
+            element_type: ElementTypeIdentifier::new("task"),
+            status: StatusType::new("plan"),
+            title: "Test Task".to_string(),
+        };
+        registry.register(Box::new(element));
+
+        let retrieved = registry.get_by_id(&id);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().title(), "Test Task");
+    }
+
+    #[test]
+    fn test_element_registry_get_by_id_not_found() {
+        let registry = ElementRegistry::new();
+        let id = ElementId::new(agent_kanban::domain::ElementType::Task, 1);
+        let retrieved = registry.get_by_id(&id);
+        assert!(retrieved.is_none());
+    }
+
+    #[test]
+    fn test_element_registry_list_by_type() {
+        let registry = ElementRegistry::new();
+
+        // Register task
+        let task = TestElement {
+            id: Some(ElementId::new(agent_kanban::domain::ElementType::Task, 1)),
+            element_type: ElementTypeIdentifier::new("task"),
+            status: StatusType::new("plan"),
+            title: "Task 1".to_string(),
+        };
+        registry.register(Box::new(task));
+
+        // Register story
+        let story = TestElement {
+            id: Some(ElementId::new(agent_kanban::domain::ElementType::Story, 1)),
+            element_type: ElementTypeIdentifier::new("story"),
+            status: StatusType::new("plan"),
+            title: "Story 1".to_string(),
+        };
+        registry.register(Box::new(story));
+
+        let tasks = registry.list_by_type(&ElementTypeIdentifier::new("task"));
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title(), "Task 1");
+
+        let stories = registry.list_by_type(&ElementTypeIdentifier::new("story"));
+        assert_eq!(stories.len(), 1);
+    }
+
+    #[test]
+    fn test_element_registry_thread_safe_registration() {
+        let registry = Arc::new(ElementRegistry::new());
+        let mut handles = vec![];
+
+        // Register from multiple threads
+        for i in 0..10 {
+            let registry_clone = registry.clone();
+            handles.push(thread::spawn(move || {
+                let element = TestElement {
+                    id: Some(ElementId::new(agent_kanban::domain::ElementType::Task, i)),
+                    element_type: ElementTypeIdentifier::new("task"),
+                    status: StatusType::new("plan"),
+                    title: format!("Task {}", i),
+                };
+                registry_clone.register(Box::new(element));
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(registry.len(), 10);
     }
 }
