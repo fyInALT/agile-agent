@@ -22,6 +22,7 @@ mod terminal;
 mod text_formatting;
 mod tool_output;
 mod transcript;
+mod tui_snapshot;
 mod ui_state;
 mod view_mode;
 
@@ -29,6 +30,8 @@ mod view_mode;
 mod shell_tests;
 #[cfg(test)]
 mod test_support;
+
+pub use tui_snapshot::TuiShutdownSnapshot;
 
 pub fn run_tui() -> Result<()> {
     run_tui_with_options(false)

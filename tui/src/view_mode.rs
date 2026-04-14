@@ -7,8 +7,11 @@
 //! - Mail: Cross-agent communication focus
 //! - TaskMatrix: Task assignment grid
 
+use serde::{Deserialize, Serialize};
+
 /// View mode for TUI display
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ViewMode {
     /// Single agent transcript view (default)
     #[default]
@@ -259,7 +262,8 @@ impl DashboardViewState {
 }
 
 /// Which field is focused in mail compose mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ComposeField {
     #[default]
     To,

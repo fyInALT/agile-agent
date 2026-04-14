@@ -58,6 +58,7 @@ dependencies = [
  "diffy",
  "pulldown-cmark",
  "ratatui",
+ "serde",
  "serde_json",
  "shlex",
  "tempfile",
