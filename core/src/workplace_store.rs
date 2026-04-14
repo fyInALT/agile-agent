@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::agent_runtime::WorkplaceId;
 use crate::logging;
+use crate::shutdown_snapshot::ShutdownSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkplaceStore {
@@ -101,6 +102,11 @@ impl WorkplaceStore {
 
     pub fn meta_path(&self) -> PathBuf {
         self.path.join("meta.json")
+    }
+
+    /// Path for shutdown snapshot
+    pub fn shutdown_snapshot_path(&self) -> PathBuf {
+        self.path.join("shutdown_snapshot.json")
     }
 
     pub fn kanban_dir(&self) -> PathBuf {
@@ -215,6 +221,70 @@ impl WorkplaceStore {
         }
         let meta = self.load_meta()?;
         Ok(meta.agent_ids)
+    }
+
+    /// Save shutdown snapshot
+    pub fn save_shutdown_snapshot(&self, snapshot: &ShutdownSnapshot) -> Result<PathBuf> {
+        let path = self.shutdown_snapshot_path();
+        let payload = serde_json::to_string_pretty(snapshot)
+            .context("failed to serialize shutdown snapshot")?;
+        fs::write(&path, payload)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "workplace.shutdown.save",
+            "saved shutdown snapshot",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "reason": snapshot.shutdown_reason,
+                "agents_count": snapshot.agents.len(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(path)
+    }
+
+    /// Load shutdown snapshot if exists
+    pub fn load_shutdown_snapshot(&self) -> Result<Option<ShutdownSnapshot>> {
+        let path = self.shutdown_snapshot_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let snapshot: ShutdownSnapshot = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "workplace.shutdown.load",
+            "loaded shutdown snapshot",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "reason": snapshot.shutdown_reason,
+                "agents_count": snapshot.agents.len(),
+            }),
+        );
+        Ok(Some(snapshot))
+    }
+
+    /// Clear shutdown snapshot (after successful restore)
+    pub fn clear_shutdown_snapshot(&self) -> Result<()> {
+        let path = self.shutdown_snapshot_path();
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+            logging::debug_event(
+                "workplace.shutdown.clear",
+                "cleared shutdown snapshot",
+                serde_json::json!({
+                    "workplace_id": self.workplace_id.as_str(),
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Check if shutdown snapshot exists
+    pub fn has_shutdown_snapshot(&self) -> bool {
+        self.shutdown_snapshot_path().exists()
     }
 
     fn ensure_meta(&self) -> Result<()> {

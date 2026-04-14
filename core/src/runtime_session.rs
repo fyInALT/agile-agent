@@ -7,9 +7,13 @@ use crate::agent_runtime::AgentBootstrapKind;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::LoopPhase;
+use crate::backlog::BacklogState;
 use crate::backlog_store;
 use crate::logging;
 use crate::provider::ProviderKind;
+use crate::shutdown_snapshot::AgentShutdownSnapshot;
+use crate::shutdown_snapshot::ShutdownReason;
+use crate::shutdown_snapshot::ShutdownSnapshot;
 use crate::session_store;
 use crate::shared_state::SharedWorkplaceState;
 use crate::skills::SkillRegistry;
@@ -203,6 +207,60 @@ impl RuntimeSession {
         matches!(self.app.loop_phase, LoopPhase::Executing | LoopPhase::Planning | LoopPhase::Verifying)
     }
 
+    /// Create shutdown snapshot for current session
+    pub fn create_shutdown_snapshot(&self, reason: ShutdownReason) -> ShutdownSnapshot {
+        let agent_snapshot = if self.was_interrupted() {
+            AgentShutdownSnapshot::active(
+                self.agent_runtime.meta().clone(),
+                self.app.active_task_id.clone(),
+                crate::shutdown_snapshot::ProviderThreadSnapshot::waiting_for_response(
+                    None,
+                    "2026-04-14T00:00:00Z".to_string(), // placeholder
+                ),
+            )
+        } else {
+            AgentShutdownSnapshot::idle(self.agent_runtime.meta().clone())
+        };
+
+        ShutdownSnapshot::new(
+            self.agent_runtime.meta().workplace_id.as_str().to_string(),
+            vec![agent_snapshot],
+            self.workplace.backlog.clone(),
+            reason,
+        )
+    }
+
+    /// Perform graceful shutdown with snapshot
+    pub fn graceful_shutdown(&mut self, reason: ShutdownReason) -> Result<ShutdownSnapshot> {
+        // Persist current state
+        self.persist_all()?;
+
+        // Create and save shutdown snapshot
+        let snapshot = self.create_shutdown_snapshot(reason);
+        self.agent_runtime.workplace().save_shutdown_snapshot(&snapshot)?;
+
+        // Mark agent as stopped
+        self.agent_runtime.mark_stopped();
+        self.agent_runtime.persist()?;
+
+        logging::debug_event(
+            "session.shutdown",
+            "completed graceful shutdown",
+            serde_json::json!({
+                "agent_id": self.agent_runtime.agent_id().as_str(),
+                "reason": snapshot.shutdown_reason,
+                "was_interrupted": self.was_interrupted(),
+            }),
+        );
+
+        Ok(snapshot)
+    }
+
+    /// Quick shutdown (just persist and mark stopped)
+    pub fn quick_shutdown(&mut self) -> Result<()> {
+        self.mark_stopped_and_persist()
+    }
+
     pub fn switch_agent(&mut self, provider_kind: ProviderKind) -> Result<String> {
         self.sync_app_to_workplace();
         self.agent_runtime.sync_from_app_state(&self.app);
@@ -287,6 +345,7 @@ fn announce_bootstrap_kind(app: &mut AppState, kind: &AgentBootstrapKind, runtim
 mod tests {
     use super::RuntimeSession;
     use super::LoopPhase;
+    use super::ShutdownReason;
     use crate::app::TranscriptEntry;
     use crate::logging;
     use crate::logging::RunMode;
@@ -429,5 +488,50 @@ mod tests {
         // Planning is interrupted
         session.app.loop_phase = LoopPhase::Planning;
         assert!(session.was_interrupted());
+    }
+
+    #[test]
+    fn graceful_shutdown_creates_snapshot() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+
+        let snapshot = session
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
+
+        assert_eq!(snapshot.shutdown_reason, ShutdownReason::UserQuit);
+        assert_eq!(snapshot.agents.len(), 1);
+        assert!(!snapshot.has_active_agents());
+    }
+
+    #[test]
+    fn graceful_shutdown_saves_snapshot_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+
+        session.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+
+        // Snapshot file should exist
+        assert!(session.agent_runtime.workplace().has_shutdown_snapshot());
+    }
+
+    #[test]
+    fn graceful_shutdown_marks_active_agent_in_snapshot() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+        session.app.loop_phase = LoopPhase::Executing;
+
+        let snapshot = session
+            .graceful_shutdown(ShutdownReason::Interrupted)
+            .expect("shutdown");
+
+        assert!(snapshot.has_active_agents());
+        assert!(snapshot.agents[0].needs_resume());
     }
 }
