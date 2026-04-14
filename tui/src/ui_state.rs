@@ -1018,6 +1018,35 @@ mod tests {
     }
 
     #[test]
+    fn active_thinking_chunks_stay_in_live_tail_until_finalize() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_thinking_chunk("step 1 ");
+        state.append_active_thinking_chunk("step 2");
+
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2"
+        ));
+        assert!(!state
+            .app()
+            .transcript
+            .iter()
+            .any(|entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2")));
+
+        state.finalize_active_entries_after_failure(None);
+
+        assert!(state.active_entries.is_empty());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2"
+        ));
+    }
+
+    #[test]
     fn finalizing_active_entries_after_failure_commits_failed_history_and_clears_live_tail() {
         let temp = TempDir::new().expect("tempdir");
         let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
