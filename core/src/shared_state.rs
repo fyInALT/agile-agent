@@ -44,6 +44,8 @@ pub struct LoopControlFlags {
     pub should_quit: bool,
     /// Whether loop execution is paused
     pub loop_paused: bool,
+    /// Whether the autonomous loop is actively running
+    pub loop_run_active: bool,
     /// Maximum iterations allowed across all agents
     pub max_iterations: usize,
     /// Current iteration count (shared across agents)
@@ -55,6 +57,7 @@ impl Default for LoopControlFlags {
         Self {
             should_quit: false,
             loop_paused: false,
+            loop_run_active: false,
             max_iterations: 100,
             current_iteration: 0,
         }
@@ -78,6 +81,28 @@ impl LoopControlFlags {
     /// Check if more iterations are allowed
     pub fn can_iterate(&self) -> bool {
         !self.should_quit && !self.loop_paused && self.current_iteration < self.max_iterations
+    }
+
+    /// Check if autonomous loop is running
+    pub fn is_loop_running(&self) -> bool {
+        self.loop_run_active && !self.should_quit
+    }
+
+    /// Get remaining iterations (max - current)
+    pub fn remaining_iterations(&self) -> usize {
+        self.max_iterations.saturating_sub(self.current_iteration)
+    }
+
+    /// Start autonomous loop with max iterations
+    pub fn start_loop(&mut self, max_iterations: usize) {
+        self.loop_run_active = true;
+        self.max_iterations = max_iterations;
+        self.current_iteration = 0;
+    }
+
+    /// Stop autonomous loop
+    pub fn stop_loop(&mut self) {
+        self.loop_run_active = false;
     }
 
     /// Increment iteration count
@@ -278,6 +303,53 @@ mod tests {
         assert!(!flags.can_iterate());
         flags.reset_iterations();
         assert!(flags.can_iterate());
+    }
+
+    #[test]
+    fn loop_control_start_loop_sets_active_and_max() {
+        let mut flags = LoopControlFlags::new();
+        flags.start_loop(10);
+        assert!(flags.loop_run_active);
+        assert_eq!(flags.max_iterations, 10);
+        assert_eq!(flags.current_iteration, 0);
+    }
+
+    #[test]
+    fn loop_control_stop_loop_clears_active() {
+        let mut flags = LoopControlFlags::new();
+        flags.start_loop(10);
+        flags.stop_loop();
+        assert!(!flags.loop_run_active);
+    }
+
+    #[test]
+    fn loop_control_is_loop_running() {
+        let mut flags = LoopControlFlags::new();
+        assert!(!flags.is_loop_running());
+        flags.start_loop(10);
+        assert!(flags.is_loop_running());
+        flags.signal_quit();
+        assert!(!flags.is_loop_running());
+    }
+
+    #[test]
+    fn loop_control_remaining_iterations() {
+        let mut flags = LoopControlFlags::with_max_iterations(10);
+        assert_eq!(flags.remaining_iterations(), 10);
+        flags.increment_iteration();
+        assert_eq!(flags.remaining_iterations(), 9);
+        flags.increment_iteration();
+        flags.increment_iteration();
+        assert_eq!(flags.remaining_iterations(), 7);
+    }
+
+    #[test]
+    fn loop_control_remaining_iterations_saturates() {
+        let mut flags = LoopControlFlags::with_max_iterations(2);
+        flags.increment_iteration();
+        flags.increment_iteration();
+        flags.increment_iteration(); // exceeds max
+        assert_eq!(flags.remaining_iterations(), 0);
     }
 
     #[test]

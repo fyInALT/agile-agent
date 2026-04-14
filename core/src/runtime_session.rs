@@ -10,12 +10,14 @@ use crate::backlog_store;
 use crate::logging;
 use crate::provider::ProviderKind;
 use crate::session_store;
+use crate::shared_state::SharedWorkplaceState;
 use crate::skills::SkillRegistry;
 
 #[derive(Debug)]
 pub struct RuntimeSession {
     pub app: AppState,
     pub agent_runtime: AgentRuntime,
+    pub workplace: SharedWorkplaceState,
 }
 
 impl RuntimeSession {
@@ -25,12 +27,15 @@ impl RuntimeSession {
         resume_snapshot: bool,
     ) -> Result<Self> {
         let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, default_provider)?;
-        let mut app = AppState::with_skills(
-            default_provider,
-            launch_cwd.clone(),
-            SkillRegistry::discover(&launch_cwd),
-        );
-        app.backlog = backlog_store::load_backlog_for_workplace(bootstrap.runtime.workplace())?;
+        let workplace_id = bootstrap.runtime.meta().workplace_id.clone();
+        let backlog = backlog_store::load_backlog_for_workplace(bootstrap.runtime.workplace())?;
+        let skills = SkillRegistry::discover(&launch_cwd);
+
+        let mut workplace = SharedWorkplaceState::with_backlog(workplace_id, backlog);
+        workplace.skills = skills;
+
+        let mut app = AppState::new(default_provider);
+        app.cwd = launch_cwd.clone();
 
         for warning in bootstrap.runtime.apply_to_app_state(&mut app) {
             app.push_error_message(warning);
@@ -52,6 +57,7 @@ impl RuntimeSession {
         let mut session = Self {
             app,
             agent_runtime: bootstrap.runtime,
+            workplace,
         };
 
         if resume_snapshot {
@@ -71,6 +77,16 @@ impl RuntimeSession {
         Ok(session)
     }
 
+    /// Get workplace (shared state) reference
+    pub fn workplace(&self) -> &SharedWorkplaceState {
+        &self.workplace
+    }
+
+    /// Get workplace (shared state) mutable reference
+    pub fn workplace_mut(&mut self) -> &mut SharedWorkplaceState {
+        &mut self.workplace
+    }
+
     pub fn persist_if_changed(&mut self) -> Result<()> {
         if self.agent_runtime.sync_from_app_state(&self.app) {
             self.persist_all()?;
@@ -85,7 +101,7 @@ impl RuntimeSession {
         self.agent_runtime.persist_messages(&self.app)?;
         self.agent_runtime.persist_memory(&self.app)?;
         backlog_store::save_backlog_for_workplace(
-            &self.app.backlog,
+            &self.workplace.backlog,
             self.agent_runtime.workplace(),
         )?;
         session_store::save_recent_session_for_workplace(
@@ -117,17 +133,19 @@ impl RuntimeSession {
 
         let next_runtime = self.agent_runtime.create_sibling(provider_kind)?;
         let cwd = self.app.cwd.clone();
-        let backlog = self.app.backlog.clone();
         let mut skills = SkillRegistry::discover(&cwd);
-        skills.enabled_names = self.app.skills.enabled_names.clone();
+        skills.enabled_names = self.workplace.skills.enabled_names.clone();
 
-        let mut next_app = AppState::with_skills(provider_kind, cwd, skills);
-        next_app.backlog = backlog;
+        let mut next_app = AppState::new(provider_kind);
+        next_app.cwd = cwd.clone();
         for warning in next_runtime.apply_to_app_state(&mut next_app) {
             next_app.push_error_message(warning);
         }
         let summary = next_runtime.summary();
         next_app.push_status_message(format!("created agent: {summary}"));
+
+        // Update workplace with new skills (backlog stays the same)
+        self.workplace.skills = skills;
 
         self.app = next_app;
         self.agent_runtime = next_runtime;

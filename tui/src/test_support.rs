@@ -1,8 +1,10 @@
 use agent_core::agent_runtime::AgentRuntime;
+use agent_core::agent_runtime::WorkplaceId;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::provider::ProviderKind;
 use agent_core::runtime_session::RuntimeSession;
+use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::skills::SkillRegistry;
 use agent_core::workplace_store::WorkplaceStore;
 use crossterm::event::KeyCode;
@@ -38,18 +40,21 @@ impl ShellHarness {
         let runtime = AgentRuntime::new(&workplace, 1, provider);
         runtime.persist().expect("persist runtime");
 
-        let mut app = AppState::with_skills(
-            provider,
-            workdir.path().to_path_buf(),
-            SkillRegistry::discover(workdir.path()),
-        );
+        let mut app = AppState::new(provider);
+        app.cwd = workdir.path().to_path_buf();
         for warning in runtime.apply_to_app_state(&mut app) {
             app.push_error_message(warning);
         }
 
+        let workplace_state = SharedWorkplaceState::with_skills(
+            WorkplaceId::new(workplace.workplace_id().as_str()),
+            SkillRegistry::discover(workdir.path()),
+        );
+
         let session = RuntimeSession {
             app,
             agent_runtime: runtime,
+            workplace: workplace_state,
         };
 
         Self {
