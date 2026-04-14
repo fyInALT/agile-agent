@@ -69,6 +69,11 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         self.repository.list_blocked()
     }
 
+    /// List elements by sprint
+    pub fn list_by_sprint(&self, sprint_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
+        self.repository.list_by_sprint(sprint_id)
+    }
+
     /// Update element status
     pub fn update_status(
         &self,
@@ -352,6 +357,15 @@ mod tests {
 
         fn list_by_parent(&self, _parent: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
             Ok(Vec::new())
+        }
+
+        fn list_by_sprint(&self, sprint_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
+            let elements = self.elements.read().unwrap();
+            Ok(elements
+                .iter()
+                .filter(|e| e.parent().map(|p| p == sprint_id).unwrap_or(false))
+                .cloned()
+                .collect())
         }
 
         fn list_blocked(&self) -> Result<Vec<KanbanElement>, KanbanError> {

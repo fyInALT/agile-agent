@@ -24,6 +24,9 @@ pub trait KanbanElementRepository: Send + Sync {
     /// List elements by parent ID
     fn list_by_parent(&self, parent: &ElementId) -> Result<Vec<KanbanElement>, KanbanError>;
 
+    /// List elements by sprint ID
+    fn list_by_sprint(&self, sprint_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError>;
+
     /// List elements that are blocked
     fn list_blocked(&self) -> Result<Vec<KanbanElement>, KanbanError>;
 

@@ -195,6 +195,14 @@ impl KanbanElementRepository for FileKanbanRepository {
         self.list_by_status(Status::Blocked)
     }
 
+    fn list_by_sprint(&self, sprint_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
+        let all = self.list()?;
+        Ok(all
+            .into_iter()
+            .filter(|e| e.parent().map(|p| p == sprint_id).unwrap_or(false))
+            .collect())
+    }
+
     fn save(&self, element: KanbanElement) -> Result<(), KanbanError> {
         let id = element
             .id()

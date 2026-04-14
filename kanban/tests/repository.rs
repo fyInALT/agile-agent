@@ -92,6 +92,18 @@ impl KanbanElementRepository for MockRepository {
             .collect())
     }
 
+    fn list_by_sprint(
+        &self,
+        sprint_id: &ElementId,
+    ) -> Result<Vec<KanbanElement>, agent_kanban::KanbanError> {
+        let elements = self.elements.read().unwrap();
+        Ok(elements
+            .iter()
+            .filter(|e| e.parent().map(|p| p == sprint_id).unwrap_or(false))
+            .cloned()
+            .collect())
+    }
+
     fn save(&self, element: KanbanElement) -> Result<(), agent_kanban::KanbanError> {
         let mut elements = self.elements.write().unwrap();
         if let Some(pos) = elements.iter().position(|e| e.id() == element.id()) {
