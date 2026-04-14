@@ -24,14 +24,14 @@ fn renders_shell_footer_and_prompt() {
 }
 
 #[test]
-fn tab_shows_focus_next_message_when_idle() {
+fn tab_shows_no_agents_message_when_no_pool() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
 
     shell.press(KeyCode::Tab, KeyModifiers::NONE);
     let rendered = shell.render_to_string(100, 24);
 
-    // In single-agent mode, Tab shows focus message
-    assert!(rendered.contains("focus next"));
+    // Without spawning agents first, Tab shows "no agents to switch"
+    assert!(rendered.contains("no agents to switch"));
 }
 
 #[test]

@@ -109,14 +109,48 @@ impl ShellHarness {
             InputOutcome::ScrollTranscriptHome => self.state.scroll_transcript_home(),
             InputOutcome::ScrollTranscriptEnd => self.state.scroll_transcript_end(),
             InputOutcome::FocusNextAgent => {
-                self.state.app_mut().push_status_message("focus next (multi-agent: coming soon)");
+                if let Some(status) = self.state.focus_next_agent() {
+                    self.state.app_mut().push_status_message(format!(
+                        "focused {} ({})",
+                        status.codename.as_str(),
+                        status.status.label()
+                    ));
+                } else {
+                    self.state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                }
             }
             InputOutcome::FocusPreviousAgent => {
-                self.state.app_mut().push_status_message("focus previous (multi-agent: coming soon)");
+                if let Some(status) = self.state.focus_previous_agent() {
+                    self.state.app_mut().push_status_message(format!(
+                        "focused {} ({})",
+                        status.codename.as_str(),
+                        status.status.label()
+                    ));
+                } else {
+                    self.state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                }
             }
-            InputOutcome::FocusAgent(_) => {}
-            InputOutcome::SpawnAgent => {}
-            InputOutcome::StopFocusedAgent => {}
+            InputOutcome::FocusAgent(index) => {
+                if let Some(status) = self.state.focus_agent_by_index(index) {
+                    self.state.app_mut().push_status_message(format!(
+                        "focused {} ({})",
+                        status.codename.as_str(),
+                        status.status.label()
+                    ));
+                } else {
+                    self.state.app_mut().push_status_message(format!(
+                        "no agent at index {}",
+                        index + 1
+                    ));
+                }
+            }
+            InputOutcome::SpawnAgent => {
+                self.state.open_provider_overlay();
+            }
+            InputOutcome::StopFocusedAgent => {
+                let codename = self.state.focused_agent_codename().to_string();
+                self.state.open_stop_confirmation(&codename);
+            }
             InputOutcome::Submit(text) => {
                 self.state.app_mut().push_user_message(text);
             }
