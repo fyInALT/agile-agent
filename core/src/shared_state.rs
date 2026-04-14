@@ -1,6 +1,35 @@
 //! SharedWorkplaceState for multi-agent runtime
 //!
 //! Contains state shared across all agents in a workplace.
+//!
+//! # Thread Safety Pattern
+//!
+//! This state is designed to be owned by the main thread (TUI loop):
+//!
+//! ```text
+//! Main Thread (TUI Loop)
+//! ┌─────────────────────────────────────────────────────────┐
+//! │  SharedWorkplaceState (Arc-wrapped for potential sharing)│
+//! │  - Backlog: todos, active_tasks                          │
+//! │  - Skills: registry                                       │
+//! │  - LoopControl: should_quit, iteration count             │
+//! │                                                           │
+//! │  All mutations happen HERE after receiving events        │
+//! └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Access Pattern
+//!
+//! - Main thread: Direct mutable access via `Arc::get_mut()` or clone
+//! - Provider threads: NEVER access this state directly
+//! - Cross-thread: Provider sends events → Main thread updates state
+//!
+//! ## Future Interior Mutability
+//!
+//! For multi-agent task pickup scenarios, BacklogState may need `Mutex`:
+//! - Agents check for available tasks
+//! - Claim atomically without race conditions
+//! - Currently handled by main thread assignment (no Mutex needed)
 
 use std::sync::Arc;
 

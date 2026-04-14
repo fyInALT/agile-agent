@@ -1,6 +1,40 @@
 //! EventAggregator for non-blocking multi-channel polling
 //!
 //! Aggregates events from multiple agent event channels.
+//!
+//! # Thread Safety Role
+//!
+//! EventAggregator is the **critical bridge** between provider threads and main thread:
+//!
+//! ```text
+//! Provider Threads                Main Thread (TUI)
+//! ┌─────────────────┐            ┌─────────────────────────┐
+//! │ Thread 1        │            │ EventAggregator         │
+//! │  event_tx ──────┼───────────▶│  receivers: HashMap     │
+//! │                 │            │  poll_all()             │
+//! └─────────────────┘            │  poll_with_timeout()    │
+//!                                └─────────────────────────┘
+//! ┌─────────────────┐                       │
+//! │ Thread 2        │                       ▼
+//! │  event_tx ──────┼──────▶  AgentEvent    │
+//! │                 │        (tagged with   │
+//! └─────────────────┘        agent_id)      │
+//!                                            ▼
+//!                                State Mutation (Main Thread)
+//! ```
+//!
+//! ## Key Thread Safety Properties
+//!
+//! 1. **Owned by main thread** - EventAggregator lives in main thread
+//! 2. **Receivers from providers** - HashMap stores mpsc::Receiver from each provider
+//! 3. **Non-blocking poll** - `try_recv()` never blocks, safe for UI loop
+//! 4. **Tagged events** - Each event carries `AgentId` for routing
+//!
+//! ## Memory Safety
+//!
+//! - Receivers are `mpsc::Receiver` - thread-safe by design
+//! - Provider threads own Senders, main thread owns Receivers
+//! - When provider thread finishes, Sender drops → Receiver detects disconnect
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, TryRecvError};
