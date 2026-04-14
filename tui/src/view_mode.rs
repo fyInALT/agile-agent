@@ -175,6 +175,8 @@ pub struct DashboardViewState {
     pub selected_card_index: usize,
     /// Number of cards per row (responsive)
     pub cards_per_row: usize,
+    /// Scroll offset (row offset for cards that overflow)
+    pub scroll_offset: usize,
 }
 
 impl Default for DashboardViewState {
@@ -182,6 +184,7 @@ impl Default for DashboardViewState {
         Self {
             selected_card_index: 0,
             cards_per_row: 3,
+            scroll_offset: 0,
         }
     }
 }
@@ -190,6 +193,33 @@ impl DashboardViewState {
     /// Create new dashboard view state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Scroll up one row
+    pub fn scroll_up(&mut self) {
+        if self.scroll_offset > 0 {
+            self.scroll_offset -= 1;
+        }
+    }
+
+    /// Scroll down one row
+    pub fn scroll_down(&mut self, total_rows: usize) {
+        if self.scroll_offset < total_rows.saturating_sub(1) {
+            self.scroll_offset += 1;
+        }
+    }
+
+    /// Ensure selected card is visible (adjust scroll if needed)
+    pub fn ensure_selected_visible(&mut self, cards_per_row: usize, visible_rows: usize) {
+        let selected_row = self.selected_card_index / cards_per_row;
+        // Scroll up if selected is above visible area
+        if selected_row < self.scroll_offset {
+            self.scroll_offset = selected_row;
+        }
+        // Scroll down if selected is below visible area
+        if selected_row >= self.scroll_offset + visible_rows {
+            self.scroll_offset = selected_row - visible_rows.saturating_sub(1);
+        }
     }
 
     /// Select next card
@@ -510,6 +540,40 @@ mod tests {
         assert_eq!(state.cards_per_row, 3);
         state.adjust_for_width(180);
         assert_eq!(state.cards_per_row, 4);
+    }
+
+    #[test]
+    fn dashboard_scroll() {
+        let mut state = DashboardViewState::new();
+        state.scroll_offset = 0;
+
+        // Scroll down
+        state.scroll_down(5);
+        assert_eq!(state.scroll_offset, 1);
+        state.scroll_down(5);
+        state.scroll_down(5);
+        state.scroll_down(5); // Should stop at max
+        assert_eq!(state.scroll_offset, 4);
+
+        // Scroll up
+        state.scroll_up();
+        assert_eq!(state.scroll_offset, 3);
+    }
+
+    #[test]
+    fn dashboard_ensure_selected_visible() {
+        let mut state = DashboardViewState::new();
+        state.cards_per_row = 3;
+
+        // Select card in row 5, visible rows = 2
+        state.selected_card_index = 15; // Row 5 (15 / 3 = 5)
+        state.ensure_selected_visible(3, 2);
+        assert_eq!(state.scroll_offset, 4); // Scroll so row 5 is visible (4 + 1 visible row)
+
+        // Select card above visible area
+        state.selected_card_index = 3; // Row 1
+        state.ensure_selected_visible(3, 2);
+        assert_eq!(state.scroll_offset, 1);
     }
 
     #[test]

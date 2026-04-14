@@ -872,7 +872,7 @@ fn render_dashboard_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Re
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_dashboard_cards(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+fn render_dashboard_cards(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -890,17 +890,29 @@ fn render_dashboard_cards(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     // Calculate card grid layout
     let cards_per_row = state.view_state.dashboard.cards_per_row.max(1);
     let card_width = (area.width / cards_per_row as u16).max(20);
+    let card_height = 4u16;
+    let visible_rows = (area.height / card_height) as usize;
+
+    // Ensure selected card is visible
+    state.view_state.dashboard.ensure_selected_visible(cards_per_row, visible_rows);
+    let scroll_offset = state.view_state.dashboard.scroll_offset;
 
     // Render each agent as a card
     for (i, status) in statuses.iter().enumerate() {
         let row = i / cards_per_row;
         let col = i % cards_per_row;
 
+        // Skip rows that are scrolled out of view
+        if row < scroll_offset {
+            continue;
+        }
+
+        let visible_row = row - scroll_offset;
         let card_area = Rect {
             x: area.x + (col as u16) * card_width,
-            y: area.y + (row as u16) * 4,
+            y: area.y + (visible_row as u16) * card_height,
             width: card_width.saturating_sub(1),
-            height: 4,
+            height: card_height,
         };
 
         if card_area.y + card_area.height > area.y + area.height {
