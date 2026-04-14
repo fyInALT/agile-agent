@@ -34,13 +34,13 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T3.1.1: Implement KanbanService struct**
+- [x] **T3.1.1: Implement KanbanService struct**
   - File: `kanban/src/service.rs`
   - Add `repository: Arc<R>` field
   - Add `event_bus: Arc<KanbanEventBus>` field
   - Add `new(repository, event_bus)` constructor
 
-- [ ] **T3.1.2: Implement create_element**
+- [x] **T3.1.2: Implement create_element**
   - File: `kanban/src/service.rs`
   - Generate new ID using repository
   - Set `created_at` and `updated_at` timestamps
@@ -48,15 +48,15 @@ kanban/                    # agent-kanban crate
   - Publish `KanbanEvent::Created` event
   - Return created element
 
-- [ ] **T3.1.3: Implement get_element**
+- [x] **T3.1.3: Implement get_element**
   - File: `kanban/src/service.rs`
   - Delegate to repository `get()`
 
-- [ ] **T3.1.4: Implement list_elements and list_by_type**
+- [x] **T3.1.4: Implement list_elements and list_by_type**
   - File: `kanban/src/service.rs`
   - Delegate to repository methods
 
-- [ ] **T3.1.5: Write unit tests for create operations**
+- [x] **T3.1.5: Write unit tests for create operations**
   - File: `kanban/tests/service.rs`
   - Test `create_element` assigns sequential ID
   - Test `create_element` sets timestamps
@@ -82,7 +82,7 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T3.2.1: Implement update_status with validation**
+- [x] **T3.2.1: Implement update_status with validation**
   - File: `kanban/src/service.rs`
   - Add `update_status(id, new_status, agent_id)` method
   - Validate element exists
@@ -92,12 +92,12 @@ kanban/                    # agent-kanban crate
   - Save updated element
   - Publish `KanbanEvent::StatusChanged` with old_status, new_status, changed_by
 
-- [ ] **T3.2.2: Handle transition failures gracefully**
+- [x] **T3.2.2: Handle transition failures gracefully**
   - File: `kanban/src/service.rs`
   - Return `KanbanError::InvalidStatusTransition` for invalid transitions
   - Ensure error message is descriptive
 
-- [ ] **T3.2.3: Write unit tests for status transitions**
+- [x] **T3.2.3: Write unit tests for status transitions**
   - File: `kanban/tests/service.rs`
   - Test valid transition: Plan → Backlog
   - Test invalid transition: Plan → Done (should fail)
@@ -122,24 +122,24 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T3.3.1: Implement find_blocking_dependencies**
+- [x] **T3.3.1: Implement find_blocking_dependencies**
   - File: `kanban/src/service.rs`
   - Get element's dependencies list
   - For each dependency, check if status is `Done` or `Verified`
   - Return list of IDs that are blocking (not Done/Verified)
   - Handle dangling dependencies (reference to non-existent element)
 
-- [ ] **T3.3.2: Add dependency check to status transitions**
+- [x] **T3.3.2: Add dependency check to status transitions**
   - File: `kanban/src/service.rs`
   - Modify `update_status` to check dependencies when transitioning to `InProgress` or `Done`
   - Return `KanbanError::DependenciesNotMet` with list of blockers if dependencies not satisfied
 
-- [ ] **T3.3.3: Implement can_start helper**
+- [x] **T3.3.3: Implement can_start helper**
   - File: `kanban/src/service.rs`
   - Add `can_start(id)` returning `true` if no blocking dependencies
   - Returns `false` if any dependency is not Done/Verified
 
-- [ ] **T3.3.4: Write unit tests for dependency checking**
+- [x] **T3.3.4: Write unit tests for dependency checking**
   - File: `kanban/tests/service.rs`
   - Test element with no dependencies can transition freely
   - Test element with unmet dependency blocks at InProgress
@@ -161,9 +161,9 @@ kanban/                    # agent-kanban crate
 
 ## Sprint 3 Completion Checklist
 
-- [ ] All 3 stories completed
-- [ ] All tasks checked off
-- [ ] Code compiles: `cargo build -p agent-kanban`
-- [ ] Tests pass: `cargo test -p agent-kanban`
-- [ ] Code formatted: `cargo fmt -p agent-kanban`
-- [ ] Committed: `git commit -m "feat(kanban): complete sprint 3 - service layer"`
+- [x] All 3 stories completed
+- [x] All tasks checked off
+- [x] Code compiles: `cargo build -p agent-kanban`
+- [x] Tests pass: `cargo test -p agent-kanban`
+- [x] Code formatted: `cargo fmt -p agent-kanban`
+- [x] Committed: `git commit -m "feat(kanban): complete sprint 3 - service layer"`
