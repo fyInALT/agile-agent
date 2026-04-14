@@ -12,6 +12,7 @@ pub mod app;
 pub mod autonomy;
 pub mod backlog;
 pub mod backlog_store;
+pub mod blocker_escalation;
 pub mod commands;
 pub mod escalation;
 pub mod event;
