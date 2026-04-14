@@ -1627,27 +1627,27 @@ fn render_edit_diff_line(
         .map(|value| format!("{value:>width$}", width = line_no_width))
         .unwrap_or_else(|| " ".repeat(line_no_width));
 
-    // Style with light background colors
+    // Style with light background colors (darker variants)
     let (bg_color, fg_for_sign) = if has_bg {
         if fg_color == Color::Green {
-            // Added line: light green background
-            (Some(Color::Indexed(194)), Color::Green) // Light green (#e5f5e5)
+            // Added line: darker light green background
+            (Color::Indexed(28), Color::Green) // Dark green (#008700)
         } else {
-            // Removed line: light red background
-            (Some(Color::Indexed(224)), Color::Red) // Light red (#ffe5e5)
+            // Removed line: darker light red background
+            (Color::Indexed(52), Color::Red) // Dark red (#5f0000)
         }
     } else {
-        (None, Color::DarkGray)
+        (Color::Reset, Color::DarkGray)
     };
 
-    let content_style = if let Some(bg) = bg_color {
-        Style::default().fg(Color::DarkGray).bg(bg)
+    let content_style = if has_bg {
+        Style::default().fg(Color::White).bg(bg_color)
     } else {
         Style::default().add_modifier(Modifier::DIM)
     };
 
-    let sign_style = if let Some(bg) = bg_color {
-        Style::default().fg(fg_for_sign).bg(bg)
+    let sign_style = if has_bg {
+        Style::default().fg(fg_for_sign).bg(bg_color)
     } else {
         Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
     };
