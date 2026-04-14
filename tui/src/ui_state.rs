@@ -369,6 +369,13 @@ impl TuiState {
         }
     }
 
+    /// Get the focused agent ID (if pool exists)
+    pub fn focused_agent_id(&self) -> Option<AgentId> {
+        self.agent_pool.as_ref()
+            .and_then(|pool| pool.focused_slot())
+            .map(|s| s.agent_id().clone())
+    }
+
     /// Start provider request for focused agent in pool
     ///
     /// Creates provider thread and registers event channel with AgentSlot.

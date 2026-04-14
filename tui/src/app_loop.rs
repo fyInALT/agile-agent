@@ -1,6 +1,7 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
+use agent_core::app::TranscriptEntry;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_local_command;
 use agent_core::logging;
@@ -432,6 +433,95 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
         if should_clear_provider_rx {
             provider_rx = None;
+        }
+
+        // Poll multi-agent events from EventAggregator
+        if state.agent_channel_count() > 0 {
+            let poll_result = state.poll_agent_events();
+            for event in poll_result.events {
+                match event {
+                    agent_core::event_aggregator::AgentEvent::FromProvider { agent_id, event } => {
+                        // For now, process events from any agent in focused slot
+                        // In full implementation, would route to specific agent's transcript
+                        match event {
+                            ProviderEvent::Status(text) => {
+                                state.app_mut().push_status_message(format!("{}: {}", agent_id.as_str(), text));
+                            }
+                            ProviderEvent::AssistantChunk(chunk) => {
+                                // If this is the focused agent, append to active display
+                                if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                                    state.append_active_assistant_chunk(&chunk);
+                                }
+                                // Also append to agent's transcript in pool
+                                if let Some(pool) = state.agent_pool.as_mut() {
+                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                        slot.append_transcript(TranscriptEntry::Assistant(chunk));
+                                    }
+                                }
+                            }
+                            ProviderEvent::ThinkingChunk(chunk) => {
+                                if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                                    state.append_active_thinking_chunk(&chunk);
+                                }
+                            }
+                            ProviderEvent::Finished => {
+                                if let Some(pool) = state.agent_pool.as_mut() {
+                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
+                                    }
+                                }
+                                state.unregister_agent_channel(&agent_id);
+                                state.app_mut().push_status_message(format!("{} finished", agent_id.as_str()));
+                            }
+                            ProviderEvent::Error(error) => {
+                                if let Some(pool) = state.agent_pool.as_mut() {
+                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                        slot.append_transcript(TranscriptEntry::Error(error.clone()));
+                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::error(error.clone()));
+                                    }
+                                }
+                                state.unregister_agent_channel(&agent_id);
+                                state.app_mut().push_error_message(format!("{} error: {}", agent_id.as_str(), error));
+                            }
+                            ProviderEvent::SessionHandle(handle) => {
+                                if let Some(pool) = state.agent_pool.as_mut() {
+                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                        slot.set_session_handle(handle);
+                                    }
+                                }
+                            }
+                            // Other events handled similarly
+                            _ => {}
+                        }
+                    }
+                    agent_core::event_aggregator::AgentEvent::ThreadFinished { agent_id, outcome } => {
+                        if let Some(pool) = state.agent_pool.as_mut() {
+                            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                slot.clear_provider_thread();
+                                match outcome {
+                                    agent_core::agent_slot::ThreadOutcome::NormalExit => {
+                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
+                                    }
+                                    agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
+                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::error(error));
+                                    }
+                                    agent_core::agent_slot::ThreadOutcome::Cancelled => {
+                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::stopped("cancelled"));
+                                    }
+                                }
+                            }
+                        }
+                        state.unregister_agent_channel(&agent_id);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Handle disconnected channels
+            for disconnected_id in poll_result.disconnected_channels {
+                state.unregister_agent_channel(&disconnected_id);
+                state.app_mut().push_status_message(format!("{} disconnected", disconnected_id.as_str()));
+            }
         }
 
         if state.drain_active_stream_commit_tick() {
