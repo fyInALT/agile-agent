@@ -171,24 +171,63 @@ impl ProviderThreadHandle {
     /// Stop the thread gracefully with timeout
     ///
     /// Returns the stop result indicating how the thread finished.
-    pub fn stop(&mut self, _timeout: Duration) -> ThreadStopResult {
+    ///
+    /// # Implementation
+    ///
+    /// 1. Drop the keepalive sender to signal thread shutdown
+    /// 2. Wait for thread to finish via join with timeout
+    /// 3. If timeout expires, abandon the thread (log warning)
+    /// 4. Catch any panic and report as Panicked result
+    pub fn stop(&mut self, timeout: Duration) -> ThreadStopResult {
         if self.handle.is_none() {
             return ThreadStopResult::AlreadyStopped;
         }
 
-        // Drop the sender to signal thread to stop
-        // (Provider threads should check for recv errors to detect shutdown)
-        let handle = self.handle.take().unwrap();
+        // Drop the keepalive sender to signal thread to stop
+        // This causes the thread's receiver to detect disconnect
+        self._keepalive_tx = channel().0; // Replace with dummy channel
 
-        // Wait for thread to finish with timeout
-        match handle.join() {
-            Ok(()) => {
+        let handle = self.handle.take().unwrap();
+        let thread_name = self.thread_name.clone();
+
+        // Use a helper thread to implement join with timeout
+        let (result_tx, result_rx) = channel();
+
+        let _watcher = Builder::new()
+            .name(format!("{}-watcher", thread_name))
+            .spawn(move || {
+                let result = handle.join();
+                let _ = result_tx.send(result);
+            });
+
+        // Wait for result with timeout
+        match result_rx.recv_timeout(timeout) {
+            Ok(Ok(())) => {
                 let elapsed_ms = self.elapsed().as_millis() as u64;
                 ThreadStopResult::GracefulStop { duration_ms: elapsed_ms }
             }
-            Err(panic_payload) => {
+            Ok(Err(panic_payload)) => {
                 let error = extract_panic_message(panic_payload);
                 ThreadStopResult::Panicked { error }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                logging::warn_event(
+                    "provider_thread.timeout",
+                    "thread did not finish within timeout",
+                    serde_json::json!({
+                        "thread_name": thread_name,
+                        "timeout_ms": timeout.as_millis(),
+                    }),
+                );
+                ThreadStopResult::TimeoutAbandoned {
+                    timeout_ms: timeout.as_millis() as u64,
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // Watcher thread failed somehow, treat as timeout
+                ThreadStopResult::TimeoutAbandoned {
+                    timeout_ms: timeout.as_millis() as u64,
+                }
             }
         }
     }
@@ -652,5 +691,120 @@ mod tests {
 
         // Thread should have detected the channel closure and exited
         assert!(matches!(result, ThreadStopResult::GracefulStop { .. }));
+    }
+
+    // Cancellation Tests
+
+    /// Test: Thread that doesn't finish gets timeout result
+    #[test]
+    fn thread_timeout_returns_timeout_abandoned() {
+        let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
+
+        // Spawn a thread that sleeps for a long time (won't finish in timeout)
+        let handle = Builder::new()
+            .name("slow-thread".to_string())
+            .spawn(|| {
+                std::thread::sleep(Duration::from_secs(10)); // Sleep for 10 seconds
+            })
+            .unwrap();
+
+        let mut thread_handle = ProviderThreadHandle::new(
+            handle,
+            event_rx,
+            keepalive_tx,
+            "slow-thread".to_string(),
+        );
+
+        // Stop with short timeout (100ms)
+        let result = thread_handle.stop(Duration::from_millis(100));
+
+        // Should return TimeoutAbandoned since thread won't finish in 100ms
+        assert!(matches!(result, ThreadStopResult::TimeoutAbandoned { .. }));
+    }
+
+    /// Test: Thread that panics returns panicked result
+    #[test]
+    fn thread_panic_returns_panicked_result() {
+        let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
+
+        let handle = Builder::new()
+            .name("panic-thread".to_string())
+            .spawn(|| {
+                panic!("intentional panic for test");
+            })
+            .unwrap();
+
+        let mut thread_handle = ProviderThreadHandle::new(
+            handle,
+            event_rx,
+            keepalive_tx,
+            "panic-thread".to_string(),
+        );
+
+        // Give thread time to panic
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Stop should catch the panic
+        let result = thread_handle.stop(Duration::from_millis(100));
+
+        assert!(matches!(result, ThreadStopResult::Panicked { .. }));
+    }
+
+    /// Test: Dropping keepalive sender doesn't immediately stop thread
+    #[test]
+    fn dropping_sender_signals_but_not_force_stops() {
+        let mut handle = start_mock_provider_threaded("test".to_string(), "signal-test".to_string()).unwrap();
+
+        // Thread is running and sending events
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Stop with short timeout - thread should finish quickly since mock is short
+        let result = handle.stop(Duration::from_millis(200));
+
+        // Mock provider finishes quickly, should be graceful
+        assert!(matches!(result, ThreadStopResult::GracefulStop { .. }));
+    }
+
+    /// Test: stop_with_timeout uses milliseconds parameter
+    #[test]
+    fn stop_with_timeout_uses_ms_parameter() {
+        let mut handle = start_mock_provider_threaded("test".to_string(), "timeout-ms-test".to_string()).unwrap();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Use stop_with_timeout with ms parameter
+        let result = handle.stop_with_timeout(200);
+
+        assert!(matches!(result, ThreadStopResult::GracefulStop { .. }));
+    }
+
+    /// Test: Abandon works without waiting
+    #[test]
+    fn abandon_returns_immediately_without_waiting() {
+        let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
+
+        // Spawn a slow thread
+        let handle = Builder::new()
+            .name("abandon-test".to_string())
+            .spawn(|| {
+                std::thread::sleep(Duration::from_secs(5));
+            })
+            .unwrap();
+
+        let mut thread_handle = ProviderThreadHandle::new(
+            handle,
+            event_rx,
+            keepalive_tx,
+            "abandon-test".to_string(),
+        );
+
+        // Abandon should return immediately
+        let start = Instant::now();
+        let result = thread_handle.abandon();
+        let elapsed = start.elapsed();
+
+        // Should be nearly instant (< 10ms)
+        assert!(elapsed < Duration::from_millis(10));
+        assert!(matches!(result, ThreadStopResult::TimeoutAbandoned { .. }));
     }
 }
