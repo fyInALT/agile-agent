@@ -760,12 +760,16 @@ impl TuiState {
         self.session.app.input = self.composer.text().to_string();
     }
 
+    #[allow(dead_code)]
     pub fn replace_transcript(&mut self, transcript: Vec<TranscriptEntry>) {
         self.session.app.transcript = transcript;
         self.transcript_rendered_lines.clear();
         self.transcript_last_cell_range = None;
+        self.transcript_max_scroll = 0;
         if self.transcript_follow_tail {
-            self.transcript_scroll_offset = self.transcript_max_scroll;
+            self.transcript_scroll_offset = 0;
+        } else {
+            self.transcript_scroll_offset = self.transcript_scroll_offset.min(self.transcript_max_scroll);
         }
     }
 
@@ -1326,6 +1330,44 @@ mod tests {
     }
 
     #[test]
+    fn active_cell_transcript_lines_render_exec_group_as_command_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.push_active_exec_started(
+            Some("call-1".to_string()),
+            Some("ls -la".to_string()),
+            Some("agent".to_string()),
+        );
+        state.push_active_exec_started(
+            Some("call-2".to_string()),
+            Some("cat src/lib.rs".to_string()),
+            Some("agent".to_string()),
+        );
+
+        let rendered = state
+            .active_cell_transcript_lines(80)
+            .expect("active lines")
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line.contains("$ ls -la")), "{rendered:?}");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("$ cat src/lib.rs")),
+            "{rendered:?}"
+        );
+    }
+
+    #[test]
     fn active_cell_preview_cells_render_active_exec() {
         let temp = TempDir::new().expect("tempdir");
         let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
@@ -1594,6 +1636,23 @@ mod tests {
         );
         assert!(state.transcript_rendered_lines.is_empty());
         assert!(state.transcript_last_cell_range.is_none());
+        assert_eq!(state.transcript_scroll_offset, 0);
+    }
+
+    #[test]
+    fn replace_transcript_clamps_manual_scroll_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.transcript_follow_tail = false;
+        state.transcript_scroll_offset = 99;
+        state.transcript_max_scroll = 99;
+
+        state.replace_transcript(vec![TranscriptEntry::Status("replaced".to_string())]);
+
+        assert_eq!(state.transcript_scroll_offset, 0);
+        assert_eq!(state.transcript_max_scroll, 0);
     }
 
     #[test]

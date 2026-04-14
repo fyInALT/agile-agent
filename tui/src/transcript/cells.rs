@@ -851,12 +851,9 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
 
+        assert!(rendered.iter().any(|line| line.contains("$ ls -la")), "{rendered:?}");
         assert!(
-            rendered.iter().any(|line| line.contains("Ran ls -la")),
-            "{rendered:?}"
-        );
-        assert!(
-            rendered.iter().any(|line| line.contains("Ran cat foo.txt")),
+            rendered.iter().any(|line| line.contains("$ cat foo.txt")),
             "{rendered:?}"
         );
         assert!(

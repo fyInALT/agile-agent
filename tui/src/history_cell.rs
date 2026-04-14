@@ -243,7 +243,7 @@ impl HistoryCell for ExecHistoryCell {
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        render_exec_history_lines(
+        render_exec_transcript_lines(
             self.source.as_deref(),
             self.input_preview.as_deref(),
             self.output_preview.as_deref(),
@@ -251,7 +251,6 @@ impl HistoryCell for ExecHistoryCell {
             self.exit_code,
             self.duration_ms,
             width,
-            ToolRenderMode::Full,
         )
     }
 }
@@ -267,7 +266,7 @@ impl HistoryCell for ExploringExecHistoryCell {
             if index > 0 {
                 lines.push(Line::from(""));
             }
-            lines.extend(render_exec_history_lines(
+            lines.extend(render_exec_transcript_lines(
                 call.source.as_deref(),
                 call.input_preview.as_deref(),
                 call.output_preview.as_deref(),
@@ -275,11 +274,71 @@ impl HistoryCell for ExploringExecHistoryCell {
                 call.exit_code,
                 call.duration_ms,
                 width,
-                ToolRenderMode::Full,
             ));
         }
         lines
     }
+}
+
+fn render_exec_transcript_lines(
+    _source: Option<&str>,
+    input_preview: Option<&str>,
+    output_preview: Option<&str>,
+    status: ExecCommandStatus,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let display_command = input_preview.map(strip_shell_wrapper).unwrap_or_default();
+    if !display_command.trim().is_empty() {
+        let command_lines = display_command.lines().collect::<Vec<_>>();
+        let first_segments = wrap_text_segments(
+            command_lines.first().copied().unwrap_or_default(),
+            width.saturating_sub(2).max(1) as usize,
+        );
+        let first_segment = first_segments.first().cloned().unwrap_or_default();
+        lines.push(Line::from(vec![
+            Span::styled("$ ", Style::default().fg(Color::Magenta)),
+            Span::styled(first_segment, Style::default().fg(Color::Magenta)),
+        ]));
+
+        let mut continuation_segments = first_segments.into_iter().skip(1).collect::<Vec<_>>();
+        for raw_line in command_lines.into_iter().skip(1) {
+            continuation_segments.extend(wrap_text_segments(
+                raw_line,
+                width.saturating_sub(4).max(1) as usize,
+            ));
+        }
+        for segment in continuation_segments {
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(segment, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+    }
+
+    if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
+        for raw_line in output.lines() {
+            for segment in wrap_text_segments(raw_line, width.max(1) as usize) {
+                lines.push(Line::from(segment));
+            }
+        }
+    } else if !matches!(status, ExecCommandStatus::InProgress) {
+        lines.push(Line::from(Span::styled(
+            "(no output)",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        )));
+    }
+
+    if !matches!(status, ExecCommandStatus::InProgress) {
+        lines.push(tool_output::render_exec_result_line_public(
+            matches!(status, ExecCommandStatus::Completed),
+            exit_code,
+            duration_ms,
+        ));
+    }
+    lines
 }
 
 #[derive(Debug)]
