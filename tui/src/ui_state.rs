@@ -23,6 +23,30 @@ use crate::composer::textarea::TextAreaState;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
 
+/// Per-agent transcript view state
+///
+/// Tracks scroll position and follow-tail state for each agent's transcript.
+/// Used when switching focus between agents.
+#[derive(Debug, Clone)]
+pub struct AgentViewState {
+    /// Scroll offset for this agent's transcript
+    pub scroll_offset: usize,
+    /// Whether to follow tail for this agent
+    pub follow_tail: bool,
+    /// Last rendered cell range for this agent
+    pub last_cell_range: Option<(usize, usize)>,
+}
+
+impl Default for AgentViewState {
+    fn default() -> Self {
+        Self {
+            scroll_offset: 0,
+            follow_tail: true,
+            last_cell_range: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TuiState {
     pub session: RuntimeSession,
@@ -40,6 +64,10 @@ pub struct TuiState {
     pub transcript_rendered_lines: Vec<String>,
     pub transcript_last_cell_range: Option<(usize, usize)>,
     pub busy_started_at: Option<Instant>,
+    /// Per-agent view state cache (for multi-agent transcript switching)
+    pub agent_view_states: std::collections::HashMap<String, AgentViewState>,
+    /// Currently focused agent ID (for multi-agent mode)
+    pub focused_agent_id: Option<String>,
 }
 
 impl TuiState {
@@ -61,6 +89,8 @@ impl TuiState {
             transcript_rendered_lines: Vec::new(),
             transcript_last_cell_range: None,
             busy_started_at: None,
+            agent_view_states: std::collections::HashMap::new(),
+            focused_agent_id: None,
         }
     }
 
@@ -80,6 +110,52 @@ impl TuiState {
     /// Get workplace (shared state) mutable reference
     pub fn workplace_mut(&mut self) -> &mut SharedWorkplaceState {
         self.session.workplace_mut()
+    }
+
+    /// Save current transcript view state for a specific agent
+    ///
+    /// Called when switching focus to preserve scroll position.
+    pub fn save_agent_view_state(&mut self, agent_id: &str) {
+        let state = AgentViewState {
+            scroll_offset: self.transcript_scroll_offset,
+            follow_tail: self.transcript_follow_tail,
+            last_cell_range: self.transcript_last_cell_range,
+        };
+        self.agent_view_states.insert(agent_id.to_string(), state);
+    }
+
+    /// Restore transcript view state for a specific agent
+    ///
+    /// Called when switching focus to resume scroll position.
+    pub fn restore_agent_view_state(&mut self, agent_id: &str) {
+        if let Some(state) = self.agent_view_states.get(agent_id).cloned() {
+            self.transcript_scroll_offset = state.scroll_offset;
+            self.transcript_follow_tail = state.follow_tail;
+            self.transcript_last_cell_range = state.last_cell_range;
+        } else {
+            // New agent - reset to default
+            self.transcript_scroll_offset = 0;
+            self.transcript_follow_tail = true;
+            self.transcript_last_cell_range = None;
+        }
+    }
+
+    /// Switch focus to a different agent
+    ///
+    /// Saves current agent's view state and restores the new agent's state.
+    pub fn switch_focus_to_agent(&mut self, new_agent_id: &str) {
+        // Save current agent's state if we have one
+        if let Some(current_id) = self.focused_agent_id.clone() {
+            self.save_agent_view_state(&current_id);
+        }
+        // Restore new agent's state
+        self.restore_agent_view_state(new_agent_id);
+        self.focused_agent_id = Some(new_agent_id.to_string());
+    }
+
+    /// Clear all cached agent view states
+    pub fn clear_agent_view_states(&mut self) {
+        self.agent_view_states.clear();
     }
 
     fn active_tool_ref(&self) -> Option<&ActiveTool> {
@@ -2071,5 +2147,84 @@ mod tests {
                     && *is_error
             )
         }));
+    }
+
+    #[test]
+    fn agent_view_state_default_values() {
+        use super::AgentViewState;
+
+        let state = AgentViewState::default();
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.follow_tail);
+        assert!(state.last_cell_range.is_none());
+    }
+
+    #[test]
+    fn save_and_restore_agent_view_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Set some view state
+        state.transcript_scroll_offset = 10;
+        state.transcript_follow_tail = false;
+        state.transcript_last_cell_range = Some((5, 15));
+
+        // Save it
+        state.save_agent_view_state("agent-001");
+
+        // Modify current state
+        state.transcript_scroll_offset = 20;
+        state.transcript_follow_tail = true;
+
+        // Restore it
+        state.restore_agent_view_state("agent-001");
+
+        assert_eq!(state.transcript_scroll_offset, 10);
+        assert!(!state.transcript_follow_tail);
+        assert_eq!(state.transcript_last_cell_range, Some((5, 15)));
+    }
+
+    #[test]
+    fn restore_new_agent_state_defaults() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Set some view state
+        state.transcript_scroll_offset = 10;
+        state.transcript_follow_tail = false;
+
+        // Restore for unknown agent (should reset to defaults)
+        state.restore_agent_view_state("unknown-agent");
+
+        assert_eq!(state.transcript_scroll_offset, 0);
+        assert!(state.transcript_follow_tail);
+    }
+
+    #[test]
+    fn switch_focus_preserves_view_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Focus on first agent
+        state.focused_agent_id = Some("agent-001".to_string());
+        state.transcript_scroll_offset = 10;
+
+        // Switch to second agent
+        state.switch_focus_to_agent("agent-002");
+
+        // First agent's state should be saved
+        assert_eq!(
+            state.agent_view_states.get("agent-001").unwrap().scroll_offset,
+            10
+        );
+        // Current state should be defaults for new agent
+        assert_eq!(state.transcript_scroll_offset, 0);
+        assert_eq!(state.focused_agent_id, Some("agent-002".to_string()));
     }
 }
