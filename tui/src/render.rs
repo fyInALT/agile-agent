@@ -42,6 +42,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1), // Agent status bar
             committed_constraint,
             Constraint::Length(active_height),
             Constraint::Length(working_height),
@@ -50,15 +51,16 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         ])
         .split(frame.area());
 
-    render_transcript(frame, state, areas[0]);
+    render_agent_status_bar(frame, state, areas[0]);
+    render_transcript(frame, state, areas[1]);
     if active_height > 0 {
-        render_active_cells(frame, &active_lines, areas[1]);
+        render_active_cells(frame, &active_lines, areas[2]);
     }
     if working_height > 0 {
-        render_working_line(frame, state, areas[2]);
+        render_working_line(frame, state, areas[3]);
     }
-    render_composer(frame, state, areas[3]);
-    render_footer(frame, state, areas[4]);
+    render_composer(frame, state, areas[4]);
+    render_footer(frame, state, areas[5]);
 
     if state.app().skill_browser_open {
         render_skill_browser(frame, state);
@@ -67,6 +69,71 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_overlay_open() {
         render_transcript_overlay(frame, state);
     }
+}
+
+/// Render the agent status bar showing all agent indicators
+fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    // For single-agent mode, show one agent indicator
+    // In multi-agent mode, this would show all agents from AgentPool
+    let provider = state.app().selected_provider.label();
+    let status = if state.is_busy() {
+        "●"
+    } else {
+        "○"
+    };
+    let status_color = if state.is_busy() {
+        Color::Green
+    } else {
+        Color::Gray
+    };
+
+    // Build status bar line: "● alpha [claude]    Ctrl+V to switch provider"
+    let mut spans = vec![
+        Span::styled(status, Style::default().fg(status_color)),
+        Span::raw(" "),
+        Span::styled("alpha", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled("[", Style::default().fg(Color::Gray)),
+        Span::styled(provider, Style::default().fg(Color::Cyan)),
+        Span::styled("]", Style::default().fg(Color::Gray)),
+    ];
+
+    // Add loop indicator if running
+    if state.workplace().loop_control.loop_run_active {
+        let remaining = state.workplace().loop_control.remaining_iterations();
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("loop:{}", remaining),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    // Add task info if assigned
+    if let Some(task_id) = &state.app().active_task_id {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("task:{}", task_id),
+            Style::default().fg(Color::Magenta),
+        ));
+    }
+
+    // Add right-aligned hint
+    let hint = " Ctrl+V:switch";
+    let total_len = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
+    if total_len <= area.width as usize {
+        let padding = area.width as usize - total_len;
+        spans.push(Span::raw(" ".repeat(padding)));
+    }
+    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+
+    let line = Line::from(spans);
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rect) {
