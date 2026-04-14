@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn add_receiver_increases_count() {
         let mut aggregator = make_aggregator();
-        let (tx, rx) = channel();
+        let (_tx, rx) = channel();
         let agent_id = AgentId::new("agent_001");
         aggregator.add_receiver(agent_id.clone(), rx);
         assert_eq!(aggregator.receiver_count(), 1);
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn remove_receiver_decreases_count() {
         let mut aggregator = make_aggregator();
-        let (tx, rx) = channel();
+        let (_tx, rx) = channel();
         let agent_id = AgentId::new("agent_001");
         aggregator.add_receiver(agent_id.clone(), rx);
         let removed = aggregator.remove_receiver(&agent_id);

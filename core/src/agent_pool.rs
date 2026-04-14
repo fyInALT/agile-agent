@@ -3,7 +3,6 @@
 //! Central coordination structure for multi-agent runtime.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskId};
@@ -352,7 +351,7 @@ mod tests {
     #[test]
     fn focus_agent_by_id() {
         let mut pool = make_pool(4);
-        let id1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let _id1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
         let id2 = pool.spawn_agent(ProviderKind::Claude).unwrap();
         pool.focus_agent(&id2).unwrap();
         assert_eq!(pool.focused_slot_index(), 1);
@@ -441,7 +440,7 @@ mod tests {
     #[test]
     fn remove_adjusts_focus() {
         let mut pool = make_pool(4);
-        let id0 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let _id0 = pool.spawn_agent(ProviderKind::Mock).unwrap();
         let id1 = pool.spawn_agent(ProviderKind::Claude).unwrap();
         pool.focus_agent_by_index(1).unwrap();
         pool.stop_agent(&id1).unwrap();

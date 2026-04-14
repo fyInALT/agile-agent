@@ -2,23 +2,27 @@
 //!
 //! Provides controlled thread spawning, monitoring, and graceful shutdown.
 
-use std::sync::mpsc::Sender;
+use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::provider::ProviderEvent;
+use crate::logging;
+use crate::provider::{ProviderEvent, ProviderKind, SessionHandle};
 
 /// Handle to a running provider thread
 ///
 /// Manages the thread lifecycle including:
 /// - Named thread for debugging
-/// - Event channel for communication
+/// - Event receiver for collecting provider events
 /// - Graceful shutdown with timeout
 pub struct ProviderThreadHandle {
     /// Thread join handle
     handle: Option<JoinHandle<()>>,
-    /// Sender for events (dropping this signals thread to stop)
-    event_tx: Sender<ProviderEvent>,
+    /// Receiver for provider events
+    event_rx: Receiver<ProviderEvent>,
+    /// Sender kept alive to prevent early disconnect (dropped on shutdown)
+    _keepalive_tx: Sender<ProviderEvent>,
     /// Thread name for debugging
     thread_name: String,
     /// When the thread was started
@@ -39,17 +43,19 @@ pub enum ThreadStopResult {
 }
 
 impl ProviderThreadHandle {
-    /// Create a new thread handle
+    /// Create a new thread handle with event receiver
     ///
-    /// This is typically called after spawning a thread.
+    /// This is typically called after spawning a thread that sends events.
     pub fn new(
         handle: JoinHandle<()>,
-        event_tx: Sender<ProviderEvent>,
+        event_rx: Receiver<ProviderEvent>,
+        keepalive_tx: Sender<ProviderEvent>,
         thread_name: String,
     ) -> Self {
         Self {
             handle: Some(handle),
-            event_tx,
+            event_rx,
+            _keepalive_tx: keepalive_tx,
             thread_name,
             started_at: Instant::now(),
         }
@@ -60,13 +66,15 @@ impl ProviderThreadHandle {
     /// Useful when thread is already spawned elsewhere.
     pub fn from_parts(
         handle: Option<JoinHandle<()>>,
-        event_tx: Sender<ProviderEvent>,
+        event_rx: Receiver<ProviderEvent>,
+        keepalive_tx: Sender<ProviderEvent>,
         thread_name: String,
         started_at: Instant,
     ) -> Self {
         Self {
             handle,
-            event_tx,
+            event_rx,
+            _keepalive_tx: keepalive_tx,
             thread_name,
             started_at,
         }
@@ -92,9 +100,9 @@ impl ProviderThreadHandle {
         self.handle.is_some()
     }
 
-    /// Get the event sender
-    pub fn event_sender(&self) -> &Sender<ProviderEvent> {
-        &self.event_tx
+    /// Get the event receiver for collecting provider events
+    pub fn event_receiver(&self) -> &Receiver<ProviderEvent> {
+        &self.event_rx
     }
 
     /// Stop the thread gracefully with timeout
@@ -180,12 +188,13 @@ impl ProviderThreadBuilder {
 
     /// Spawn a thread with the given function
     ///
-    /// Returns the handle and event sender.
+    /// Returns the handle for lifecycle management.
+    /// Note: The spawned function should create its own channel for events.
     pub fn spawn<F>(self, f: F) -> std::io::Result<ProviderThreadHandle>
     where
         F: FnOnce() + Send + 'static,
     {
-        let (event_tx, _) = std::sync::mpsc::channel();
+        let (keepalive_tx, event_rx) = channel();
         let thread_name = self.name.clone();
 
         let mut builder = Builder::new().name(thread_name.clone());
@@ -195,8 +204,105 @@ impl ProviderThreadBuilder {
 
         let handle = builder.spawn(f)?;
 
-        Ok(ProviderThreadHandle::new(handle, event_tx, thread_name))
+        Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
     }
+}
+
+/// Start a provider in a named thread
+///
+/// Spawns the provider in a dedicated thread with proper naming for debugging.
+/// Returns the thread handle for lifecycle management and event collection.
+pub fn start_provider_threaded(
+    provider: ProviderKind,
+    prompt: String,
+    cwd: PathBuf,
+    session_handle: Option<SessionHandle>,
+    thread_name: String,
+) -> std::io::Result<ProviderThreadHandle> {
+    let (keepalive_tx, event_rx) = channel();
+    let thread_event_tx = keepalive_tx.clone();
+    let provider_label = provider.label();
+
+    logging::debug_event(
+        "provider_thread.start",
+        "spawning provider thread",
+        serde_json::json!({
+            "provider": provider_label,
+            "thread_name": thread_name,
+            "cwd": cwd.display().to_string(),
+        }),
+    );
+
+    let handle = Builder::new()
+        .name(thread_name.clone())
+        .spawn(move || {
+            run_provider_in_thread(provider, prompt, cwd, session_handle, thread_event_tx);
+        })?;
+
+    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+}
+
+/// Run provider logic in thread context
+///
+/// This is the internal function that runs inside the provider thread.
+fn run_provider_in_thread(
+    provider: ProviderKind,
+    _prompt: String,
+    _cwd: PathBuf,
+    _session_handle: Option<SessionHandle>,
+    event_tx: Sender<ProviderEvent>,
+) {
+    // For now, just log and send a status event
+    // Full provider integration will be added in later sprints
+    logging::debug_event(
+        "provider_thread.run",
+        "provider thread started",
+        serde_json::json!({
+            "provider": provider.label(),
+        }),
+    );
+
+    let _ = event_tx.send(ProviderEvent::Status(format!("{} thread started", provider.label())));
+    let _ = event_tx.send(ProviderEvent::Finished);
+}
+
+/// Start mock provider in a thread
+///
+/// Convenience function for testing with mock provider.
+pub fn start_mock_provider_threaded(
+    prompt: String,
+    thread_name: String,
+) -> std::io::Result<ProviderThreadHandle> {
+    let (keepalive_tx, event_rx) = channel();
+    let thread_event_tx = keepalive_tx.clone();
+
+    let handle = Builder::new()
+        .name(thread_name.clone())
+        .spawn(move || {
+            run_mock_provider(prompt, thread_event_tx);
+        })?;
+
+    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+}
+
+/// Run mock provider logic
+fn run_mock_provider(prompt: String, event_tx: Sender<ProviderEvent>) {
+    let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+
+    for chunk in crate::mock_provider::build_reply_chunks(&prompt) {
+        std::thread::sleep(Duration::from_millis(60));
+        if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+            return;
+        }
+    }
+
+    let _ = event_tx.send(ProviderEvent::Finished);
+
+    logging::debug_event(
+        "provider_thread.mock_finished",
+        "mock provider thread finished",
+        serde_json::json!({}),
+    );
 }
 
 #[cfg(test)]
@@ -207,7 +313,7 @@ mod tests {
     use std::time::Duration;
 
     fn make_handle_with_thread() -> (ProviderThreadHandle, Arc<AtomicBool>) {
-        let (event_tx, _) = std::sync::mpsc::channel();
+        let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
@@ -220,11 +326,11 @@ mod tests {
             })
             .unwrap();
 
-        (ProviderThreadHandle::new(handle, event_tx, "test-thread".to_string()), running)
+        (ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "test-thread".to_string()), running)
     }
 
     fn make_quick_thread() -> ProviderThreadHandle {
-        let (event_tx, _) = std::sync::mpsc::channel();
+        let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
 
         let handle = Builder::new()
             .name("quick-thread".to_string())
@@ -233,7 +339,7 @@ mod tests {
             })
             .unwrap();
 
-        ProviderThreadHandle::new(handle, event_tx, "quick-thread".to_string())
+        ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string())
     }
 
     #[test]
@@ -324,5 +430,59 @@ mod tests {
     fn stop_result_already_stopped() {
         let result = ThreadStopResult::AlreadyStopped;
         assert!(matches!(result, ThreadStopResult::AlreadyStopped));
+    }
+
+    #[test]
+    fn mock_provider_threaded_creates_running_thread() {
+        let handle = start_mock_provider_threaded("test prompt".to_string(), "mock-thread".to_string());
+        assert!(handle.is_ok());
+        let handle = handle.unwrap();
+        assert!(handle.is_running());
+        assert_eq!(handle.thread_name(), "mock-thread");
+    }
+
+    #[test]
+    fn mock_provider_threaded_sends_events() {
+        let handle = start_mock_provider_threaded("test".to_string(), "mock-events".to_string()).unwrap();
+        let receiver = handle.event_receiver();
+
+        // Wait briefly for mock provider to start sending events
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Receive events - mock provider sends status, then chunks, then finished
+        let mut received_status = false;
+        let mut received_chunk = false;
+
+        for _ in 0..20 {
+            match receiver.try_recv() {
+                Ok(ProviderEvent::Status(_)) => received_status = true,
+                Ok(ProviderEvent::AssistantChunk(_)) => received_chunk = true,
+                Ok(ProviderEvent::Finished) => {} // Finished is expected but not checked
+                Ok(_) => {} // Other events are fine
+                Err(_) => break,
+            }
+        }
+
+        assert!(received_status, "should receive status event");
+        assert!(received_chunk, "should receive at least one chunk");
+    }
+
+    #[test]
+    fn mock_provider_thread_completes_gracefully() {
+        let mut handle = start_mock_provider_threaded("short".to_string(), "mock-complete".to_string()).unwrap();
+
+        // Wait for mock provider to finish (it sends chunks then Finished)
+        std::thread::sleep(Duration::from_millis(500));
+
+        // Stop should return graceful since thread completed
+        let result = handle.stop(Duration::from_millis(100));
+        assert!(matches!(result, ThreadStopResult::GracefulStop { .. }));
+        assert!(!handle.is_running());
+    }
+
+    #[test]
+    fn mock_provider_thread_name_matches() {
+        let handle = start_mock_provider_threaded("test".to_string(), "custom-mock".to_string()).unwrap();
+        assert_eq!(handle.thread_name(), "custom-mock");
     }
 }
