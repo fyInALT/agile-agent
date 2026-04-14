@@ -33,7 +33,7 @@ core/                      # Existing crate
 
 ### Tasks
 
-- [ ] **T1.1.1: Create kanban crate structure**
+- [x] **T1.1.1: Create kanban crate structure**
   - Create `kanban/Cargo.toml` with:
     - `name = "agent-kanban"`
     - `edition.workspace = true`
@@ -41,10 +41,10 @@ core/                      # Existing crate
     - Dependencies: `serde`, `serde_json`, `chrono`
   - Create `kanban/src/lib.rs` with module declarations
 
-- [ ] **T1.1.2: Add workspace member**
+- [x] **T1.1.2: Add workspace member**
   - Modify `Cargo.toml` workspace to add `"kanban"` to members list
 
-- [ ] **T1.1.3: Implement Status enum**
+- [x] **T1.1.3: Implement Status enum**
   - File: `kanban/src/domain.rs`
   - Add `Status` enum with variants: `Plan`, `Backlog`, `Blocked`, `Ready`, `Todo`, `InProgress`, `Done`, `Verified`
   - Add `valid_transitions()` method returning valid target states
@@ -52,14 +52,14 @@ core/                      # Existing crate
   - Add `is_terminal()` method (only `Verified` is terminal)
   - Add `serde` serialization with `snake_case` rename
 
-- [ ] **T1.1.4: Implement Priority enum**
+- [x] **T1.1.4: Implement Priority enum**
   - File: `kanban/src/domain.rs`
   - Add `Priority` enum with variants: `Critical`, `High`, `Medium`, `Low`
   - Add `as_str()` method
   - Add `from_str()` method
   - Add `serde` serialization with `lowercase` rename
 
-- [ ] **T1.1.5: Implement ElementId type**
+- [x] **T1.1.5: Implement ElementId type**
   - File: `kanban/src/domain.rs`
   - Add `ElementId` wrapper struct around `String`
   - Add `new(type_, number)` constructor generating format `{type}-{number:03}`
@@ -70,13 +70,13 @@ core/                      # Existing crate
   - Implement `Display` trait
   - Implement `Hash` trait for use in collections
 
-- [ ] **T1.1.6: Implement ElementType enum**
+- [x] **T1.1.6: Implement ElementType enum**
   - File: `kanban/src/domain.rs`
   - Add `ElementType` enum with variants: `Sprint`, `Story`, `Task`, `Idea`, `Issue`, `Tips`
   - Add `as_str()` method
   - Add `from_str()` method (accept both "tip" and "tips")
 
-- [ ] **T1.1.7: Write unit tests for domain types**
+- [x] **T1.1.7: Write unit tests for domain types**
   - File: `kanban/tests/domain.rs`
   - Test `Status.valid_transitions()`
   - Test `Status.can_transition_to()` for valid and invalid transitions
@@ -101,7 +101,7 @@ core/                      # Existing crate
 
 ### Tasks
 
-- [ ] **T1.2.1: Implement BaseElement struct**
+- [x] **T1.2.1: Implement BaseElement struct**
   - File: `kanban/src/domain.rs`
   - Add `BaseElement` struct with all common fields: `id`, `title`, `content`, `keywords`, `status`, `dependencies`, `references`, `parent`, `created_at`, `updated_at`, `priority`, `assignee`, `effort`, `blocked_reason`, `tags`, `status_history`
   - Add `new(type_, title)` constructor initializing with defaults
@@ -109,7 +109,7 @@ core/                      # Existing crate
   - Add `transition()` method with validation and history recording
   - Add `serde` defaults for optional fields
 
-- [ ] **T1.2.2: Implement element variant structs**
+- [x] **T1.2.2: Implement element variant structs**
   - File: `kanban/src/domain.rs`
   - Add `Sprint` struct with `#[serde(flatten)] base: BaseElement` and `goal`, `start_date`, `end_date`, `active` fields
   - Add `Story` struct with `#[serde(flatten)] base: BaseElement`
@@ -119,14 +119,14 @@ core/                      # Existing crate
   - Add `Tips` struct with `#[serde(flatten)] base: BaseElement`, `target_task`, `agent_id` fields
   - Add constructor methods for each variant
 
-- [ ] **T1.2.3: Implement KanbanElement enum**
+- [x] **T1.2.3: Implement KanbanElement enum**
   - File: `kanban/src/domain.rs`
   - Add `#[serde(tag = "type")]` enum with all variants
   - Add constructor methods: `new_sprint()`, `new_story()`, `new_task()`, `new_idea()`, `new_issue()`, `new_tips()`
   - Add accessor methods: `id()`, `element_type()`, `status()`, `can_transition_to()`, `transition()`, `assignee()`, `dependencies()`, `references()`, `parent()`
   - Add mutable setters: `set_id()`, `set_status()`, `set_updated_at()`, `set_created_at()`, `base_mut()`
 
-- [ ] **T1.2.4: Write unit tests for KanbanElement**
+- [x] **T1.2.4: Write unit tests for KanbanElement**
   - File: `kanban/tests/element.rs`
   - Test sprint creation with goal
   - Test task creation with parent
@@ -153,19 +153,19 @@ core/                      # Existing crate
 
 ### Tasks
 
-- [ ] **T1.3.1: Implement StatusHistoryEntry struct**
+- [x] **T1.3.1: Implement StatusHistoryEntry struct**
   - File: `kanban/src/domain.rs`
   - Add `StatusHistoryEntry` struct with `status: Status` and `entered_at: DateTime<Utc>` fields
   - Add `new(status)` constructor using `Utc::now()`
   - Add `serde` serialization
 
-- [ ] **T1.3.2: Integrate status history into BaseElement**
+- [x] **T1.3.2: Integrate status history into BaseElement**
   - File: `kanban/src/domain.rs`
   - Ensure `status_history` is initialized with entry for initial `Plan` status
   - Ensure `transition()` appends new entry to history
   - Add `#[serde(default)]` to allow empty history on deserialization
 
-- [ ] **T1.3.3: Write unit tests for status history**
+- [x] **T1.3.3: Write unit tests for status history**
   - File: `kanban/tests/domain.rs`
   - Test that new element has one history entry (Plan)
   - Test that transition adds new history entry
@@ -182,9 +182,9 @@ core/                      # Existing crate
 
 ## Sprint 1 Completion Checklist
 
-- [ ] All 3 stories completed
-- [ ] All tasks checked off
-- [ ] Code compiles: `cargo build -p agent-kanban`
-- [ ] Tests pass: `cargo test -p agent-kanban`
-- [ ] Code formatted: `cargo fmt -p agent-kanban`
-- [ ] Committed: `git commit -m "feat(kanban): complete sprint 1 - core domain model"`
+- [x] All 3 stories completed
+- [x] All tasks checked off
+- [x] Code compiles: `cargo build -p agent-kanban`
+- [x] Tests pass: `cargo test -p agent-kanban`
+- [x] Code formatted: `cargo fmt -p agent-kanban`
+- [x] Committed: `git commit -m "feat(kanban): complete sprint 1 - core domain model"`
