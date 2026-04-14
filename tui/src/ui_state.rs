@@ -190,6 +190,7 @@ impl TuiState {
         input_preview: Option<String>,
         source: Option<String>,
     ) {
+        self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::ExecCommand { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
         });
@@ -293,6 +294,7 @@ impl TuiState {
         call_id: Option<String>,
         input_preview: Option<String>,
     ) {
+        self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::GenericToolCall { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
         });
@@ -371,6 +373,7 @@ impl TuiState {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
     ) {
+        self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::PatchApply { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
         });
@@ -455,6 +458,7 @@ impl TuiState {
     }
 
     pub fn push_active_web_search_started(&mut self, call_id: Option<String>, query: String) {
+        self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::WebSearch { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
         });
@@ -510,6 +514,7 @@ impl TuiState {
         call_id: Option<String>,
         invocation: McpInvocation,
     ) {
+        self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::McpToolCall { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
         });
@@ -766,6 +771,13 @@ impl TuiState {
         }
         if !stream.tail.is_empty() {
             self.commit_stream_text(stream.kind, &stream.tail);
+        }
+    }
+
+    fn flush_active_stream_to_transcript(&mut self) {
+        if let Some(stream) = self.active_stream.take() {
+            self.flush_stream_to_transcript(stream);
+            self.bump_active_entries_revision();
         }
     }
 }
@@ -1115,6 +1127,7 @@ mod tests {
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
+                ..
             }) if tail == "hello world"
         ));
         assert!(!state
@@ -1188,7 +1201,37 @@ mod tests {
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
+                ..
             }) if tail == "answer"
+        ));
+    }
+
+    #[test]
+    fn starting_exec_flushes_active_assistant_stream_to_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_assistant_chunk("streaming answer");
+        state.push_active_exec_started(
+            Some("call-1".to_string()),
+            Some("printf hello".to_string()),
+            Some("agent".to_string()),
+        );
+
+        assert!(state.active_stream.is_none());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "streaming answer"
+        ));
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::ExecCommand {
+                call_id,
+                status: ExecCommandStatus::InProgress,
+                ..
+            }) if call_id.as_deref() == Some("call-1")
         ));
     }
 
@@ -1208,6 +1251,7 @@ mod tests {
             Some(ActiveStream {
                 kind: StreamTextKind::Thinking,
                 tail,
+                ..
             }) if tail == "step 1 step 2"
         ));
         assert!(!state
