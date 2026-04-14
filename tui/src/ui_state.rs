@@ -190,6 +190,7 @@ impl TuiState {
         input_preview: Option<String>,
         source: Option<String>,
     ) {
+        self.prepare_for_active_tool_start(ActiveToolStart::Exec);
         self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::ExecCommand { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
@@ -294,6 +295,7 @@ impl TuiState {
         call_id: Option<String>,
         input_preview: Option<String>,
     ) {
+        self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::GenericToolCall { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
@@ -373,6 +375,7 @@ impl TuiState {
         call_id: Option<String>,
         changes: Vec<PatchChange>,
     ) {
+        self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::PatchApply { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
@@ -458,6 +461,7 @@ impl TuiState {
     }
 
     pub fn push_active_web_search_started(&mut self, call_id: Option<String>, query: String) {
+        self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::WebSearch { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
@@ -514,6 +518,7 @@ impl TuiState {
         call_id: Option<String>,
         invocation: McpInvocation,
     ) {
+        self.prepare_for_active_tool_start(ActiveToolStart::Other);
         self.flush_active_stream_to_transcript();
         self.active_entries.retain(|entry| {
             !matches!(entry, TranscriptEntry::McpToolCall { call_id: existing, .. } if call_id.is_some() && existing == &call_id)
@@ -583,6 +588,7 @@ impl TuiState {
 
     pub fn finalize_active_entries_after_failure(&mut self, reason: Option<&str>) {
         self.drain_active_entries(reason);
+        self.mark_in_progress_transcript_entries_failed(reason);
     }
 
     pub fn sync_app_input_from_composer(&mut self) {
@@ -765,6 +771,45 @@ impl TuiState {
         }
     }
 
+    fn mark_in_progress_transcript_entries_failed(&mut self, reason: Option<&str>) {
+        for entry in &mut self.session.app.transcript {
+            match entry {
+                TranscriptEntry::ExecCommand {
+                    status: exec_status, ..
+                } if matches!(*exec_status, ExecCommandStatus::InProgress) => {
+                    *exec_status = ExecCommandStatus::Failed;
+                }
+                TranscriptEntry::GenericToolCall {
+                    success, started, ..
+                } if *started => {
+                    *success = false;
+                    *started = false;
+                }
+                TranscriptEntry::PatchApply { status, .. }
+                    if matches!(*status, PatchApplyStatus::InProgress) =>
+                {
+                    *status = PatchApplyStatus::Failed;
+                }
+                TranscriptEntry::WebSearch { started, .. } if *started => {
+                    *started = false;
+                }
+                TranscriptEntry::McpToolCall {
+                    error,
+                    status,
+                    is_error,
+                    ..
+                } if matches!(*status, McpToolCallStatus::InProgress) => {
+                    *status = McpToolCallStatus::Failed;
+                    *is_error = true;
+                    if error.is_none() {
+                        *error = reason.map(ToOwned::to_owned);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn flush_stream_to_transcript(&mut self, stream: ActiveStream) {
         for text in stream.pending_commits {
             self.commit_stream_text(stream.kind, &text);
@@ -778,6 +823,18 @@ impl TuiState {
         if let Some(stream) = self.active_stream.take() {
             self.flush_stream_to_transcript(stream);
             self.bump_active_entries_revision();
+        }
+    }
+
+    fn prepare_for_active_tool_start(&mut self, start: ActiveToolStart) {
+        let should_flush = match start {
+            ActiveToolStart::Exec => self.active_entries.iter().any(|entry| {
+                !matches!(entry, TranscriptEntry::ExecCommand { .. })
+            }),
+            ActiveToolStart::Other => !self.active_entries.is_empty(),
+        };
+        if should_flush {
+            self.flush_active_entries_to_transcript();
         }
     }
 }
@@ -802,6 +859,12 @@ impl ActiveStream {
 pub(crate) enum StreamTextKind {
     Assistant,
     Thinking,
+}
+
+#[derive(Clone, Copy)]
+enum ActiveToolStart {
+    Exec,
+    Other,
 }
 
 #[cfg(test)]
@@ -1236,6 +1299,39 @@ mod tests {
     }
 
     #[test]
+    fn starting_web_search_flushes_active_exec_live_tail_to_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.push_active_exec_started(
+            Some("call-1".to_string()),
+            Some("printf hello".to_string()),
+            Some("agent".to_string()),
+        );
+        state.push_active_web_search_started(
+            Some("search-1".to_string()),
+            "ratatui styling".to_string(),
+        );
+
+        assert_eq!(state.active_entries.len(), 1);
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::WebSearch { call_id, started, .. })
+                if call_id.as_deref() == Some("search-1") && *started
+        ));
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::ExecCommand {
+                call_id,
+                status: ExecCommandStatus::InProgress,
+                ..
+            }) if call_id.as_deref() == Some("call-1")
+        ));
+    }
+
+    #[test]
     fn active_thinking_chunks_stay_in_live_tail_until_finalize() {
         let temp = TempDir::new().expect("tempdir");
         let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
@@ -1411,10 +1507,14 @@ mod tests {
                 } if call_id.as_deref() == Some("patch-1") && changes == &patch_changes
             )
         }));
-        assert!(!state.app().transcript.iter().any(|entry| {
+        assert!(state.app().transcript.iter().any(|entry| {
             matches!(
                 entry,
-                TranscriptEntry::WebSearch { call_id, .. } if call_id.as_deref() == Some("search-1")
+                TranscriptEntry::WebSearch {
+                    call_id,
+                    started,
+                    ..
+                } if call_id.as_deref() == Some("search-1") && !started
             )
         }));
         assert!(state.app().transcript.iter().any(|entry| {
