@@ -317,6 +317,18 @@ impl AgentMailbox {
         false
     }
 
+    /// Mark all mail as read for an agent
+    pub fn mark_all_read(&mut self, agent_id: &AgentId) -> usize {
+        if let Some(inbox) = self.inbox.get_mut(agent_id) {
+            let count = inbox.iter().filter(|m| !m.is_read()).count();
+            for mail in inbox.iter_mut() {
+                mail.mark_read();
+            }
+            return count;
+        }
+        0
+    }
+
     /// Process pending delivery queue
     ///
     /// Returns list of agents that received new mail.
@@ -647,6 +659,85 @@ mod tests {
         );
 
         mailbox.deliver_broadcast(mail, &[agent1.clone(), agent2.clone()]);
+
+        assert_eq!(mailbox.unread_count(&agent1), 1);
+        assert_eq!(mailbox.unread_count(&agent2), 1);
+    }
+
+    #[test]
+    fn mailbox_mark_all_read_keeps_mail_history() {
+        let mut mailbox = AgentMailbox::new();
+        let recipient = make_agent_id("recipient");
+
+        // Send multiple mails
+        let mail1 = AgentMail::new(
+            make_agent_id("sender1"),
+            MailTarget::Direct(recipient.clone()),
+            MailSubject::Custom { label: "Test1".to_string() },
+            MailBody::Text("Message1".to_string()),
+        );
+        let mail2 = AgentMail::new(
+            make_agent_id("sender2"),
+            MailTarget::Direct(recipient.clone()),
+            MailSubject::Custom { label: "Test2".to_string() },
+            MailBody::Text("Message2".to_string()),
+        );
+
+        mailbox.send_mail(mail1);
+        mailbox.send_mail(mail2);
+        mailbox.process_pending();
+
+        // Verify unread count is 2
+        assert_eq!(mailbox.unread_count(&recipient), 2);
+
+        // Mark all as read
+        let marked_count = mailbox.mark_all_read(&recipient);
+        assert_eq!(marked_count, 2);
+
+        // Verify unread count is 0 but inbox still has 2 mails
+        assert_eq!(mailbox.unread_count(&recipient), 0);
+        let inbox = mailbox.inbox_for(&recipient);
+        assert!(inbox.is_some());
+        assert_eq!(inbox.unwrap().len(), 2); // Mail history preserved
+
+        // All mails should be marked read
+        for mail in inbox.unwrap() {
+            assert!(mail.is_read());
+        }
+    }
+
+    #[test]
+    fn mailbox_mark_all_read_empty_inbox() {
+        let mut mailbox = AgentMailbox::new();
+        let agent = make_agent_id("empty_agent");
+
+        let count = mailbox.mark_all_read(&agent);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn broadcast_process_pending_delivers_to_all() {
+        let mut mailbox = AgentMailbox::new();
+        let agent1 = make_agent_id("agent1");
+        let agent2 = make_agent_id("agent2");
+
+        // Send broadcast mail
+        let mail = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Announcement".to_string() },
+            MailBody::Text("Hello everyone!".to_string()),
+        );
+        mailbox.send_mail(mail);
+
+        // Process pending - broadcast mail goes to pending_delivery
+        let recipients = mailbox.process_pending();
+        assert!(recipients.is_empty()); // Broadcast returns no recipient
+        assert_eq!(mailbox.pending_count(), 1); // Pending for broadcast
+
+        // Get pending mail and deliver to agents
+        let pending_mail = mailbox.pending_delivery.pop().unwrap();
+        mailbox.deliver_broadcast(pending_mail, &[agent1.clone(), agent2.clone()]);
 
         assert_eq!(mailbox.unread_count(&agent1), 1);
         assert_eq!(mailbox.unread_count(&agent2), 1);

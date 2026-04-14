@@ -171,10 +171,10 @@ impl TuiState {
         }
     }
 
-    /// Mark all mail as read for focused agent
+    /// Mark all mail as read for focused agent (keeps mail history)
     pub fn mark_focused_mail_read(&mut self) {
         if let Some(agent_id) = self.focused_agent_id() {
-            self.mailbox.clear_inbox(&agent_id);
+            self.mailbox.mark_all_read(&agent_id);
         }
     }
 
@@ -1689,6 +1689,8 @@ mod tests {
     use super::ActiveStream;
     use super::StreamTextKind;
     use super::TuiState;
+    use agent_core::agent_runtime::AgentId;
+    use agent_core::agent_slot::TaskId;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
@@ -2751,5 +2753,155 @@ mod tests {
         for event in &poll_result.events {
             assert_eq!(event.agent_id(), &agent_id);
         }
+    }
+
+    #[test]
+    fn focused_unread_mail_count_empty_when_no_agent() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let state = TuiState::from_session(session);
+
+        // No agent pool, no focused agent
+        assert_eq!(state.focused_unread_mail_count(), 0);
+    }
+
+    #[test]
+    fn focused_unread_mail_count_with_mail() {
+        use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Send mail to that agent
+        let mail = AgentMail::new(
+            AgentId::new("sender"),
+            MailTarget::Direct(agent_id.clone()),
+            MailSubject::Custom { label: "Test".to_string() },
+            MailBody::Text("Message".to_string()),
+        );
+        state.mailbox.send_mail(mail);
+        state.mailbox.process_pending();
+
+        assert_eq!(state.focused_unread_mail_count(), 1);
+    }
+
+    #[test]
+    fn focused_unread_mail_for_prompt_formats_correctly() {
+        use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Send mail with action required
+        let mail = AgentMail::new(
+            AgentId::new("sender"),
+            MailTarget::Direct(agent_id.clone()),
+            MailSubject::TaskHelpRequest { task_id: TaskId::new("task-1") },
+            MailBody::Text("Need help".to_string()),
+        ).with_action_required();
+        state.mailbox.send_mail(mail);
+        state.mailbox.process_pending();
+
+        let formatted = state.focused_unread_mail_for_prompt();
+        assert!(formatted.contains("=== Incoming Messages ==="));
+        assert!(formatted.contains("[ACTION REQUIRED]"));
+        assert!(formatted.contains("Help requested for task-1"));
+        assert!(formatted.contains("=== End Messages ==="));
+    }
+
+    #[test]
+    fn focused_unread_mail_for_prompt_empty_when_no_mail() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent but no mail
+        state.spawn_agent(ProviderKind::Mock);
+
+        let formatted = state.focused_unread_mail_for_prompt();
+        assert!(formatted.is_empty());
+    }
+
+    #[test]
+    fn mark_focused_mail_read_keeps_mail_history() {
+        use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent and send mail
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let mail = AgentMail::new(
+            AgentId::new("sender"),
+            MailTarget::Direct(agent_id.clone()),
+            MailSubject::Custom { label: "Test".to_string() },
+            MailBody::Text("Message".to_string()),
+        );
+        state.mailbox.send_mail(mail);
+        state.mailbox.process_pending();
+
+        // Verify unread
+        assert_eq!(state.focused_unread_mail_count(), 1);
+
+        // Mark read
+        state.mark_focused_mail_read();
+
+        // Verify unread is 0 but mail still exists
+        assert_eq!(state.focused_unread_mail_count(), 0);
+        let inbox = state.mailbox.inbox_for(&agent_id);
+        assert!(inbox.is_some());
+        assert_eq!(inbox.unwrap().len(), 1); // Mail preserved
+        assert!(inbox.unwrap()[0].is_read());
+    }
+
+    #[test]
+    fn mail_injection_prepends_to_prompt() {
+        use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent and send mail
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let mail = AgentMail::new(
+            AgentId::new("helper"),
+            MailTarget::Direct(agent_id.clone()),
+            MailSubject::InfoRequest { query: "What is the status?".to_string() },
+            MailBody::Text("Please respond".to_string()),
+        );
+        state.mailbox.send_mail(mail);
+        state.mailbox.process_pending();
+
+        // Get mail prefix before starting provider
+        let mail_prefix = state.focused_unread_mail_for_prompt();
+        assert!(!mail_prefix.is_empty());
+
+        // The augmented prompt would be mail_prefix + user_prompt
+        let user_prompt = "Write tests for feature X";
+        let augmented = if mail_prefix.is_empty() {
+            user_prompt.to_string()
+        } else {
+            format!("{}{}", mail_prefix, user_prompt)
+        };
+
+        assert!(augmented.contains("=== Incoming Messages ==="));
+        assert!(augmented.contains("Write tests for feature X"));
+        assert!(augmented.starts_with("\n=== Incoming Messages ==="));
     }
 }
