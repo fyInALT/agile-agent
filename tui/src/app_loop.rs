@@ -643,12 +643,19 @@ fn start_provider_request(
     prompt: String,
     provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
 ) {
+    // Check if multi-agent mode is active (agent pool exists with agents)
+    if state.is_multi_agent_mode() {
+        start_multi_agent_provider_request(state, prompt);
+        return;
+    }
+
+    // Single-agent mode: use existing flow
     let (event_tx, event_rx) = mpsc::channel();
     let provider_kind = state.app().selected_provider;
     let session_handle = state.app().current_session_handle();
     logging::debug_event(
         "tui.provider_request",
-        "starting provider request from TUI",
+        "starting provider request from TUI (single-agent)",
         serde_json::json!({
             "provider": provider_kind.label(),
             "prompt": prompt,
@@ -668,6 +675,38 @@ fn start_provider_request(
         state.app_mut().begin_provider_response();
         let _ = state.persist_if_changed();
         *provider_rx = Some(event_rx);
+    }
+}
+
+fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
+    let provider_kind = state.app().selected_provider;
+    let focused_id = state.focused_agent_id();
+
+    logging::debug_event(
+        "tui.multi_agent_request",
+        "starting provider request for focused agent",
+        serde_json::json!({
+            "provider": provider_kind.label(),
+            "focused_agent": focused_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
+            "prompt": prompt,
+        }),
+    );
+
+    // Start provider for focused agent and get event receiver
+    let event_rx = state.start_provider_for_focused_agent(prompt.clone(), provider_kind);
+
+    if let Some(rx) = event_rx {
+        // Register the event channel with EventAggregator
+        let agent_id = state.focused_agent_id().expect("focused agent should exist after start");
+        state.register_agent_channel(agent_id.clone(), rx);
+        state.app_mut().begin_provider_response();
+        state.app_mut().push_status_message(format!(
+            "started {} ({})",
+            agent_id.as_str(),
+            provider_kind.label()
+        ));
+    } else {
+        task_engine::handle_provider_start_failure(state.app_mut(), "failed to start provider for agent".to_string());
     }
 }
 
@@ -773,5 +812,37 @@ mod tests {
 
         assert_eq!(event_poll_timeout(&state, false), Duration::from_millis(80));
         assert_eq!(event_poll_timeout(&state, true), Duration::from_millis(80));
+    }
+
+    #[test]
+    fn multi_agent_mode_triggers_event_aggregator_flow() {
+        use super::start_provider_request;
+        use std::sync::mpsc;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn an agent to activate multi-agent mode
+        let agent_id = state.spawn_agent(ProviderKind::Claude).expect("spawn agent");
+        assert!(state.is_multi_agent_mode());
+
+        // Start provider request - should use multi-agent flow
+        let mut provider_rx: Option<mpsc::Receiver<agent_core::provider::ProviderEvent>> = None;
+        start_provider_request(&mut state, "hello".to_string(), &mut provider_rx);
+
+        // In multi-agent mode, provider_rx should NOT be set (events go through EventAggregator)
+        assert!(provider_rx.is_none(), "multi-agent mode should not use provider_rx");
+
+        // EventAggregator should have a registered channel
+        assert_eq!(state.agent_channel_count(), 1, "should have one registered channel");
+
+        // The channel should be for the spawned agent (either empty or has events)
+        let registered = state.poll_agent_events();
+        assert!(
+            registered.empty_channels.contains(&agent_id),
+            "spawned agent should have an empty channel registered"
+        );
     }
 }
