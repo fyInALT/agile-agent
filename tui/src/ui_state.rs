@@ -2626,4 +2626,63 @@ mod tests {
         let slot = pool.focused_slot().unwrap();
         assert!(slot.status().is_terminal());
     }
+
+    #[test]
+    fn multi_agent_provider_request_registers_channel_with_aggregator() {
+        use agent_core::provider::ProviderEvent;
+        use std::sync::mpsc;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn agent to activate multi-agent mode
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        assert!(state.is_multi_agent_mode());
+
+        // Start provider for focused agent
+        let event_rx = state
+            .start_provider_for_focused_agent("test prompt".to_string(), ProviderKind::Mock)
+            .expect("start provider");
+
+        // Register channel with aggregator
+        state.register_agent_channel(agent_id.clone(), event_rx);
+
+        // Verify aggregator has the channel
+        assert_eq!(state.agent_channel_count(), 1);
+
+        // Poll should return empty channel (no events yet)
+        let poll_result = state.poll_agent_events();
+        assert!(poll_result.empty_channels.contains(&agent_id));
+    }
+
+    #[test]
+    fn multi_agent_event_routing_updates_agent_slot_transcript() {
+        use agent_core::provider::ProviderEvent;
+        use std::sync::mpsc;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Setup multi-agent
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let (event_tx, event_rx) = mpsc::channel();
+        state.register_agent_channel(agent_id.clone(), event_rx);
+
+        // Simulate provider events
+        event_tx.send(ProviderEvent::AssistantChunk("Hello from agent".to_string())).unwrap();
+        event_tx.send(ProviderEvent::Status("Working".to_string())).unwrap();
+
+        // Poll events
+        let poll_result = state.poll_agent_events();
+        assert_eq!(poll_result.events.len(), 2);
+
+        // Verify events are tagged with agent_id
+        for event in &poll_result.events {
+            assert_eq!(event.agent_id(), &agent_id);
+        }
+    }
 }
