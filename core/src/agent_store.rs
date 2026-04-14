@@ -362,6 +362,7 @@ mod tests {
             loop_phase: crate::app::LoopPhase::Executing,
             loop_run_active: true,
             remaining_loop_iterations: 2,
+            was_interrupted: false,
         };
 
         store
@@ -373,6 +374,7 @@ mod tests {
 
         assert_eq!(loaded.draft_input, "draft");
         assert_eq!(loaded.active_task_id.as_deref(), Some("task-1"));
+        assert!(!loaded.was_interrupted);
     }
 
     #[test]

@@ -290,6 +290,7 @@ mod tests {
             loop_phase: LoopPhase::Idle,
             loop_run_active: false,
             remaining_loop_iterations: 0,
+            was_interrupted: false,
         }
     }
 
