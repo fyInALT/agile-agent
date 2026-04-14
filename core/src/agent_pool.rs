@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
-use crate::backlog::BacklogState;
+use crate::backlog::{BacklogState, TaskStatus};
 use crate::provider::ProviderKind;
 
 /// Snapshot of an agent's status for display
@@ -17,6 +17,38 @@ pub struct AgentStatusSnapshot {
     pub provider_type: ProviderType,
     pub status: AgentSlotStatus,
     pub assigned_task_id: Option<TaskId>,
+}
+
+/// Per-agent task assignment info for visualization
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTaskAssignment {
+    pub agent_id: AgentId,
+    pub codename: AgentCodename,
+    pub task_id: TaskId,
+    pub task_status: TaskStatus,
+}
+
+/// Snapshot of task queue state for TUI display
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskQueueSnapshot {
+    /// Total number of tasks in backlog
+    pub total_tasks: usize,
+    /// Number of tasks ready to be assigned
+    pub ready_tasks: usize,
+    /// Number of tasks currently running
+    pub running_tasks: usize,
+    /// Number of tasks completed successfully
+    pub completed_tasks: usize,
+    /// Number of tasks that failed
+    pub failed_tasks: usize,
+    /// Number of tasks that are blocked
+    pub blocked_tasks: usize,
+    /// Tasks assigned to specific agents
+    pub agent_assignments: Vec<AgentTaskAssignment>,
+    /// Number of idle agents available for assignment
+    pub available_agents: usize,
+    /// Number of active agents (responding/executing)
+    pub active_agents: usize,
 }
 
 /// Pool managing multiple agent slots
@@ -346,6 +378,66 @@ impl AgentPool {
             *counts.entry(label).or_insert(0) += 1;
         }
         counts
+    }
+
+    /// Generate a snapshot of the task queue state for TUI display
+    ///
+    /// Combines backlog state with agent pool state for comprehensive view.
+    pub fn task_queue_snapshot(&self, backlog: &BacklogState) -> TaskQueueSnapshot {
+        let counts = backlog.count_tasks_by_status();
+
+        // Collect agent assignments
+        let agent_assignments: Vec<AgentTaskAssignment> = self
+            .slots
+            .iter()
+            .filter_map(|slot| {
+                let task_id = slot.assigned_task_id()?;
+                let task = backlog.find_task(task_id.as_str())?;
+                Some(AgentTaskAssignment {
+                    agent_id: slot.agent_id().clone(),
+                    codename: slot.codename().clone(),
+                    task_id: task_id.clone(),
+                    task_status: task.status,
+                })
+            })
+            .collect();
+
+        // Count available and active agents
+        let available_agents = self
+            .slots
+            .iter()
+            .filter(|s| *s.status() == AgentSlotStatus::Idle)
+            .count();
+        let active_agents = self.slots.iter().filter(|s| s.status().is_active()).count();
+
+        TaskQueueSnapshot {
+            total_tasks: backlog.tasks.len(),
+            ready_tasks: counts.get(&TaskStatus::Ready).copied().unwrap_or(0),
+            running_tasks: counts.get(&TaskStatus::Running).copied().unwrap_or(0),
+            completed_tasks: counts.get(&TaskStatus::Done).copied().unwrap_or(0),
+            failed_tasks: counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
+            blocked_tasks: counts.get(&TaskStatus::Blocked).copied().unwrap_or(0),
+            agent_assignments,
+            available_agents,
+            active_agents,
+        }
+    }
+
+    /// Get agents with their assigned task info
+    pub fn agents_with_assignments(&self, backlog: &BacklogState) -> Vec<AgentTaskAssignment> {
+        self.slots
+            .iter()
+            .filter_map(|slot| {
+                let task_id = slot.assigned_task_id()?;
+                let task = backlog.find_task(task_id.as_str())?;
+                Some(AgentTaskAssignment {
+                    agent_id: slot.agent_id().clone(),
+                    codename: slot.codename().clone(),
+                    task_id: task_id.clone(),
+                    task_status: task.status,
+                })
+            })
+            .collect()
     }
 }
 
@@ -704,5 +796,144 @@ mod tests {
 
         let result = pool.auto_assign_task(&mut backlog.clone());
         assert!(result.is_none());
+    }
+
+    // Task Queue Visualization Tests
+
+    #[test]
+    fn task_queue_snapshot_empty_backlog() {
+        let pool = make_pool(2);
+        let backlog = BacklogState::default();
+
+        let snapshot = pool.task_queue_snapshot(&backlog);
+        assert_eq!(snapshot.total_tasks, 0);
+        assert_eq!(snapshot.ready_tasks, 0);
+        assert_eq!(snapshot.running_tasks, 0);
+        assert_eq!(snapshot.agent_assignments.len(), 0);
+    }
+
+    #[test]
+    fn task_queue_snapshot_with_tasks() {
+        let pool = make_pool(2);
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 1".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Ready,
+            result_summary: None,
+        });
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-002".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 2".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Running,
+            result_summary: None,
+        });
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-003".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 3".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Done,
+            result_summary: Some("Completed".to_string()),
+        });
+
+        let snapshot = pool.task_queue_snapshot(&backlog);
+        assert_eq!(snapshot.total_tasks, 3);
+        assert_eq!(snapshot.ready_tasks, 1);
+        assert_eq!(snapshot.running_tasks, 1);
+        assert_eq!(snapshot.completed_tasks, 1);
+    }
+
+    #[test]
+    fn task_queue_snapshot_with_agent_assignments() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 1".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Ready,
+            result_summary: None,
+        });
+
+        // Assign task to agent
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        let snapshot = pool.task_queue_snapshot(&backlog);
+        assert_eq!(snapshot.agent_assignments.len(), 1);
+        assert_eq!(snapshot.agent_assignments[0].task_id.as_str(), "task-001");
+        assert_eq!(snapshot.agent_assignments[0].task_status, crate::backlog::TaskStatus::Running);
+        assert_eq!(snapshot.running_tasks, 1);
+    }
+
+    #[test]
+    fn task_queue_snapshot_available_agents_count() {
+        let mut pool = make_pool(3);
+        let _agent1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let agent2 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let _agent3 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 1".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Ready,
+            result_summary: None,
+        });
+
+        // Assign task to agent2 (agent status stays Idle)
+        pool.assign_task_with_backlog(&agent2, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Now mark agent2 as starting (not idle)
+        pool.get_slot_mut_by_id(&agent2)
+            .unwrap()
+            .transition_to(AgentSlotStatus::starting())
+            .unwrap();
+
+        let snapshot = pool.task_queue_snapshot(&backlog);
+        assert_eq!(snapshot.available_agents, 2); // agent1 and agent3 are idle
+        assert_eq!(snapshot.active_agents, 1); // Starting is active
+    }
+
+    #[test]
+    fn agents_with_assignments_returns_assigned_agents() {
+        let mut pool = make_pool(2);
+        let agent1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let _agent2 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = BacklogState::default();
+        backlog.push_task(crate::backlog::TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-001".to_string(),
+            objective: "Task 1".to_string(),
+            scope: "Test".to_string(),
+            constraints: Vec::new(),
+            verification_plan: Vec::new(),
+            status: crate::backlog::TaskStatus::Ready,
+            result_summary: None,
+        });
+
+        pool.assign_task_with_backlog(&agent1, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        let assignments = pool.agents_with_assignments(&backlog);
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].agent_id, agent1);
     }
 }
