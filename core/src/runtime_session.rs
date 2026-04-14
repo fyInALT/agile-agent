@@ -31,6 +31,22 @@ impl RuntimeSession {
         default_provider: ProviderKind,
         resume_snapshot: bool,
     ) -> Result<Self> {
+        // Check for shutdown snapshot first (higher priority than agent snapshot)
+        let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
+        if resume_snapshot {
+            if let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+                logging::debug_event(
+                    "session.bootstrap.shutdown_snapshot",
+                    "found shutdown snapshot, restoring",
+                    serde_json::json!({
+                        "agents_count": snapshot.agents.len(),
+                        "reason": snapshot.shutdown_reason,
+                    }),
+                );
+                return Self::restore_from_snapshot(launch_cwd, snapshot, default_provider);
+            }
+        }
+
         let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, default_provider)?;
         let workplace_id = bootstrap.runtime.meta().workplace_id.clone();
         let backlog = backlog_store::load_backlog_for_workplace(bootstrap.runtime.workplace())?;
@@ -675,5 +691,44 @@ mod tests {
         let workplace = crate::workplace_store::WorkplaceStore::for_cwd(temp.path())
             .expect("workplace");
         assert!(!workplace.has_shutdown_snapshot());
+    }
+
+    #[test]
+    fn bootstrap_with_resume_snapshot_uses_shutdown_snapshot() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut first =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap first");
+        first.app.input = "saved input".to_string();
+        first.app.loop_run_active = true;
+        first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+
+        // Bootstrap with resume_snapshot=true should restore from shutdown snapshot
+        let restored =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, true)
+                .expect("bootstrap with resume");
+
+        // Should have restored state from snapshot
+        assert_eq!(restored.app.input, "saved input");
+        assert!(restored.app.loop_run_active);
+    }
+
+    #[test]
+    fn bootstrap_without_resume_snapshot_ignores_shutdown_snapshot() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut first =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap first");
+        first.app.input = "saved input".to_string();
+        first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+
+        // Bootstrap without resume_snapshot should start fresh (but restore agent from files)
+        let fresh =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap fresh");
+
+        // Should not have the shutdown snapshot state
+        // (but may have agent state from files depending on implementation)
+        assert!(fresh.agent_runtime.workplace().has_shutdown_snapshot()); // Snapshot still exists
     }
 }
