@@ -971,10 +971,13 @@ fn render_generic_tool_call_lines(
         Style::default().fg(Color::Red)
     };
 
-    // Check if this is a git command
-    let git_label = input_preview
-        .filter(|v| !v.trim().is_empty())
-        .and_then(|input| detect_git_command(input));
+    // Extract command from input_preview (handles JSON-wrapped commands like {"command":"git diff",...})
+    let display_command = extract_command_from_input(input_preview);
+
+    // Check if this is a git command using the extracted command
+    let git_label = display_command
+        .as_ref()
+        .and_then(|cmd| detect_git_command(cmd));
 
     let (header_text, header_style) = if git_label.is_some() {
         let prefix = if started { "Calling" } else { "Called" };
@@ -984,7 +987,7 @@ fn render_generic_tool_call_lines(
         (prefix, bullet_style)
     };
 
-    let invocation = format_tool_invocation(name, input_preview);
+    let invocation = format_tool_invocation(name, input_preview, display_command.as_deref());
     let inline_invocation =
         !invocation.is_empty() && invocation.len() + header_text.len() + 3 <= width.max(1);
 
@@ -1776,10 +1779,33 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     None
 }
 
-fn format_tool_invocation(name: &str, input_preview: Option<&str>) -> String {
-    match input_preview.filter(|value| !value.trim().is_empty()) {
-        Some(input) => format!("{name}({input})"),
-        None => name.to_string(),
+/// Extract command string from input_preview, handling both plain commands and JSON-wrapped commands
+/// like {"command":"git diff","description":"..."}
+fn extract_command_from_input(input_preview: Option<&str>) -> Option<String> {
+    let input = input_preview?.trim();
+    if input.is_empty() {
+        return None;
+    }
+
+    // Try to parse as JSON to extract "command" field
+    if input.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(input) {
+            if let Some(command) = parsed.get("command").and_then(|v| v.as_str()) {
+                return Some(command.to_string());
+            }
+        }
+    }
+
+    // Return as-is if not JSON
+    Some(input.to_string())
+}
+
+fn format_tool_invocation(name: &str, input_preview: Option<&str>, display_command: Option<&str>) -> String {
+    // Use the extracted display_command if available, otherwise use input_preview
+    let display = display_command.unwrap_or_else(|| input_preview.unwrap_or(""));
+    match display.trim().is_empty() {
+        false => format!("{name}({display})"),
+        true => name.to_string(),
     }
 }
 
@@ -2808,5 +2834,86 @@ mod git_detection_tests {
 
         // Non-git commands should show raw command
         assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
+    }
+
+    #[test]
+    fn extract_command_from_input_parses_json_command() {
+        let json_input = r#"{"command":"git diff --stat","description":"Show diff stats"}"#;
+        let extracted = extract_command_from_input(Some(json_input));
+        assert_eq!(extracted, Some("git diff --stat".to_string()));
+    }
+
+    #[test]
+    fn extract_command_from_input_handles_plain_command() {
+        let plain_input = "git status";
+        let extracted = extract_command_from_input(Some(plain_input));
+        assert_eq!(extracted, Some("git status".to_string()));
+    }
+
+    #[test]
+    fn extract_command_from_input_handles_none() {
+        assert_eq!(extract_command_from_input(None), None);
+    }
+
+    #[test]
+    fn extract_command_from_input_handles_empty_string() {
+        assert_eq!(extract_command_from_input(Some("")), None);
+        assert_eq!(extract_command_from_input(Some("  ")), None);
+    }
+
+    #[test]
+    fn render_generic_tool_call_extracts_git_from_json_command() {
+        let json_input = r#"{"command":"git diff --stat","description":"Show diff stats"}"#;
+        let lines = render_generic_tool_call_lines(
+            "Bash",
+            Some(json_input),
+            Some("file.rs | 10 +++----"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show git-friendly label
+        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' label in: {:?}", rendered);
+        // Should NOT show the raw JSON
+        assert!(!rendered.iter().any(|line| line.contains("command")), "Should not contain 'command' in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_extracts_git_commit_from_json() {
+        let json_input = r#"{"command":"git commit -m \"fix: update\"","description":"Commit changes"}"#;
+        let lines = render_generic_tool_call_lines(
+            "Bash",
+            Some(json_input),
+            Some("[main abc123] fix: update"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Commit")), "Expected 'Git Commit' label in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_generic_tool_call_non_git_json_shows_command() {
+        let json_input = r#"{"command":"npm install","description":"Install deps"}"#;
+        let lines = render_generic_tool_call_lines(
+            "Bash",
+            Some(json_input),
+            Some("added 100 packages"),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show the command, not the JSON
+        assert!(rendered.iter().any(|line| line.contains("npm install")), "Expected 'npm install' in: {:?}", rendered);
+        assert!(!rendered.iter().any(|line| line.contains("command")), "Should not contain 'command' in: {:?}", rendered);
     }
 }
