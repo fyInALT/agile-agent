@@ -815,8 +815,14 @@ impl KanbanElement {
         self.base_mut().transition(Status::Blocked)
     }
 
-    /// Unblock this element
+    /// Unblock this element - must be in Blocked status
     pub fn unblock(&mut self) -> Result<(), KanbanTransitionError> {
+        if self.status() != Status::Blocked {
+            return Err(KanbanTransitionError {
+                from: self.status(),
+                to: Status::Backlog,
+            });
+        }
         self.base_mut().blocked_reason = None;
         self.base_mut().transition(Status::Backlog)
     }

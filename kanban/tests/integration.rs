@@ -1,9 +1,8 @@
 //! Integration tests for WorkplaceStore + FileKanbanRepository
 
 use agent_kanban::FileKanbanRepository;
-use agent_kanban::domain::{ElementId, ElementType, KanbanElement};
+use agent_kanban::domain::{ElementType, KanbanElement};
 use agent_kanban::repository::KanbanElementRepository;
-use std::path::Path;
 
 #[test]
 fn test_file_repository_from_workplace() {
@@ -11,7 +10,7 @@ fn test_file_repository_from_workplace() {
     let workplace = temp.path().join("workplace");
 
     // Create repo using from_workplace
-    let repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
+    let _repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
 
     // Verify kanban directory was created
     assert!(workplace.join("kanban").join("elements").exists());
@@ -23,7 +22,7 @@ fn test_file_repository_from_workplace_nested() {
     let workplace = temp.path().join("workspace").join("project");
 
     // Create repo using from_workplace
-    let repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
+    let _repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
 
     // Verify kanban directory structure was created
     assert!(workplace.join("kanban").join("elements").exists());

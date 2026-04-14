@@ -434,7 +434,7 @@ mod dependency_tests {
 
     #[test]
     fn test_dependency_blocks_in_progress() {
-        let (service, repo) = create_service();
+        let (service, _repo) = create_service();
 
         // Create a task that will be a dependency
         let dep_task = service
@@ -455,7 +455,7 @@ mod dependency_tests {
 
     #[test]
     fn test_dependency_satisfied_allows_in_progress() {
-        let (service, repo) = create_service();
+        let (service, _repo) = create_service();
 
         // Create a task that will be a dependency
         let dep_task = service

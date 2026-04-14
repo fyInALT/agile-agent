@@ -368,11 +368,35 @@ fn test_full_append_tip_workflow() {
     let tip1_id = tip1.id().unwrap().clone();
 
     let tip2 = service.append_tip(&task_id, "agent-2", "Second tip content").unwrap();
-    let _tip2_id = tip2.id().unwrap().clone();
+    let tip2_id = tip2.id().unwrap().clone();
 
     // Verify tip was created correctly
     assert_eq!(tip1.element_type(), ElementType::Tips);
     assert_eq!(tip1.title(), "First tip content");
+
+    // Verify tips can be retrieved by type
+    let all_tips = service.list_by_type(ElementType::Tips).unwrap();
+    assert_eq!(all_tips.len(), 2);
+
+    // Verify each tip has correct agent_id and target_task via base()
+    for tip in &all_tips {
+        match tip {
+            KanbanElement::Tips(t) => {
+                assert_eq!(t.target_task, task_id);
+                assert!(t.agent_id == "agent-1" || t.agent_id == "agent-2");
+            }
+            _ => panic!("Expected Tips variant"),
+        }
+    }
+
+    // Verify specific tip can be retrieved
+    let retrieved_tip1 = service.get_element(&tip1_id).unwrap();
+    assert!(retrieved_tip1.is_some());
+    assert_eq!(retrieved_tip1.unwrap().title(), "First tip content");
+
+    let retrieved_tip2 = service.get_element(&tip2_id).unwrap();
+    assert!(retrieved_tip2.is_some());
+    assert_eq!(retrieved_tip2.unwrap().title(), "Second tip content");
 
     // Verify events were published
     let events = collector.get_events();

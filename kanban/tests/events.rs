@@ -5,36 +5,6 @@ use agent_kanban::events::{KanbanEvent, KanbanEventBus, KanbanEventSubscriber};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct CountingSubscriber {
-    count: Arc<AtomicUsize>,
-}
-
-impl CountingSubscriber {
-    fn new() -> Self {
-        CountingSubscriber {
-            count: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    fn get_count(&self) -> usize {
-        self.count.load(Ordering::SeqCst)
-    }
-}
-
-impl Clone for CountingSubscriber {
-    fn clone(&self) -> Self {
-        CountingSubscriber {
-            count: self.count.clone(),
-        }
-    }
-}
-
-impl KanbanEventSubscriber for CountingSubscriber {
-    fn on_event(&self, _event: &KanbanEvent) {
-        self.count.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
 #[test]
 fn test_created_event() {
     let event = KanbanEvent::Created {

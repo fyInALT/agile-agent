@@ -3,7 +3,7 @@
 //! Tests using real file storage with temporary directories.
 
 use agent_kanban::FileKanbanRepository;
-use agent_kanban::domain::{ElementId, ElementType, KanbanElement, Status};
+use agent_kanban::domain::{ElementType, KanbanElement, Status};
 use agent_kanban::repository::KanbanElementRepository;
 use tempfile::TempDir;
 
@@ -178,7 +178,7 @@ fn test_file_repo_from_workplace() {
     let temp = TempDir::new().unwrap();
     let workplace = temp.path().join("workspace");
 
-    let repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
+    let _repo = FileKanbanRepository::from_workplace(&workplace).unwrap();
 
     assert!(workplace.join("kanban").join("elements").exists());
 }
