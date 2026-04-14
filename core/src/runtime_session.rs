@@ -87,7 +87,28 @@ impl RuntimeSession {
         &mut self.workplace
     }
 
+    /// Sync shared fields from app to workplace
+    /// Called before persisting to ensure workplace has latest shared state
+    pub fn sync_app_to_workplace(&mut self) {
+        self.workplace.loop_control.should_quit = self.app.should_quit;
+        self.workplace.loop_control.loop_run_active = self.app.loop_run_active;
+        self.workplace.loop_control.current_iteration =
+            self.workplace.loop_control.max_iterations.saturating_sub(self.app.remaining_loop_iterations);
+        self.workplace.skills.enabled_names = self.app.skills.enabled_names.clone();
+        // Note: backlog is already synced through separate calls
+    }
+
+    /// Sync shared fields from workplace to app
+    /// Called after restoring to ensure app has latest shared state
+    pub fn sync_workplace_to_app(&mut self) {
+        self.app.should_quit = self.workplace.loop_control.should_quit;
+        self.app.loop_run_active = self.workplace.loop_control.loop_run_active;
+        self.app.remaining_loop_iterations = self.workplace.loop_control.remaining_iterations();
+        self.app.skills.enabled_names = self.workplace.skills.enabled_names.clone();
+    }
+
     pub fn persist_if_changed(&mut self) -> Result<()> {
+        self.sync_app_to_workplace();
         if self.agent_runtime.sync_from_app_state(&self.app) {
             self.persist_all()?;
         }
@@ -121,12 +142,14 @@ impl RuntimeSession {
     }
 
     pub fn mark_stopped_and_persist(&mut self) -> Result<()> {
+        self.sync_app_to_workplace();
         self.agent_runtime.sync_from_app_state(&self.app);
         self.agent_runtime.mark_stopped();
         self.persist_all()
     }
 
     pub fn switch_agent(&mut self, provider_kind: ProviderKind) -> Result<String> {
+        self.sync_app_to_workplace();
         self.agent_runtime.sync_from_app_state(&self.app);
         self.agent_runtime.mark_stopped();
         self.persist_all()?;
@@ -149,6 +172,7 @@ impl RuntimeSession {
 
         self.app = next_app;
         self.agent_runtime = next_runtime;
+        self.sync_workplace_to_app(); // Ensure app has workplace state
         self.persist_all()?;
 
         Ok(summary)
@@ -164,6 +188,7 @@ impl RuntimeSession {
                 for warning in self.agent_runtime.apply_to_app_state(&mut self.app) {
                     self.app.push_error_message(warning);
                 }
+                self.sync_app_to_workplace();
             }
             Err(err) => match session_store::restore_recent_session_for_workplace(
                 &mut self.app,
@@ -178,6 +203,7 @@ impl RuntimeSession {
                     for warning in self.agent_runtime.apply_to_app_state(&mut self.app) {
                         self.app.push_error_message(warning);
                     }
+                    self.sync_app_to_workplace();
                 }
                 Err(_) => self
                     .app
