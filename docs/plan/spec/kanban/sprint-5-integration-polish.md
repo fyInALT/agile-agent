@@ -38,6 +38,9 @@ core/                      # agent-core crate (depends on agent-kanban)
 **I need** kanban accessible through SharedWorkplaceState
 **So that** multiple agents can access the shared kanban
 
+**Note:** This story requires `SharedWorkplaceState` from the multi-agent runtime,
+which is not present in the domain-types worktree. Deferred to multi-agent integration sprint.
+
 ### Tasks
 
 - [ ] **T5.1.1: Add core re-export of kanban types**
@@ -76,28 +79,28 @@ core/                      # agent-core crate (depends on agent-kanban)
 
 ### Tasks
 
-- [ ] **T5.2.1: Create GitOperations struct**
+- [x] **T5.2.1: Create GitOperations struct**
   - File: `kanban/src/git_ops.rs`
   - Add `GitOperations` struct with `repo_path: PathBuf`
   - Add `new(repo_path)` constructor
 
-- [ ] **T5.2.2: Define GitOperation methods (placeholder)**
+- [x] **T5.2.2: Define GitOperation methods (placeholder)**
   - File: `kanban/src/git_ops.rs`
   - Add `commit_changes(agent_id, message)` → `Result<(), GitError>`
   - Add `fetch_and_rebase(branch)` → `Result<(), GitError>`
   - Add `has_conflicts()` → `bool`
 
-- [ ] **T5.2.3: Define GitError type**
+- [x] **T5.2.3: Define GitError type**
   - File: `kanban/src/git_ops.rs`
   - Add `GitError` struct with `message: String`
   - Implement `Display` trait
   - Implement `Debug` trait
 
-- [ ] **T5.2.4: Export GitOperations from kanban module**
+- [x] **T5.2.4: Export GitOperations from kanban module**
   - File: `kanban/src/lib.rs`
   - Export `GitOperations`
 
-- [ ] **T5.2.5: Write unit tests for GitOperations**
+- [x] **T5.2.5: Write unit tests for GitOperations**
   - File: `kanban/tests/git_ops.rs`
   - Test placeholder methods return appropriate results
   - Test GitError display format
@@ -120,28 +123,28 @@ core/                      # agent-core crate (depends on agent-kanban)
 
 ### Tasks
 
-- [ ] **T5.3.1: Add base_mut accessor to KanbanElement**
+- [x] **T5.3.1: Add base_mut accessor to KanbanElement**
   - File: `kanban/src/domain.rs`
   - Add `base_mut(&mut self) -> &mut BaseElement` to KanbanElement
   - Delegate to variant's base field
   - Used by tests to set dependencies before creation
 
-- [ ] **T5.3.2: Add ElementId.number() method**
+- [x] **T5.3.2: Add ElementId.number() method**
   - File: `kanban/src/domain.rs`
   - Add `number(&self) -> u32` to ElementId
   - Parse and return the numeric portion
 
-- [ ] **T5.3.3: Add ElementId.type_() method**
+- [x] **T5.3.3: Add ElementId.type_() method**
   - File: `kanban/src/domain.rs`
   - Add `type_(&self) -> ElementType` to ElementId
   - Parse and return the type portion
 
-- [ ] **T5.3.4: Verify all trait implementations**
+- [x] **T5.3.4: Verify all trait implementations**
   - Review: `impl Hash for ElementId` works correctly
   - Review: `impl Serialize for ElementId` works correctly
   - Review: `impl<'de> Deserialize<'de> for ElementId` works correctly
 
-- [ ] **T5.3.5: Run full test suite**
+- [x] **T5.3.5: Run full test suite**
   - Run: `cargo test -p agent-kanban`
   - Fix any failing tests
   - Ensure all domain, repository, service, and events tests pass
@@ -158,12 +161,12 @@ core/                      # agent-core crate (depends on agent-kanban)
 
 ## Sprint 5 Completion Checklist
 
-- [ ] All 3 stories completed
-- [ ] All tasks checked off
-- [ ] Code compiles: `cargo build -p agent-kanban`
-- [ ] Tests pass: `cargo test -p agent-kanban`
-- [ ] Code formatted: `cargo fmt -p agent-kanban`
-- [ ] Committed: `git commit -m "feat(kanban): complete sprint 5 - integration and polish"`
+- [x] Stories 5.2 (GitOperations) and 5.3 (Accessors) completed
+- [x] Story 5.1 (SharedWorkplaceState) deferred - requires multi-agent runtime
+- [x] Code compiles: `cargo build -p agent-kanban`
+- [x] Tests pass: `cargo test -p agent-kanban`
+- [x] Code formatted: `cargo fmt -p agent-kanban`
+- [x] Committed: see Story 5.2 commit
 
 ---
 
