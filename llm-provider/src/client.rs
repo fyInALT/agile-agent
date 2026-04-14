@@ -94,11 +94,9 @@ impl LlmClient {
 
         let response = self.execute_request(request).await?;
 
-        Ok(response
-            .choices
-            .first()
-            .map(|c| c.message.content.clone())
-            .unwrap_or_default())
+        let choice = response.choices.first()
+            .ok_or_else(|| anyhow::anyhow!("No choices in response"))?;
+        Ok(choice.message.content.clone())
     }
 
     /// Async version: Send a streaming request and process chunks via callback.
