@@ -19,6 +19,7 @@ use crate::markdown_stream::MarkdownStreamCollector;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
 use crate::composer::textarea::TextAreaState;
+use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
 
 #[derive(Debug)]
@@ -250,8 +251,17 @@ impl TuiState {
         self.bump_active_entries_revision();
     }
 
-    pub fn active_entries_revision_key(&self) -> Option<u64> {
-        self.active_cell.as_ref().map(|_| self.active_entries_revision)
+    pub fn active_cell_transcript_key(&self) -> Option<ActiveCellTranscriptKey> {
+        self.active_cell.as_ref().map(|_| ActiveCellTranscriptKey {
+            revision: self.active_entries_revision,
+            is_stream_continuation: self.live_tail_is_stream_continuation(),
+        })
+    }
+
+    pub fn active_cell_transcript_lines(&self, width: u16) -> Option<Vec<ratatui::text::Line<'static>>> {
+        let entries = self.active_entries_for_display();
+        let lines = cells::flatten_cells(&cells::build_overlay_cells(&entries, width));
+        (!lines.is_empty()).then_some(lines)
     }
 
     #[cfg(test)]
@@ -1052,6 +1062,12 @@ pub enum ActiveCell {
     Stream(ActiveStream),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveCellTranscriptKey {
+    pub revision: u64,
+    pub is_stream_continuation: bool,
+}
+
 impl ActiveCell {
     fn as_transcript_entries(&self) -> Vec<TranscriptEntry> {
         match self {
@@ -1156,6 +1172,7 @@ enum ActiveToolStart {
 
 #[cfg(test)]
 mod tests {
+    use super::ActiveCellTranscriptKey;
     use super::ActiveStream;
     use super::StreamTextKind;
     use super::TuiState;
@@ -1239,6 +1256,60 @@ mod tests {
             .expect("switch");
 
         assert!(state.active_tool_is_empty());
+    }
+
+    #[test]
+    fn active_cell_transcript_key_is_none_without_active_cell() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let state = TuiState::from_session(session);
+
+        assert_eq!(state.active_cell_transcript_key(), None);
+    }
+
+    #[test]
+    fn active_cell_transcript_key_reflects_revision_and_stream_continuation() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state
+            .app_mut()
+            .transcript
+            .push(TranscriptEntry::Assistant("committed".to_string()));
+        state.append_active_assistant_chunk("tail");
+
+        assert_eq!(
+            state.active_cell_transcript_key(),
+            Some(ActiveCellTranscriptKey {
+                revision: state.active_entries_revision,
+                is_stream_continuation: true,
+            })
+        );
+    }
+
+    #[test]
+    fn active_cell_transcript_lines_render_current_live_tail() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.append_active_assistant_chunk("tail");
+
+        let rendered = state
+            .active_cell_transcript_lines(80)
+            .expect("active lines")
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line == "tail"));
     }
 
     #[test]

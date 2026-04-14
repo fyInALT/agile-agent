@@ -266,14 +266,16 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 fn build_transcript_overlay_lines(state: &mut TuiState, width: u16) -> Vec<Line<'static>> {
     let mut lines = cells::flatten_cells(&cells::build_overlay_cells(&state.app().transcript, width));
-    let active_revision = state.active_entries_revision_key();
-    let active_entries = state.active_entries_for_display();
-    let is_stream_continuation = state.live_tail_is_stream_continuation();
+    let active_key = state.active_cell_transcript_key();
+    let active_lines = state.active_cell_transcript_lines(width).unwrap_or_default();
     let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
-    overlay.sync_live_tail(width, active_revision, || {
-        cells::flatten_cells(&cells::build_overlay_cells(&active_entries, width))
+    overlay.sync_live_tail(width, active_key.map(|key| key.revision), || {
+        active_lines
     });
-    if !lines.is_empty() && !overlay.live_tail_lines().is_empty() && !is_stream_continuation {
+    if !lines.is_empty()
+        && !overlay.live_tail_lines().is_empty()
+        && !active_key.is_some_and(|key| key.is_stream_continuation)
+    {
         lines.push(Line::from(""));
     }
     lines.extend_from_slice(overlay.live_tail_lines());
