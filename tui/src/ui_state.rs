@@ -21,6 +21,7 @@ use crate::transcript::overlay::TranscriptOverlayState;
 pub struct TuiState {
     pub session: RuntimeSession,
     pub active_entries: Vec<TranscriptEntry>,
+    pub active_stream: Option<ActiveStream>,
     pub active_entries_revision: u64,
     pub composer: TextArea,
     pub composer_state: TextAreaState,
@@ -41,6 +42,7 @@ impl TuiState {
         Self {
             session,
             active_entries: Vec::new(),
+            active_stream: None,
             active_entries_revision: 0,
             composer,
             composer_state: TextAreaState::default(),
@@ -65,7 +67,11 @@ impl TuiState {
     }
 
     pub fn active_entries_for_display(&self) -> Vec<TranscriptEntry> {
-        self.active_entries.clone()
+        let mut entries = self.active_entries.clone();
+        if let Some(stream) = self.active_stream.as_ref() {
+            entries.push(stream.as_transcript_entry());
+        }
+        entries
     }
 
     #[cfg(test)]
@@ -76,7 +82,8 @@ impl TuiState {
     }
 
     pub fn active_entries_revision_key(&self) -> Option<u64> {
-        (!self.active_entries.is_empty()).then_some(self.active_entries_revision)
+        (!self.active_entries.is_empty() || self.active_stream.is_some())
+            .then_some(self.active_entries_revision)
     }
 
     fn bump_active_entries_revision(&mut self) {
@@ -100,61 +107,50 @@ impl TuiState {
             return;
         }
 
-        let tail_index = self.ensure_streaming_text_tail(kind);
         let mut committed = None;
-        if let Some(existing) = self.active_entries.get_mut(tail_index) {
-            let existing = match (kind, existing) {
-                (StreamTextKind::Assistant, TranscriptEntry::Assistant(text)) => text,
-                (StreamTextKind::Thinking, TranscriptEntry::Thinking(text)) => text,
-                _ => return,
-            };
-            existing.push_str(chunk);
-            if let Some(split_index) = existing.rfind('\n').map(|index| index + 1) {
-                let remainder = existing.split_off(split_index);
-                let finished = std::mem::replace(existing, remainder);
-                if !finished.is_empty() {
-                    committed = Some(finished);
-                }
+        let stream = self.ensure_active_stream(kind);
+        stream.tail.push_str(chunk);
+        if let Some(split_index) = stream.tail.rfind('\n').map(|index| index + 1) {
+            let remainder = stream.tail.split_off(split_index);
+            let finished = std::mem::replace(&mut stream.tail, remainder);
+            if !finished.is_empty() {
+                committed = Some(finished);
             }
         }
 
-        self.drop_empty_streaming_text_tail(kind);
+        self.drop_empty_active_stream();
         if let Some(committed) = committed {
-            match kind {
-                StreamTextKind::Assistant => self.session.app.append_assistant_chunk(&committed),
-                StreamTextKind::Thinking => self.session.app.append_thinking_chunk(&committed),
-            }
+            self.commit_stream_text(kind, &committed);
         }
         self.bump_active_entries_revision();
     }
 
-    fn ensure_streaming_text_tail(&mut self, kind: StreamTextKind) -> usize {
-        match (kind, self.active_entries.last()) {
-            (StreamTextKind::Assistant, Some(TranscriptEntry::Assistant(_)))
-            | (StreamTextKind::Thinking, Some(TranscriptEntry::Thinking(_))) => {
-                self.active_entries.len().saturating_sub(1)
-            }
-            (StreamTextKind::Assistant, _) => {
-                self.active_entries
-                    .push(TranscriptEntry::Assistant(String::new()));
-                self.active_entries.len().saturating_sub(1)
-            }
-            (StreamTextKind::Thinking, _) => {
-                self.active_entries
-                    .push(TranscriptEntry::Thinking(String::new()));
-                self.active_entries.len().saturating_sub(1)
+    fn ensure_active_stream(&mut self, kind: StreamTextKind) -> &mut ActiveStream {
+        if self
+            .active_stream
+            .as_ref()
+            .is_some_and(|stream| stream.kind != kind && !stream.tail.is_empty())
+        {
+            if let Some(stream) = self.active_stream.take() {
+                self.commit_stream_text(stream.kind, &stream.tail);
             }
         }
+
+        let stream = self.active_stream.get_or_insert(ActiveStream {
+            kind,
+            tail: String::new(),
+        });
+        stream.kind = kind;
+        stream
     }
 
-    fn drop_empty_streaming_text_tail(&mut self, kind: StreamTextKind) {
-        let should_drop = match (kind, self.active_entries.last()) {
-            (StreamTextKind::Assistant, Some(TranscriptEntry::Assistant(text))) => text.is_empty(),
-            (StreamTextKind::Thinking, Some(TranscriptEntry::Thinking(text))) => text.is_empty(),
-            _ => false,
-        };
-        if should_drop {
-            self.active_entries.pop();
+    fn drop_empty_active_stream(&mut self) {
+        if self
+            .active_stream
+            .as_ref()
+            .is_some_and(|stream| stream.tail.is_empty())
+        {
+            self.active_stream = None;
         }
     }
 
@@ -636,6 +632,7 @@ impl TuiState {
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;
         self.active_entries.clear();
+        self.active_stream = None;
         self.bump_active_entries_revision();
         self.transcript_scroll_offset = 0;
         self.transcript_max_scroll = 0;
@@ -649,17 +646,16 @@ impl TuiState {
 
 impl TuiState {
     fn drain_active_entries(&mut self, failure_reason: Option<&str>) {
-        if self.active_entries.is_empty() {
+        if self.active_entries.is_empty() && self.active_stream.is_none() {
             return;
+        }
+        if let Some(stream) = self.active_stream.take()
+            && !stream.tail.is_empty()
+        {
+            self.commit_stream_text(stream.kind, &stream.tail);
         }
         for entry in std::mem::take(&mut self.active_entries) {
             match (failure_reason, entry) {
-                (_, TranscriptEntry::Assistant(text)) => {
-                    self.session.app.append_assistant_chunk(&text);
-                }
-                (_, TranscriptEntry::Thinking(text)) => {
-                    self.session.app.append_thinking_chunk(&text);
-                }
                 (Some(_), TranscriptEntry::ExecCommand {
                     call_id,
                     source,
@@ -728,9 +724,31 @@ impl TuiState {
         }
         self.bump_active_entries_revision();
     }
+
+    fn commit_stream_text(&mut self, kind: StreamTextKind, text: &str) {
+        match kind {
+            StreamTextKind::Assistant => self.session.app.append_assistant_chunk(text),
+            StreamTextKind::Thinking => self.session.app.append_thinking_chunk(text),
+        }
+    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveStream {
+    kind: StreamTextKind,
+    tail: String,
+}
+
+impl ActiveStream {
+    fn as_transcript_entry(&self) -> TranscriptEntry {
+        match self.kind {
+            StreamTextKind::Assistant => TranscriptEntry::Assistant(self.tail.clone()),
+            StreamTextKind::Thinking => TranscriptEntry::Thinking(self.tail.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamTextKind {
     Assistant,
     Thinking,
@@ -738,6 +756,8 @@ enum StreamTextKind {
 
 #[cfg(test)]
 mod tests {
+    use super::ActiveStream;
+    use super::StreamTextKind;
     use super::TuiState;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
@@ -1051,9 +1071,13 @@ mod tests {
         state.append_active_assistant_chunk("hello ");
         state.append_active_assistant_chunk("world");
 
+        assert!(state.active_entries.is_empty());
         assert!(matches!(
-            state.active_entries.last(),
-            Some(TranscriptEntry::Assistant(text)) if text == "hello world"
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Assistant,
+                tail,
+            }) if tail == "hello world"
         ));
         assert!(!state
             .app()
@@ -1084,9 +1108,13 @@ mod tests {
             state.app().transcript.last(),
             Some(TranscriptEntry::Assistant(text)) if text == "hello world\n"
         ));
+        assert!(state.active_entries.is_empty());
         assert!(matches!(
-            state.active_entries.last(),
-            Some(TranscriptEntry::Assistant(text)) if text == "next"
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Assistant,
+                tail,
+            }) if tail == "next"
         ));
     }
 
@@ -1100,9 +1128,13 @@ mod tests {
         state.append_active_thinking_chunk("step 1 ");
         state.append_active_thinking_chunk("step 2");
 
+        assert!(state.active_entries.is_empty());
         assert!(matches!(
-            state.active_entries.last(),
-            Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2"
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Thinking,
+                tail,
+            }) if tail == "step 1 step 2"
         ));
         assert!(!state
             .app()
@@ -1150,9 +1182,13 @@ mod tests {
             state.app().transcript.last(),
             Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2\n"
         ));
+        assert!(state.active_entries.is_empty());
         assert!(matches!(
-            state.active_entries.last(),
-            Some(TranscriptEntry::Thinking(text)) if text == "next"
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Thinking,
+                tail,
+            }) if tail == "next"
         ));
     }
 
