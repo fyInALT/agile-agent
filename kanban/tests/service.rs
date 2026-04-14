@@ -459,4 +459,30 @@ mod dependency_tests {
         let result = service.get_element(&id).unwrap();
         assert!(result.is_none());
     }
+
+    #[test]
+    fn test_append_tip_to_task() {
+        let (service, _repo) = create_service();
+
+        let task = service
+            .create_element(KanbanElement::new_task("Task"))
+            .unwrap();
+        let task_id = task.id().unwrap().clone();
+
+        let tips = service.append_tip(&task_id, "agent-1").unwrap();
+        assert_eq!(tips.element_type(), ElementType::Tips);
+    }
+
+    #[test]
+    fn test_append_tip_to_non_task_fails() {
+        let (service, _repo) = create_service();
+
+        let story = service
+            .create_element(KanbanElement::new_story("Story", "Content"))
+            .unwrap();
+        let story_id = story.id().unwrap().clone();
+
+        let result = service.append_tip(&story_id, "agent-1");
+        assert!(result.is_err());
+    }
 }

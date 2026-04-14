@@ -36,7 +36,7 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T4.1.1: Define KanbanEvent enum**
+- [x] **T4.1.1: Define KanbanEvent enum**
   - File: `kanban/src/events.rs`
   - Add `Created { element_id, element_type }`
   - Add `Updated { element_id, changes }` where changes is `Vec<String>`
@@ -47,17 +47,17 @@ kanban/                    # agent-kanban crate
   - Add `DependencyRemoved { element_id, dependency }`
   - Add `Clone` derive (needed for event bus)
 
-- [ ] **T4.1.2: Define KanbanEventSubscriber trait**
+- [x] **T4.1.2: Define KanbanEventSubscriber trait**
   - File: `kanban/src/events.rs`
   - Add trait with `on_event(event: &KanbanEvent)` method
   - Add `Send` bound for thread safety
 
-- [ ] **T4.1.3: Export events from kanban module**
+- [x] **T4.1.3: Export events from kanban module**
   - File: `kanban/src/lib.rs`
   - Export `KanbanEvent`
   - Export `KanbanEventSubscriber`
 
-- [ ] **T4.1.4: Write unit tests for event types**
+- [x] **T4.1.4: Write unit tests for event types**
   - File: `kanban/tests/events.rs`
   - Test event creation with all variants
   - Test event cloning
@@ -80,28 +80,28 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T4.2.1: Implement KanbanEventBus struct**
+- [x] **T4.2.1: Implement KanbanEventBus struct**
   - File: `kanban/src/events.rs`
   - Add `subscribers: RwLock<Vec<Box<dyn KanbanEventSubscriber + Send>>>` field
   - Add `new()` constructor
 
-- [ ] **T4.2.2: Implement subscribe method**
+- [x] **T4.2.2: Implement subscribe method**
   - File: `kanban/src/events.rs`
   - Accept `Box<dyn KanbanEventSubscriber + Send>`
   - Store in subscribers list (wrapped in RwLock)
 
-- [ ] **T4.2.3: Implement publish method**
+- [x] **T4.2.3: Implement publish method**
   - File: `kanban/src/events.rs`
   - Accept `KanbanEvent`
   - Iterate through all subscribers
   - Call `on_event()` on each subscriber
   - Use read lock for iteration
 
-- [ ] **T4.2.4: Implement Default trait**
+- [x] **T4.2.4: Implement Default trait**
   - File: `kanban/src/events.rs`
   - Implement `Default` for `KanbanEventBus` using `new()`
 
-- [ ] **T4.2.5: Write unit tests for event bus**
+- [x] **T4.2.5: Write unit tests for event bus**
   - File: `kanban/tests/events.rs`
   - Test single subscriber receives events
   - Test multiple subscribers all receive events
@@ -126,26 +126,26 @@ kanban/                    # agent-kanban crate
 
 ### Tasks
 
-- [ ] **T4.3.1: Review existing event publishing in service**
+- [x] **T4.3.1: Review existing event publishing in service**
   - File: `kanban/src/service.rs`
   - Verify `create_element` publishes `Created` event
   - Verify `update_status` publishes `StatusChanged` event
   - Identify any missing event publications
 
-- [ ] **T4.3.2: Implement append_tip method**
+- [x] **T4.3.2: Implement append_tip method**
   - File: `kanban/src/service.rs`
   - Validate target is a Task
   - Create Tips element with target_task and agent_id
   - Call `create_element` to save
   - Publish `TipAppended` event
 
-- [ ] **T4.3.3: Write unit tests for event integration**
+- [x] **T4.3.3: Write unit tests for event integration**
   - File: `kanban/tests/service.rs`
   - Test `append_tip` creates tip and publishes event
   - Test event contains correct task_id and agent_id
   - Test error when appending tip to non-task element
 
-- [ ] **T4.3.4: Update service tests to verify events**
+- [x] **T4.3.4: Update service tests to verify events**
   - File: `kanban/tests/service.rs`
   - Add test that verifies event is published on create
   - Add test that verifies event is published on status change
@@ -163,9 +163,9 @@ kanban/                    # agent-kanban crate
 
 ## Sprint 4 Completion Checklist
 
-- [ ] All 3 stories completed
-- [ ] All tasks checked off
-- [ ] Code compiles: `cargo build -p agent-kanban`
-- [ ] Tests pass: `cargo test -p agent-kanban`
+- [x] All 3 stories completed
+- [x] All tasks checked off
+- [x] Code compiles: `cargo build -p agent-kanban`
+- [x] Tests pass: `cargo test -p agent-kanban`
 - [ ] Code formatted: `cargo fmt -p agent-kanban`
 - [ ] Committed: `git commit -m "feat(kanban): complete sprint 4 - event system"`

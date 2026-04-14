@@ -204,6 +204,40 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         });
         Ok(())
     }
+
+    /// Append a tip to a task
+    pub fn append_tip(
+        &self,
+        task_id: &ElementId,
+        agent_id: &str,
+    ) -> Result<KanbanElement, KanbanError> {
+        // Validate target is a Task
+        let task = self
+            .repository
+            .get(task_id)?
+            .ok_or_else(|| KanbanError::NotFound(task_id.as_str().to_string()))?;
+
+        if task.element_type() != ElementType::Task {
+            return Err(KanbanError::InvalidInput(
+                "append_tip can only be called on Task elements".to_string(),
+            ));
+        }
+
+        // Create Tips element
+        let mut tips = KanbanElement::new_tips("Tip", task_id.clone(), agent_id);
+        let tip_id = self.repository.new_id(ElementType::Tips)?;
+        tips.set_id(tip_id.clone());
+        self.repository.save(tips.clone())?;
+
+        // Publish event
+        self.event_bus.publish(KanbanEvent::TipAppended {
+            task_id: task_id.clone(),
+            tip_id,
+            agent_id: agent_id.to_string(),
+        });
+
+        Ok(tips)
+    }
 }
 
 #[cfg(test)]

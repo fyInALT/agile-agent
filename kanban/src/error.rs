@@ -15,6 +15,8 @@ pub enum KanbanError {
     RepositoryError(String),
     /// Serialization error
     SerializationError(String),
+    /// Invalid input
+    InvalidInput(String),
 }
 
 impl fmt::Display for KanbanError {
@@ -29,6 +31,7 @@ impl fmt::Display for KanbanError {
             }
             KanbanError::RepositoryError(msg) => write!(f, "repository error: {}", msg),
             KanbanError::SerializationError(msg) => write!(f, "serialization error: {}", msg),
+            KanbanError::InvalidInput(msg) => write!(f, "invalid input: {}", msg),
         }
     }
 }
