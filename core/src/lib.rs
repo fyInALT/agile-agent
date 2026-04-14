@@ -31,6 +31,7 @@ pub mod session_store;
 pub mod shared_state;
 pub mod skills;
 pub mod sprint_planning;
+pub mod standup_report;
 pub mod storage;
 pub mod task_artifacts;
 pub mod task_engine;
