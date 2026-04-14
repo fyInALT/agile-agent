@@ -164,6 +164,43 @@ impl ShellHarness {
             InputOutcome::PrevViewMode => {
                 self.state.view_state.prev_mode();
             }
+            InputOutcome::SplitFocusLeft => {
+                self.state.view_state.split.focus_left();
+            }
+            InputOutcome::SplitFocusRight => {
+                self.state.view_state.split.focus_right();
+            }
+            InputOutcome::SplitSwap => {
+                self.state.view_state.split.swap();
+            }
+            InputOutcome::SplitEqual => {
+                self.state.view_state.split.equal_split();
+            }
+            InputOutcome::DashboardNext => {
+                let count = self.state.agent_statuses().len();
+                self.state.view_state.dashboard.select_next(count);
+            }
+            InputOutcome::DashboardPrev => {
+                self.state.view_state.dashboard.select_prev();
+            }
+            InputOutcome::DashboardSelect(n) => {
+                let count = self.state.agent_statuses().len();
+                self.state.view_state.dashboard.select_by_number(n, count);
+            }
+            InputOutcome::MailNext => {
+                self.state.view_state.mail.select_next(0);
+            }
+            InputOutcome::MailPrev => {
+                self.state.view_state.mail.select_prev();
+            }
+            InputOutcome::MailMarkRead => {}
+            InputOutcome::MailComposeStart => {
+                self.state.view_state.mail.start_compose();
+            }
+            InputOutcome::MailComposeCancel => {
+                self.state.view_state.mail.cancel_compose();
+            }
+            InputOutcome::MailComposeSend(_) => {}
         }
     }
 }

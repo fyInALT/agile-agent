@@ -34,6 +34,32 @@ pub enum InputOutcome {
     NextViewMode,
     /// Cycle to previous view mode
     PrevViewMode,
+    /// Split view: focus left side
+    SplitFocusLeft,
+    /// Split view: focus right side
+    SplitFocusRight,
+    /// Split view: swap left/right agents
+    SplitSwap,
+    /// Split view: equal split ratio
+    SplitEqual,
+    /// Dashboard: select next card
+    DashboardNext,
+    /// Dashboard: select previous card
+    DashboardPrev,
+    /// Dashboard: select card by number
+    DashboardSelect(u8),
+    /// Mail: select next mail
+    MailNext,
+    /// Mail: select previous mail
+    MailPrev,
+    /// Mail: mark selected as read
+    MailMarkRead,
+    /// Mail: start compose
+    MailComposeStart,
+    /// Mail: cancel compose
+    MailComposeCancel,
+    /// Mail: send composed mail
+    MailComposeSend(String),
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -116,6 +142,118 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::NextViewMode,
+
+        // View-specific key handling (when composer is empty and in specific mode)
+        // Split view: arrow keys for side selection
+        KeyEvent {
+            code: KeyCode::Left,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitFocusLeft,
+        KeyEvent {
+            code: KeyCode::Right,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitFocusRight,
+        KeyEvent {
+            code: KeyCode::Char('s'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitSwap,
+        KeyEvent {
+            code: KeyCode::Char('e'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitEqual,
+
+        // Dashboard view: arrow keys and number selection
+        KeyEvent {
+            code: KeyCode::Up,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard => InputOutcome::DashboardPrev,
+        KeyEvent {
+            code: KeyCode::Down,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard => InputOutcome::DashboardNext,
+        KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard
+            && c >= '1' && c <= '9' => InputOutcome::DashboardSelect(c as u8),
+
+        // Mail view: arrow keys, c compose, r reply, m mark read
+        KeyEvent {
+            code: KeyCode::Up,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailPrev,
+        KeyEvent {
+            code: KeyCode::Down,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailNext,
+        KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && !state.view_state.mail.composing => InputOutcome::MailComposeStart,
+        KeyEvent {
+            code: KeyCode::Esc,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => InputOutcome::MailComposeCancel,
+        KeyEvent {
+            code: KeyCode::Enter,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => {
+                InputOutcome::MailComposeSend(state.view_state.mail.compose_buffer.clone())
+            },
+        KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => {
+                state.view_state.mail.append_char(c);
+                InputOutcome::None
+            },
+        KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => {
+                state.view_state.mail.remove_char();
+                InputOutcome::None
+            },
+        KeyEvent {
+            code: KeyCode::Char('m'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailMarkRead,
+
         // Agent focus switching (Ctrl+1-9 for direct selection)
         KeyEvent {
             code: KeyCode::Char('1'),

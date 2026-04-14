@@ -255,6 +255,82 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 label
                             ));
                         }
+                        // Split view input handling
+                        InputOutcome::SplitFocusLeft => {
+                            state.view_state.split.focus_left();
+                        }
+                        InputOutcome::SplitFocusRight => {
+                            state.view_state.split.focus_right();
+                        }
+                        InputOutcome::SplitSwap => {
+                            state.view_state.split.swap();
+                            state.app_mut().push_status_message("swapped agents");
+                        }
+                        InputOutcome::SplitEqual => {
+                            state.view_state.split.equal_split();
+                            state.app_mut().push_status_message("equal split");
+                        }
+                        // Dashboard view input handling
+                        InputOutcome::DashboardNext => {
+                            let count = state.agent_statuses().len();
+                            state.view_state.dashboard.select_next(count);
+                        }
+                        InputOutcome::DashboardPrev => {
+                            state.view_state.dashboard.select_prev();
+                        }
+                        InputOutcome::DashboardSelect(n) => {
+                            let count = state.agent_statuses().len();
+                            state.view_state.dashboard.select_by_number(n, count);
+                        }
+                        // Mail view input handling
+                        InputOutcome::MailNext => {
+                            let focused_id = state.focused_agent_id();
+                            let count = focused_id.as_ref()
+                                .and_then(|id| state.mailbox.inbox_for(id))
+                                .map(|inbox| inbox.len())
+                                .unwrap_or(0);
+                            state.view_state.mail.select_next(count);
+                        }
+                        InputOutcome::MailPrev => {
+                            state.view_state.mail.select_prev();
+                        }
+                        InputOutcome::MailMarkRead => {
+                            // Mark selected mail as read
+                            let focused_id = state.focused_agent_id();
+                            if let Some(id) = focused_id {
+                                let inbox = state.mailbox.inbox_for(&id);
+                                if let Some(mails) = inbox {
+                                    let idx = state.view_state.mail.selected_mail_index;
+                                    if idx < mails.len() {
+                                        let mail_id = mails[idx].mail_id.clone();
+                                        state.mailbox.mark_read(&id, &mail_id);
+                                        state.app_mut().push_status_message("mail marked as read");
+                                    }
+                                }
+                            }
+                        }
+                        InputOutcome::MailComposeStart => {
+                            state.view_state.mail.start_compose();
+                        }
+                        InputOutcome::MailComposeCancel => {
+                            state.view_state.mail.cancel_compose();
+                        }
+                        InputOutcome::MailComposeSend(content) => {
+                            use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+                            // Send mail to focused agent (or broadcast)
+                            let focused_id = state.focused_agent_id();
+                            if let Some(to) = focused_id {
+                                let mail = AgentMail::new(
+                                    to.clone(), // From focused agent to itself (or could select recipient)
+                                    MailTarget::Direct(to.clone()),
+                                    MailSubject::Custom { label: "Note".to_string() },
+                                    MailBody::Text(content),
+                                );
+                                state.mailbox.send_mail(mail);
+                                state.view_state.mail.cancel_compose();
+                                state.app_mut().push_status_message("mail sent");
+                            }
+                        }
                         InputOutcome::Quit => {
     state.app_mut().request_quit();
     // Sync quit flag to workplace immediately for loop exit
