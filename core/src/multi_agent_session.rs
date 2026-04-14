@@ -14,8 +14,10 @@ use crate::agent_runtime::{AgentId, WorkplaceId};
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::event_aggregator::{AgentEvent, EventAggregator, PollResult};
 use crate::provider::{ProviderEvent, ProviderKind};
+use crate::shutdown_snapshot::ShutdownSnapshot;
 use crate::shared_state::SharedWorkplaceState;
 use crate::skills::SkillRegistry;
+use crate::workplace_store::WorkplaceStore;
 
 /// Multi-agent runtime session
 ///
@@ -57,6 +59,152 @@ impl MultiAgentSession {
             default_provider,
             focused_index: 0,
         }
+    }
+
+    /// Bootstrap a new multi-agent session
+    ///
+    /// Creates a fresh session with one agent, or restores from shutdown snapshot if available.
+    pub fn bootstrap(
+        cwd: PathBuf,
+        default_provider: ProviderKind,
+        resume_snapshot: bool,
+        max_agents: usize,
+    ) -> Result<Self> {
+        let workplace = WorkplaceStore::for_cwd(&cwd)?;
+        workplace.ensure()?;
+
+        if resume_snapshot {
+            if let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+                crate::logging::debug_event(
+                    "multi_agent.bootstrap.restore",
+                    "restoring from shutdown snapshot",
+                    serde_json::json!({
+                        "agents_count": snapshot.agents.len(),
+                        "reason": snapshot.shutdown_reason,
+                    }),
+                );
+                return Self::restore_from_snapshot(cwd, snapshot, default_provider, max_agents);
+            }
+        }
+
+        // Create fresh session with one agent
+        let workplace_id = workplace.workplace_id().clone();
+        let mut session = Self::new(cwd, workplace_id, default_provider, max_agents);
+        if let Err(e) = session.spawn_agent(default_provider) {
+            return Err(anyhow::anyhow!("Failed to spawn initial agent: {}", e));
+        }
+
+        crate::logging::debug_event(
+            "multi_agent.bootstrap.fresh",
+            "created fresh multi-agent session",
+            serde_json::json!({
+                "workplace_id": session.workplace.workplace_id.as_str(),
+                "agents_count": session.agents.active_count(),
+            }),
+        );
+
+        Ok(session)
+    }
+
+    /// Restore a multi-agent session from shutdown snapshot
+    ///
+    /// Restores all agents from the snapshot, not just the first one.
+    pub fn restore_from_snapshot(
+        cwd: PathBuf,
+        snapshot: ShutdownSnapshot,
+        default_provider: ProviderKind,
+        max_agents: usize,
+    ) -> Result<Self> {
+        let workplace = WorkplaceStore::for_cwd(&cwd)?;
+        let workplace_id = workplace.workplace_id().clone();
+
+        let skills = SkillRegistry::discover(&cwd);
+        let mut workplace_state = SharedWorkplaceState::with_backlog(
+            workplace_id.clone(),
+            snapshot.backlog.clone(),
+        );
+        workplace_state.skills = skills;
+
+        let mut agents = AgentPool::new(workplace_id.clone(), max_agents);
+
+        // Restore all agents from snapshot
+        for agent_snapshot in &snapshot.agents {
+            // Get provider from agent meta, fall back to default if not convertible
+            let provider = agent_snapshot.meta.provider_type.to_provider_kind()
+                .unwrap_or(default_provider);
+
+            match agents.spawn_agent(provider) {
+                Ok(_) => {
+                    // Get the spawned slot and restore its state
+                    let last_index = agents.active_count() - 1;
+                    if let Some(slot) = agents.get_slot_mut(last_index) {
+                        // Set session handle from provider_session_id if available
+                        if let Some(session_id) = &agent_snapshot.meta.provider_session_id {
+                            let handle = match agent_snapshot.meta.provider_type {
+                                crate::agent_runtime::ProviderType::Claude => {
+                                    crate::provider::SessionHandle::ClaudeSession {
+                                        session_id: session_id.as_str().to_string(),
+                                    }
+                                }
+                                crate::agent_runtime::ProviderType::Codex => {
+                                    crate::provider::SessionHandle::CodexThread {
+                                        thread_id: session_id.as_str().to_string(),
+                                    }
+                                }
+                                _ => {
+                                    // Mock or Opencode - no session handle needed
+                                    crate::provider::SessionHandle::ClaudeSession {
+                                        session_id: session_id.as_str().to_string(),
+                                    }
+                                }
+                            };
+                            slot.set_session_handle(handle);
+                        }
+
+                        // Set assigned task if agent had one
+                        if let Some(task_id) = &agent_snapshot.assigned_task_id {
+                            let _ = slot.assign_task(TaskId::new(task_id));
+                        }
+
+                        // Set status based on was_active
+                        if agent_snapshot.was_active {
+                            // Agent was interrupted, mark as stopped
+                            let _ = slot.transition_to(AgentSlotStatus::stopped("interrupted during execution"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    crate::logging::debug_event(
+                        "multi_agent.restore.spawn_failed",
+                        "failed to spawn agent from snapshot",
+                        serde_json::json!({
+                            "error": e,
+                        }),
+                    );
+                }
+            }
+        }
+
+        // Clear the snapshot after successful restore
+        workplace.clear_shutdown_snapshot()?;
+
+        crate::logging::debug_event(
+            "multi_agent.restore.complete",
+            "restored multi-agent session from snapshot",
+            serde_json::json!({
+                "agents_count": agents.active_count(),
+                "workplace_id": workplace_id.as_str(),
+            }),
+        );
+
+        Ok(Self {
+            workplace: workplace_state,
+            agents,
+            event_aggregator: EventAggregator::new(),
+            cwd,
+            default_provider,
+            focused_index: 0,
+        })
     }
 
     /// Get workplace reference
@@ -369,5 +517,95 @@ mod tests {
         assert!(session.focus_agent(1));
         assert_eq!(session.focused_index(), 1);
         assert!(!session.focus_agent(5)); // Out of bounds
+    }
+
+    #[test]
+    fn bootstrap_creates_fresh_session_with_one_agent() {
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = MultiAgentSession::bootstrap(
+            temp.path().to_path_buf(),
+            ProviderKind::Mock,
+            false, // No resume
+            10,
+        ).expect("bootstrap");
+
+        assert_eq!(session.agents.active_count(), 1);
+        assert!(session.agents.focused_slot().is_some());
+    }
+
+    #[test]
+    fn restore_from_snapshot_restores_all_agents() {
+        use tempfile::TempDir;
+        use crate::shutdown_snapshot::{ShutdownSnapshot, AgentShutdownSnapshot, ShutdownReason};
+        use crate::agent_runtime::{AgentId, AgentCodename, AgentMeta, AgentStatus, ProviderType};
+
+        let temp = TempDir::new().expect("tempdir");
+
+        // Create snapshot with multiple agents
+        let agent1 = AgentShutdownSnapshot {
+            meta: AgentMeta {
+                agent_id: AgentId::new("agent_001"),
+                codename: AgentCodename::new("alpha"),
+                workplace_id: WorkplaceId::new("test"),
+                provider_type: ProviderType::Mock,
+                provider_session_id: None,
+                created_at: "2026-04-14T00:00:00Z".to_string(),
+                updated_at: "2026-04-14T00:00:00Z".to_string(),
+                status: AgentStatus::Idle,
+            },
+            assigned_task_id: Some("task-001".to_string()),
+            was_active: false,
+            had_error: false,
+            provider_thread_state: None,
+            captured_at: "2026-04-14T00:00:00Z".to_string(),
+        };
+
+        let agent2 = AgentShutdownSnapshot {
+            meta: AgentMeta {
+                agent_id: AgentId::new("agent_002"),
+                codename: AgentCodename::new("bravo"),
+                workplace_id: WorkplaceId::new("test"),
+                provider_type: ProviderType::Claude,
+                provider_session_id: Some(crate::agent_runtime::ProviderSessionId::new("sess-123")),
+                created_at: "2026-04-14T00:00:00Z".to_string(),
+                updated_at: "2026-04-14T00:00:00Z".to_string(),
+                status: AgentStatus::Running,
+            },
+            assigned_task_id: None,
+            was_active: true,
+            had_error: false,
+            provider_thread_state: None,
+            captured_at: "2026-04-14T00:00:00Z".to_string(),
+        };
+
+        let snapshot = ShutdownSnapshot {
+            workplace_id: "test".to_string(),
+            backlog: crate::backlog::BacklogState::default(),
+            agents: vec![agent1, agent2],
+            shutdown_reason: ShutdownReason::UserQuit,
+            shutdown_at: "2026-04-14T00:00:00Z".to_string(),
+        };
+
+        // Restore session from snapshot
+        let session = MultiAgentSession::restore_from_snapshot(
+            temp.path().to_path_buf(),
+            snapshot,
+            ProviderKind::Mock,
+            10,
+        ).expect("restore");
+
+        // Should have restored both agents
+        assert_eq!(session.agents.active_count(), 2);
+
+        // Check agent states
+        let statuses = session.agents.agent_statuses();
+        assert_eq!(statuses[0].codename.as_str(), "alpha");
+        assert_eq!(statuses[0].provider_type, ProviderType::Mock);
+        assert!(statuses[0].assigned_task_id.is_some());
+
+        assert_eq!(statuses[1].codename.as_str(), "bravo");
+        assert_eq!(statuses[1].provider_type, ProviderType::Claude);
     }
 }
