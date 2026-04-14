@@ -203,6 +203,18 @@ impl<R: KanbanElementRepository> KanbanService<R> {
 
     /// Delete an element
     pub fn delete(&self, id: &ElementId) -> Result<(), KanbanError> {
+        // Check if any elements depend on this one
+        let all_elements = self.repository.list()?;
+        let dependents: Vec<String> = all_elements
+            .iter()
+            .filter(|e| e.dependencies().contains(id))
+            .filter_map(|e| e.id().map(|i| i.as_str().to_string()))
+            .collect();
+
+        if !dependents.is_empty() {
+            return Err(KanbanError::HasDependents(dependents));
+        }
+
         self.repository.delete(id)?;
         self.event_bus.publish(KanbanEvent::Deleted {
             element_id: id.clone(),
@@ -247,6 +259,7 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         }
 
         if !changes.is_empty() {
+            element.set_updated_at(chrono::Utc::now());
             self.repository.save(element.clone())?;
             self.event_bus.publish(KanbanEvent::Updated {
                 element_id: id.clone(),
@@ -262,6 +275,7 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         &self,
         task_id: &ElementId,
         agent_id: &str,
+        content: &str,
     ) -> Result<KanbanElement, KanbanError> {
         // Validate target is a Task
         let task = self
@@ -275,8 +289,8 @@ impl<R: KanbanElementRepository> KanbanService<R> {
             ));
         }
 
-        // Create Tips element
-        let mut tips = KanbanElement::new_tips("Tip", task_id.clone(), agent_id);
+        // Create Tips element with content as title
+        let mut tips = KanbanElement::new_tips(content, task_id.clone(), agent_id);
         let tip_id = self.repository.new_id(ElementType::Tips)?;
         tips.set_id(tip_id.clone());
         self.repository.save(tips.clone())?;

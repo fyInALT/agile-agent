@@ -168,7 +168,7 @@ fn test_append_tip_publishes_tip_appended_event() {
 
     collector.clear();
 
-    let tips = service.append_tip(&task_id, "agent-1").unwrap();
+    let tips = service.append_tip(&task_id, "agent-1", "Helpful tip content").unwrap();
 
     let events = collector.get_events();
     assert_eq!(events.len(), 1);

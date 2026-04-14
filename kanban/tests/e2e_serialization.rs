@@ -14,6 +14,10 @@ fn test_task_roundtrip_serialization() {
     assert_eq!(task.title(), deserialized.title());
     assert_eq!(task.status(), deserialized.status());
     assert_eq!(task.element_type(), deserialized.element_type());
+    assert_eq!(task.content(), deserialized.content());
+    assert_eq!(task.priority(), deserialized.priority());
+    assert_eq!(task.assignee(), deserialized.assignee());
+    assert_eq!(task.effort(), deserialized.effort());
 }
 
 #[test]
@@ -23,7 +27,10 @@ fn test_story_roundtrip_serialization() {
     let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
 
     assert_eq!(story.title(), deserialized.title());
+    assert_eq!(story.content(), deserialized.content());
     assert_eq!(story.element_type(), deserialized.element_type());
+    assert_eq!(story.status(), deserialized.status());
+    assert_eq!(story.priority(), deserialized.priority());
 }
 
 #[test]
@@ -34,6 +41,18 @@ fn test_sprint_roundtrip_serialization() {
 
     assert_eq!(sprint.title(), deserialized.title());
     assert_eq!(sprint.element_type(), deserialized.element_type());
+    assert_eq!(sprint.status(), deserialized.status());
+
+    // Check via base() for sprint-specific fields
+    match (&sprint, &deserialized) {
+        (KanbanElement::Sprint(s1), KanbanElement::Sprint(s2)) => {
+            assert_eq!(s1.goal, s2.goal);
+            assert_eq!(s1.active, s2.active);
+            assert_eq!(s1.start_date, s2.start_date);
+            assert_eq!(s1.end_date, s2.end_date);
+        }
+        _ => panic!("Expected Sprint variant"),
+    }
 }
 
 #[test]
@@ -49,6 +68,18 @@ fn test_sprint_with_dates_roundtrip_serialization() {
 
     assert_eq!(sprint.title(), deserialized.title());
     assert_eq!(sprint.element_type(), deserialized.element_type());
+
+    match (&sprint, &deserialized) {
+        (KanbanElement::Sprint(s1), KanbanElement::Sprint(s2)) => {
+            assert_eq!(s1.goal, s2.goal);
+            assert_eq!(s1.active, s2.active);
+            assert_eq!(s1.start_date, Some("2024-01-01".to_string()));
+            assert_eq!(s1.end_date, Some("2024-01-14".to_string()));
+            assert_eq!(s1.start_date, s2.start_date);
+            assert_eq!(s1.end_date, s2.end_date);
+        }
+        _ => panic!("Expected Sprint variant"),
+    }
 }
 
 #[test]
@@ -59,6 +90,8 @@ fn test_idea_roundtrip_serialization() {
 
     assert_eq!(idea.title(), deserialized.title());
     assert_eq!(idea.element_type(), deserialized.element_type());
+    assert_eq!(idea.status(), deserialized.status());
+    assert_eq!(idea.priority(), deserialized.priority());
 }
 
 #[test]
@@ -69,6 +102,9 @@ fn test_issue_roundtrip_serialization() {
 
     assert_eq!(issue.title(), deserialized.title());
     assert_eq!(issue.element_type(), deserialized.element_type());
+    assert_eq!(issue.status(), deserialized.status());
+    // Issues have High priority by default
+    assert_eq!(issue.priority(), deserialized.priority());
 }
 
 #[test]
@@ -80,6 +116,15 @@ fn test_tips_roundtrip_serialization() {
 
     assert_eq!(tips.title(), deserialized.title());
     assert_eq!(tips.element_type(), deserialized.element_type());
+    assert_eq!(tips.status(), deserialized.status());
+
+    match (&tips, &deserialized) {
+        (KanbanElement::Tips(t1), KanbanElement::Tips(t2)) => {
+            assert_eq!(t1.target_task, t2.target_task);
+            assert_eq!(t1.agent_id, t2.agent_id);
+        }
+        _ => panic!("Expected Tips variant"),
+    }
 }
 
 #[test]
@@ -135,5 +180,42 @@ fn test_priority_roundtrip_serialization() {
         let json = serde_json::to_string(&priority).unwrap();
         let deserialized: Priority = serde_json::from_str(&json).unwrap();
         assert_eq!(priority, deserialized);
+    }
+}
+
+#[test]
+fn test_task_with_all_fields_roundtrip() {
+    let mut task = KanbanElement::new_task("Full Task");
+    task.base_mut().content = "Task description".to_string();
+    task.base_mut().priority = Priority::High;
+    task.base_mut().assignee = Some("agent-1".to_string());
+    task.base_mut().effort = Some(8);
+    task.base_mut().keywords = vec!["rust".to_string(), "test".to_string()];
+
+    let json = serde_json::to_string(&task).unwrap();
+    let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(task.title(), deserialized.title());
+    assert_eq!(task.content(), deserialized.content());
+    assert_eq!(task.priority(), deserialized.priority());
+    assert_eq!(task.assignee(), deserialized.assignee());
+    assert_eq!(task.effort(), deserialized.effort());
+    assert_eq!(task.keywords(), deserialized.keywords());
+}
+
+#[test]
+fn test_sprint_active_field_serialization() {
+    // Test that active field is properly serialized
+    let sprint = KanbanElement::new_sprint("Sprint 1", "Goal");
+    let json = serde_json::to_string(&sprint).unwrap();
+
+    // Default sprint should have active = false
+    assert!(!json.contains("\"active\":true") || json.contains("\"active\":false"));
+
+    let sprint_active = KanbanElement::new_sprint_with_dates("Sprint 2", "Goal", "2024-01-01", "2024-01-14");
+    // Sprint with dates should be active
+    match sprint_active {
+        KanbanElement::Sprint(s) => assert!(s.active),
+        _ => panic!("Expected Sprint"),
     }
 }

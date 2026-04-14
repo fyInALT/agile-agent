@@ -473,6 +473,58 @@ mod dependency_tests {
     }
 
     #[test]
+    fn test_delete_fails_when_element_has_dependents() {
+        let (service, _repo) = create_service();
+
+        // Create a dependency
+        let dep_task = service
+            .create_element(KanbanElement::new_task("Dependency"))
+            .unwrap();
+        let dep_id = dep_task.id().unwrap().clone();
+
+        // Create main task that depends on dep_task
+        let mut main_task = KanbanElement::new_task("Main Task");
+        main_task.base_mut().dependencies.push(dep_id.clone());
+        let main_task = service.create_element(main_task).unwrap();
+        let _main_id = main_task.id().unwrap().clone();
+
+        // Try to delete the dependency - should fail
+        let result = service.delete(&dep_id);
+        assert!(result.is_err());
+
+        // Verify the dependency still exists
+        let dep = service.get_element(&dep_id).unwrap();
+        assert!(dep.is_some());
+    }
+
+    #[test]
+    fn test_delete_succeeds_after_removing_dependency() {
+        let (service, _repo) = create_service();
+
+        // Create a dependency
+        let dep_task = service
+            .create_element(KanbanElement::new_task("Dependency"))
+            .unwrap();
+        let dep_id = dep_task.id().unwrap().clone();
+
+        // Create main task that depends on dep_task
+        let mut main_task = KanbanElement::new_task("Main Task");
+        main_task.base_mut().dependencies.push(dep_id.clone());
+        let main_task = service.create_element(main_task).unwrap();
+        let main_id = main_task.id().unwrap().clone();
+
+        // Remove the dependency from main task
+        service.remove_dependency(&main_id, &dep_id).unwrap();
+
+        // Now deleting dep_task should succeed
+        service.delete(&dep_id).unwrap();
+
+        // Verify it's gone
+        let dep = service.get_element(&dep_id).unwrap();
+        assert!(dep.is_none());
+    }
+
+    #[test]
     fn test_append_tip_to_task() {
         let (service, _repo) = create_service();
 
@@ -481,8 +533,9 @@ mod dependency_tests {
             .unwrap();
         let task_id = task.id().unwrap().clone();
 
-        let tips = service.append_tip(&task_id, "agent-1").unwrap();
+        let tips = service.append_tip(&task_id, "agent-1", "This is a helpful tip").unwrap();
         assert_eq!(tips.element_type(), ElementType::Tips);
+        assert_eq!(tips.title(), "This is a helpful tip");
     }
 
     #[test]
@@ -494,7 +547,7 @@ mod dependency_tests {
             .unwrap();
         let story_id = story.id().unwrap().clone();
 
-        let result = service.append_tip(&story_id, "agent-1");
+        let result = service.append_tip(&story_id, "agent-1", "This won't work");
         assert!(result.is_err());
     }
 }

@@ -767,6 +767,37 @@ impl KanbanElement {
             KanbanElement::Tips(t) => &mut t.base,
         }
     }
+
+    pub fn status_history(&self) -> &[StatusHistoryEntry] {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.status_history,
+            KanbanElement::Story(s) => &s.base.status_history,
+            KanbanElement::Task(t) => &t.base.status_history,
+            KanbanElement::Idea(i) => &i.base.status_history,
+            KanbanElement::Issue(i) => &i.base.status_history,
+            KanbanElement::Tips(t) => &t.base.status_history,
+        }
+    }
+
+    pub fn add_tag(&mut self, tag: &str) {
+        if !self.base_mut().tags.contains(&tag.to_string()) {
+            self.base_mut().tags.push(tag.to_string());
+        }
+    }
+
+    pub fn remove_tag(&mut self, tag: &str) {
+        self.base_mut().tags.retain(|t| t != tag);
+    }
+
+    pub fn add_reference(&mut self, id: ElementId) {
+        if !self.base_mut().references.contains(&id) {
+            self.base_mut().references.push(id);
+        }
+    }
+
+    pub fn remove_reference(&mut self, id: &ElementId) {
+        self.base_mut().references.retain(|r| r != id);
+    }
 }
 
 #[cfg(test)]

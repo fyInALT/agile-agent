@@ -17,6 +17,8 @@ pub enum KanbanError {
     SerializationError(String),
     /// Invalid input
     InvalidInput(String),
+    /// Element has dependents (other elements depend on it)
+    HasDependents(Vec<String>),
 }
 
 impl fmt::Display for KanbanError {
@@ -32,6 +34,9 @@ impl fmt::Display for KanbanError {
             KanbanError::RepositoryError(msg) => write!(f, "repository error: {}", msg),
             KanbanError::SerializationError(msg) => write!(f, "serialization error: {}", msg),
             KanbanError::InvalidInput(msg) => write!(f, "invalid input: {}", msg),
+            KanbanError::HasDependents(deps) => {
+                write!(f, "element has dependents: {}", deps.join(", "))
+            }
         }
     }
 }
