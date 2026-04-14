@@ -315,20 +315,48 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::MailComposeCancel => {
                             state.view_state.mail.cancel_compose();
                         }
-                        InputOutcome::MailComposeSend(content) => {
+                        InputOutcome::MailComposeNextField => {
+                            state.view_state.mail.next_compose_field();
+                        }
+                        InputOutcome::MailComposePrevField => {
+                            state.view_state.mail.prev_compose_field();
+                        }
+                        InputOutcome::MailComposeSend(to, subject, body) => {
                             use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
-                            // Send mail to focused agent (or broadcast)
-                            let focused_id = state.focused_agent_id();
-                            if let Some(to) = focused_id {
+                            use agent_core::agent_runtime::AgentId;
+
+                            // Parse recipient from 'to' field (codename or agent_id)
+                            let recipient = if to.is_empty() {
+                                // Default: send to focused agent
+                                state.focused_agent_id()
+                            } else {
+                                // Try to parse as agent_id or find by codename
+                                state.agent_pool.as_ref().and_then(|pool| {
+                                    pool.agent_statuses().iter()
+                                        .find(|s| s.codename.as_str() == to || s.agent_id.as_str() == to)
+                                        .map(|s| s.agent_id.clone())
+                                }).or_else(|| Some(AgentId::new(&to)))
+                            };
+
+                            if let Some(recipient_id) = recipient {
+                                let mail_subject = if subject.is_empty() {
+                                    MailSubject::Custom { label: "Note".to_string() }
+                                } else {
+                                    MailSubject::Custom { label: subject }
+                                };
+
+                                let sender = state.focused_agent_id().unwrap_or_else(|| AgentId::new("unknown"));
                                 let mail = AgentMail::new(
-                                    to.clone(), // From focused agent to itself (or could select recipient)
-                                    MailTarget::Direct(to.clone()),
-                                    MailSubject::Custom { label: "Note".to_string() },
-                                    MailBody::Text(content),
+                                    sender,
+                                    MailTarget::Direct(recipient_id),
+                                    mail_subject,
+                                    MailBody::Text(body),
                                 );
                                 state.mailbox.send_mail(mail);
                                 state.view_state.mail.cancel_compose();
                                 state.app_mut().push_status_message("mail sent");
+                            } else {
+                                state.app_mut().push_status_message("no recipient specified");
                             }
                         }
                         InputOutcome::Quit => {

@@ -200,7 +200,13 @@ impl ShellHarness {
             InputOutcome::MailComposeCancel => {
                 self.state.view_state.mail.cancel_compose();
             }
-            InputOutcome::MailComposeSend(_) => {}
+            InputOutcome::MailComposeNextField => {
+                self.state.view_state.mail.next_compose_field();
+            }
+            InputOutcome::MailComposePrevField => {
+                self.state.view_state.mail.prev_compose_field();
+            }
+            InputOutcome::MailComposeSend(_, _, _) => {}
         }
     }
 }

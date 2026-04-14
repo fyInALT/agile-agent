@@ -58,8 +58,12 @@ pub enum InputOutcome {
     MailComposeStart,
     /// Mail: cancel compose
     MailComposeCancel,
-    /// Mail: send composed mail
-    MailComposeSend(String),
+    /// Mail: send composed mail (to, subject, body)
+    MailComposeSend(String, String, String),
+    /// Mail: cycle to next compose field
+    MailComposeNextField,
+    /// Mail: cycle to previous compose field
+    MailComposePrevField,
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -197,13 +201,15 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailPrev,
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && !state.view_state.mail.composing => InputOutcome::MailPrev,
         KeyEvent {
             code: KeyCode::Down,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailNext,
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && !state.view_state.mail.composing => InputOutcome::MailNext,
         KeyEvent {
             code: KeyCode::Char('c'),
             modifiers,
@@ -219,13 +225,31 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
             && state.view_state.mail.composing => InputOutcome::MailComposeCancel,
         KeyEvent {
+            code: KeyCode::Tab,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => InputOutcome::MailComposeNextField,
+        KeyEvent {
+            code: KeyCode::BackTab,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && state.view_state.mail.composing => InputOutcome::MailComposePrevField,
+        KeyEvent {
             code: KeyCode::Enter,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
             && state.view_state.mail.composing => {
-                InputOutcome::MailComposeSend(state.view_state.mail.compose_buffer.clone())
+                InputOutcome::MailComposeSend(
+                    state.view_state.mail.compose_to.clone(),
+                    state.view_state.mail.compose_subject.clone(),
+                    state.view_state.mail.compose_body.clone(),
+                )
             },
         KeyEvent {
             code: KeyCode::Char(c),
@@ -252,7 +276,8 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Mail => InputOutcome::MailMarkRead,
+            && state.view_state.mode == crate::view_mode::ViewMode::Mail
+            && !state.view_state.mail.composing => InputOutcome::MailMarkRead,
 
         // Agent focus switching (Ctrl+1-9 for direct selection)
         KeyEvent {

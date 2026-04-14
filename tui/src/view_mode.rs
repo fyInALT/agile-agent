@@ -258,6 +258,44 @@ impl DashboardViewState {
     }
 }
 
+/// Which field is focused in mail compose mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ComposeField {
+    #[default]
+    To,
+    Subject,
+    Body,
+}
+
+impl ComposeField {
+    /// Cycle to next field
+    pub fn next(self) -> Self {
+        match self {
+            Self::To => Self::Subject,
+            Self::Subject => Self::Body,
+            Self::Body => Self::To,
+        }
+    }
+
+    /// Cycle to previous field
+    pub fn prev(self) -> Self {
+        match self {
+            Self::To => Self::Body,
+            Self::Subject => Self::To,
+            Self::Body => Self::Subject,
+        }
+    }
+
+    /// Get label for field
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::To => "To",
+            Self::Subject => "Subject",
+            Self::Body => "Body",
+        }
+    }
+}
+
 /// State specific to mail view mode
 #[derive(Debug, Clone)]
 pub struct MailViewState {
@@ -267,8 +305,14 @@ pub struct MailViewState {
     pub viewing_agent_index: usize,
     /// Compose mode active
     pub composing: bool,
-    /// Compose text buffer
-    pub compose_buffer: String,
+    /// Which field is focused in compose mode
+    pub compose_field: ComposeField,
+    /// Compose recipient (agent codename)
+    pub compose_to: String,
+    /// Compose subject
+    pub compose_subject: String,
+    /// Compose body text
+    pub compose_body: String,
 }
 
 impl Default for MailViewState {
@@ -277,7 +321,10 @@ impl Default for MailViewState {
             selected_mail_index: 0,
             viewing_agent_index: 0,
             composing: false,
-            compose_buffer: String::new(),
+            compose_field: ComposeField::default(),
+            compose_to: String::new(),
+            compose_subject: String::new(),
+            compose_body: String::new(),
         }
     }
 }
@@ -314,23 +361,60 @@ impl MailViewState {
     /// Start composing new mail
     pub fn start_compose(&mut self) {
         self.composing = true;
-        self.compose_buffer.clear();
+        self.compose_field = ComposeField::To;
+        self.compose_to.clear();
+        self.compose_subject.clear();
+        self.compose_body.clear();
     }
 
     /// Cancel composing
     pub fn cancel_compose(&mut self) {
         self.composing = false;
-        self.compose_buffer.clear();
+        self.compose_to.clear();
+        self.compose_subject.clear();
+        self.compose_body.clear();
     }
 
-    /// Append character to compose buffer
+    /// Cycle to next compose field
+    pub fn next_compose_field(&mut self) {
+        self.compose_field = self.compose_field.next();
+    }
+
+    /// Cycle to previous compose field
+    pub fn prev_compose_field(&mut self) {
+        self.compose_field = self.compose_field.prev();
+    }
+
+    /// Append character to focused field
     pub fn append_char(&mut self, c: char) {
-        self.compose_buffer.push(c);
+        match self.compose_field {
+            ComposeField::To => self.compose_to.push(c),
+            ComposeField::Subject => self.compose_subject.push(c),
+            ComposeField::Body => self.compose_body.push(c),
+        }
     }
 
-    /// Remove last character from compose buffer
+    /// Remove last character from focused field
     pub fn remove_char(&mut self) {
-        self.compose_buffer.pop();
+        match self.compose_field {
+            ComposeField::To => self.compose_to.pop(),
+            ComposeField::Subject => self.compose_subject.pop(),
+            ComposeField::Body => self.compose_body.pop(),
+        };
+    }
+
+    /// Get the focused field content
+    pub fn focused_content(&self) -> &str {
+        match self.compose_field {
+            ComposeField::To => &self.compose_to,
+            ComposeField::Subject => &self.compose_subject,
+            ComposeField::Body => &self.compose_body,
+        }
+    }
+
+    /// Get compose mail content (body)
+    pub fn compose_content(&self) -> &str {
+        &self.compose_body
     }
 }
 
@@ -581,14 +665,46 @@ mod tests {
         let mut state = MailViewState::new();
         state.start_compose();
         assert!(state.composing);
+        // Default field is To
+        assert_eq!(state.compose_field, ComposeField::To);
         state.append_char('H');
         state.append_char('i');
-        assert_eq!(state.compose_buffer, "Hi");
+        assert_eq!(state.compose_to, "Hi");
         state.remove_char();
-        assert_eq!(state.compose_buffer, "H");
+        assert_eq!(state.compose_to, "H");
+        // Switch to Subject field
+        state.next_compose_field();
+        assert_eq!(state.compose_field, ComposeField::Subject);
+        state.append_char('T');
+        state.append_char('e');
+        state.append_char('s');
+        state.append_char('t');
+        assert_eq!(state.compose_subject, "Test");
+        // Switch to Body field
+        state.next_compose_field();
+        assert_eq!(state.compose_field, ComposeField::Body);
+        state.append_char('B');
+        assert_eq!(state.compose_body, "B");
         state.cancel_compose();
         assert!(!state.composing);
-        assert_eq!(state.compose_buffer, "");
+        assert_eq!(state.compose_to, "");
+        assert_eq!(state.compose_subject, "");
+        assert_eq!(state.compose_body, "");
+    }
+
+    #[test]
+    fn mail_view_compose_field_cycle() {
+        let mut state = MailViewState::new();
+        state.start_compose();
+        assert_eq!(state.compose_field, ComposeField::To);
+        state.next_compose_field();
+        assert_eq!(state.compose_field, ComposeField::Subject);
+        state.next_compose_field();
+        assert_eq!(state.compose_field, ComposeField::Body);
+        state.next_compose_field();
+        assert_eq!(state.compose_field, ComposeField::To); // Cycles back
+        state.prev_compose_field();
+        assert_eq!(state.compose_field, ComposeField::Body);
     }
 
     #[test]

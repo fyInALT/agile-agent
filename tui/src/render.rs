@@ -189,7 +189,7 @@ fn render_dashboard_view(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 /// Render mail view - cross-agent communication focus
 fn render_mail_view(frame: &mut Frame<'_>, state: &mut TuiState) {
-    let composer_height = if state.view_state.mail.composing { 3 } else { 1 };
+    let composer_height = if state.view_state.mail.composing { 5 } else { 1 };
 
     let areas = Layout::default()
         .direction(Direction::Vertical)
@@ -1112,23 +1112,84 @@ fn render_mail_list(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_mail_composer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
-    if area.height == 0 {
+fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    if area.height < 5 {
+        // Not enough space, show minimal
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Yellow));
+        frame.render_widget(block, area);
+        frame.render_widget(
+            Paragraph::new("Compose: (resize window for fields)")
+                .style(Style::default().fg(Color::Gray)),
+            Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
+        );
         return;
     }
+
+    use crate::view_mode::ComposeField;
 
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::Yellow));
-
     frame.render_widget(block, area);
 
-    let compose_text = state.view_state.mail.compose_buffer.clone();
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    // Render three fields: To, Subject, Body
+    let fields = [
+        (ComposeField::To, &state.view_state.mail.compose_to),
+        (ComposeField::Subject, &state.view_state.mail.compose_subject),
+        (ComposeField::Body, &state.view_state.mail.compose_body),
+    ];
+
+    let focused = state.view_state.mail.compose_field;
+
+    for (i, (field, content)) in fields.iter().enumerate() {
+        let field_area = Rect {
+            x: inner.x,
+            y: inner.y + i as u16,
+            width: inner.width,
+            height: 1,
+        };
+
+        let is_focused = *field == focused;
+        let style = if is_focused {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        // Field label and content
+        let label = field.label();
+        let display_content = if content.is_empty() {
+            if is_focused { "_" } else { "" }
+        } else {
+            content.as_str()
+        };
+
+        frame.render_widget(
+            Paragraph::new(format!("{}: {}", label, display_content)).style(style),
+            Rect { x: field_area.x, y: field_area.y, width: field_area.width, height: 1 },
+        );
+    }
+
+    // Hint at bottom
     frame.render_widget(
-        Paragraph::new(format!("Compose: {}", compose_text))
-            .style(Style::default().fg(Color::White)),
-        Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
+        Paragraph::new("Tab next field  Enter send  Esc cancel")
+            .style(Style::default().fg(Color::DarkGray)),
+        Rect { x: inner.x, y: inner.y + 3, width: inner.width, height: 1 },
     );
+
+    // Set cursor position for focused field
+    let cursor_x = inner.x + focused.label().len() as u16 + 2 + state.view_state.mail.focused_content().len() as u16;
+    let cursor_y = inner.y + focused as u16;
+    frame.set_cursor_position((cursor_x.min(inner.x + inner.width.saturating_sub(1)), cursor_y));
 }
 
 fn render_mail_hint(frame: &mut Frame<'_>, _state: &TuiState, area: Rect) {
