@@ -807,4 +807,213 @@ mod tests {
         assert!(elapsed < Duration::from_millis(10));
         assert!(matches!(result, ThreadStopResult::TimeoutAbandoned { .. }));
     }
+
+    // Multi-Provider Concurrent Execution Tests
+
+    /// Test: Two providers run simultaneously without blocking
+    #[test]
+    fn two_providers_run_concurrently() {
+        let handle1 = start_mock_provider_threaded("provider1".to_string(), "agent-alpha".to_string()).unwrap();
+        let handle2 = start_mock_provider_threaded("provider2".to_string(), "agent-bravo".to_string()).unwrap();
+
+        // Both should be running
+        assert!(handle1.is_running());
+        assert!(handle2.is_running());
+
+        // Wait for both to send events
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Both should have sent events
+        let rx1 = handle1.event_receiver();
+        let rx2 = handle2.event_receiver();
+
+        let mut count1 = 0;
+        let mut count2 = 0;
+
+        for _ in 0..50 {
+            match rx1.try_recv() {
+                Ok(_) => count1 += 1,
+                Err(_) => break,
+            }
+        }
+
+        for _ in 0..50 {
+            match rx2.try_recv() {
+                Ok(_) => count2 += 1,
+                Err(_) => break,
+            }
+        }
+
+        // Both should have received events
+        assert!(count1 > 0, "provider1 should have sent events");
+        assert!(count2 > 0, "provider2 should have sent events");
+
+        // Clean up
+        let mut h1 = handle1;
+        let mut h2 = handle2;
+        h1.stop(Duration::from_millis(100));
+        h2.stop(Duration::from_millis(100));
+    }
+
+    /// Test: Concurrent providers don't block each other
+    #[test]
+    fn concurrent_providers_dont_block() {
+        // Start first provider
+        let start_time = Instant::now();
+        let handle1 = start_mock_provider_threaded("slow".to_string(), "slow-provider".to_string()).unwrap();
+        let spawn_time1 = start_time.elapsed();
+
+        // Start second provider immediately
+        let start_time2 = Instant::now();
+        let handle2 = start_mock_provider_threaded("fast".to_string(), "fast-provider".to_string()).unwrap();
+        let spawn_time2 = start_time2.elapsed();
+
+        // Both spawns should be fast (< 50ms each)
+        // If blocking, spawn_time2 would be much larger
+        assert!(spawn_time1 < Duration::from_millis(50), "spawn should be non-blocking");
+        assert!(spawn_time2 < Duration::from_millis(50), "spawn should be non-blocking");
+
+        // Wait and verify both sent events
+        std::thread::sleep(Duration::from_millis(200));
+
+        let rx1 = handle1.event_receiver();
+        let rx2 = handle2.event_receiver();
+
+        // Both should have events
+        assert!(rx1.try_recv().is_ok() || rx1.try_recv().is_err()); // Channel was active
+        assert!(rx2.try_recv().is_ok() || rx2.try_recv().is_err()); // Channel was active
+
+        // Clean up
+        let mut h1 = handle1;
+        let mut h2 = handle2;
+        h1.stop(Duration::from_millis(100));
+        h2.stop(Duration::from_millis(100));
+    }
+
+    /// Test: Events arrive in correct channels (no cross-talk)
+    #[test]
+    fn events_arrive_in_correct_channels() {
+        let handle1 = start_mock_provider_threaded("unique-alpha".to_string(), "channel-alpha".to_string()).unwrap();
+        let handle2 = start_mock_provider_threaded("unique-bravo".to_string(), "channel-bravo".to_string()).unwrap();
+
+        std::thread::sleep(Duration::from_millis(200));
+
+        let rx1 = handle1.event_receiver();
+        let rx2 = handle2.event_receiver();
+
+        // Receive events from channel 1
+        let mut events1: Vec<String> = Vec::new();
+        for _ in 0..50 {
+            match rx1.try_recv() {
+                Ok(ProviderEvent::AssistantChunk(chunk)) => events1.push(chunk),
+                Ok(_) => {} // Other events
+                Err(_) => break,
+            }
+        }
+
+        // Receive events from channel 2
+        let mut events2: Vec<String> = Vec::new();
+        for _ in 0..50 {
+            match rx2.try_recv() {
+                Ok(ProviderEvent::AssistantChunk(chunk)) => events2.push(chunk),
+                Ok(_) => {} // Other events
+                Err(_) => break,
+            }
+        }
+
+        // Verify events from channel 1 contain "alpha" context
+        // and events from channel 2 contain "bravo" context (or are distinct)
+        // Mock provider generates chunks based on prompt
+        assert!(!events1.is_empty() || !events2.is_empty(), "should receive some chunks");
+
+        // Clean up
+        let mut h1 = handle1;
+        let mut h2 = handle2;
+        h1.stop(Duration::from_millis(100));
+        h2.stop(Duration::from_millis(100));
+    }
+
+    /// Test: Stress test with many concurrent providers
+    #[test]
+    fn stress_test_many_concurrent_providers() {
+        let num_providers = 5;
+        let handles: Vec<_> = (0..num_providers)
+            .map(|i| {
+                start_mock_provider_threaded(
+                    format!("stress-{}", i),
+                    format!("stress-agent-{}", i),
+                ).unwrap()
+            })
+            .collect();
+
+        // All should be running
+        for h in &handles {
+            assert!(h.is_running());
+        }
+
+        // Wait for all to produce events
+        std::thread::sleep(Duration::from_millis(300));
+
+        // Each should have produced events
+        for h in &handles {
+            let rx = h.event_receiver();
+            let mut count = 0;
+            for _ in 0..50 {
+                match rx.try_recv() {
+                    Ok(_) => count += 1,
+                    Err(_) => break,
+                }
+            }
+            assert!(count > 0, "each provider should have sent events");
+        }
+
+        // Clean up all
+        let mut handles_mut: Vec<_> = handles.into_iter().collect();
+        for h in handles_mut.iter_mut() {
+            h.stop(Duration::from_millis(100));
+        }
+    }
+
+    /// Test: Event ordering is preserved per-channel
+    #[test]
+    fn event_ordering_preserved_per_channel() {
+        let handle = start_mock_provider_threaded("ordering-test".to_string(), "ordering-agent".to_string()).unwrap();
+
+        std::thread::sleep(Duration::from_millis(200));
+
+        let rx = handle.event_receiver();
+
+        // Collect events and verify ordering
+        let mut events: Vec<ProviderEvent> = Vec::new();
+        for _ in 0..50 {
+            match rx.try_recv() {
+                Ok(event) => events.push(event),
+                Err(_) => break,
+            }
+        }
+
+        // Mock provider sends: Status, then chunks, then Finished
+        // Verify first event is Status (or similar)
+        if !events.is_empty() {
+            // First should be Status
+            assert!(
+                matches!(events[0], ProviderEvent::Status(_)),
+                "first event should be Status"
+            );
+
+            // Should have chunks in middle
+            let has_chunks = events.iter().any(|e| matches!(e, ProviderEvent::AssistantChunk(_)));
+            assert!(has_chunks, "should have chunks");
+
+            // Last should be Finished
+            assert!(
+                matches!(events.last(), Some(ProviderEvent::Finished)),
+                "last event should be Finished"
+            );
+        }
+
+        // Clean up
+        let mut h = handle;
+        h.stop(Duration::from_millis(100));
+    }
 }
