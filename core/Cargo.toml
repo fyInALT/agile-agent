@@ -11,6 +11,7 @@ dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 which.workspace = true
+agent-kanban = { path = "../kanban" }
 
 [dev-dependencies]
 tempfile.workspace = true

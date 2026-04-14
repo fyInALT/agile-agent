@@ -13,6 +13,7 @@
 //! │  - Backlog: todos, active_tasks                          │
 //! │  - Skills: registry                                       │
 //! │  - LoopControl: should_quit, iteration count             │
+//! │  - Kanban: tasks, stories, sprints                        │
 //! │                                                           │
 //! │  All mutations happen HERE after receiving events        │
 //! └─────────────────────────────────────────────────────────┘
@@ -36,6 +37,9 @@ use std::sync::Arc;
 use crate::backlog::BacklogState;
 use crate::agent_runtime::WorkplaceId;
 use crate::skills::SkillRegistry;
+use agent_kanban::service::KanbanService;
+use agent_kanban::file_repository::FileKanbanRepository;
+use agent_kanban::events::KanbanEventBus;
 
 /// Loop control flags shared across agents
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,8 +138,8 @@ impl LoopControlFlags {
 /// State shared across all agents in a workplace
 ///
 /// Contains workplace-wide data that all agents need access to,
-/// including backlog, skills registry, and loop control.
-#[derive(Debug, Clone)]
+/// including backlog, skills registry, kanban, and loop control.
+#[derive(Debug)]
 pub struct SharedWorkplaceState {
     /// Unique workplace identifier
     pub workplace_id: WorkplaceId,
@@ -143,8 +147,22 @@ pub struct SharedWorkplaceState {
     pub backlog: BacklogState,
     /// Skills registry (shared across agents)
     pub skills: SkillRegistry,
+    /// Kanban service for task management (optional, requires workplace path)
+    pub kanban: Option<Arc<KanbanService<FileKanbanRepository>>>,
     /// Loop control flags
     pub loop_control: LoopControlFlags,
+}
+
+impl Clone for SharedWorkplaceState {
+    fn clone(&self) -> Self {
+        Self {
+            workplace_id: self.workplace_id.clone(),
+            backlog: self.backlog.clone(),
+            skills: self.skills.clone(),
+            kanban: self.kanban.clone(),
+            loop_control: self.loop_control.clone(),
+        }
+    }
 }
 
 impl SharedWorkplaceState {
@@ -154,6 +172,7 @@ impl SharedWorkplaceState {
             workplace_id,
             backlog: BacklogState::default(),
             skills: SkillRegistry::default(),
+            kanban: None,
             loop_control: LoopControlFlags::new(),
         }
     }
@@ -164,6 +183,7 @@ impl SharedWorkplaceState {
             workplace_id,
             backlog,
             skills: SkillRegistry::default(),
+            kanban: None,
             loop_control: LoopControlFlags::new(),
         }
     }
@@ -174,7 +194,50 @@ impl SharedWorkplaceState {
             workplace_id,
             backlog: BacklogState::default(),
             skills,
+            kanban: None,
             loop_control: LoopControlFlags::new(),
+        }
+    }
+
+    /// Create with kanban service from workplace path
+    pub fn with_kanban(workplace_id: WorkplaceId, workplace_path: impl Into<std::path::PathBuf>) -> Self {
+        let kanban = Self::create_kanban_service(&workplace_path.into());
+        Self {
+            workplace_id,
+            backlog: BacklogState::default(),
+            skills: SkillRegistry::default(),
+            kanban,
+            loop_control: LoopControlFlags::new(),
+        }
+    }
+
+    /// Create with skills and kanban
+    pub fn with_skills_and_kanban(
+        workplace_id: WorkplaceId,
+        skills: SkillRegistry,
+        workplace_path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        let kanban = Self::create_kanban_service(&workplace_path.into());
+        Self {
+            workplace_id,
+            backlog: BacklogState::default(),
+            skills,
+            kanban,
+            loop_control: LoopControlFlags::new(),
+        }
+    }
+
+    /// Create KanbanService from workplace path
+    fn create_kanban_service(workplace_path: &std::path::Path) -> Option<Arc<KanbanService<FileKanbanRepository>>> {
+        let repo = FileKanbanRepository::from_workplace(workplace_path).ok()?;
+        let event_bus = Arc::new(KanbanEventBus::new());
+        Some(Arc::new(KanbanService::new(Arc::new(repo), event_bus)))
+    }
+
+    /// Initialize kanban service (if not already initialized)
+    pub fn initialize_kanban(&mut self, workplace_path: impl Into<std::path::PathBuf>) {
+        if self.kanban.is_none() {
+            self.kanban = Self::create_kanban_service(&workplace_path.into());
         }
     }
 
@@ -201,6 +264,11 @@ impl SharedWorkplaceState {
     /// Get skills registry mutable reference
     pub fn skills_mut(&mut self) -> &mut SkillRegistry {
         &mut self.skills
+    }
+
+    /// Get kanban service reference
+    pub fn kanban(&self) -> Option<&Arc<KanbanService<FileKanbanRepository>>> {
+        self.kanban.as_ref()
     }
 
     /// Get loop control reference
@@ -357,6 +425,7 @@ mod tests {
         let state = SharedWorkplaceState::new(WorkplaceId::new("wp-001"));
         assert_eq!(state.workplace_id().as_str(), "wp-001");
         assert!(state.can_continue());
+        assert!(state.kanban.is_none());
     }
 
     #[test]
@@ -393,5 +462,75 @@ mod tests {
         let skills = state.skills();
         // Skills registry is empty by default
         assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn shared_workplace_with_kanban() {
+        use tempfile::TempDir;
+        let temp = TempDir::new().unwrap();
+        let state = SharedWorkplaceState::with_kanban(
+            WorkplaceId::new("wp-001"),
+            temp.path(),
+        );
+        assert!(state.kanban.is_some());
+        // Kanban service is initialized
+        let kanban = state.kanban().unwrap();
+        assert!(kanban.list_elements().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_workplace_initialize_kanban() {
+        use tempfile::TempDir;
+        let temp = TempDir::new().unwrap();
+        let mut state = SharedWorkplaceState::new(WorkplaceId::new("wp-001"));
+        assert!(state.kanban.is_none());
+        state.initialize_kanban(temp.path());
+        assert!(state.kanban.is_some());
+    }
+
+    #[test]
+    fn shared_workplace_initialize_kanban_once() {
+        use tempfile::TempDir;
+        let temp1 = TempDir::new().unwrap();
+        let temp2 = TempDir::new().unwrap();
+        let mut state = SharedWorkplaceState::with_kanban(
+            WorkplaceId::new("wp-001"),
+            temp1.path(),
+        );
+        // Kanban already initialized, second call should not replace
+        state.initialize_kanban(temp2.path());
+        // Original kanban path is still used
+        assert!(state.kanban.is_some());
+    }
+
+    #[test]
+    fn shared_workplace_kanban_create_task() {
+        use tempfile::TempDir;
+        use agent_kanban::domain::{KanbanElement, ElementType};
+        let temp = TempDir::new().unwrap();
+        let state = SharedWorkplaceState::with_kanban(
+            WorkplaceId::new("wp-001"),
+            temp.path(),
+        );
+        let kanban = state.kanban().unwrap();
+        let task = KanbanElement::new_task("Test Task");
+        let created = kanban.create_element(task).unwrap();
+        assert!(created.id().is_some());
+        assert_eq!(created.element_type(), ElementType::Task);
+    }
+
+    #[test]
+    fn shared_workplace_clone_preserves_kanban() {
+        use tempfile::TempDir;
+        let temp = TempDir::new().unwrap();
+        let state = SharedWorkplaceState::with_kanban(
+            WorkplaceId::new("wp-001"),
+            temp.path(),
+        );
+        let cloned = state.clone();
+        assert!(cloned.kanban.is_some());
+        // Both share the same Arc
+        assert!(state.kanban.as_ref().unwrap().list_elements().unwrap().is_empty());
+        assert!(cloned.kanban.as_ref().unwrap().list_elements().unwrap().is_empty());
     }
 }

@@ -16,6 +16,14 @@ pub struct KanbanService<R: KanbanElementRepository> {
     transition_registry: Option<Arc<TransitionRegistry>>,
 }
 
+impl<R: KanbanElementRepository> std::fmt::Debug for KanbanService<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KanbanService")
+            .field("has_transition_registry", &self.transition_registry.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<R: KanbanElementRepository> KanbanService<R> {
     /// Create a new KanbanService (without transition registry)
     pub fn new(repository: Arc<R>, event_bus: Arc<KanbanEventBus>) -> Self {
