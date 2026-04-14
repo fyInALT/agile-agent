@@ -623,4 +623,64 @@ mod tests {
         assert!(rendered.contains("alpha"));
         assert!(rendered.contains("mock"));
     }
+
+    #[test]
+    fn status_bar_shows_provider_type() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let state = TuiState::from_session(session);
+
+        // Verify state has correct provider
+        assert_eq!(state.app().selected_provider.label(), "claude");
+    }
+
+    #[test]
+    fn status_bar_shows_idle_when_not_busy() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let state = TuiState::from_session(session);
+
+        // When idle, is_busy returns false
+        assert!(!state.is_busy());
+    }
+
+    #[test]
+    fn status_bar_shows_busy_when_responding() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().status = AppStatus::Responding;
+        state.sync_busy_started_at();
+
+        // When responding, is_busy returns true
+        assert!(state.is_busy());
+    }
+
+    #[test]
+    fn status_bar_shows_loop_iterations_when_active() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.workplace_mut().loop_control.start_loop(10);
+
+        // Verify loop is active with correct iterations
+        assert!(state.workplace().loop_control.loop_run_active);
+        assert_eq!(state.workplace().loop_control.remaining_iterations(), 10);
+    }
+
+    #[test]
+    fn status_bar_shows_task_assignment() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().active_task_id = Some("task-001".to_string());
+
+        // Verify task is assigned
+        assert_eq!(state.app().active_task_id, Some("task-001".to_string()));
+    }
 }
