@@ -285,11 +285,11 @@ fn render_skill_browser(frame: &mut Frame<'_>, state: &TuiState) {
     let area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, area);
 
-    let title = format!("Skills ({})", state.app().skills.enabled_names.len());
+    let title = format!("Skills ({})", state.workplace().skills.enabled_names.len());
 
     let mut lines = Vec::new();
-    for (index, skill) in state.app().skills.discovered.iter().enumerate() {
-        let enabled = state.app().skills.is_enabled(&skill.name);
+    for (index, skill) in state.workplace().skills.discovered.iter().enumerate() {
+        let enabled = state.workplace().skills.is_enabled(&skill.name);
         let selected = index == state.app().skill_browser_selected;
         let marker = if enabled { "[x]" } else { "[ ]" };
         let prefix = if selected { ">" } else { " " };

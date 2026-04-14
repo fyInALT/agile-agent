@@ -38,28 +38,29 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     loop {
         terminal.draw(|frame| render_app(frame, &mut state))?;
 
-        if state.app().should_quit {
+        if state.workplace().loop_control.should_quit {
             break;
         }
 
-        if state.app().loop_run_active
+        if state.workplace().loop_control.loop_run_active
             && provider_rx.is_none()
             && state.app().status == AppStatus::Idle
         {
-            if state.app().remaining_loop_iterations == 0 {
+            if state.workplace().loop_control.remaining_iterations() == 0 {
                 state.app_mut().set_loop_phase(LoopPhase::Idle);
                 state
                     .app_mut()
                     .stop_loop_run("loop guardrail reached: max iterations");
+                state.workplace_mut().loop_control.stop_loop();
             } else if let Some((prompt, started_new_task)) = next_loop_prompt(&mut state) {
                 if started_new_task {
-                    state.app_mut().remaining_loop_iterations =
-                        state.app().remaining_loop_iterations.saturating_sub(1);
+                    state.workplace_mut().loop_control.increment_iteration();
                 }
                 start_provider_request(&mut state, prompt, &mut provider_rx);
             } else {
                 state.app_mut().set_loop_phase(LoopPhase::Idle);
                 state.app_mut().stop_loop_run("no ready todo available");
+                state.workplace_mut().loop_control.stop_loop();
             }
         }
 
@@ -143,7 +144,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
 
                             let augmented_prompt =
-                                state.app().skills.build_injected_prompt(&user_input);
+                                state.workplace().skills.build_injected_prompt(&user_input);
                             logging::debug_event(
                                 "tui.submit",
                                 "submitted prompt from TUI",
@@ -426,7 +427,7 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
                 "tui.loop_control",
                 "started autonomous loop from TUI",
                 serde_json::json!({
-                    "remaining_iterations": state.app().remaining_loop_iterations,
+                    "remaining_iterations": state.workplace().loop_control.remaining_iterations(),
                 }),
             );
             None
@@ -485,7 +486,7 @@ fn handle_provider_terminal_error(state: &mut TuiState, error: String) -> Result
 fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
     if let Some(active_task_id) = state.app().active_task_id.clone() {
         let task = state
-            .app()
+            .workplace()
             .backlog
             .tasks
             .iter()

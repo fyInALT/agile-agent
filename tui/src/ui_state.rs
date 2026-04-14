@@ -4,6 +4,7 @@ use agent_core::app::LoopPhase;
 use agent_core::app::TranscriptEntry;
 use agent_core::logging;
 use agent_core::runtime_session::RuntimeSession;
+use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::tool_calls::ExecCommandStatus;
 use agent_core::tool_calls::McpInvocation;
 use agent_core::tool_calls::McpToolCallStatus;
@@ -69,6 +70,16 @@ impl TuiState {
 
     pub fn app_mut(&mut self) -> &mut AppState {
         &mut self.session.app
+    }
+
+    /// Get workplace (shared state) reference
+    pub fn workplace(&self) -> &SharedWorkplaceState {
+        self.session.workplace()
+    }
+
+    /// Get workplace (shared state) mutable reference
+    pub fn workplace_mut(&mut self) -> &mut SharedWorkplaceState {
+        self.session.workplace_mut()
     }
 
     fn active_tool_ref(&self) -> Option<&ActiveTool> {
