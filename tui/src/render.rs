@@ -262,7 +262,7 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
 /// Render confirmation overlay for agent stop
 fn render_confirmation_overlay(frame: &mut Frame<'_>, state: &TuiState) {
-    use crate::confirmation_overlay::ConfirmationOverlay;
+    
 
     let overlay = state.confirmation_overlay.as_ref().expect("overlay should be open");
     let area = centered_rect(40, 30, frame.area());
@@ -349,8 +349,7 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
             .transcript_rendered_lines
             .get(state.transcript_scroll_offset)
             .cloned()
-        {
-            if rendered_lines
+            && rendered_lines
                 .get(state.transcript_scroll_offset)
                 .map(|line| line.as_str())
                 != Some(anchor.as_str())
@@ -373,7 +372,6 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
                     }
                 }
             }
-        }
 
         if state.transcript_scroll_offset > max_scroll {
             state.transcript_scroll_offset = max_scroll;

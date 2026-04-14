@@ -792,11 +792,9 @@ impl TuiState {
         if self
             .active_stream_ref()
             .is_some_and(|stream| stream.kind != kind && !stream.tail.is_empty())
-        {
-            if let Some(stream) = self.take_active_stream() {
+            && let Some(stream) = self.take_active_stream() {
                 self.flush_stream_to_transcript(stream);
             }
-        }
 
         if self.active_stream_ref().is_none() {
             self.set_active_stream(ActiveStream {

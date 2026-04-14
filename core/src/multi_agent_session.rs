@@ -73,8 +73,8 @@ impl MultiAgentSession {
         let workplace = WorkplaceStore::for_cwd(&cwd)?;
         workplace.ensure()?;
 
-        if resume_snapshot {
-            if let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+        if resume_snapshot
+            && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
                 crate::logging::debug_event(
                     "multi_agent.bootstrap.restore",
                     "restoring from shutdown snapshot",
@@ -85,7 +85,6 @@ impl MultiAgentSession {
                 );
                 return Self::restore_from_snapshot(cwd, snapshot, default_provider, max_agents);
             }
-        }
 
         // Create fresh session with one agent
         let workplace_id = workplace.workplace_id().clone();

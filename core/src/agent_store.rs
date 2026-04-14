@@ -189,7 +189,7 @@ impl AgentStore {
 
     pub fn load_most_recent_meta(&self) -> Result<Option<AgentMeta>> {
         let mut metas = self.list_meta()?;
-        metas.sort_by(|a, b| meta_sort_key(a).cmp(&meta_sort_key(b)));
+        metas.sort_by_key(meta_sort_key);
         Ok(metas.pop())
     }
 
@@ -224,7 +224,7 @@ impl AgentStore {
             metas.push(meta);
         }
 
-        metas.sort_by(|a, b| meta_sort_key(a).cmp(&meta_sort_key(b)));
+        metas.sort_by_key(meta_sort_key);
         Ok(metas)
     }
 

@@ -243,32 +243,29 @@ impl AppState {
     ) {
         // Find the matching started tool call and update it
         for entry in self.transcript.iter_mut().rev() {
-            match entry {
-                TranscriptEntry::ExecCommand {
+            if let TranscriptEntry::ExecCommand {
                     call_id: existing_call_id,
                     source: existing_source,
                     allow_exploring_group,
                     input_preview: existing_input_preview,
                     status: ExecCommandStatus::InProgress,
                     ..
-                } => {
-                    let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
-                    let matches_name = existing_call_id.is_none();
-                    if matches_call_id || matches_name {
-                        *entry = TranscriptEntry::ExecCommand {
-                            call_id: existing_call_id.clone().or(call_id),
-                            source: existing_source.clone().or(source),
-                            allow_exploring_group: *allow_exploring_group,
-                            input_preview: existing_input_preview.clone(),
-                            output_preview,
-                            status,
-                            exit_code,
-                            duration_ms,
-                        };
-                        return;
-                    }
+                } = entry {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = existing_call_id.is_none();
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::ExecCommand {
+                        call_id: existing_call_id.clone().or(call_id),
+                        source: existing_source.clone().or(source),
+                        allow_exploring_group: *allow_exploring_group,
+                        input_preview: existing_input_preview.clone(),
+                        output_preview,
+                        status,
+                        exit_code,
+                        duration_ms,
+                    };
+                    return;
                 }
-                _ => {}
             }
         }
         self.transcript.push(TranscriptEntry::ExecCommand {
@@ -844,11 +841,10 @@ impl AppState {
                 task.todo_id.clone()
             });
 
-        if let Some(todo_id) = task_todo_id {
-            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
+        if let Some(todo_id) = task_todo_id
+            && let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
                 todo.status = TodoStatus::Done;
             }
-        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }
@@ -870,13 +866,11 @@ impl AppState {
                 task.todo_id.clone()
             });
 
-        if let Some(todo_id) = task_todo_id {
-            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
-                if todo.status == TodoStatus::InProgress {
+        if let Some(todo_id) = task_todo_id
+            && let Some(todo) = self.backlog.find_todo_mut(&todo_id)
+                && todo.status == TodoStatus::InProgress {
                     todo.status = TodoStatus::Ready;
                 }
-            }
-        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }
@@ -898,11 +892,10 @@ impl AppState {
                 task.todo_id.clone()
             });
 
-        if let Some(todo_id) = task_todo_id {
-            if let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
+        if let Some(todo_id) = task_todo_id
+            && let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
                 todo.status = TodoStatus::Blocked;
             }
-        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }

@@ -95,8 +95,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 Event::Key(key_event) => {
                     // Handle provider selection overlay
                     if state.is_provider_overlay_open() {
-                        if let Some(overlay) = state.provider_overlay.as_mut() {
-                            if let Some(command) = overlay.handle_key_event(key_event) {
+                        if let Some(overlay) = state.provider_overlay.as_mut()
+                            && let Some(command) = overlay.handle_key_event(key_event) {
                                 match command {
                                     ProviderSelectionCommand::Close => {
                                         state.close_provider_overlay();
@@ -115,14 +115,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     }
                                 }
                             }
-                        }
                         continue;
                     }
 
                     // Handle confirmation overlay
                     if state.is_confirmation_overlay_open() {
-                        if let Some(overlay) = state.confirmation_overlay.as_mut() {
-                            if let Some(command) = overlay.handle_key_event(key_event) {
+                        if let Some(overlay) = state.confirmation_overlay.as_mut()
+                            && let Some(command) = overlay.handle_key_event(key_event) {
                                 match command {
                                     ConfirmationCommand::Cancel => {
                                         state.close_confirmation_overlay();
@@ -140,7 +139,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     }
                                 }
                             }
-                        }
                         continue;
                     }
 
@@ -153,14 +151,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             continue;
                         }
                         let page_height = terminal.size()?.height.saturating_sub(2) as usize;
-                        if let Some(overlay) = state.transcript_overlay.as_mut() {
-                            if let Some(command) = overlay.handle_key_event(key_event, page_height)
-                            {
-                                if matches!(command, OverlayCommand::Close) {
+                        if let Some(overlay) = state.transcript_overlay.as_mut()
+                            && let Some(command) = overlay.handle_key_event(key_event, page_height)
+                                && matches!(command, OverlayCommand::Close) {
                                     state.close_transcript_overlay();
                                 }
-                            }
-                        }
                         continue;
                     }
 
@@ -467,11 +462,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     state.append_active_assistant_chunk(&chunk);
                                 }
                                 // Also append to agent's transcript in pool
-                                if let Some(pool) = state.agent_pool.as_mut() {
-                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                if let Some(pool) = state.agent_pool.as_mut()
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                                         slot.append_transcript(TranscriptEntry::Assistant(chunk));
                                     }
-                                }
                             }
                             ProviderEvent::ThinkingChunk(chunk) => {
                                 if state.focused_agent_id().as_ref() == Some(&agent_id) {
@@ -479,38 +473,35 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 }
                             }
                             ProviderEvent::Finished => {
-                                if let Some(pool) = state.agent_pool.as_mut() {
-                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                if let Some(pool) = state.agent_pool.as_mut()
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                                         let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
                                     }
-                                }
                                 state.unregister_agent_channel(&agent_id);
                                 state.app_mut().push_status_message(format!("{} finished", agent_id.as_str()));
                             }
                             ProviderEvent::Error(error) => {
-                                if let Some(pool) = state.agent_pool.as_mut() {
-                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                if let Some(pool) = state.agent_pool.as_mut()
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                                         slot.append_transcript(TranscriptEntry::Error(error.clone()));
                                         let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::error(error.clone()));
                                     }
-                                }
                                 state.unregister_agent_channel(&agent_id);
                                 state.app_mut().push_error_message(format!("{} error: {}", agent_id.as_str(), error));
                             }
                             ProviderEvent::SessionHandle(handle) => {
-                                if let Some(pool) = state.agent_pool.as_mut() {
-                                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                if let Some(pool) = state.agent_pool.as_mut()
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                                         slot.set_session_handle(handle);
                                     }
-                                }
                             }
                             // Other events handled similarly
                             _ => {}
                         }
                     }
                     agent_core::event_aggregator::AgentEvent::ThreadFinished { agent_id, outcome } => {
-                        if let Some(pool) = state.agent_pool.as_mut() {
-                            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                        if let Some(pool) = state.agent_pool.as_mut()
+                            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                                 slot.clear_provider_thread();
                                 match outcome {
                                     agent_core::agent_slot::ThreadOutcome::NormalExit => {
@@ -524,7 +515,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     }
                                 }
                             }
-                        }
                         state.unregister_agent_channel(&agent_id);
                     }
                     _ => {}
@@ -805,9 +795,9 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
         })?;
 
         // Poll for input with timeout
-        if crossterm::event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key_event) = crossterm::event::read()? {
-                if let Some(cmd) = overlay.handle_key_event(key_event) {
+        if crossterm::event::poll(Duration::from_millis(100))?
+            && let Event::Key(key_event) = crossterm::event::read()?
+                && let Some(cmd) = overlay.handle_key_event(key_event) {
                     match cmd {
                         ResumeCommand::Resume => {
                             logging::debug_event(
@@ -839,8 +829,6 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
                         }
                     }
                 }
-            }
-        }
     }
 }
 

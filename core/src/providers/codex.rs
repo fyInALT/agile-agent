@@ -191,7 +191,7 @@ fn run_codex(
     let mut turn_started = false;
     let mut turn_completed = false;
     let mut streamed_agent_message_ids = HashSet::new();
-    while let Some(line) = stdout_lines.next() {
+    for line in stdout_lines {
         let line = line.context("failed to read line from codex stdout")?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -385,7 +385,7 @@ fn wait_for_response(
 ) -> Result<JsonRpcMessage> {
     let mut turn_completed = turn_completed;
     let mut streamed_agent_message_ids = HashSet::new();
-    while let Some(line) = stdout_lines.next() {
+    for line in stdout_lines.by_ref() {
         let line = line.context("failed to read line from codex stdout")?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -563,11 +563,10 @@ fn handle_notification(
             if let Some(item_id) = params.get("itemId").and_then(|value| value.as_str()) {
                 streamed_agent_message_ids.insert(item_id.to_string());
             }
-            if let Some(delta) = params.get("delta").and_then(|value| value.as_str()) {
-                if !delta.is_empty() {
+            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
+                && !delta.is_empty() {
                     let _ = event_tx.send(ProviderEvent::AssistantChunk(delta.to_string()));
                 }
-            }
         }
         "item/started" | "item/completed" => {
             let item = params.get("item").unwrap_or(&params);
@@ -975,11 +974,10 @@ fn parse_content_blocks(
                     }
                 }
                 "thinking" => {
-                    if let Some(thinking) = block.get("thinking").and_then(|value| value.as_str()) {
-                        if !thinking.is_empty() {
+                    if let Some(thinking) = block.get("thinking").and_then(|value| value.as_str())
+                        && !thinking.is_empty() {
                             events.push(ProviderEvent::ThinkingChunk(thinking.to_string()));
                         }
-                    }
                 }
                 "tool_use" => {
                     events.push(ProviderEvent::GenericToolCallStarted {

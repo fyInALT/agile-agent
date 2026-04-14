@@ -1714,12 +1714,11 @@ fn render_edit_tool_lines(
     }
 
     // Render full diff lines (no truncation) with background colors
-    if !started {
-        if let Some(diff_text) = build_edit_diff_text(&edit_input) {
+    if !started
+        && let Some(diff_text) = build_edit_diff_text(&edit_input) {
             let diff_lines = render_edit_diff_with_background(&diff_text);
             lines.extend(diff_lines);
         }
-    }
 
     // Show output preview if present and not a success message
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {

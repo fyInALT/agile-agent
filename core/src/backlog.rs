@@ -98,48 +98,44 @@ impl BacklogState {
 
     /// Mark task as running (assigned to agent)
     pub fn start_task(&mut self, task_id: &str) -> bool {
-        if let Some(task) = self.find_task_mut(task_id) {
-            if task.status == TaskStatus::Ready {
+        if let Some(task) = self.find_task_mut(task_id)
+            && task.status == TaskStatus::Ready {
                 task.status = TaskStatus::Running;
                 return true;
             }
-        }
         false
     }
 
     /// Mark task as done (completed successfully)
     pub fn complete_task(&mut self, task_id: &str, summary: Option<String>) -> bool {
-        if let Some(task) = self.find_task_mut(task_id) {
-            if task.status == TaskStatus::Running || task.status == TaskStatus::Verifying {
+        if let Some(task) = self.find_task_mut(task_id)
+            && (task.status == TaskStatus::Running || task.status == TaskStatus::Verifying) {
                 task.status = TaskStatus::Done;
                 task.result_summary = summary;
                 return true;
             }
-        }
         false
     }
 
     /// Mark task as failed
     pub fn fail_task(&mut self, task_id: &str, error: String) -> bool {
-        if let Some(task) = self.find_task_mut(task_id) {
-            if task.status == TaskStatus::Running {
+        if let Some(task) = self.find_task_mut(task_id)
+            && task.status == TaskStatus::Running {
                 task.status = TaskStatus::Failed;
                 task.result_summary = Some(error);
                 return true;
             }
-        }
         false
     }
 
     /// Mark task as blocked
     pub fn block_task(&mut self, task_id: &str, reason: String) -> bool {
-        if let Some(task) = self.find_task_mut(task_id) {
-            if task.status == TaskStatus::Running {
+        if let Some(task) = self.find_task_mut(task_id)
+            && task.status == TaskStatus::Running {
                 task.status = TaskStatus::Blocked;
                 task.result_summary = Some(reason);
                 return true;
             }
-        }
         false
     }
 

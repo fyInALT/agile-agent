@@ -32,8 +32,8 @@ impl RuntimeSession {
     ) -> Result<Self> {
         // Check for shutdown snapshot first (higher priority than agent snapshot)
         let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
-        if resume_snapshot {
-            if let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+        if resume_snapshot
+            && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
                 logging::debug_event(
                     "session.bootstrap.shutdown_snapshot",
                     "found shutdown snapshot, restoring",
@@ -44,7 +44,6 @@ impl RuntimeSession {
                 );
                 return Self::restore_from_snapshot(launch_cwd, snapshot, default_provider);
             }
-        }
 
         let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, default_provider)?;
         let workplace_id = bootstrap.runtime.meta().workplace_id.clone();

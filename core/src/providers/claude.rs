@@ -367,14 +367,13 @@ fn parse_result_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
 }
 
 fn parse_log_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
-    if let Some(log) = message.log {
-        if !log.message.is_empty() {
+    if let Some(log) = message.log
+        && !log.message.is_empty() {
             return vec![ProviderEvent::Status(format!(
                 "claude {}: {}",
                 log.level, log.message
             ))];
         }
-    }
     Vec::new()
 }
 

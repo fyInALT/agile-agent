@@ -285,7 +285,7 @@ impl TextArea {
                     None
                 }
             })
-            .last()
+            .next_back()
             .unwrap_or_else(|| lines.len().saturating_sub(1))
     }
 
@@ -378,7 +378,7 @@ fn next_grapheme_boundary(text: &str, index: usize) -> usize {
                 None
             }
         })
-        .unwrap_or_else(|| text.len())
+        .unwrap_or(text.len())
 }
 
 fn cursor_for_visual_column(line: &VisualLine, target_column: usize) -> usize {

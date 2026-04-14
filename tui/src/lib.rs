@@ -40,9 +40,9 @@ pub fn run_tui_with_resume_last() -> Result<()> {
 fn run_tui_with_options(resume_last: bool) -> Result<()> {
     if logging::current_log_path().is_none() {
         let launch_cwd = std::env::current_dir()?;
-        if let Ok(workplace) = WorkplaceStore::for_cwd(&launch_cwd) {
-            if workplace.ensure().is_ok() {
-                if let Ok(initialized) = logging::init_for_workplace(
+        if let Ok(workplace) = WorkplaceStore::for_cwd(&launch_cwd)
+            && workplace.ensure().is_ok()
+                && let Ok(initialized) = logging::init_for_workplace(
                     &workplace,
                     if resume_last {
                         RunMode::ResumeLast
@@ -60,8 +60,6 @@ fn run_tui_with_options(resume_last: bool) -> Result<()> {
                         }),
                     );
                 }
-            }
-        }
     }
 
     if !probe::has_any_real_provider() {
