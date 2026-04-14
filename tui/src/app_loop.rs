@@ -63,11 +63,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             }
         }
 
-        let poll_timeout = if provider_rx.is_some() {
-            Duration::from_millis(80)
-        } else {
-            Duration::from_millis(250)
-        };
+        let poll_timeout = event_poll_timeout(&state, provider_rx.is_some());
 
         if event::poll(poll_timeout)? {
             match event::read()? {
@@ -338,6 +334,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     Ok(state.into_app_state())
 }
 
+fn event_poll_timeout(state: &TuiState, provider_active: bool) -> Duration {
+    if provider_active || state.has_pending_active_stream_commits() {
+        Duration::from_millis(80)
+    } else {
+        Duration::from_millis(250)
+    }
+}
+
 fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<String> {
     match command {
         LocalCommand::Help => {
@@ -514,12 +518,14 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
 
 #[cfg(test)]
 mod tests {
+    use super::event_poll_timeout;
     use super::handle_provider_terminal_error;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -555,5 +561,17 @@ mod tests {
             state.app().transcript.last(),
             Some(TranscriptEntry::Error(text)) if text == "provider crashed"
         ));
+    }
+
+    #[test]
+    fn pending_stream_commits_keep_fast_poll_timeout_even_without_provider_channel() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.append_active_assistant_chunk("line 1\n");
+
+        assert_eq!(event_poll_timeout(&state, false), Duration::from_millis(80));
+        assert_eq!(event_poll_timeout(&state, true), Duration::from_millis(80));
     }
 }

@@ -220,6 +220,12 @@ impl TuiState {
         )
     }
 
+    pub fn has_pending_active_stream_commits(&self) -> bool {
+        self.active_stream
+            .as_ref()
+            .is_some_and(|stream| !stream.pending_commits.is_empty())
+    }
+
     fn bump_active_entries_revision(&mut self) {
         self.active_entries_revision = self.active_entries_revision.wrapping_add(1);
     }
