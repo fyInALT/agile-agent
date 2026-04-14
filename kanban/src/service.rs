@@ -4,20 +4,38 @@ use crate::domain::{ElementId, ElementType, KanbanElement, Status};
 use crate::error::KanbanError;
 use crate::events::{KanbanEvent, KanbanEventBus};
 use crate::repository::KanbanElementRepository;
+use crate::transition::TransitionRegistry;
+use crate::types::StatusType;
 use std::sync::Arc;
 
 /// KanbanService provides business logic for kanban operations
 pub struct KanbanService<R: KanbanElementRepository> {
     repository: Arc<R>,
     event_bus: Arc<KanbanEventBus>,
+    /// Optional transition registry for trait-based transition validation
+    transition_registry: Option<Arc<TransitionRegistry>>,
 }
 
 impl<R: KanbanElementRepository> KanbanService<R> {
-    /// Create a new KanbanService
+    /// Create a new KanbanService (without transition registry)
     pub fn new(repository: Arc<R>, event_bus: Arc<KanbanEventBus>) -> Self {
         KanbanService {
             repository,
             event_bus,
+            transition_registry: None,
+        }
+    }
+
+    /// Create a new KanbanService with transition registry
+    pub fn new_with_registry(
+        repository: Arc<R>,
+        event_bus: Arc<KanbanEventBus>,
+        transition_registry: Arc<TransitionRegistry>,
+    ) -> Self {
+        KanbanService {
+            repository,
+            event_bus,
+            transition_registry: Some(transition_registry),
         }
     }
 
@@ -94,8 +112,14 @@ impl<R: KanbanElementRepository> KanbanService<R> {
 
         let old_status = element.status();
 
-        // Validate transition
-        if !element.can_transition_to(&new_status) {
+        // Validate transition - use registry if available, otherwise use enum-based validation
+        let can_transition = if let Some(registry) = &self.transition_registry {
+            registry.can_transition(&old_status.to_status_type(), &new_status.to_status_type())
+        } else {
+            element.can_transition_to(&new_status)
+        };
+
+        if !can_transition {
             return Err(KanbanError::InvalidStatusTransition {
                 from: old_status.to_string(),
                 to: new_status.to_string(),
@@ -132,6 +156,18 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         });
 
         Ok(element)
+    }
+
+    /// Update element status using StatusType (trait-based)
+    pub fn update_status_with_type(
+        &self,
+        id: &ElementId,
+        new_status_type: StatusType,
+        changed_by: &str,
+    ) -> Result<KanbanElement, KanbanError> {
+        // Convert to enum-based Status for now (backward compatibility)
+        let new_status: Status = new_status_type.clone().into();
+        self.update_status(id, new_status, changed_by)
     }
 
     /// Find blocking dependencies (not Done or Verified)

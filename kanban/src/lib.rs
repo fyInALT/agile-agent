@@ -12,6 +12,7 @@ pub mod registry;
 pub mod repository;
 pub mod service;
 pub mod traits;
+pub mod transition;
 pub mod types;
 
 pub use builtin::*;
@@ -24,4 +25,5 @@ pub use registry::*;
 pub use repository::*;
 pub use service::*;
 pub use traits::*;
+pub use transition::*;
 pub use types::*;
