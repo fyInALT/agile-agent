@@ -1,4 +1,5 @@
 use ratatui::text::Line;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::markdown;
@@ -12,12 +13,12 @@ pub(crate) struct MarkdownStreamCollector {
 }
 
 impl MarkdownStreamCollector {
-    pub(crate) fn new(width: Option<usize>) -> Self {
+    pub(crate) fn new(width: Option<usize>, cwd: &Path) -> Self {
         Self {
             buffer: String::new(),
             committed_line_count: 0,
             width,
-            cwd: std::env::temp_dir(),
+            cwd: cwd.to_path_buf(),
         }
     }
 
@@ -89,7 +90,7 @@ mod tests {
 
     #[test]
     fn does_not_commit_until_newline() {
-        let mut collector = MarkdownStreamCollector::new(None);
+        let mut collector = MarkdownStreamCollector::new(None, &std::env::temp_dir());
         collector.push_delta("Hello, world");
         assert!(collector.commit_complete_lines().is_empty());
 
@@ -100,7 +101,7 @@ mod tests {
 
     #[test]
     fn finalize_commits_partial_line() {
-        let mut collector = MarkdownStreamCollector::new(None);
+        let mut collector = MarkdownStreamCollector::new(None, &std::env::temp_dir());
         collector.push_delta("Line without newline");
         let rendered = lines_to_strings(&collector.finalize_and_drain());
         assert_eq!(rendered, vec!["Line without newline".to_string()]);
@@ -108,7 +109,7 @@ mod tests {
 
     #[test]
     fn heading_split_across_chunks_starts_on_new_line() {
-        let mut collector = MarkdownStreamCollector::new(None);
+        let mut collector = MarkdownStreamCollector::new(None, &std::env::temp_dir());
         collector.push_delta("Hello.\n");
         let first = lines_to_strings(&collector.commit_complete_lines());
         assert_eq!(first, vec!["Hello.".to_string()]);

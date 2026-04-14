@@ -31,6 +31,7 @@ pub struct TuiState {
     pub transcript_overlay: Option<TranscriptOverlayState>,
     pub composer_width: u16,
     pub transcript_viewport_height: u16,
+    pub transcript_render_width: Option<usize>,
     pub transcript_scroll_offset: usize,
     pub transcript_max_scroll: usize,
     pub transcript_follow_tail: bool,
@@ -51,6 +52,7 @@ impl TuiState {
             transcript_overlay: None,
             composer_width: 80,
             transcript_viewport_height: 1,
+            transcript_render_width: None,
             transcript_scroll_offset: 0,
             transcript_max_scroll: 0,
             transcript_follow_tail: true,
@@ -220,7 +222,10 @@ impl TuiState {
                     kind: StreamTextKind::Assistant,
                     tail: text,
                     pending_commits: VecDeque::new(),
-                    collector: MarkdownStreamCollector::new(None),
+                    collector: MarkdownStreamCollector::new(
+                        self.transcript_render_width,
+                        self.app().cwd.as_path(),
+                    ),
                     policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
@@ -231,7 +236,10 @@ impl TuiState {
                     kind: StreamTextKind::Thinking,
                     tail: text,
                     pending_commits: VecDeque::new(),
-                    collector: MarkdownStreamCollector::new(None),
+                    collector: MarkdownStreamCollector::new(
+                        self.transcript_render_width,
+                        self.app().cwd.as_path(),
+                    ),
                     policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
@@ -342,7 +350,10 @@ impl TuiState {
                 kind,
                 tail: String::new(),
                 pending_commits: VecDeque::new(),
-                collector: MarkdownStreamCollector::new(None),
+                collector: MarkdownStreamCollector::new(
+                    self.transcript_render_width,
+                    self.app().cwd.as_path(),
+                ),
                 policy: AdaptiveChunkingPolicy::default(),
             });
         }
@@ -817,6 +828,7 @@ impl TuiState {
         self.transcript_scroll_offset = 0;
         self.transcript_max_scroll = 0;
         self.transcript_follow_tail = true;
+        self.transcript_render_width = None;
         self.transcript_rendered_lines.clear();
         self.transcript_last_cell_range = None;
         self.busy_started_at = None;
@@ -1737,6 +1749,23 @@ mod tests {
             }) if tail == "tail"
         ));
         assert!(!state.drain_active_stream_commit_tick());
+    }
+
+    #[test]
+    fn active_stream_snapshots_render_width_for_commit_line_count() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.transcript_render_width = Some(8);
+
+        state.append_active_assistant_chunk("123456789\n");
+
+        assert!(matches!(
+            state.active_stream_for_test(),
+            Some(ActiveStream { pending_commits, .. })
+                if pending_commits.front().is_some_and(|commit| commit.rendered_lines == 2)
+        ));
     }
 
     #[test]

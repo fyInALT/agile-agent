@@ -22,6 +22,7 @@ use crate::ui_state::TuiState;
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     frame.render_widget(Clear, frame.area());
     state.sync_busy_started_at();
+    state.transcript_render_width = Some(frame.area().width.max(1) as usize);
     let composer_height = state.composer.desired_height(frame.area().width, 8);
     let committed_cells = cells::build_cells(&state.app().transcript, frame.area().width);
     let committed_lines = cells::flatten_cells(&committed_cells);
@@ -518,7 +519,10 @@ mod tests {
             kind: StreamTextKind::Assistant,
             tail: "next".to_string(),
             pending_commits: std::collections::VecDeque::new(),
-            collector: crate::markdown_stream::MarkdownStreamCollector::new(None),
+            collector: crate::markdown_stream::MarkdownStreamCollector::new(
+                None,
+                std::path::Path::new("/tmp"),
+            ),
             policy: crate::streaming::AdaptiveChunkingPolicy::default(),
         });
         state.open_transcript_overlay();
