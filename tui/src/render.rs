@@ -20,6 +20,7 @@ use crate::transcript::cells;
 use crate::ui_state::TuiState;
 use crate::view_mode::ViewMode;
 use agent_core::agent_pool::AgentStatusSnapshot;
+use agent_core::app::TranscriptEntry;
 
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     frame.render_widget(Clear, frame.area());
@@ -810,7 +811,7 @@ fn render_split_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_agent_panel(frame: &mut Frame<'_>, _state: &mut TuiState, _agent_idx: usize, area: Rect, is_focused: bool) {
+fn render_agent_panel(frame: &mut Frame<'_>, state: &mut TuiState, agent_idx: usize, area: Rect, is_focused: bool) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -829,18 +830,58 @@ fn render_agent_panel(frame: &mut Frame<'_>, _state: &mut TuiState, _agent_idx: 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    // Render transcript for this agent (placeholder for now)
-    let placeholder_text = if is_focused {
-        "Focused agent transcript"
+    // Get the transcript for this agent
+    let transcript_entries: &[TranscriptEntry] = if let Some(pool) = &state.agent_pool {
+        if let Some(slot) = pool.get_slot(agent_idx) {
+            slot.transcript()
+        } else {
+            // Slot not found
+            frame.render_widget(
+                Paragraph::new("Agent slot not found")
+                    .style(Style::default().fg(Color::Red)),
+                inner_area,
+            );
+            return;
+        }
     } else {
-        "Other agent transcript"
+        // No agent pool - use focused agent transcript
+        &state.app().transcript
     };
 
-    frame.render_widget(
-        Paragraph::new(placeholder_text)
-            .style(Style::default().fg(Color::Gray)),
-        inner_area,
-    );
+    if transcript_entries.is_empty() {
+        let codename = if let Some(pool) = &state.agent_pool {
+            pool.get_slot(agent_idx)
+                .map(|s| s.codename().as_str())
+                .unwrap_or("Agent")
+        } else {
+            "Agent"
+        };
+        frame.render_widget(
+            Paragraph::new(format!("{} - No messages yet", codename))
+                .style(Style::default().fg(Color::Gray)),
+            inner_area,
+        );
+        return;
+    }
+
+    // Build cells and render transcript
+    let transcript_cells = cells::build_cells(transcript_entries, inner_area.width);
+    let lines = cells::flatten_cells(&transcript_cells);
+
+    // For non-focused agents, just show the transcript (no scroll state)
+    // For focused agent in split view, use the main scroll state
+    let scroll_offset = if is_focused {
+        state.transcript_scroll_offset
+    } else {
+        // Auto-scroll to bottom for non-focused panels
+        lines.len().saturating_sub(inner_area.height as usize)
+    };
+
+    let transcript = Paragraph::new(lines).scroll((
+        scroll_offset.min(u16::MAX as usize) as u16,
+        0,
+    ));
+    frame.render_widget(transcript, inner_area);
 }
 
 fn render_split_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
