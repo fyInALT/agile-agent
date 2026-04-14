@@ -220,6 +220,441 @@ impl fmt::Display for ElementIdParseError {
 
 impl std::error::Error for ElementIdParseError {}
 
+/// StatusHistoryEntry records a status change with timestamp
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusHistoryEntry {
+    pub status: Status,
+    pub entered_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl StatusHistoryEntry {
+    pub fn new(status: Status) -> Self {
+        StatusHistoryEntry {
+            status,
+            entered_at: chrono::Utc::now(),
+        }
+    }
+}
+
+/// BaseElement contains common fields for all kanban elements
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseElement {
+    pub id: Option<ElementId>,
+    pub title: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    pub status: Status,
+    #[serde(default)]
+    pub dependencies: Vec<ElementId>,
+    #[serde(default)]
+    pub references: Vec<ElementId>,
+    pub parent: Option<ElementId>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub priority: Priority,
+    #[serde(default)]
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub effort: Option<u32>,
+    #[serde(default)]
+    pub blocked_reason: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status_history: Vec<StatusHistoryEntry>,
+}
+
+impl BaseElement {
+    pub fn new(_element_type: ElementType, title: &str) -> Self {
+        let now = chrono::Utc::now();
+        let status = Status::Plan;
+        BaseElement {
+            id: None,
+            title: title.to_string(),
+            content: String::new(),
+            keywords: Vec::new(),
+            status,
+            dependencies: Vec::new(),
+            references: Vec::new(),
+            parent: None,
+            created_at: now,
+            updated_at: now,
+            priority: Priority::Medium,
+            assignee: None,
+            effort: None,
+            blocked_reason: None,
+            tags: Vec::new(),
+            status_history: vec![StatusHistoryEntry::new(status)],
+        }
+    }
+
+    pub fn can_transition_to(&self, target: &Status) -> bool {
+        self.status.can_transition_to(target)
+    }
+
+    pub fn transition(&mut self, new_status: Status) -> Result<(), KanbanTransitionError> {
+        if !self.can_transition_to(&new_status) {
+            return Err(KanbanTransitionError {
+                from: self.status,
+                to: new_status,
+            });
+        }
+        self.status = new_status;
+        self.updated_at = chrono::Utc::now();
+        self.status_history
+            .push(StatusHistoryEntry::new(new_status));
+        Ok(())
+    }
+}
+
+/// Error type for invalid status transitions
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KanbanTransitionError {
+    pub from: Status,
+    pub to: Status,
+}
+
+impl fmt::Display for KanbanTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid transition from {:?} to {:?}",
+            self.from, self.to
+        )
+    }
+}
+
+impl std::error::Error for KanbanTransitionError {}
+
+/// Sprint represents a sprint element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sprint {
+    #[serde(flatten)]
+    pub base: BaseElement,
+    #[serde(default)]
+    pub goal: String,
+    #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
+    pub end_date: Option<String>,
+    #[serde(default)]
+    pub active: bool,
+}
+
+impl Sprint {
+    pub fn new(title: &str, goal: &str) -> Self {
+        Sprint {
+            base: BaseElement::new(ElementType::Sprint, title),
+            goal: goal.to_string(),
+            start_date: None,
+            end_date: None,
+            active: false,
+        }
+    }
+
+    pub fn new_with_dates(title: &str, goal: &str, start: &str, end: &str) -> Self {
+        Sprint {
+            base: BaseElement::new(ElementType::Sprint, title),
+            goal: goal.to_string(),
+            start_date: Some(start.to_string()),
+            end_date: Some(end.to_string()),
+            active: true,
+        }
+    }
+}
+
+/// Story represents a user story element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Story {
+    #[serde(flatten)]
+    pub base: BaseElement,
+}
+
+impl Story {
+    pub fn new(title: &str, _content: &str) -> Self {
+        Story {
+            base: BaseElement::new(ElementType::Story, title),
+        }
+    }
+
+    pub fn new_with_parent(title: &str, content: &str, parent: ElementId) -> Self {
+        let mut story = Story::new(title, content);
+        story.base.parent = Some(parent);
+        story
+    }
+}
+
+/// Task represents a task element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    #[serde(flatten)]
+    pub base: BaseElement,
+}
+
+impl Task {
+    pub fn new(title: &str) -> Self {
+        Task {
+            base: BaseElement::new(ElementType::Task, title),
+        }
+    }
+
+    pub fn new_with_parent(title: &str, parent: ElementId) -> Self {
+        let mut task = Task::new(title);
+        task.base.parent = Some(parent);
+        task
+    }
+}
+
+/// Idea represents an idea element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Idea {
+    #[serde(flatten)]
+    pub base: BaseElement,
+}
+
+impl Idea {
+    pub fn new(title: &str) -> Self {
+        Idea {
+            base: BaseElement::new(ElementType::Idea, title),
+        }
+    }
+}
+
+/// Issue represents an issue element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Issue {
+    #[serde(flatten)]
+    pub base: BaseElement,
+}
+
+impl Issue {
+    pub fn new(title: &str) -> Self {
+        Issue {
+            base: BaseElement::new(ElementType::Issue, title),
+        }
+    }
+}
+
+/// Tips represents a tip element
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tips {
+    #[serde(flatten)]
+    pub base: BaseElement,
+    pub target_task: ElementId,
+    pub agent_id: String,
+}
+
+impl Tips {
+    pub fn new(title: &str, target_task: ElementId, agent_id: &str) -> Self {
+        Tips {
+            base: BaseElement::new(ElementType::Tips, title),
+            target_task,
+            agent_id: agent_id.to_string(),
+        }
+    }
+}
+
+/// KanbanElement is the main enum representing all kanban board elements
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum KanbanElement {
+    #[serde(rename = "sprint")]
+    Sprint(Sprint),
+    #[serde(rename = "story")]
+    Story(Story),
+    #[serde(rename = "task")]
+    Task(Task),
+    #[serde(rename = "idea")]
+    Idea(Idea),
+    #[serde(rename = "issue")]
+    Issue(Issue),
+    #[serde(rename = "tips")]
+    Tips(Tips),
+}
+
+impl KanbanElement {
+    pub fn new_sprint(title: &str, goal: &str) -> Self {
+        KanbanElement::Sprint(Sprint::new(title, goal))
+    }
+
+    pub fn new_sprint_with_dates(title: &str, goal: &str, start: &str, end: &str) -> Self {
+        KanbanElement::Sprint(Sprint::new_with_dates(title, goal, start, end))
+    }
+
+    pub fn new_story(title: &str, content: &str) -> Self {
+        KanbanElement::Story(Story::new(title, content))
+    }
+
+    pub fn new_story_with_parent(title: &str, content: &str, parent: ElementId) -> Self {
+        KanbanElement::Story(Story::new_with_parent(title, content, parent))
+    }
+
+    pub fn new_task(title: &str) -> Self {
+        KanbanElement::Task(Task::new(title))
+    }
+
+    pub fn new_task_with_parent(title: &str, parent: ElementId) -> Self {
+        KanbanElement::Task(Task::new_with_parent(title, parent))
+    }
+
+    pub fn new_idea(title: &str) -> Self {
+        KanbanElement::Idea(Idea::new(title))
+    }
+
+    pub fn new_issue(title: &str) -> Self {
+        KanbanElement::Issue(Issue::new(title))
+    }
+
+    pub fn new_tips(title: &str, target_task: ElementId, agent_id: &str) -> Self {
+        KanbanElement::Tips(Tips::new(title, target_task, agent_id))
+    }
+
+    pub fn id(&self) -> Option<&ElementId> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.id.as_ref(),
+            KanbanElement::Story(s) => s.base.id.as_ref(),
+            KanbanElement::Task(t) => t.base.id.as_ref(),
+            KanbanElement::Idea(i) => i.base.id.as_ref(),
+            KanbanElement::Issue(i) => i.base.id.as_ref(),
+            KanbanElement::Tips(t) => t.base.id.as_ref(),
+        }
+    }
+
+    pub fn set_id(&mut self, id: ElementId) {
+        match self {
+            KanbanElement::Sprint(s) => s.base.id = Some(id),
+            KanbanElement::Story(s) => s.base.id = Some(id),
+            KanbanElement::Task(t) => t.base.id = Some(id),
+            KanbanElement::Idea(i) => i.base.id = Some(id),
+            KanbanElement::Issue(i) => i.base.id = Some(id),
+            KanbanElement::Tips(t) => t.base.id = Some(id),
+        }
+    }
+
+    pub fn element_type(&self) -> ElementType {
+        match self {
+            KanbanElement::Sprint(_) => ElementType::Sprint,
+            KanbanElement::Story(_) => ElementType::Story,
+            KanbanElement::Task(_) => ElementType::Task,
+            KanbanElement::Idea(_) => ElementType::Idea,
+            KanbanElement::Issue(_) => ElementType::Issue,
+            KanbanElement::Tips(_) => ElementType::Tips,
+        }
+    }
+
+    pub fn status(&self) -> Status {
+        match self {
+            KanbanElement::Sprint(s) => s.base.status,
+            KanbanElement::Story(s) => s.base.status,
+            KanbanElement::Task(t) => t.base.status,
+            KanbanElement::Idea(i) => i.base.status,
+            KanbanElement::Issue(i) => i.base.status,
+            KanbanElement::Tips(t) => t.base.status,
+        }
+    }
+
+    pub fn set_status(&mut self, status: Status) {
+        match self {
+            KanbanElement::Sprint(s) => s.base.status = status,
+            KanbanElement::Story(s) => s.base.status = status,
+            KanbanElement::Task(t) => t.base.status = status,
+            KanbanElement::Idea(i) => i.base.status = status,
+            KanbanElement::Issue(i) => i.base.status = status,
+            KanbanElement::Tips(t) => t.base.status = status,
+        }
+    }
+
+    pub fn can_transition_to(&self, target: &Status) -> bool {
+        match self {
+            KanbanElement::Sprint(s) => s.base.can_transition_to(target),
+            KanbanElement::Story(s) => s.base.can_transition_to(target),
+            KanbanElement::Task(t) => t.base.can_transition_to(target),
+            KanbanElement::Idea(i) => i.base.can_transition_to(target),
+            KanbanElement::Issue(i) => i.base.can_transition_to(target),
+            KanbanElement::Tips(t) => t.base.can_transition_to(target),
+        }
+    }
+
+    pub fn transition(&mut self, new_status: Status) -> Result<(), KanbanTransitionError> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.transition(new_status),
+            KanbanElement::Story(s) => s.base.transition(new_status),
+            KanbanElement::Task(t) => t.base.transition(new_status),
+            KanbanElement::Idea(i) => i.base.transition(new_status),
+            KanbanElement::Issue(i) => i.base.transition(new_status),
+            KanbanElement::Tips(t) => t.base.transition(new_status),
+        }
+    }
+
+    pub fn assignee(&self) -> Option<&String> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.assignee.as_ref(),
+            KanbanElement::Story(s) => s.base.assignee.as_ref(),
+            KanbanElement::Task(t) => t.base.assignee.as_ref(),
+            KanbanElement::Idea(i) => i.base.assignee.as_ref(),
+            KanbanElement::Issue(i) => i.base.assignee.as_ref(),
+            KanbanElement::Tips(t) => t.base.assignee.as_ref(),
+        }
+    }
+
+    pub fn dependencies(&self) -> &[ElementId] {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.dependencies,
+            KanbanElement::Story(s) => &s.base.dependencies,
+            KanbanElement::Task(t) => &t.base.dependencies,
+            KanbanElement::Idea(i) => &i.base.dependencies,
+            KanbanElement::Issue(i) => &i.base.dependencies,
+            KanbanElement::Tips(t) => &t.base.dependencies,
+        }
+    }
+
+    pub fn references(&self) -> &[ElementId] {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.references,
+            KanbanElement::Story(s) => &s.base.references,
+            KanbanElement::Task(t) => &t.base.references,
+            KanbanElement::Idea(i) => &i.base.references,
+            KanbanElement::Issue(i) => &i.base.references,
+            KanbanElement::Tips(t) => &t.base.references,
+        }
+    }
+
+    pub fn parent(&self) -> Option<&ElementId> {
+        match self {
+            KanbanElement::Sprint(s) => s.base.parent.as_ref(),
+            KanbanElement::Story(s) => s.base.parent.as_ref(),
+            KanbanElement::Task(t) => t.base.parent.as_ref(),
+            KanbanElement::Idea(i) => i.base.parent.as_ref(),
+            KanbanElement::Issue(i) => i.base.parent.as_ref(),
+            KanbanElement::Tips(t) => t.base.parent.as_ref(),
+        }
+    }
+
+    pub fn title(&self) -> &str {
+        match self {
+            KanbanElement::Sprint(s) => &s.base.title,
+            KanbanElement::Story(s) => &s.base.title,
+            KanbanElement::Task(t) => &t.base.title,
+            KanbanElement::Idea(i) => &i.base.title,
+            KanbanElement::Issue(i) => &i.base.title,
+            KanbanElement::Tips(t) => &t.base.title,
+        }
+    }
+
+    pub fn base_mut(&mut self) -> &mut BaseElement {
+        match self {
+            KanbanElement::Sprint(s) => &mut s.base,
+            KanbanElement::Story(s) => &mut s.base,
+            KanbanElement::Task(t) => &mut t.base,
+            KanbanElement::Idea(i) => &mut i.base,
+            KanbanElement::Issue(i) => &mut i.base,
+            KanbanElement::Tips(t) => &mut t.base,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
