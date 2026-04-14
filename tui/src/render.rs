@@ -31,7 +31,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         Constraint::Min(1)
     };
     let active_entries = state.active_entries_for_display();
-    let active_cells = cells::build_active_cells(&active_entries, frame.area().width);
+    let active_cells = cells::build_live_tail_cells(&active_entries, frame.area().width);
     let active_lines = cells::flatten_cells(&active_cells);
     let active_height = active_cells.iter().map(|cell| cell.height).sum::<u16>();
     let working_height = if state.is_busy() && active_height == 0 {

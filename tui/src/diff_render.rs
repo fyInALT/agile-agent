@@ -93,11 +93,15 @@ pub(crate) fn diff_line(
     Line::from(vec![
         Span::styled(
             prefix.to_string(),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             number,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::raw(" "),
         Span::styled(format!("{sign}"), style),
@@ -118,7 +122,9 @@ pub(crate) fn render_unified_diff_lines(
                 Line::from(vec![
                     Span::styled(
                         continuation_prefix.to_string(),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::DIM),
                     ),
                     Span::styled(line.to_string(), diff_style_for_line(line)),
                 ])
@@ -144,7 +150,9 @@ pub(crate) fn render_unified_diff_lines(
         out.push(Line::from(vec![
             Span::styled(
                 initial_prefix.to_string(),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 format!(

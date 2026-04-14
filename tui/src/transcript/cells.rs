@@ -3,8 +3,8 @@ use ratatui::text::Line;
 
 use crate::exec_semantics::parse_exploring_ops;
 use crate::history_cell::ExploringExecCall;
-use crate::history_cell::history_cell_for_exploring_exec_group;
 use crate::history_cell::history_cell_for_entry;
+use crate::history_cell::history_cell_for_exploring_exec_group;
 use crate::tool_output::ToolRenderMode;
 
 #[derive(Debug, Clone)]
@@ -14,11 +14,26 @@ pub struct TranscriptCell {
 }
 
 pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
-    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::Committed)
+    build_cells_with_mode(
+        entries,
+        width,
+        ToolRenderMode::Preview,
+        CellSelection::Committed,
+    )
 }
 
+#[allow(dead_code)]
 pub fn build_active_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
-    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::Active)
+    build_cells_with_mode(
+        entries,
+        width,
+        ToolRenderMode::Preview,
+        CellSelection::Active,
+    )
+}
+
+pub fn build_live_tail_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
+    build_cells_with_mode(entries, width, ToolRenderMode::Preview, CellSelection::All)
 }
 
 pub fn build_overlay_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
@@ -36,7 +51,8 @@ fn build_cells_with_mode(
 
     while index < entries.len() {
         if let ToolRenderMode::Preview = mode
-            && let Some((next_index, cell)) = exploring_exec_group_cell(entries, index, width, selection)
+            && let Some((next_index, cell)) =
+                exploring_exec_group_cell(entries, index, width, selection)
         {
             if let Some(cell) = cell {
                 cells.push(cell);
@@ -68,6 +84,7 @@ fn build_cells_with_mode(
     cells
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum CellSelection {
     Committed,
@@ -86,14 +103,20 @@ fn selection_matches_entry(selection: CellSelection, entry: &TranscriptEntry) ->
 fn is_active_entry(entry: &TranscriptEntry) -> bool {
     match entry {
         TranscriptEntry::ExecCommand { status, .. } => {
-            matches!(status, agent_core::tool_calls::ExecCommandStatus::InProgress)
+            matches!(
+                status,
+                agent_core::tool_calls::ExecCommandStatus::InProgress
+            )
         }
         TranscriptEntry::PatchApply { status, .. } => {
             matches!(status, agent_core::tool_calls::PatchApplyStatus::InProgress)
         }
         TranscriptEntry::WebSearch { started, .. } => *started,
         TranscriptEntry::McpToolCall { status, .. } => {
-            matches!(status, agent_core::tool_calls::McpToolCallStatus::InProgress)
+            matches!(
+                status,
+                agent_core::tool_calls::McpToolCallStatus::InProgress
+            )
         }
         TranscriptEntry::GenericToolCall { started, .. } => *started,
         _ => false,
@@ -136,7 +159,10 @@ fn exploring_exec_group_cell(
             break;
         };
 
-        contains_active |= matches!(status, agent_core::tool_calls::ExecCommandStatus::InProgress);
+        contains_active |= matches!(
+            status,
+            agent_core::tool_calls::ExecCommandStatus::InProgress
+        );
         calls.push(ExploringExecCall {
             source: source.clone(),
             input_preview: input_preview.clone(),
@@ -188,13 +214,15 @@ pub fn flatten_cells(cells: &[TranscriptCell]) -> Vec<Line<'static>> {
 mod tests {
     use super::build_active_cells;
     use super::build_cells;
+    use super::build_live_tail_cells;
     use super::build_overlay_cells;
     use super::flatten_cells;
     use agent_core::app::TranscriptEntry;
     use ratatui::text::Line;
 
     fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
-        lines.iter()
+        lines
+            .iter()
             .map(|line| {
                 line.spans
                     .iter()
@@ -223,8 +251,16 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("Ran")));
-        assert!(rendered.iter().any(|line| line.contains("git diff README.md")));
-        assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("git diff README.md"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("README.md (+1 -1)"))
+        );
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
         assert!(rendered.iter().any(|line| line.contains("1 - old")));
         assert!(rendered.iter().any(|line| line.contains("1 + new")));
@@ -296,7 +332,11 @@ mod tests {
         let lines = flatten_cells(&build_cells(&entries, 80));
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("You ran git status")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("You ran git status"))
+        );
     }
 
     #[test]
@@ -338,10 +378,16 @@ mod tests {
         assert!(rendered.iter().any(|line| {
             line == "• Called search.find_docs({\"query\":\"ratatui styling\",\"limit\":3})"
         }));
-        assert!(rendered.iter().any(|line| line == "  └ Found styling guidance in styles.md"));
-        assert!(!rendered
-            .iter()
-            .any(|line| line.contains("finished tool search.find_docs")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "  └ Found styling guidance in styles.md")
+        );
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("finished tool search.find_docs"))
+        );
     }
 
     #[test]
@@ -365,12 +411,16 @@ mod tests {
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 36)));
 
         assert!(rendered.iter().any(|line| line == "• Called"));
-        assert!(rendered
-            .iter()
-            .any(|line| line.starts_with("  └ metrics.get_nearby_metric(")));
-        assert!(rendered
-            .iter()
-            .any(|line| line.contains("Line one of the response,")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.starts_with("  └ metrics.get_nearby_metric("))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("Line one of the response,"))
+        );
     }
 
     #[test]
@@ -402,18 +452,27 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered
-            .iter()
-            .any(|line| line == "• Edited 2 files (+2 -1)"));
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ README.md (+1 -1)"));
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ src/lib.rs (+1 -0)"));
-        assert!(rendered.iter().any(|line| line == "    1  line one"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "    2 -line two"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "    2 +line two changed"), "{rendered:?}");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "• Edited 2 files (+2 -1)")
+        );
+        assert!(rendered.iter().any(|line| line == "  └ README.md (+1 -1)"));
+        assert!(rendered.iter().any(|line| line == "  └ src/lib.rs (+1 -0)"));
+        assert!(
+            rendered.iter().any(|line| line == "    1  line one"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "    2 -line two"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "    2 +line two changed"),
+            "{rendered:?}"
+        );
         assert!(!rendered.iter().any(|line| line.contains("applied patch")));
     }
 
@@ -437,11 +496,20 @@ mod tests {
         let preview = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
         let overlay = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
 
-        assert!(preview.iter().any(|line| line.contains("… +")), "{preview:?}");
-        assert!(!overlay.iter().any(|line| line.contains("… +")), "{overlay:?}");
-        assert!(overlay
-            .iter()
-            .any(|line| line.contains("10 +line 10 changed")), "{overlay:?}");
+        assert!(
+            preview.iter().any(|line| line.contains("… +")),
+            "{preview:?}"
+        );
+        assert!(
+            !overlay.iter().any(|line| line.contains("… +")),
+            "{overlay:?}"
+        );
+        assert!(
+            overlay
+                .iter()
+                .any(|line| line.contains("10 +line 10 changed")),
+            "{overlay:?}"
+        );
     }
 
     #[test]
@@ -462,9 +530,12 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered
-            .iter()
-            .any(|line| line == "• Edited old_name.rs → new_name.rs (+1 -1)"), "{rendered:?}");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "• Edited old_name.rs → new_name.rs (+1 -1)"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -485,18 +556,28 @@ mod tests {
         let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
         let declined_rendered = lines_to_strings(&flatten_cells(&build_cells(&declined, 80)));
 
-        assert!(failed_rendered
-            .iter()
-            .any(|line| line == "• Failed patch"), "{failed_rendered:?}");
-        assert!(failed_rendered
-            .iter()
-            .any(|line| line == "  └ patch rejected by user"), "{failed_rendered:?}");
-        assert!(declined_rendered
-            .iter()
-            .any(|line| line == "• Declined patch"), "{declined_rendered:?}");
-        assert!(declined_rendered
-            .iter()
-            .any(|line| line == "  └ patch canceled"), "{declined_rendered:?}");
+        assert!(
+            failed_rendered.iter().any(|line| line == "• Failed patch"),
+            "{failed_rendered:?}"
+        );
+        assert!(
+            failed_rendered
+                .iter()
+                .any(|line| line == "  └ patch rejected by user"),
+            "{failed_rendered:?}"
+        );
+        assert!(
+            declined_rendered
+                .iter()
+                .any(|line| line == "• Declined patch"),
+            "{declined_rendered:?}"
+        );
+        assert!(
+            declined_rendered
+                .iter()
+                .any(|line| line == "  └ patch canceled"),
+            "{declined_rendered:?}"
+        );
     }
 
     #[test]
@@ -519,12 +600,18 @@ mod tests {
         let started_rendered = lines_to_strings(&flatten_cells(&build_active_cells(&started, 80)));
         let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
 
-        assert!(started_rendered
-            .iter()
-            .any(|line| line.contains("Searching the web")), "{started_rendered:?}");
-        assert!(completed_rendered
-            .iter()
-            .any(|line| line.contains("Searched example search query")), "{completed_rendered:?}");
+        assert!(
+            started_rendered
+                .iter()
+                .any(|line| line.contains("Searching the web")),
+            "{started_rendered:?}"
+        );
+        assert!(
+            completed_rendered
+                .iter()
+                .any(|line| line.contains("Searched example search query")),
+            "{completed_rendered:?}"
+        );
     }
 
     #[test]
@@ -544,15 +631,28 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Viewed Image"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ example.png"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "• Generated Image:"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ A tiny blue square"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ Saved to: /tmp/ig-1.png"), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Viewed Image"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ example.png"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "• Generated Image:"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ A tiny blue square"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "  └ Saved to: /tmp/ig-1.png"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -597,18 +697,34 @@ mod tests {
         let completed_rendered = lines_to_strings(&flatten_cells(&build_cells(&completed, 80)));
         let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
 
-        assert!(started_rendered
-            .iter()
-            .any(|line| line.starts_with("• Calling search.find_docs(") && line.contains("\"query\":\"ratatui styling\"") && line.contains("\"limit\":3")), "{started_rendered:?}");
-        assert!(completed_rendered
-            .iter()
-            .any(|line| line.starts_with("• Called search.find_docs(") && line.contains("\"query\":\"ratatui styling\"") && line.contains("\"limit\":3")), "{completed_rendered:?}");
-        assert!(completed_rendered
-            .iter()
-            .any(|line| line == "  └ Found styling guidance in styles.md"), "{completed_rendered:?}");
-        assert!(failed_rendered
-            .iter()
-            .any(|line| line == "  └ Error: network timeout"), "{failed_rendered:?}");
+        assert!(
+            started_rendered
+                .iter()
+                .any(|line| line.starts_with("• Calling search.find_docs(")
+                    && line.contains("\"query\":\"ratatui styling\"")
+                    && line.contains("\"limit\":3")),
+            "{started_rendered:?}"
+        );
+        assert!(
+            completed_rendered
+                .iter()
+                .any(|line| line.starts_with("• Called search.find_docs(")
+                    && line.contains("\"query\":\"ratatui styling\"")
+                    && line.contains("\"limit\":3")),
+            "{completed_rendered:?}"
+        );
+        assert!(
+            completed_rendered
+                .iter()
+                .any(|line| line == "  └ Found styling guidance in styles.md"),
+            "{completed_rendered:?}"
+        );
+        assert!(
+            failed_rendered
+                .iter()
+                .any(|line| line == "  └ Error: network timeout"),
+            "{failed_rendered:?}"
+        );
     }
 
     #[test]
@@ -617,7 +733,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -627,7 +743,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -637,7 +753,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-3".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("cat bar.txt".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -648,12 +764,24 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "    Read foo.txt, bar.txt"), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line.contains("Ran ls -la")), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Explored"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ List ls -la"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "    Read foo.txt, bar.txt"),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("Ran ls -la")),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -662,7 +790,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("rg shimmer_spans src".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -672,7 +800,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("cat src/shimmer.rs".to_string()),
                 output_preview: None,
                 status: agent_core::tool_calls::ExecCommandStatus::InProgress,
@@ -683,13 +811,22 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Exploring"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ Search shimmer_spans in src"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "    Read src/shimmer.rs"), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Exploring"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "  └ Search shimmer_spans in src"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "    Read src/shimmer.rs"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -698,7 +835,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-1".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -708,7 +845,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-2".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -719,9 +856,18 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line.contains("Ran ls -la")), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line.contains("Ran cat foo.txt")), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line.contains("Ran ls -la")),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains("Ran cat foo.txt")),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line == "• Explored"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -739,8 +885,16 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line.contains("You ran cat foo.txt")), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("You ran cat foo.txt")),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line == "• Explored"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -760,7 +914,10 @@ mod tests {
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 36)));
 
         assert_eq!(
-            rendered.iter().filter(|line| line.contains(url_like)).count(),
+            rendered
+                .iter()
+                .filter(|line| line.contains(url_like))
+                .count(),
             1,
             "{rendered:?}"
         );
@@ -772,7 +929,9 @@ mod tests {
             call_id: Some("call-7".to_string()),
             source: Some("userShell".to_string()),
             allow_exploring_group: true,
-            input_preview: Some("bash -lc 'python3 -c '\\''print(\"Hello, world!\")'\\'''".to_string()),
+            input_preview: Some(
+                "bash -lc 'python3 -c '\\''print(\"Hello, world!\")'\\'''".to_string(),
+            ),
             output_preview: Some("Hello, world!".to_string()),
             status: agent_core::tool_calls::ExecCommandStatus::Completed,
             exit_code: Some(0),
@@ -781,10 +940,16 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered
-            .iter()
-            .any(|line| line == "• You ran python3 -c 'print(\"Hello, world!\")'"), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line.contains("bash -lc")), "{rendered:?}");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "• You ran python3 -c 'print(\"Hello, world!\")'"),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("bash -lc")),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -802,10 +967,22 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Running printf hello"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ hello"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "    world"), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line.contains("✓")), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Running printf hello"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ hello"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "    world"),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("✓")),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -827,9 +1004,103 @@ mod tests {
         let committed = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
         let active = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
-        assert!(committed.iter().any(|line| line == "• done before"), "{committed:?}");
-        assert!(!committed.iter().any(|line| line.contains("Running printf hello")), "{committed:?}");
-        assert!(active.iter().any(|line| line == "• Running printf hello"), "{active:?}");
+        assert!(
+            committed.iter().any(|line| line == "• done before"),
+            "{committed:?}"
+        );
+        assert!(
+            !committed
+                .iter()
+                .any(|line| line.contains("Running printf hello")),
+            "{committed:?}"
+        );
+        assert!(
+            active.iter().any(|line| line == "• Running printf hello"),
+            "{active:?}"
+        );
+    }
+
+    #[test]
+    fn live_tail_cells_render_streaming_assistant_entries() {
+        let entries = vec![TranscriptEntry::Assistant(
+            "streaming assistant response".to_string(),
+        )];
+
+        let rendered = lines_to_strings(&flatten_cells(&build_live_tail_cells(&entries, 80)));
+
+        assert!(rendered.iter().any(|line| line.contains("streaming assistant response")));
+    }
+
+    #[test]
+    fn committed_cells_omit_in_progress_patch_web_search_and_mcp_entries() {
+        let entries = vec![
+            TranscriptEntry::Status("done before".to_string()),
+            TranscriptEntry::PatchApply {
+                call_id: Some("patch-live".to_string()),
+                changes: Vec::new(),
+                status: agent_core::tool_calls::PatchApplyStatus::InProgress,
+                output_preview: Some("patch running".to_string()),
+            },
+            TranscriptEntry::WebSearch {
+                call_id: Some("search-live".to_string()),
+                query: "ratatui styling".to_string(),
+                action: None,
+                started: true,
+            },
+            TranscriptEntry::McpToolCall {
+                call_id: Some("mcp-live".to_string()),
+                invocation: agent_core::tool_calls::McpInvocation {
+                    server: "search".to_string(),
+                    tool: "find_docs".to_string(),
+                    arguments: Some(serde_json::json!({
+                        "query": "ratatui styling",
+                        "limit": 3
+                    })),
+                },
+                result_blocks: Vec::new(),
+                error: None,
+                status: agent_core::tool_calls::McpToolCallStatus::InProgress,
+                is_error: false,
+            },
+        ];
+
+        let committed = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
+        let active = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
+
+        assert!(
+            committed.iter().any(|line| line == "• done before"),
+            "{committed:?}"
+        );
+        assert!(
+            !committed.iter().any(|line| line.contains("Applying patch")),
+            "{committed:?}"
+        );
+        assert!(
+            !committed
+                .iter()
+                .any(|line| line.contains("Searching the web")),
+            "{committed:?}"
+        );
+        assert!(
+            !committed
+                .iter()
+                .any(|line| line.contains("Calling search.find_docs")),
+            "{committed:?}"
+        );
+        assert!(
+            active.iter().any(|line| line == "• Applying patch"),
+            "{active:?}"
+        );
+        assert!(
+            active.iter().any(|line| line.contains("Searching the web")),
+            "{active:?}"
+        );
+        assert!(
+            active
+                .iter()
+                .any(|line| line.contains("• Calling search.find_docs(")),
+            "{active:?}"
+        );
     }
 
     #[test]
@@ -858,12 +1129,16 @@ mod tests {
         let failed_rendered = lines_to_strings(&flatten_cells(&build_cells(&failed, 80)));
         let declined_rendered = lines_to_strings(&flatten_cells(&build_cells(&declined, 80)));
 
-        assert!(failed_rendered
-            .iter()
-            .any(|line| line == "• Ran false"), "{failed_rendered:?}");
-        assert!(declined_rendered
-            .iter()
-            .any(|line| line == "• Declined command rm -rf /tmp/demo"), "{declined_rendered:?}");
+        assert!(
+            failed_rendered.iter().any(|line| line == "• Ran false"),
+            "{failed_rendered:?}"
+        );
+        assert!(
+            declined_rendered
+                .iter()
+                .any(|line| line == "• Declined command rm -rf /tmp/demo"),
+            "{declined_rendered:?}"
+        );
     }
 
     #[test]
@@ -872,7 +1147,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-8".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("bash -lc 'ls -la'".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -882,7 +1157,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-9".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("/bin/bash -lc 'cat foo.txt'".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -893,10 +1168,22 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "    Read foo.txt"), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line.contains("bash -lc")), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Explored"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ List ls -la"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "    Read foo.txt"),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("bash -lc")),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -905,7 +1192,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-exploring".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("cat /dev/null".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::InProgress,
@@ -915,7 +1202,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-orphan".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: false,
+                allow_exploring_group: false,
                 input_preview: Some("echo repro-marker".to_string()),
                 output_preview: Some("repro-marker\n".to_string()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -927,14 +1214,26 @@ mod tests {
         let committed = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
         let active = lines_to_strings(&flatten_cells(&build_active_cells(&entries, 80)));
 
-        assert!(active.iter().any(|line| line == "• Exploring"), "{active:?}");
-        assert!(active.iter().any(|line| line == "  └ Read /dev/null"), "{active:?}");
-        assert!(committed
-            .iter()
-            .any(|line| line.contains("Ran echo repro-marker")), "{committed:?}");
-        assert!(!active
-            .iter()
-            .any(|line| line == "    Read /dev/null, echo repro-marker"), "{active:?}");
+        assert!(
+            active.iter().any(|line| line == "• Exploring"),
+            "{active:?}"
+        );
+        assert!(
+            active.iter().any(|line| line == "  └ Read /dev/null"),
+            "{active:?}"
+        );
+        assert!(
+            committed
+                .iter()
+                .any(|line| line.contains("Ran echo repro-marker")),
+            "{committed:?}"
+        );
+        assert!(
+            !active
+                .iter()
+                .any(|line| line == "    Read /dev/null, echo repro-marker"),
+            "{active:?}"
+        );
     }
 
     #[test]
@@ -943,7 +1242,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-ls".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: true,
+                allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -953,7 +1252,7 @@ mod tests {
             TranscriptEntry::ExecCommand {
                 call_id: Some("call-after".to_string()),
                 source: Some("agent".to_string()),
-            allow_exploring_group: false,
+                allow_exploring_group: false,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some("hello\n".to_string()),
                 status: agent_core::tool_calls::ExecCommandStatus::Completed,
@@ -964,10 +1263,22 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line == "• Explored"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  └ List ls -la"), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line.contains("Ran cat foo.txt")), "{rendered:?}");
-        assert!(!rendered.iter().any(|line| line == "    Read foo.txt"), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Explored"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ List ls -la"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains("Ran cat foo.txt")),
+            "{rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line == "    Read foo.txt"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -990,14 +1301,24 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_cells(&entries, 24)));
 
-        assert!(rendered.iter().any(|line| line == "• Ran echo"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line.starts_with("  │ this_is_a_very_")), "{rendered:?}");
-        assert!(rendered.iter().any(|line| line == "  │ … +2 lines"), "{rendered:?}");
-        assert!(rendered
-            .iter()
-            .any(|line| line == "  └ error: first line"), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line == "• Ran echo"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.starts_with("  │ this_is_a_very_")),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  │ … +2 lines"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  └ error: first line"),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -1022,9 +1343,11 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line == "  └ 1"));
         assert!(rendered.iter().any(|line| line == "    2"));
-        assert!(rendered
-            .iter()
-            .any(|line| line == "    … +6 lines (ctrl + t to view transcript)"));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "    … +6 lines (ctrl + t to view transcript)")
+        );
         assert!(rendered.iter().any(|line| line == "    9"));
         assert!(rendered.iter().any(|line| line == "    10"));
         assert!(!rendered.iter().any(|line| line == "    3"));

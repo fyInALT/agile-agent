@@ -400,6 +400,20 @@ fn active_cell_height_accounts_for_wrapped_rows() {
 }
 
 #[test]
+fn streaming_assistant_renders_in_live_tail_area() {
+    let mut shell = ShellHarness::new(ProviderKind::Claude);
+    shell.state.append_active_assistant_chunk("streaming assistant reply");
+
+    let rendered = shell.render_to_string(40, 10);
+
+    assert!(
+        rendered.contains("streaming assistant reply"),
+        "streaming assistant content should render in live tail:\n{}",
+        rendered
+    );
+}
+
+#[test]
 fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
     let backend = TestBackend::new(24, 3);

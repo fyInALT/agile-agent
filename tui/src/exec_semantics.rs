@@ -14,15 +14,15 @@ pub(crate) fn parse_exploring_ops(command: &str, source: Option<&str>) -> Option
 
     let command = strip_shell_wrapper(command);
     let mut ops = Vec::new();
-    for line in command.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in command
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         ops.extend(parse_single_line(&normalize_exploring_line(line))?);
     }
 
-    if ops.is_empty() {
-        None
-    } else {
-        Some(ops)
-    }
+    if ops.is_empty() { None } else { Some(ops) }
 }
 
 fn normalize_exploring_line(line: &str) -> String {

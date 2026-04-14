@@ -186,12 +186,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                 match event {
                     ProviderEvent::Status(text) => state.app_mut().push_status_message(text),
-                    ProviderEvent::AssistantChunk(chunk) => {
-                        state.app_mut().append_assistant_chunk(&chunk)
-                    }
-                    ProviderEvent::ThinkingChunk(chunk) => {
-                        state.app_mut().append_thinking_chunk(&chunk)
-                    }
+                    ProviderEvent::AssistantChunk(chunk) => state.append_active_assistant_chunk(&chunk),
+                    ProviderEvent::ThinkingChunk(chunk) => state.append_active_thinking_chunk(&chunk),
                     ProviderEvent::ExecCommandStarted {
                         call_id,
                         input_preview,

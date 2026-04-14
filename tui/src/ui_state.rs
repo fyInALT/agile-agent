@@ -83,6 +83,34 @@ impl TuiState {
         self.active_entries_revision = self.active_entries_revision.wrapping_add(1);
     }
 
+    pub fn append_active_assistant_chunk(&mut self, chunk: &str) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        if let Some(TranscriptEntry::Assistant(text)) = self.active_entries.last_mut() {
+            text.push_str(chunk);
+        } else {
+            self.active_entries
+                .push(TranscriptEntry::Assistant(chunk.to_string()));
+        }
+        self.bump_active_entries_revision();
+    }
+
+    pub fn append_active_thinking_chunk(&mut self, chunk: &str) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        if let Some(TranscriptEntry::Thinking(text)) = self.active_entries.last_mut() {
+            text.push_str(chunk);
+        } else {
+            self.active_entries
+                .push(TranscriptEntry::Thinking(chunk.to_string()));
+        }
+        self.bump_active_entries_revision();
+    }
+
     pub fn push_active_exec_started(
         &mut self,
         call_id: Option<String>,
@@ -958,6 +986,35 @@ mod tests {
                 .scroll_offset,
             usize::MAX
         );
+    }
+
+    #[test]
+    fn active_assistant_chunks_stay_in_live_tail_until_finalize() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_assistant_chunk("hello ");
+        state.append_active_assistant_chunk("world");
+
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "hello world"
+        ));
+        assert!(!state
+            .app()
+            .transcript
+            .iter()
+            .any(|entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world")));
+
+        state.finalize_active_entries_after_failure(None);
+
+        assert!(state.active_entries.is_empty());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "hello world"
+        ));
     }
 
     #[test]

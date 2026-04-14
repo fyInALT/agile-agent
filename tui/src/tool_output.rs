@@ -44,16 +44,26 @@ pub fn render_tool_call_lines(
     }
 
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
-        lines.extend(render_output_block(name, input_preview, output, width, mode));
+        lines.extend(render_output_block(
+            name,
+            input_preview,
+            output,
+            width,
+            mode,
+        ));
     } else if !started && name == "exec_command" {
         lines.push(Line::from(vec![
             Span::styled(
                 TOOL_OUTPUT_INITIAL_PREFIX,
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 "(no output)",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
         ]));
     }
@@ -128,12 +138,16 @@ fn render_exec_result_line(
     let mut spans = Vec::new();
     spans.push(Span::styled(
         TOOL_OUTPUT_CONTINUATION_PREFIX,
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
     ));
     if success {
         spans.push(Span::styled(
             "✓",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::styled(
@@ -169,7 +183,10 @@ fn format_duration_ms(duration_ms: u64) -> String {
 fn render_input_block(name: &str, input: &str, width: usize) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let text = if name == "exec_command" {
-        format!("$ {}", truncate_graphemes(input, body_width.saturating_mul(2)))
+        format!(
+            "$ {}",
+            truncate_graphemes(input, body_width.saturating_mul(2))
+        )
     } else {
         truncate_graphemes(input, body_width.saturating_mul(2))
     };
@@ -215,8 +232,7 @@ fn render_output_block(
 }
 
 fn looks_like_diff(input_preview: Option<&str>, output: &str) -> bool {
-    input_preview
-        .is_some_and(|input| input.contains("git diff") || input.contains("git show"))
+    input_preview.is_some_and(|input| input.contains("git diff") || input.contains("git show"))
         || output.starts_with("diff --git ")
         || (output.contains("\n--- ") && output.contains("\n+++ "))
 }
@@ -295,7 +311,9 @@ fn git_status_style_for_line(line: &str) -> Style {
     if line.starts_with("On branch ") || line.starts_with("Your branch ") {
         Style::default().fg(Color::Cyan)
     } else if line.ends_with(':') {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else if trimmed.starts_with("modified:")
         || trimmed.starts_with("deleted:")
         || trimmed.starts_with("renamed:")
@@ -307,7 +325,9 @@ fn git_status_style_for_line(line: &str) -> Style {
         || trimmed.starts_with("Changes to be committed")
         || trimmed.starts_with("Untracked files")
     {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().add_modifier(Modifier::DIM)
     }
@@ -335,8 +355,12 @@ fn render_git_log_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec
     }
 }
 
-
-fn render_text_block(name: &str, output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+fn render_text_block(
+    name: &str,
+    output: &str,
+    width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(4).max(1);
     let style = if name == "exec_command" {
         Style::default().add_modifier(Modifier::DIM)
@@ -366,7 +390,11 @@ fn split_git_log_line(line: &str) -> Option<(&str, &str)> {
     Some((hash, rest))
 }
 
-fn render_wrapped_preview_lines<F>(raw_lines: Vec<String>, width: usize, style_for: F) -> Vec<Line<'static>>
+fn render_wrapped_preview_lines<F>(
+    raw_lines: Vec<String>,
+    width: usize,
+    style_for: F,
+) -> Vec<Line<'static>>
 where
     F: Fn(&str) -> Style,
 {
@@ -388,7 +416,10 @@ where
     rendered
 }
 
-fn truncate_rendered_lines_middle(lines: Vec<Line<'static>>, max_rows: usize) -> Vec<Line<'static>> {
+fn truncate_rendered_lines_middle(
+    lines: Vec<Line<'static>>,
+    max_rows: usize,
+) -> Vec<Line<'static>> {
     if lines.len() <= max_rows {
         return lines;
     }
@@ -416,11 +447,15 @@ fn ellipsis_line(omitted: usize) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             TOOL_OUTPUT_CONTINUATION_PREFIX,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             format!("… +{omitted} lines ({TRANSCRIPT_HINT})"),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
     ])
 }
@@ -444,7 +479,6 @@ fn wrap_prefixed(prefix: &str, text: &str, style: Style, width: usize) -> Vec<Li
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::ToolRenderMode;
@@ -452,7 +486,8 @@ mod tests {
     use ratatui::text::Line;
 
     fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
-        lines.iter()
+        lines
+            .iter()
             .map(|line| {
                 line.spans
                     .iter()
@@ -467,7 +502,9 @@ mod tests {
         let lines = render_tool_call_lines(
             "exec_command",
             Some("git diff README.md"),
-            Some("diff --git a/README.md b/README.md\nindex 123..456 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new"),
+            Some(
+                "diff --git a/README.md b/README.md\nindex 123..456 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new",
+            ),
             true,
             false,
             Some(0),
@@ -477,8 +514,16 @@ mod tests {
         );
         let rendered = lines_to_strings(&lines);
         assert!(rendered.iter().any(|line| line.contains("Ran")));
-        assert!(rendered.iter().any(|line| line.contains("$ git diff README.md")));
-        assert!(rendered.iter().any(|line| line.contains("README.md (+1 -1)")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("$ git diff README.md"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("README.md (+1 -1)"))
+        );
         assert!(rendered.iter().any(|line| line.contains("@@ -1 +1 @@")));
         assert!(rendered.iter().any(|line| line.contains("1 - old")));
         assert!(rendered.iter().any(|line| line.contains("1 + new")));
@@ -506,7 +551,11 @@ mod tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("ctrl + t to view transcript")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("ctrl + t to view transcript"))
+        );
         assert!(rendered.iter().any(|line| line.contains("line 1")));
         assert!(rendered.iter().any(|line| line.contains("line 12")));
     }
@@ -527,7 +576,11 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("\"ok\": true")));
-        assert!(rendered.iter().any(|line| line.contains("\"items\": [1, 2, 3]")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("\"items\": [1, 2, 3]"))
+        );
     }
 
     #[test]
@@ -535,7 +588,9 @@ mod tests {
         let lines = render_tool_call_lines(
             "exec_command",
             Some("git status"),
-            Some("On branch main\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    old.txt"),
+            Some(
+                "On branch main\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    old.txt",
+            ),
             true,
             false,
             Some(0),
@@ -546,9 +601,21 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("On branch main")));
-        assert!(rendered.iter().any(|line| line.contains("Changes not staged for commit:")));
-        assert!(rendered.iter().any(|line| line.contains("modified:   README.md")));
-        assert!(rendered.iter().any(|line| line.contains("deleted:    old.txt")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("Changes not staged for commit:"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("modified:   README.md"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("deleted:    old.txt"))
+        );
     }
 
     #[test]
@@ -556,7 +623,9 @@ mod tests {
         let lines = render_tool_call_lines(
             "exec_command",
             Some("git log --oneline -4"),
-            Some("927a1e4 feat: add end-to-end debug observability\n0d7485f feat: log codex jsonrpc transport"),
+            Some(
+                "927a1e4 feat: add end-to-end debug observability\n0d7485f feat: log codex jsonrpc transport",
+            ),
             true,
             false,
             Some(0),
@@ -566,8 +635,16 @@ mod tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("927a1e4 feat: add end-to-end debug observability")));
-        assert!(rendered.iter().any(|line| line.contains("0d7485f feat: log codex jsonrpc transport")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("927a1e4 feat: add end-to-end debug observability"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("0d7485f feat: log codex jsonrpc transport"))
+        );
     }
 
     #[test]
@@ -585,7 +662,11 @@ mod tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("$ git rev-parse HEAD")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("$ git rev-parse HEAD"))
+        );
         assert!(rendered.iter().any(|line| line.contains("(no output)")));
     }
 

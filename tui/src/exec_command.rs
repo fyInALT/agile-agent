@@ -24,7 +24,10 @@ mod tests {
     #[test]
     fn strips_bash_lc_wrapper() {
         assert_eq!(strip_shell_wrapper("bash -lc 'echo hello'"), "echo hello");
-        assert_eq!(strip_shell_wrapper("/bin/bash -lc 'echo hello'"), "echo hello");
+        assert_eq!(
+            strip_shell_wrapper("/bin/bash -lc 'echo hello'"),
+            "echo hello"
+        );
         assert_eq!(strip_shell_wrapper("zsh -lc 'echo hello'"), "echo hello");
     }
 

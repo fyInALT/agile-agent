@@ -2,9 +2,9 @@ use agent_core::app::TranscriptEntry;
 use agent_core::tool_calls::ExecCommandStatus;
 use agent_core::tool_calls::McpInvocation;
 use agent_core::tool_calls::McpToolCallStatus;
+use agent_core::tool_calls::PatchApplyStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::PatchChangeKind;
-use agent_core::tool_calls::PatchApplyStatus;
 use agent_core::tool_calls::WebSearchAction;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -109,9 +109,9 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             action: action.clone(),
             started: *started,
         }),
-        TranscriptEntry::ViewImage { call_id: _, path } => Box::new(ViewImageHistoryCell {
-            path: path.clone(),
-        }),
+        TranscriptEntry::ViewImage { call_id: _, path } => {
+            Box::new(ViewImageHistoryCell { path: path.clone() })
+        }
         TranscriptEntry::ImageGeneration {
             call_id: _,
             revised_prompt,
@@ -386,7 +386,10 @@ impl HistoryCell for ViewImageHistoryCell {
         let mut lines = Vec::new();
         lines.push(Line::from(vec![
             Span::styled("• ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled("Viewed Image".to_string(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Viewed Image".to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
         ]));
         lines.extend(wrap_prefixed(
             DETAIL_INITIAL_PREFIX,
@@ -624,11 +627,15 @@ fn render_exec_history_lines(
         lines.push(Line::from(vec![
             Span::styled(
                 DETAIL_INITIAL_PREFIX,
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 "(no output)",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
         ]));
     } else {
@@ -654,12 +661,17 @@ fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<L
     let bullet_style = if any_started {
         Style::default().fg(Color::Blue)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
     let title = if any_started { "Exploring" } else { "Explored" };
     lines.push(Line::from(vec![
         Span::styled("• ", bullet_style),
-        Span::styled(title.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title.to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     let mut grouped = Vec::new();
@@ -675,7 +687,9 @@ fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<L
                     .all(|op| matches!(op, ExploringOp::Read(_)))
             {
                 for op in &calls[index].ops {
-                    if let ExploringOp::Read(name) = op && !names.contains(name) {
+                    if let ExploringOp::Read(name) = op
+                        && !names.contains(name)
+                    {
                         names.push(name.clone());
                     }
                 }
@@ -721,7 +735,10 @@ fn render_exploring_exec_lines(calls: &[ExploringExecCall], width: u16) -> Vec<L
 
 fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> String {
     match action {
-        Some(WebSearchAction::Search { query: action_query, queries }) => action_query
+        Some(WebSearchAction::Search {
+            query: action_query,
+            queries,
+        }) => action_query
             .clone()
             .or_else(|| queries.as_ref().and_then(|items| items.first().cloned()))
             .unwrap_or_else(|| query.to_string()),
@@ -756,13 +773,15 @@ fn render_mcp_result_block(block: &serde_json::Value) -> String {
         Some("audio") => "<audio content>".to_string(),
         Some("resource_link") => format!(
             "link: {}",
-            block.get("uri")
+            block
+                .get("uri")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default()
         ),
         Some("resource") => format!(
             "embedded resource: {}",
-            block.get("uri")
+            block
+                .get("uri")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default()
         ),
@@ -813,10 +832,9 @@ fn render_exec_header_lines(
         ));
     }
 
-    for segment in truncate_segments_from_start(
-        continuation_segments,
-        EXEC_COMMAND_CONTINUATION_MAX_LINES,
-    ) {
+    for segment in
+        truncate_segments_from_start(continuation_segments, EXEC_COMMAND_CONTINUATION_MAX_LINES)
+    {
         lines.push(Line::from(vec![
             Span::styled(
                 COMMAND_CONTINUATION_PREFIX,
@@ -848,8 +866,8 @@ fn render_generic_tool_call_lines(
     };
     let header_text = if started { "Calling" } else { "Called" };
     let invocation = format_tool_invocation(name, input_preview);
-    let inline_invocation = !invocation.is_empty()
-        && invocation.len() + header_text.len() + 3 <= width.max(1);
+    let inline_invocation =
+        !invocation.is_empty() && invocation.len() + header_text.len() + 3 <= width.max(1);
 
     if inline_invocation {
         lines.push(Line::from(vec![
@@ -915,9 +933,7 @@ fn render_patch_summary_lines(
             PatchApplyStatus::Declined => Style::default().fg(Color::Yellow),
         };
         let title = match status {
-            PatchApplyStatus::InProgress => {
-            "• Applying patch"
-            }
+            PatchApplyStatus::InProgress => "• Applying patch",
             PatchApplyStatus::Completed => "• Applied patch",
             PatchApplyStatus::Failed => "• Failed patch",
             PatchApplyStatus::Declined => "• Declined patch",
@@ -952,7 +968,11 @@ fn render_patch_summary_lines(
             Span::raw(" "),
             Span::raw(format!("(+{} -{})", change.added, change.removed)),
         ]));
-        lines.extend(render_patch_diff_lines(change, DETAIL_CONTINUATION_PREFIX, mode));
+        lines.extend(render_patch_diff_lines(
+            change,
+            DETAIL_CONTINUATION_PREFIX,
+            mode,
+        ));
         return append_patch_output(lines, output_preview, width, mode);
     }
 
@@ -1077,11 +1097,15 @@ fn render_patch_diff_line(
     Line::from(vec![
         Span::styled(
             prefix.to_string(),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             number,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::raw(" "),
         Span::styled(marker, entry.style),
@@ -1166,7 +1190,10 @@ fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
     let line = line.strip_prefix("@@ -")?;
     let (old_part, rest) = line.split_once(" +")?;
     let (new_part, _) = rest.split_once(" @@")?;
-    Some((parse_hunk_range_start(old_part), parse_hunk_range_start(new_part)))
+    Some((
+        parse_hunk_range_start(old_part),
+        parse_hunk_range_start(new_part),
+    ))
 }
 
 fn parse_hunk_range_start(range: &str) -> usize {
@@ -1243,7 +1270,9 @@ fn render_prefixed_text_block(
             rendered.push(Line::from(vec![
                 Span::styled(
                     leader,
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::styled(segment, style),
             ]));
@@ -1331,11 +1360,15 @@ fn ellipsis_line(omitted: usize) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             DETAIL_CONTINUATION_PREFIX,
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             format!("… +{omitted} lines ({TRANSCRIPT_HINT})"),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
     ])
 }
