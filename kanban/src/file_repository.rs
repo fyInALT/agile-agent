@@ -48,6 +48,12 @@ impl FileKanbanRepository {
         Ok(repo)
     }
 
+    /// Create a new FileKanbanRepository from a workplace path
+    pub fn from_workplace(workplace_path: impl Into<PathBuf>) -> Result<Self, KanbanError> {
+        let kanban_path = workplace_path.into().join("kanban");
+        Self::new(kanban_path)
+    }
+
     /// Get the path for an element's JSON file
     fn element_path(&self, id: &ElementId) -> PathBuf {
         self.elements_path.join(format!("{}.json", id.as_str()))

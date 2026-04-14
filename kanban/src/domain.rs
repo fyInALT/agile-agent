@@ -388,10 +388,10 @@ pub struct Story {
 }
 
 impl Story {
-    pub fn new(title: &str, _content: &str) -> Self {
-        Story {
-            base: BaseElement::new(ElementType::Story, title),
-        }
+    pub fn new(title: &str, content: &str) -> Self {
+        let mut base = BaseElement::new(ElementType::Story, title);
+        base.content = content.to_string();
+        Story { base }
     }
 
     pub fn new_with_parent(title: &str, content: &str, parent: ElementId) -> Self {
@@ -578,6 +578,28 @@ impl KanbanElement {
             KanbanElement::Idea(i) => i.base.status = status,
             KanbanElement::Issue(i) => i.base.status = status,
             KanbanElement::Tips(t) => t.base.status = status,
+        }
+    }
+
+    pub fn set_created_at(&mut self, timestamp: chrono::DateTime<chrono::Utc>) {
+        match self {
+            KanbanElement::Sprint(s) => s.base.created_at = timestamp,
+            KanbanElement::Story(s) => s.base.created_at = timestamp,
+            KanbanElement::Task(t) => t.base.created_at = timestamp,
+            KanbanElement::Idea(i) => i.base.created_at = timestamp,
+            KanbanElement::Issue(i) => i.base.created_at = timestamp,
+            KanbanElement::Tips(t) => t.base.created_at = timestamp,
+        }
+    }
+
+    pub fn set_updated_at(&mut self, timestamp: chrono::DateTime<chrono::Utc>) {
+        match self {
+            KanbanElement::Sprint(s) => s.base.updated_at = timestamp,
+            KanbanElement::Story(s) => s.base.updated_at = timestamp,
+            KanbanElement::Task(t) => t.base.updated_at = timestamp,
+            KanbanElement::Idea(i) => i.base.updated_at = timestamp,
+            KanbanElement::Issue(i) => i.base.updated_at = timestamp,
+            KanbanElement::Tips(t) => t.base.updated_at = timestamp,
         }
     }
 
