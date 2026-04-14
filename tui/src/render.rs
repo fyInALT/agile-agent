@@ -518,6 +518,7 @@ mod tests {
             kind: StreamTextKind::Assistant,
             tail: "next".to_string(),
             pending_commits: std::collections::VecDeque::new(),
+            policy: crate::streaming::AdaptiveChunkingPolicy::default(),
         });
         state.open_transcript_overlay();
 

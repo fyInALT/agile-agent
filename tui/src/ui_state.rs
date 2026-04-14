@@ -15,6 +15,8 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
+use crate::streaming::AdaptiveChunkingPolicy;
+use crate::streaming::QueueSnapshot;
 use crate::composer::textarea::TextAreaState;
 use crate::transcript::overlay::TranscriptOverlayState;
 
@@ -169,6 +171,7 @@ impl TuiState {
                     kind: StreamTextKind::Assistant,
                     tail: text,
                     pending_commits: VecDeque::new(),
+                    policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
                 return;
@@ -178,6 +181,7 @@ impl TuiState {
                     kind: StreamTextKind::Thinking,
                     tail: text,
                     pending_commits: VecDeque::new(),
+                    policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
                 return;
@@ -252,7 +256,10 @@ impl TuiState {
         }
 
         if let Some(committed) = committed {
-            stream.pending_commits.push_back(committed);
+            stream.pending_commits.push_back(QueuedStreamCommit {
+                text: committed,
+                enqueued_at: Instant::now(),
+            });
         }
         self.drop_empty_active_stream();
         self.bump_active_entries_revision();
@@ -273,6 +280,7 @@ impl TuiState {
             kind,
             tail: String::new(),
             pending_commits: VecDeque::new(),
+            policy: AdaptiveChunkingPolicy::default(),
         });
         stream.kind = kind;
         stream
@@ -289,14 +297,30 @@ impl TuiState {
     }
 
     pub fn drain_active_stream_commit_tick(&mut self) -> bool {
-        let next = self
-            .active_stream
-            .as_mut()
-            .and_then(|stream| stream.pending_commits.pop_front().map(|text| (stream.kind, text)));
-        let Some((kind, text)) = next else {
+        let now = Instant::now();
+        let next = self.active_stream.as_mut().and_then(|stream| {
+            let snapshot = QueueSnapshot {
+                queued_lines: stream.pending_commits.len(),
+                oldest_age: stream.oldest_queued_age(now),
+            };
+            let decision = stream.policy.decide(snapshot, now);
+            let drain_count = decision.drain_lines.min(stream.pending_commits.len());
+            if drain_count == 0 {
+                return None;
+            }
+            let drained = stream
+                .pending_commits
+                .drain(..drain_count)
+                .map(|commit| commit.text)
+                .collect::<Vec<_>>();
+            Some((stream.kind, drained))
+        });
+        let Some((kind, drained)) = next else {
             return false;
         };
-        self.commit_stream_text(kind, &text);
+        for text in drained {
+            self.commit_stream_text(kind, &text);
+        }
         self.drop_empty_active_stream();
         self.bump_active_entries_revision();
         true
@@ -842,8 +866,8 @@ impl TuiState {
     }
 
     fn flush_stream_to_transcript(&mut self, stream: ActiveStream) {
-        for text in stream.pending_commits {
-            self.commit_stream_text(stream.kind, &text);
+        for commit in stream.pending_commits {
+            self.commit_stream_text(stream.kind, &commit.text);
         }
         if !stream.tail.is_empty() {
             self.commit_stream_text(stream.kind, &stream.tail);
@@ -984,7 +1008,8 @@ pub struct ActiveMcpToolCall {
 pub struct ActiveStream {
     pub(crate) kind: StreamTextKind,
     pub(crate) tail: String,
-    pub(crate) pending_commits: VecDeque<String>,
+    pub(crate) pending_commits: VecDeque<QueuedStreamCommit>,
+    pub(crate) policy: AdaptiveChunkingPolicy,
 }
 
 impl ActiveStream {
@@ -994,6 +1019,18 @@ impl ActiveStream {
             StreamTextKind::Thinking => TranscriptEntry::Thinking(self.tail.clone()),
         }
     }
+
+    fn oldest_queued_age(&self, now: Instant) -> Option<std::time::Duration> {
+        self.pending_commits
+            .front()
+            .map(|commit| now.saturating_duration_since(commit.enqueued_at))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedStreamCommit {
+    pub(crate) text: String,
+    pub(crate) enqueued_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1574,6 +1611,35 @@ mod tests {
                 ..
             }) if tail == "next"
         ));
+    }
+
+    #[test]
+    fn active_stream_commit_tick_catches_up_large_backlog() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        for index in 1..=8 {
+            state.append_active_assistant_chunk(&format!("line {index}\n"));
+        }
+        state.append_active_assistant_chunk("tail");
+
+        assert!(state.drain_active_stream_commit_tick());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text))
+                if text == "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
+        ));
+        assert!(matches!(
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Assistant,
+                tail,
+                ..
+            }) if tail == "tail"
+        ));
+        assert!(!state.drain_active_stream_commit_tick());
     }
 
     #[test]
