@@ -2,6 +2,7 @@
 members = [
     "cli",
     "core",
+    "kanban",
     "test-support",
     "tui",
 ]
