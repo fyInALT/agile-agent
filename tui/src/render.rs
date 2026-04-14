@@ -235,22 +235,34 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let entries = state.overlay_entries_for_display();
-    let lines = cells::flatten_cells(&cells::build_overlay_cells(&entries, chunks[1].width));
+    let mut lines = cells::flatten_cells(&cells::build_overlay_cells(
+        &state.app().transcript,
+        chunks[1].width,
+    ));
+    let active_revision = state.active_entries_revision_key();
+    let active_entries = state.active_entries_for_display();
+    let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
+    overlay.sync_live_tail(chunks[1].width, active_revision, || {
+        cells::flatten_cells(&cells::build_overlay_cells(
+            &active_entries,
+            chunks[1].width,
+        ))
+    });
+    if !lines.is_empty() && !overlay.live_tail_lines().is_empty() {
+        lines.push(Line::from(""));
+    }
+    lines.extend_from_slice(overlay.live_tail_lines());
     let content_height = lines.len();
     let max_scroll = content_height.saturating_sub(chunks[1].height as usize);
-    let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
-    if overlay.scroll_offset > max_scroll {
-        overlay.scroll_offset = max_scroll;
-    }
-    let paragraph =
-        Paragraph::new(lines).scroll((overlay.scroll_offset.min(u16::MAX as usize) as u16, 0));
+    overlay.set_max_scroll(max_scroll);
+    let scroll_offset = overlay.render_scroll_offset();
+    let paragraph = Paragraph::new(lines).scroll((scroll_offset.min(u16::MAX as usize) as u16, 0));
     frame.render_widget(paragraph, chunks[1]);
 
     let percent = if max_scroll == 0 {
         100
     } else {
-        (((overlay.scroll_offset as f32 / max_scroll as f32) * 100.0).round() as u8).min(100)
+        (((scroll_offset as f32 / max_scroll as f32) * 100.0).round() as u8).min(100)
     };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(

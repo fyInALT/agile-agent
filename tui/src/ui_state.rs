@@ -21,6 +21,7 @@ use crate::transcript::overlay::TranscriptOverlayState;
 pub struct TuiState {
     pub session: RuntimeSession,
     pub active_entries: Vec<TranscriptEntry>,
+    pub active_entries_revision: u64,
     pub composer: TextArea,
     pub composer_state: TextAreaState,
     pub transcript_overlay: Option<TranscriptOverlayState>,
@@ -40,6 +41,7 @@ impl TuiState {
         Self {
             session,
             active_entries: Vec::new(),
+            active_entries_revision: 0,
             composer,
             composer_state: TextAreaState::default(),
             transcript_overlay: None,
@@ -66,10 +68,19 @@ impl TuiState {
         self.active_entries.clone()
     }
 
+    #[cfg(test)]
     pub fn overlay_entries_for_display(&self) -> Vec<TranscriptEntry> {
         let mut entries = self.session.app.transcript.clone();
         entries.extend(self.active_entries_for_display());
         entries
+    }
+
+    pub fn active_entries_revision_key(&self) -> Option<u64> {
+        (!self.active_entries.is_empty()).then_some(self.active_entries_revision)
+    }
+
+    fn bump_active_entries_revision(&mut self) {
+        self.active_entries_revision = self.active_entries_revision.wrapping_add(1);
     }
 
     pub fn push_active_exec_started(
@@ -91,6 +102,7 @@ impl TuiState {
             exit_code: None,
             duration_ms: None,
         });
+        self.bump_active_entries_revision();
     }
 
     pub fn append_active_exec_output(&mut self, call_id: Option<String>, delta: &str) {
@@ -111,6 +123,7 @@ impl TuiState {
                     output_preview
                         .get_or_insert_with(String::new)
                         .push_str(delta);
+                    self.bump_active_entries_revision();
                     return;
                 }
             }
@@ -158,6 +171,7 @@ impl TuiState {
                         exit_code,
                         duration_ms,
                     });
+                self.bump_active_entries_revision();
                 return;
             }
         }
@@ -191,6 +205,7 @@ impl TuiState {
             exit_code: None,
             duration_ms: None,
         });
+        self.bump_active_entries_revision();
     }
 
     pub fn finish_active_generic_tool_call(
@@ -235,6 +250,7 @@ impl TuiState {
                         exit_code,
                         duration_ms,
                     });
+                self.bump_active_entries_revision();
                 return;
             }
         }
@@ -263,6 +279,7 @@ impl TuiState {
             status: PatchApplyStatus::InProgress,
             output_preview: None,
         });
+        self.bump_active_entries_revision();
     }
 
     pub fn append_active_patch_apply_output(&mut self, call_id: Option<String>, delta: &str) {
@@ -283,6 +300,7 @@ impl TuiState {
                     output_preview
                         .get_or_insert_with(String::new)
                         .push_str(delta);
+                    self.bump_active_entries_revision();
                     return;
                 }
             }
@@ -325,6 +343,7 @@ impl TuiState {
                     status,
                     output_preview,
                 });
+                self.bump_active_entries_revision();
                 return;
             }
         }
@@ -344,6 +363,7 @@ impl TuiState {
             action: None,
             started: true,
         });
+        self.bump_active_entries_revision();
     }
 
     pub fn finish_active_web_search(
@@ -374,6 +394,7 @@ impl TuiState {
                     action,
                     started: false,
                 });
+                self.bump_active_entries_revision();
                 return;
             }
         }
@@ -399,6 +420,7 @@ impl TuiState {
             status: McpToolCallStatus::InProgress,
             is_error: false,
         });
+        self.bump_active_entries_revision();
     }
 
     pub fn finish_active_mcp_tool_call(
@@ -434,6 +456,7 @@ impl TuiState {
                     status,
                     is_error,
                 });
+                self.bump_active_entries_revision();
                 return;
             }
         }
@@ -449,6 +472,9 @@ impl TuiState {
     }
 
     pub fn finalize_active_entries_after_failure(&mut self, reason: Option<&str>) {
+        if self.active_entries.is_empty() {
+            return;
+        }
         for entry in std::mem::take(&mut self.active_entries) {
             match entry {
                 TranscriptEntry::ExecCommand {
@@ -533,6 +559,7 @@ impl TuiState {
                 other => self.session.app.transcript.push(other),
             }
         }
+        self.bump_active_entries_revision();
     }
 
     pub fn sync_app_input_from_composer(&mut self) {
@@ -617,6 +644,7 @@ impl TuiState {
         self.composer_state = TextAreaState::default();
         self.transcript_overlay = None;
         self.active_entries.clear();
+        self.bump_active_entries_revision();
         self.transcript_scroll_offset = 0;
         self.transcript_max_scroll = 0;
         self.transcript_follow_tail = true;
