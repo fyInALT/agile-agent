@@ -1,5 +1,6 @@
 //! Core domain types for the kanban system
 
+use crate::types::{StatusType, ElementTypeIdentifier};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::Hash;
@@ -43,6 +44,25 @@ impl Status {
     pub fn is_terminal(&self) -> bool {
         matches!(self, Status::Verified)
     }
+
+    /// Convert to new trait-based StatusType
+    pub fn to_status_type(&self) -> StatusType {
+        StatusType::new(self.as_str())
+    }
+
+    /// Get the status name as lowercase string
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Status::Plan => "plan",
+            Status::Backlog => "backlog",
+            Status::Blocked => "blocked",
+            Status::Ready => "ready",
+            Status::Todo => "todo",
+            Status::InProgress => "in_progress",
+            Status::Done => "done",
+            Status::Verified => "verified",
+        }
+    }
 }
 
 impl std::fmt::Display for Status {
@@ -56,6 +76,30 @@ impl std::fmt::Display for Status {
             Status::InProgress => write!(f, "InProgress"),
             Status::Done => write!(f, "Done"),
             Status::Verified => write!(f, "Verified"),
+        }
+    }
+}
+
+/// Convert from Status enum to StatusType
+impl From<Status> for StatusType {
+    fn from(status: Status) -> Self {
+        status.to_status_type()
+    }
+}
+
+/// Convert from StatusType to Status enum (for known statuses)
+impl From<StatusType> for Status {
+    fn from(status_type: StatusType) -> Self {
+        match status_type.name() {
+            "plan" => Status::Plan,
+            "backlog" => Status::Backlog,
+            "blocked" => Status::Blocked,
+            "ready" => Status::Ready,
+            "todo" => Status::Todo,
+            "in_progress" => Status::InProgress,
+            "done" => Status::Done,
+            "verified" => Status::Verified,
+            _ => Status::Plan, // Default fallback for unknown statuses
         }
     }
 }
@@ -124,6 +168,33 @@ impl ElementType {
             "issue" => Some(ElementType::Issue),
             "tips" | "tip" => Some(ElementType::Tips), // Accept both
             _ => None,
+        }
+    }
+
+    /// Convert to new trait-based ElementTypeIdentifier
+    pub fn to_element_type_identifier(&self) -> ElementTypeIdentifier {
+        ElementTypeIdentifier::new(self.as_str())
+    }
+}
+
+/// Convert from ElementType enum to ElementTypeIdentifier
+impl From<ElementType> for ElementTypeIdentifier {
+    fn from(elem_type: ElementType) -> Self {
+        elem_type.to_element_type_identifier()
+    }
+}
+
+/// Convert from ElementTypeIdentifier to ElementType enum (for known types)
+impl From<ElementTypeIdentifier> for ElementType {
+    fn from(type_id: ElementTypeIdentifier) -> Self {
+        match type_id.name() {
+            "sprint" => ElementType::Sprint,
+            "story" => ElementType::Story,
+            "task" => ElementType::Task,
+            "idea" => ElementType::Idea,
+            "issue" => ElementType::Issue,
+            "tips" => ElementType::Tips,
+            _ => ElementType::Task, // Default fallback for unknown types
         }
     }
 }
