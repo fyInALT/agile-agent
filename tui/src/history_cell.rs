@@ -293,29 +293,46 @@ fn render_exec_transcript_lines(
     let mut lines = Vec::new();
     let display_command = input_preview.map(strip_shell_wrapper).unwrap_or_default();
     if !display_command.trim().is_empty() {
-        let command_lines = display_command.lines().collect::<Vec<_>>();
-        let first_segments = wrap_text_segments(
-            command_lines.first().copied().unwrap_or_default(),
-            width.saturating_sub(2).max(1) as usize,
-        );
-        let first_segment = first_segments.first().cloned().unwrap_or_default();
-        lines.push(Line::from(vec![
-            Span::styled("$ ", Style::default().fg(Color::Magenta)),
-            Span::styled(first_segment, Style::default().fg(Color::Magenta)),
-        ]));
+        // Check if this is a git command for friendly label display
+        let git_label = detect_git_command(&display_command);
 
-        let mut continuation_segments = first_segments.into_iter().skip(1).collect::<Vec<_>>();
-        for raw_line in command_lines.into_iter().skip(1) {
-            continuation_segments.extend(wrap_text_segments(
-                raw_line,
-                width.saturating_sub(4).max(1) as usize,
-            ));
-        }
-        for segment in continuation_segments {
+        if let Some(ref git) = git_label {
+            // Show git-friendly label in transcript
+            let label_with_detail = if let Some(ref detail) = git.detail {
+                format!("{} ({})", git.label, detail)
+            } else {
+                git.label.to_string()
+            };
             lines.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(segment, Style::default().fg(Color::Magenta)),
+                Span::styled("$ ", Style::default().fg(Color::Magenta)),
+                Span::styled(label_with_detail, Style::default().fg(Color::Magenta)),
             ]));
+        } else {
+            // Show raw command for non-git commands
+            let command_lines = display_command.lines().collect::<Vec<_>>();
+            let first_segments = wrap_text_segments(
+                command_lines.first().copied().unwrap_or_default(),
+                width.saturating_sub(2).max(1) as usize,
+            );
+            let first_segment = first_segments.first().cloned().unwrap_or_default();
+            lines.push(Line::from(vec![
+                Span::styled("$ ", Style::default().fg(Color::Magenta)),
+                Span::styled(first_segment, Style::default().fg(Color::Magenta)),
+            ]));
+
+            let mut continuation_segments = first_segments.into_iter().skip(1).collect::<Vec<_>>();
+            for raw_line in command_lines.into_iter().skip(1) {
+                continuation_segments.extend(wrap_text_segments(
+                    raw_line,
+                    width.saturating_sub(4).max(1) as usize,
+                ));
+            }
+            for segment in continuation_segments {
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(segment, Style::default().fg(Color::Magenta)),
+                ]));
+            }
         }
     }
 
@@ -2754,6 +2771,42 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Non-git commands should show the raw command
+        assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_exec_transcript_shows_git_label_for_git_diff() {
+        let lines = render_exec_transcript_lines(
+            None,
+            Some("git diff --stat HEAD~1"),
+            Some("file.rs | 10 +++----"),
+            ExecCommandStatus::Completed,
+            Some(0),
+            Some(100),
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Transcript should show git-friendly label
+        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' in transcript: {:?}", rendered);
+        // Should not show raw command
+        assert!(!rendered.iter().any(|line| line.contains("git diff")), "Should not contain raw command in transcript: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_exec_transcript_shows_non_git_command() {
+        let lines = render_exec_transcript_lines(
+            None,
+            Some("cargo build"),
+            Some("Compiling..."),
+            ExecCommandStatus::Completed,
+            Some(0),
+            Some(1000),
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Non-git commands should show raw command
         assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
     }
 }
