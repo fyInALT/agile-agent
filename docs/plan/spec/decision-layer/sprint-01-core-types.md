@@ -24,6 +24,7 @@ This sprint adopts **Trait-based architecture** for extensibility:
 - Registry pattern (plugin-like registration)
 
 See [Architecture Evolution Proposal](architecture-evolution.md) for rationale.
+See [Architecture Reflection](architecture-reflection.md) for additional concerns addressed.
 
 ## Sprint Goal
 
@@ -31,25 +32,26 @@ Establish extensible core types for decision layer using Trait + Registry patter
 
 ## Stories
 
-### Story 1.1: DecisionSituation Trait and Registry
+### Story 1.1: DecisionSituation Trait and Thread-Safe Registry
 
 **Priority**: P0
-**Effort**: 4 points
+**Effort**: 5 points
 **Status**: Backlog
 
-Define DecisionSituation trait and SituationRegistry for extensible decision situations.
+Define DecisionSituation trait with debug info and thread-safe SituationRegistry.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
 | T1.1.1 | Create `SituationType` identifier struct | Todo | - |
-| T1.1.2 | Define `DecisionSituation` trait | Todo | - |
-| T1.1.3 | Create `SituationRegistry` struct | Todo | - |
-| T1.1.4 | Implement registry `register()` method | Todo | - |
-| T1.1.5 | Implement registry `get()` method | Todo | - |
-| T1.1.6 | Implement registry `build_from_event()` method | Todo | - |
-| T1.1.7 | Write unit tests for trait and registry | Todo | - |
+| T1.1.2 | Define `DecisionSituation` trait with implementation_type() | Todo | - |
+| T1.1.3 | Create thread-safe `SituationRegistry` with RwLock | Todo | - |
+| T1.1.4 | Implement registry `register()` (thread-safe) | Todo | - |
+| T1.1.5 | Implement registry `get()` (thread-safe) | Todo | - |
+| T1.1.6 | Implement `build_from_event()` with fallback chain | Todo | - |
+| T1.1.7 | Implement `GenericUnknownSituation` fallback | Todo | - |
+| T1.1.8 | Write unit tests for thread-safe registry | Todo | - |
 
 #### TDD Test Tasks
 
@@ -57,9 +59,11 @@ Define DecisionSituation trait and SituationRegistry for extensible decision sit
 |---------|------------|
 | T1.1.T1 | SituationType creation and comparison |
 | T1.1.T2 | Trait methods return correct values |
-| T1.1.T3 | Registry stores and retrieves situations |
-| T1.1.T4 | Registry builds situation from event |
-| T1.1.T5 | Registry handles unknown type gracefully |
+| T1.1.T3 | implementation_type() returns concrete type name |
+| T1.1.T4 | Registry stores and retrieves situations (thread-safe) |
+| T1.1.T5 | Registry builds situation from event |
+| T1.1.T6 | Registry handles unknown type → GenericUnknownSituation |
+| T1.1.T7 | Concurrent registration works correctly |
 
 #### Acceptance Criteria
 
@@ -91,10 +95,18 @@ impl SituationType {
     }
 }
 
-/// Decision situation trait - extensible
+/// Decision situation trait - extensible with debug info
 pub trait DecisionSituation: Send + Sync + 'static {
     /// Situation type identifier
     fn situation_type(&self) -> SituationType;
+    
+    /// NEW: Concrete implementation type name (for debugging)
+    fn implementation_type(&self) -> &'static str;
+    
+    /// NEW: Debug representation
+    fn debug_info(&self) -> String {
+        format!("{} ({})", self.implementation_type(), self.situation_type().name)
+    }
     
     /// Whether requires human escalation
     fn requires_human(&self) -> bool;
@@ -107,6 +119,9 @@ pub trait DecisionSituation: Send + Sync + 'static {
     
     /// Available actions for this situation
     fn available_actions(&self) -> Vec<ActionType>;
+    
+    /// NEW: Serialize parameters for persistence (optional)
+    fn serialize_params(&self) -> Option<String> { None }
     
     /// Clone into boxed
     fn clone_boxed(&self) -> Box<dyn DecisionSituation>;
@@ -133,13 +148,13 @@ impl ActionType {
     }
 }
 
-/// Situation registry - extensible plugin system
+/// Situation registry - THREAD-SAFE with RwLock
 pub struct SituationRegistry {
-    /// Registered situation builders
-    builders: HashMap<SituationType, SituationBuilder>,
+    /// Registered situation builders (thread-safe)
+    builders: RwLock<HashMap<SituationType, SituationBuilder>>,
     
-    /// Default situations (fallback)
-    defaults: HashMap<SituationType, Box<dyn DecisionSituation>>,
+    /// Default situations (fallback, thread-safe)
+    defaults: RwLock<HashMap<SituationType, Box<dyn DecisionSituation>>>,
 }
 
 /// Situation builder function type
@@ -148,47 +163,112 @@ type SituationBuilder = Box<dyn Fn(&ProviderEvent) -> Option<Box<dyn DecisionSit
 impl SituationRegistry {
     pub fn new() -> Self {
         Self {
-            builders: HashMap::new(),
-            defaults: HashMap::new(),
+            builders: RwLock::new(HashMap::new()),
+            defaults: RwLock::new(HashMap::new()),
         }
     }
     
-    /// Register a situation builder
+    /// THREAD-SAFE: Register a situation builder
     pub fn register_builder(
-        &mut self,
+        &self,
         type: SituationType,
         builder: impl Fn(&ProviderEvent) -> Option<Box<dyn DecisionSituation>> + Send + Sync + 'static,
     ) {
-        self.builders.insert(type, Box::new(builder));
+        self.builders.write().unwrap().insert(type, Box::new(builder));
     }
     
-    /// Register a default situation (used when builder fails)
-    pub fn register_default(&mut self, situation: Box<dyn DecisionSituation>) {
-        self.defaults.insert(situation.situation_type(), situation);
+    /// THREAD-SAFE: Register a default situation
+    pub fn register_default(&self, situation: Box<dyn DecisionSituation>) {
+        self.defaults.write().unwrap().insert(situation.situation_type(), situation);
     }
     
-    /// Get situation by type
-    pub fn get(&self, type: &SituationType) -> Option<&dyn DecisionSituation> {
-        self.defaults.get(type).map(|b| b.as_ref())
+    /// THREAD-SAFE: Get situation by type
+    pub fn get(&self, type: &SituationType) -> Option<Box<dyn DecisionSituation>> {
+        self.defaults.read().unwrap().get(type).map(|d| d.clone_boxed())
     }
     
-    /// Build situation from provider event
+    /// THREAD-SAFE: Build situation with EXPLICIT FALLBACK CHAIN
     pub fn build_from_event(&self, type: SituationType, event: &ProviderEvent) 
-        -> Option<Box<dyn DecisionSituation>> {
-        // Try builder first
-        if let Some(builder) = self.builders.get(&type) {
-            if let Some(situation) = builder(event) {
-                return Some(situation);
+        -> Box<dyn DecisionSituation> {
+        
+        // 1. Try exact type builder
+        {
+            let builders = self.builders.read().unwrap();
+            if let Some(builder) = builders.get(&type) {
+                if let Some(situation) = builder(event) {
+                    return situation;
+                }
             }
         }
         
-        // Fall back to default
-        self.defaults.get(&type).map(|d| d.clone_boxed())
+        // 2. Try base type (without subtype) - e.g., "waiting_for_choice" for "waiting_for_choice.codex"
+        let base_type = type.base_type();
+        if base_type != type {
+            let builders = self.builders.read().unwrap();
+            if let Some(builder) = builders.get(&base_type) {
+                if let Some(situation) = builder(event) {
+                    return situation;
+                }
+            }
+        }
+        
+        // 3. Try default for exact type
+        {
+            let defaults = self.defaults.read().unwrap();
+            if let Some(default) = defaults.get(&type) {
+                return default.clone_boxed();
+            }
+        }
+        
+        // 4. Try default for base type
+        if base_type != type {
+            let defaults = self.defaults.read().unwrap();
+            if let Some(default) = defaults.get(&base_type) {
+                return default.clone_boxed();
+            }
+        }
+        
+        // 5. ULTIMATE FALLBACK - GenericUnknownSituation (always requires human)
+        Box::new(GenericUnknownSituation { detected_type: type.clone() })
     }
     
-    /// Check if type is registered
+    /// THREAD-SAFE: Check if type is registered
     pub fn is_registered(&self, type: &SituationType) -> bool {
-        self.builders.contains_key(type) || self.defaults.contains_key(type)
+        let builders = self.builders.read().unwrap();
+        let defaults = self.defaults.read().unwrap();
+        builders.contains_key(type) || defaults.contains_key(type)
+    }
+}
+
+/// SituationType base type extraction
+impl SituationType {
+    pub fn base_type(&self) -> SituationType {
+        if self.subtype.is_some() {
+            SituationType::new(&self.name)
+        } else {
+            self.clone()
+        }
+    }
+}
+
+/// ULTIMATE FALLBACK: Generic unknown situation
+pub struct GenericUnknownSituation {
+    detected_type: SituationType,
+}
+
+impl DecisionSituation for GenericUnknownSituation {
+    fn situation_type(&self) -> SituationType { self.detected_type.clone() }
+    fn implementation_type(&self) -> &'static str { "GenericUnknownSituation" }
+    fn requires_human(&self) -> bool { true }  // Unknown → ALWAYS require human
+    fn human_urgency(&self) -> UrgencyLevel { UrgencyLevel::High }
+    fn to_prompt_text(&self) -> String {
+        format!("Unknown situation detected: {}\nRequires human intervention.", self.detected_type.name)
+    }
+    fn available_actions(&self) -> Vec<ActionType> {
+        vec![ActionType::new("request_human")]
+    }
+    fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
+        Box::new(self.clone())
     }
 }
 
@@ -515,24 +595,26 @@ impl DecisionSituation for ErrorSituation {
 
 ---
 
-### Story 1.3: DecisionAction Trait and Registry
+### Story 1.3: DecisionAction Trait and Thread-Safe Registry
 
 **Priority**: P0
-**Effort**: 3 points
+**Effort**: 4 points
 **Status**: Backlog
 
-Define DecisionAction trait and ActionRegistry for extensible decision actions.
+Define DecisionAction trait with serialization support and thread-safe ActionRegistry.
 
 #### Tasks
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T1.3.1 | Define `DecisionAction` trait | Todo | - |
+| T1.3.1 | Define `DecisionAction` trait with serialize/deserialize | Todo | - |
 | T1.3.2 | Define `ActionResult` enum | Todo | - |
-| T1.3.3 | Create `ActionRegistry` struct | Todo | - |
-| T1.3.4 | Implement registry `register()` method | Todo | - |
-| T1.3.5 | Implement registry `parse()` method | Todo | - |
-| T1.3.6 | Write unit tests for action trait | Todo | - |
+| T1.3.3 | Create thread-safe `ActionRegistry` with RwLock | Todo | - |
+| T1.3.4 | Implement registry `register()` (thread-safe) | Todo | - |
+| T1.3.5 | Implement registry `parse()` for LLM output | Todo | - |
+| T1.3.6 | Implement `serialize_params()` / `deserialize()` | Todo | - |
+| T1.3.7 | Create `DecisionOutputSerde` for persistence | Todo | - |
+| T1.3.8 | Write unit tests for serialization | Todo | - |
 
 #### TDD Test Tasks
 
@@ -540,23 +622,30 @@ Define DecisionAction trait and ActionRegistry for extensible decision actions.
 |---------|------------|
 | T1.3.T1 | ActionType creation matches |
 | T1.3.T2 | Trait methods return correct values |
-| T1.3.T3 | Registry stores and retrieves actions |
-| T1.3.T4 | Registry parses action from LLM output |
-| T1.3.T5 | ActionResult variants work correctly |
+| T1.3.T3 | implementation_type() returns concrete type |
+| T1.3.T4 | Registry stores and retrieves actions (thread-safe) |
+| T1.3.T5 | Registry parses action from LLM output |
+| T1.3.T6 | serialize_params() produces valid JSON |
+| T1.3.T7 | deserialize() reconstructs action |
+| T1.3.T8 | DecisionOutputSerde roundtrip works |
 
 #### Acceptance Criteria
 
-- Action trait defines execution interface
-- Registry supports parsing from LLM output
+- Action trait defines execution + serialization interface
+- Registry thread-safe with RwLock
+- Actions can be serialized/deserialized for persistence
 - ActionResult tracks execution outcome
 
 #### Technical Notes
 
 ```rust
-/// Decision action trait - extensible
+/// Decision action trait - extensible with serialization
 pub trait DecisionAction: Send + Sync + 'static {
     /// Action type identifier
     fn action_type(&self) -> ActionType;
+    
+    /// NEW: Concrete implementation type name (for debugging)
+    fn implementation_type(&self) -> &'static str;
     
     /// Execute action on main agent
     fn execute(&self, context: &DecisionContext, agent: &mut MainAgentConnection) 
@@ -564,6 +653,9 @@ pub trait DecisionAction: Send + Sync + 'static {
     
     /// Serialize for prompt (tells LLM how to output)
     fn to_prompt_format(&self) -> String;
+    
+    /// NEW: Serialize parameters to JSON (for persistence)
+    fn serialize_params(&self) -> String;
     
     /// Clone into boxed
     fn clone_boxed(&self) -> Box<dyn DecisionAction>;
@@ -596,61 +688,132 @@ pub enum ActionResult {
     },
 }
 
-/// Action registry - extensible
+/// Action registry - THREAD-SAFE with RwLock and serialization
 pub struct ActionRegistry {
-    /// Registered actions by type
-    actions: HashMap<ActionType, Box<dyn DecisionAction>>,
+    /// Registered actions by type (thread-safe)
+    actions: RwLock<HashMap<ActionType, Box<dyn DecisionAction>>>,
     
-    /// Action parsers (parse from LLM output)
-    parsers: HashMap<ActionType, ActionParser>,
+    /// Action parsers (parse from LLM output, thread-safe)
+    parsers: RwLock<HashMap<ActionType, ActionParser>>,
+    
+    /// NEW: Action deserializers (for persistence)
+    deserializers: RwLock<HashMap<ActionType, ActionDeserializer>>,
 }
 
 /// Action parser function type
 type ActionParser = Box<dyn Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync>;
 
+/// NEW: Action deserializer function type
+type ActionDeserializer = Box<dyn Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync>;
+
 impl ActionRegistry {
     pub fn new() -> Self {
         Self {
-            actions: HashMap::new(),
-            parsers: HashMap::new(),
+            actions: RwLock::new(HashMap::new()),
+            parsers: RwLock::new(HashMap::new()),
+            deserializers: RwLock::new(HashMap::new()),
         }
     }
     
-    /// Register an action
-    pub fn register(&mut self, action: Box<dyn DecisionAction>) {
-        self.actions.insert(action.action_type(), action);
+    /// THREAD-SAFE: Register an action
+    pub fn register(&self, action: Box<dyn DecisionAction>) {
+        self.actions.write().unwrap().insert(action.action_type(), action);
     }
     
-    /// Register an action parser
+    /// THREAD-SAFE: Register an action parser
     pub fn register_parser(
-        &mut self,
+        &self,
         type: ActionType,
         parser: impl Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync + 'static,
     ) {
-        self.parsers.insert(type, Box::new(parser));
+        self.parsers.write().unwrap().insert(type, Box::new(parser));
     }
     
-    /// Get action by type
-    pub fn get(&self, type: &ActionType) -> Option<&dyn DecisionAction> {
-        self.actions.get(type).map(|b| b.as_ref())
+    /// NEW: THREAD-SAFE: Register an action deserializer
+    pub fn register_deserializer(
+        &self,
+        type: ActionType,
+        deserializer: impl Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync + 'static,
+    ) {
+        self.deserializers.write().unwrap().insert(type, Box::new(deserializer));
     }
     
-    /// Parse action from LLM output
+    /// THREAD-SAFE: Get action by type
+    pub fn get(&self, type: &ActionType) -> Option<Box<dyn DecisionAction>> {
+        self.actions.read().unwrap().get(type).map(|a| a.clone_boxed())
+    }
+    
+    /// THREAD-SAFE: Parse action from LLM output
     pub fn parse(&self, type: ActionType, output: &str) -> Option<Box<dyn DecisionAction>> {
-        self.parsers.get(&type).and_then(|parser| parser(output))
+        self.parsers.read().unwrap().get(&type).and_then(|parser| parser(output))
     }
     
-    /// Get all registered action types
+    /// NEW: Deserialize action from serialized params
+    pub fn deserialize(&self, type: &ActionType, params: &str) -> Option<Box<dyn DecisionAction>> {
+        self.deserializers.read().unwrap().get(type).and_then(|deser| deser(params))
+    }
+    
+    /// THREAD-SAFE: Get all registered action types
     pub fn registered_types(&self) -> Vec<ActionType> {
-        self.actions.keys().cloned().collect()
+        self.actions.read().unwrap().keys().cloned().collect()
     }
     
     /// Generate prompt format for all actions
     pub fn generate_prompt_formats(&self) -> String {
-        self.actions.values()
+        self.actions.read().unwrap().values()
             .map(|a| a.to_prompt_format())
             .collect::<Vec<_>>()
             .join("\n\n")
+    }
+}
+
+/// NEW: DecisionOutput serde format (for persistence)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionOutputSerde {
+    /// Action types
+    action_types: Vec<String>,
+    
+    /// Serialized action parameters
+    action_params: Vec<String>,
+    
+    /// Reasoning
+    reasoning: String,
+    
+    /// Confidence
+    confidence: f64,
+    
+    /// Human requested
+    human_requested: bool,
+}
+
+impl DecisionOutput {
+    /// Serialize to serde format
+    pub fn to_serde(&self) -> DecisionOutputSerde {
+        DecisionOutputSerde {
+            action_types: self.actions.iter().map(|a| a.action_type().name.clone()).collect(),
+            action_params: self.actions.iter().map(|a| a.serialize_params()).collect(),
+            reasoning: self.reasoning.clone(),
+            confidence: self.confidence,
+            human_requested: self.human_requested,
+        }
+    }
+    
+    /// Deserialize from serde format using registry
+    pub fn from_serde(serde: DecisionOutputSerde, registry: &ActionRegistry) -> Result<Self> {
+        let actions = serde.action_types.iter()
+            .zip(serde.action_params.iter())
+            .filter_map(|(type, params)| {
+                let action_type = ActionType::new(type);
+                registry.deserialize(&action_type, params)
+            })
+            .collect();
+        
+        Ok(Self {
+            actions,
+            reasoning: serde.reasoning,
+            confidence: serde.confidence,
+            human_requested: serde.human_requested,
+        })
     }
 }
 
