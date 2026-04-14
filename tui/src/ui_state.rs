@@ -264,6 +264,10 @@ impl TuiState {
         (!lines.is_empty()).then_some(lines)
     }
 
+    pub fn active_cell_preview_cells(&self, width: u16) -> Vec<cells::TranscriptCell> {
+        cells::build_live_tail_cells(&self.active_entries_for_display(), width)
+    }
+
     #[cfg(test)]
     pub(crate) fn active_tool_is_empty(&self) -> bool {
         self.active_tool_ref().is_none()
@@ -1310,6 +1314,38 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(rendered.iter().any(|line| line == "tail"));
+    }
+
+    #[test]
+    fn active_cell_preview_cells_render_active_exec() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.set_active_entry_for_test(TranscriptEntry::ExecCommand {
+            call_id: Some("call-1".to_string()),
+            source: Some("agent".to_string()),
+            allow_exploring_group: true,
+            input_preview: Some("printf hello".to_string()),
+            output_preview: Some("hello".to_string()),
+            status: ExecCommandStatus::InProgress,
+            exit_code: None,
+            duration_ms: None,
+        });
+
+        let rendered = state
+            .active_cell_preview_cells(80)
+            .into_iter()
+            .flat_map(|cell| cell.lines)
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line == "• Running printf hello"));
     }
 
     #[test]
