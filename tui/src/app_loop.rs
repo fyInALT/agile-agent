@@ -293,7 +293,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         break;
                     }
                     ProviderEvent::Finished => {
-                        state.finalize_active_entries_after_failure(None);
+                        state.flush_active_entries_to_transcript();
                         state.app_mut().finish_provider_response();
                         if state.app().active_task_id.is_some() {
                             match task_engine::resolve_active_task_after_turn(

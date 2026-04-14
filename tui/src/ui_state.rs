@@ -546,97 +546,12 @@ impl TuiState {
         );
     }
 
+    pub fn flush_active_entries_to_transcript(&mut self) {
+        self.drain_active_entries(None);
+    }
+
     pub fn finalize_active_entries_after_failure(&mut self, reason: Option<&str>) {
-        if self.active_entries.is_empty() {
-            return;
-        }
-        for entry in std::mem::take(&mut self.active_entries) {
-            match entry {
-                TranscriptEntry::Assistant(text) => self.session.app.append_assistant_chunk(&text),
-                TranscriptEntry::Thinking(text) => self.session.app.append_thinking_chunk(&text),
-                TranscriptEntry::ExecCommand {
-                    call_id,
-                    source,
-                    allow_exploring_group,
-                    input_preview,
-                    output_preview,
-                    status: ExecCommandStatus::InProgress,
-                    exit_code,
-                    duration_ms,
-                } => self
-                    .session
-                    .app
-                    .transcript
-                    .push(TranscriptEntry::ExecCommand {
-                        call_id,
-                        source,
-                        allow_exploring_group,
-                        input_preview,
-                        output_preview,
-                        status: ExecCommandStatus::Failed,
-                        exit_code,
-                        duration_ms,
-                    }),
-                TranscriptEntry::GenericToolCall {
-                    name,
-                    call_id,
-                    input_preview,
-                    output_preview,
-                    started: true,
-                    ..
-                } => self
-                    .session
-                    .app
-                    .transcript
-                    .push(TranscriptEntry::GenericToolCall {
-                        name,
-                        call_id,
-                        input_preview,
-                        output_preview,
-                        success: false,
-                        started: false,
-                        exit_code: None,
-                        duration_ms: None,
-                    }),
-                TranscriptEntry::PatchApply {
-                    call_id,
-                    changes,
-                    status: PatchApplyStatus::InProgress,
-                    output_preview,
-                } => self
-                    .session
-                    .app
-                    .transcript
-                    .push(TranscriptEntry::PatchApply {
-                        call_id,
-                        changes,
-                        status: PatchApplyStatus::Failed,
-                        output_preview,
-                    }),
-                TranscriptEntry::WebSearch { started: true, .. } => {}
-                TranscriptEntry::McpToolCall {
-                    call_id,
-                    invocation,
-                    result_blocks,
-                    error,
-                    status: McpToolCallStatus::InProgress,
-                    ..
-                } => self
-                    .session
-                    .app
-                    .transcript
-                    .push(TranscriptEntry::McpToolCall {
-                        call_id,
-                        invocation,
-                        result_blocks,
-                        error: error.or_else(|| reason.map(ToOwned::to_owned)),
-                        status: McpToolCallStatus::Failed,
-                        is_error: true,
-                    }),
-                other => self.session.app.transcript.push(other),
-            }
-        }
-        self.bump_active_entries_revision();
+        self.drain_active_entries(reason);
     }
 
     pub fn sync_app_input_from_composer(&mut self) {
@@ -729,6 +644,89 @@ impl TuiState {
         self.transcript_last_cell_range = None;
         self.busy_started_at = None;
         Ok(summary)
+    }
+}
+
+impl TuiState {
+    fn drain_active_entries(&mut self, failure_reason: Option<&str>) {
+        if self.active_entries.is_empty() {
+            return;
+        }
+        for entry in std::mem::take(&mut self.active_entries) {
+            match (failure_reason, entry) {
+                (_, TranscriptEntry::Assistant(text)) => {
+                    self.session.app.append_assistant_chunk(&text);
+                }
+                (_, TranscriptEntry::Thinking(text)) => {
+                    self.session.app.append_thinking_chunk(&text);
+                }
+                (Some(_), TranscriptEntry::ExecCommand {
+                    call_id,
+                    source,
+                    allow_exploring_group,
+                    input_preview,
+                    output_preview,
+                    status: ExecCommandStatus::InProgress,
+                    exit_code,
+                    duration_ms,
+                }) => self.session.app.transcript.push(TranscriptEntry::ExecCommand {
+                    call_id,
+                    source,
+                    allow_exploring_group,
+                    input_preview,
+                    output_preview,
+                    status: ExecCommandStatus::Failed,
+                    exit_code,
+                    duration_ms,
+                }),
+                (Some(_), TranscriptEntry::GenericToolCall {
+                    name,
+                    call_id,
+                    input_preview,
+                    output_preview,
+                    started: true,
+                    ..
+                }) => self.session.app.transcript.push(TranscriptEntry::GenericToolCall {
+                    name,
+                    call_id,
+                    input_preview,
+                    output_preview,
+                    success: false,
+                    started: false,
+                    exit_code: None,
+                    duration_ms: None,
+                }),
+                (Some(_), TranscriptEntry::PatchApply {
+                    call_id,
+                    changes,
+                    status: PatchApplyStatus::InProgress,
+                    output_preview,
+                }) => self.session.app.transcript.push(TranscriptEntry::PatchApply {
+                    call_id,
+                    changes,
+                    status: PatchApplyStatus::Failed,
+                    output_preview,
+                }),
+                (Some(_), TranscriptEntry::WebSearch { started: true, .. }) => {}
+                (Some(reason), TranscriptEntry::McpToolCall {
+                    call_id,
+                    invocation,
+                    result_blocks,
+                    error,
+                    status: McpToolCallStatus::InProgress,
+                    ..
+                }) => self.session.app.transcript.push(TranscriptEntry::McpToolCall {
+                    call_id,
+                    invocation,
+                    result_blocks,
+                    error: error.or_else(|| Some(reason.to_string())),
+                    status: McpToolCallStatus::Failed,
+                    is_error: true,
+                }),
+                (_, other) => self.session.app.transcript.push(other),
+            }
+        }
+        self.bump_active_entries_revision();
     }
 }
 
@@ -1118,6 +1116,23 @@ mod tests {
         assert!(matches!(
             state.app().transcript.last(),
             Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2"
+        ));
+    }
+
+    #[test]
+    fn flush_active_entries_to_transcript_commits_live_tail_without_failure_semantics() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_assistant_chunk("tail");
+        state.flush_active_entries_to_transcript();
+
+        assert!(state.active_entries.is_empty());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "tail"
         ));
     }
 
