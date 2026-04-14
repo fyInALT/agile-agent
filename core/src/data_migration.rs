@@ -217,7 +217,15 @@ impl DataMigrator {
         // Move legacy files to agent directory
         let legacy_files = self.detector.found_legacy_files(workplace_path);
         for legacy_file in &legacy_files {
-            let file_name = legacy_file.file_name().unwrap().to_str().unwrap();
+            // Safely get file name, skip if invalid
+            let file_name = match legacy_file.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => {
+                    result.failed_files.push("unknown".to_string());
+                    result.error = Some("Invalid file name in legacy path".to_string());
+                    continue;
+                }
+            };
             let new_path = agent_dir.join(file_name);
 
             if let Err(e) = self.move_file_with_backup(legacy_file, &new_path) {
