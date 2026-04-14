@@ -14,6 +14,7 @@ pub mod backlog;
 pub mod backlog_store;
 pub mod blocker_escalation;
 pub mod commands;
+pub mod data_migration;
 pub mod escalation;
 pub mod event;
 pub mod event_aggregator;
