@@ -11,6 +11,7 @@ use agent_core::tool_calls::PatchApplyStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::WebSearchAction;
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
@@ -68,7 +69,7 @@ impl TuiState {
 
     pub fn active_entries_for_display(&self) -> Vec<TranscriptEntry> {
         let mut entries = self.active_entries.clone();
-        if let Some(stream) = self.active_stream.as_ref() {
+        if let Some(stream) = self.active_stream.as_ref().filter(|stream| !stream.tail.is_empty()) {
             entries.push(stream.as_transcript_entry());
         }
         entries
@@ -132,10 +133,10 @@ impl TuiState {
             }
         }
 
-        self.drop_empty_active_stream();
         if let Some(committed) = committed {
-            self.commit_stream_text(kind, &committed);
+            stream.pending_commits.push_back(committed);
         }
+        self.drop_empty_active_stream();
         self.bump_active_entries_revision();
     }
 
@@ -146,13 +147,14 @@ impl TuiState {
             .is_some_and(|stream| stream.kind != kind && !stream.tail.is_empty())
         {
             if let Some(stream) = self.active_stream.take() {
-                self.commit_stream_text(stream.kind, &stream.tail);
+                self.flush_stream_to_transcript(stream);
             }
         }
 
         let stream = self.active_stream.get_or_insert(ActiveStream {
             kind,
             tail: String::new(),
+            pending_commits: VecDeque::new(),
         });
         stream.kind = kind;
         stream
@@ -162,10 +164,24 @@ impl TuiState {
         if self
             .active_stream
             .as_ref()
-            .is_some_and(|stream| stream.tail.is_empty())
+            .is_some_and(|stream| stream.tail.is_empty() && stream.pending_commits.is_empty())
         {
             self.active_stream = None;
         }
+    }
+
+    pub fn drain_active_stream_commit_tick(&mut self) -> bool {
+        let next = self
+            .active_stream
+            .as_mut()
+            .and_then(|stream| stream.pending_commits.pop_front().map(|text| (stream.kind, text)));
+        let Some((kind, text)) = next else {
+            return false;
+        };
+        self.commit_stream_text(kind, &text);
+        self.drop_empty_active_stream();
+        self.bump_active_entries_revision();
+        true
     }
 
     pub fn push_active_exec_started(
@@ -663,10 +679,8 @@ impl TuiState {
         if self.active_entries.is_empty() && self.active_stream.is_none() {
             return;
         }
-        if let Some(stream) = self.active_stream.take()
-            && !stream.tail.is_empty()
-        {
-            self.commit_stream_text(stream.kind, &stream.tail);
+        if let Some(stream) = self.active_stream.take() {
+            self.flush_stream_to_transcript(stream);
         }
         for entry in std::mem::take(&mut self.active_entries) {
             match (failure_reason, entry) {
@@ -745,12 +759,22 @@ impl TuiState {
             StreamTextKind::Thinking => self.session.app.append_thinking_chunk(text),
         }
     }
+
+    fn flush_stream_to_transcript(&mut self, stream: ActiveStream) {
+        for text in stream.pending_commits {
+            self.commit_stream_text(stream.kind, &text);
+        }
+        if !stream.tail.is_empty() {
+            self.commit_stream_text(stream.kind, &stream.tail);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveStream {
     pub(crate) kind: StreamTextKind,
     pub(crate) tail: String,
+    pub(crate) pending_commits: VecDeque<String>,
 }
 
 impl ActiveStream {
@@ -1118,16 +1142,20 @@ mod tests {
         state.append_active_assistant_chunk("hello ");
         state.append_active_assistant_chunk("world\nnext");
 
-        assert!(matches!(
-            state.app().transcript.last(),
-            Some(TranscriptEntry::Assistant(text)) if text == "hello world\n"
-        ));
+        assert!(
+            !state
+                .app()
+                .transcript
+                .iter()
+                .any(|entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world\n"))
+        );
         assert!(state.active_entries.is_empty());
         assert!(matches!(
             state.active_stream.as_ref(),
             Some(ActiveStream {
                 kind: StreamTextKind::Assistant,
                 tail,
+                ..
             }) if tail == "next"
         ));
     }
@@ -1224,16 +1252,45 @@ mod tests {
         state.append_active_thinking_chunk("step 1 ");
         state.append_active_thinking_chunk("step 2\nnext");
 
-        assert!(matches!(
-            state.app().transcript.last(),
-            Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2\n"
-        ));
+        assert!(
+            !state
+                .app()
+                .transcript
+                .iter()
+                .any(|entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2\n"))
+        );
         assert!(state.active_entries.is_empty());
         assert!(matches!(
             state.active_stream.as_ref(),
             Some(ActiveStream {
                 kind: StreamTextKind::Thinking,
                 tail,
+                ..
+            }) if tail == "next"
+        ));
+    }
+
+    #[test]
+    fn active_stream_commit_tick_drains_queued_assistant_lines() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_assistant_chunk("hello ");
+        state.append_active_assistant_chunk("world\nnext");
+
+        assert!(state.drain_active_stream_commit_tick());
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "hello world\n"
+        ));
+        assert!(matches!(
+            state.active_stream.as_ref(),
+            Some(ActiveStream {
+                kind: StreamTextKind::Assistant,
+                tail,
+                ..
             }) if tail == "next"
         ));
     }

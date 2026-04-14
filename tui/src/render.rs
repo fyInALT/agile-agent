@@ -515,6 +515,7 @@ mod tests {
         state.active_stream = Some(ActiveStream {
             kind: StreamTextKind::Assistant,
             tail: "next".to_string(),
+            pending_commits: std::collections::VecDeque::new(),
         });
         state.open_transcript_overlay();
 

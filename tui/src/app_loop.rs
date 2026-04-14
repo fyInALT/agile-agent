@@ -327,6 +327,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         if should_clear_provider_rx {
             provider_rx = None;
         }
+
+        if state.drain_active_stream_commit_tick() {
+            state.persist_if_changed()?;
+        }
     }
 
     state.sync_app_input_from_composer();
