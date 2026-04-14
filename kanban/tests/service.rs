@@ -220,6 +220,51 @@ mod create_tests {
         let stories = service.list_by_type(ElementType::Story).unwrap();
         assert_eq!(stories.len(), 1);
     }
+
+    #[test]
+    fn test_list_children_returns_direct_children() {
+        let (service, _repo) = create_service();
+
+        // Create a story with tasks
+        let story = service
+            .create_element(KanbanElement::new_story("Story", "Content"))
+            .unwrap();
+        let story_id = story.id().unwrap().clone();
+
+        // Create tasks under the story
+        let task1 = {
+            let mut t = KanbanElement::new_task("Task 1");
+            t.base_mut().parent = Some(story_id.clone());
+            service.create_element(t).unwrap()
+        };
+        let task2 = {
+            let mut t = KanbanElement::new_task("Task 2");
+            t.base_mut().parent = Some(story_id.clone());
+            service.create_element(t).unwrap()
+        };
+
+        // Get children of the story
+        let children = service.list_children(&story_id).unwrap();
+        assert_eq!(children.len(), 2);
+
+        // Verify we got the right tasks
+        let child_ids: Vec<_> = children.iter().map(|e| e.id().unwrap().as_str()).collect();
+        assert!(child_ids.contains(&task1.id().unwrap().as_str()));
+        assert!(child_ids.contains(&task2.id().unwrap().as_str()));
+    }
+
+    #[test]
+    fn test_list_children_returns_empty_when_no_children() {
+        let (service, _repo) = create_service();
+
+        let task = service
+            .create_element(KanbanElement::new_task("Task"))
+            .unwrap();
+        let task_id = task.id().unwrap().clone();
+
+        let children = service.list_children(&task_id).unwrap();
+        assert!(children.is_empty());
+    }
 }
 
 mod status_transition_tests {

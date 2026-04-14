@@ -7,7 +7,7 @@ mod test_helpers;
 use test_helpers::*;
 
 use agent_kanban::domain::{ElementId, ElementType, KanbanElement, Status};
-use agent_kanban::events::KanbanEvent;
+use agent_kanban::events::{KanbanEvent, KanbanEventSubscriber};
 
 #[test]
 fn test_create_element_publishes_correct_created_event() {
@@ -191,22 +191,30 @@ fn test_append_tip_publishes_tip_appended_event() {
 fn test_multiple_subscribers_all_receive_events() {
     use agent_kanban::events::KanbanEventBus;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let event_bus = Arc::new(KanbanEventBus::new());
-    let sub1 = CountingSubscriber::new();
-    let sub2 = CountingSubscriber::new();
+    let counter1 = Arc::new(AtomicUsize::new(0));
+    let counter2 = Arc::new(AtomicUsize::new(0));
 
-    event_bus.subscribe(Box::new(sub1));
-    event_bus.subscribe(Box::new(sub2));
+    struct MultiCounter(Arc<AtomicUsize>);
+    impl KanbanEventSubscriber for MultiCounter {
+        fn on_event(&self, _event: &KanbanEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    event_bus.subscribe(Box::new(MultiCounter(counter1.clone())));
+    event_bus.subscribe(Box::new(MultiCounter(counter2.clone())));
 
     event_bus.publish(KanbanEvent::Created {
         element_id: ElementId::new(ElementType::Task, 1),
         element_type: ElementType::Task,
     });
 
-    // Both subscribers should have received the event
-    // Note: we can't check counts here since subscribers are moved
-    // This test mainly verifies the API works
+    // Both subscribers should have received exactly 1 event each
+    assert_eq!(counter1.load(Ordering::SeqCst), 1);
+    assert_eq!(counter2.load(Ordering::SeqCst), 1);
 }
 
 #[test]

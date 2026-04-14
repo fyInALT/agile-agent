@@ -74,6 +74,11 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         self.repository.list_by_sprint(sprint_id)
     }
 
+    /// List direct children of an element
+    pub fn list_children(&self, parent_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
+        self.repository.list_by_parent(parent_id)
+    }
+
     /// Update element status
     pub fn update_status(
         &self,
@@ -222,7 +227,7 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         Ok(())
     }
 
-    /// Update element properties (title, content, priority, assignee)
+    /// Update element properties (title, content, priority, assignee, effort)
     pub fn update_element(
         &self,
         id: &ElementId,
@@ -230,6 +235,7 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         content: Option<&str>,
         priority: Option<crate::domain::Priority>,
         assignee: Option<&str>,
+        effort: Option<u32>,
     ) -> Result<KanbanElement, KanbanError> {
         let mut element = self
             .repository
@@ -256,6 +262,11 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         if let Some(a) = assignee {
             element.base_mut().assignee = Some(a.to_string());
             changes.push("assignee".to_string());
+        }
+
+        if let Some(e) = effort {
+            element.set_effort(e);
+            changes.push("effort".to_string());
         }
 
         if !changes.is_empty() {

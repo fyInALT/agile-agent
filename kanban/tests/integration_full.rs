@@ -221,9 +221,9 @@ fn test_full_kanban_workflow() {
         .update_status(&task1_id, Status::Done, "agent-1")
         .unwrap();
 
-    // 8. Verify events were published
+    // 8. Verify events were published (1 sprint + 2 stories + 1 task + 5 status changes = 9)
     let events = collector.get_events();
-    assert!(events.len() >= 7); // 1 sprint + 2 stories + 1 task + 5 status changes
+    assert_eq!(events.len(), 9);
 
     // 9. Files should exist on disk
     let elements_dir = temp.path().join("kanban").join("elements");
@@ -418,6 +418,7 @@ fn test_full_update_and_query() {
             Some("Fix the login bug"),
             Some(Priority::Critical),
             Some("agent-1"),
+            None,
         )
         .unwrap();
 

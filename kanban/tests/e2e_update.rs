@@ -18,7 +18,7 @@ fn test_update_element_title() {
     collector.clear();
 
     let updated = service
-        .update_element(&id, Some("New Title"), None, None, None)
+        .update_element(&id, Some("New Title"), None, None, None, None)
         .unwrap();
 
     assert_eq!(updated.title(), "New Title");
@@ -48,7 +48,7 @@ fn test_update_element_content() {
     collector.clear();
 
     let updated = service
-        .update_element(&id, None, Some("New content"), None, None)
+        .update_element(&id, None, Some("New content"), None, None, None)
         .unwrap();
 
     assert_eq!(updated.content(), "New content");
@@ -66,7 +66,7 @@ fn test_update_element_priority() {
     collector.clear();
 
     let updated = service
-        .update_element(&id, None, None, Some(Priority::High), None)
+        .update_element(&id, None, None, Some(Priority::High), None, None)
         .unwrap();
 
     assert_eq!(updated.priority(), Priority::High);
@@ -84,10 +84,38 @@ fn test_update_element_assignee() {
     collector.clear();
 
     let updated = service
-        .update_element(&id, None, None, None, Some("agent-1"))
+        .update_element(&id, None, None, None, Some("agent-1"), None)
         .unwrap();
 
     assert_eq!(updated.assignee(), Some(&"agent-1".to_string()));
+}
+
+#[test]
+fn test_update_element_effort() {
+    let (service, _repo, _event_bus, collector) = create_test_service();
+
+    let task = service
+        .create_element(KanbanElement::new_task("Task"))
+        .unwrap();
+    let id = task.id().unwrap().clone();
+
+    collector.clear();
+
+    let updated = service
+        .update_element(&id, None, None, None, None, Some(5))
+        .unwrap();
+
+    assert_eq!(updated.effort(), Some(5));
+
+    let events = collector.get_events();
+    assert_eq!(events.len(), 1);
+
+    match &events[0] {
+        KanbanEvent::Updated { changes, .. } => {
+            assert!(changes.contains(&"effort".to_string()));
+        }
+        _ => panic!("Expected Updated event"),
+    }
 }
 
 #[test]
@@ -108,6 +136,7 @@ fn test_update_element_multiple_fields() {
             None,
             Some(Priority::Critical),
             Some("agent-2"),
+            None,
         )
         .unwrap();
 
@@ -141,7 +170,7 @@ fn test_update_element_no_changes() {
     collector.clear();
 
     // Call with no changes
-    let updated = service.update_element(&id, None, None, None, None).unwrap();
+    let updated = service.update_element(&id, None, None, None, None, None).unwrap();
 
     assert_eq!(updated.title(), "Task");
     // No events should be published
@@ -154,7 +183,7 @@ fn test_update_element_not_found() {
 
     let id = ElementId::new(ElementType::Task, 999);
 
-    let result = service.update_element(&id, Some("Title"), None, None, None);
+    let result = service.update_element(&id, Some("Title"), None, None, None, None);
 
     assert!(result.is_err());
 }
