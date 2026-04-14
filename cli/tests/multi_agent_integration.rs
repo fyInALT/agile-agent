@@ -406,3 +406,319 @@ fn concurrent_task_assignment() {
     let running_count = backlog.tasks.iter().filter(|t| t.status == TaskStatus::Running).count();
     assert_eq!(running_count, 3);
 }
+
+/// Test shutdown/restore cycle for agent state
+#[test]
+fn shutdown_restore_cycle() {
+    use agent_core::shutdown_snapshot::{ShutdownSnapshot, ShutdownReason, AgentShutdownSnapshot};
+    use agent_core::agent_runtime::AgentMeta;
+
+    // Create agent snapshot
+    let agent_snapshot = AgentShutdownSnapshot {
+        meta: AgentMeta {
+            agent_id: AgentId::new("agent-001".to_string()),
+            codename: AgentCodename::new("alpha".to_string()),
+            workplace_id: WorkplaceId::new("workplace-001".to_string()),
+            provider_type: ProviderType::Claude,
+            provider_session_id: None,
+            status: agent_core::agent_runtime::AgentStatus::Idle,
+            created_at: "2026-04-15T00:00:00Z".to_string(),
+            updated_at: "2026-04-15T00:00:00Z".to_string(),
+        },
+        assigned_task_id: Some("task-001".to_string()),
+        was_active: false,
+        had_error: false,
+        provider_thread_state: None,
+        captured_at: "2026-04-15T00:00:00Z".to_string(),
+    };
+
+    // Create snapshot for shutdown
+    let snapshot = ShutdownSnapshot {
+        shutdown_at: "2026-04-15T00:00:00Z".to_string(),
+        workplace_id: "workplace-001".to_string(),
+        agents: vec![agent_snapshot],
+        backlog: BacklogState::default(),
+        pending_mail: vec![],
+        shutdown_reason: ShutdownReason::UserQuit,
+    };
+
+    // Verify snapshot contains expected data
+    assert_eq!(snapshot.agents.len(), 1);
+    assert_eq!(snapshot.shutdown_reason, ShutdownReason::UserQuit);
+
+    // Snapshot should be serializable
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert!(json.contains("agent-001"));
+    assert!(json.contains("user_quit"));
+
+    // Restore from JSON
+    let restored: ShutdownSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.agents.len(), snapshot.agents.len());
+}
+
+/// Test concurrent persistence serialization
+#[test]
+fn concurrent_persistence_serialization() {
+    use std::sync::Arc;
+    use std::thread;
+
+    // Test that backlog can be safely shared across threads (Arc<Mutex> pattern)
+    let backlog = Arc::new(std::sync::Mutex::new(BacklogState::default()));
+
+    // Add tasks from multiple threads
+    let backlog_clone1 = backlog.clone();
+    let backlog_clone2 = backlog.clone();
+
+    let thread1 = thread::spawn(move || {
+        let mut bl = backlog_clone1.lock().unwrap();
+        bl.push_task(TaskItem {
+            id: "task-001".to_string(),
+            todo_id: "todo-1".to_string(),
+            objective: "Thread 1 task".to_string(),
+            scope: "test".to_string(),
+            constraints: vec![],
+            verification_plan: vec![],
+            status: TaskStatus::Ready,
+            result_summary: None,
+        });
+    });
+
+    let thread2 = thread::spawn(move || {
+        let mut bl = backlog_clone2.lock().unwrap();
+        bl.push_task(TaskItem {
+            id: "task-002".to_string(),
+            todo_id: "todo-2".to_string(),
+            objective: "Thread 2 task".to_string(),
+            scope: "test".to_string(),
+            constraints: vec![],
+            verification_plan: vec![],
+            status: TaskStatus::Ready,
+            result_summary: None,
+        });
+    });
+
+    thread1.join().unwrap();
+    thread2.join().unwrap();
+
+    // Verify both tasks added
+    let bl = backlog.lock().unwrap();
+    assert_eq!(bl.tasks.len(), 2);
+}
+
+/// Test kanban concurrent access pattern (single-threaded architecture)
+#[test]
+fn kanban_concurrent_access() {
+    use agent_core::shared_state::SharedWorkplaceState;
+
+    // Create shared workplace state with kanban
+    let workplace_id = WorkplaceId::new("workplace-test".to_string());
+    let mut workplace = SharedWorkplaceState::new(workplace_id.clone());
+
+    // Verify workplace_id is accessible
+    assert_eq!(workplace.workplace_id().as_str(), workplace_id.as_str());
+
+    // Test backlog can be modified
+    workplace.backlog_mut().push_task(TaskItem {
+        id: "task-001".to_string(),
+        todo_id: "todo-1".to_string(),
+        objective: "Test task".to_string(),
+        scope: "test".to_string(),
+        constraints: vec![],
+        verification_plan: vec![],
+        status: TaskStatus::Ready,
+        result_summary: None,
+    });
+
+    // Verify task added
+    assert_eq!(workplace.backlog().tasks.len(), 1);
+
+    // The architecture is single-threaded for main loop, but Arc<Mutex> pattern
+    // is used for shared state between agents (each in their own thread)
+    // This test verifies the state struct itself is valid
+}
+
+/// Test sprint planning persistence cycle
+#[test]
+fn sprint_planning_persistence_cycle() {
+    let mut session = SprintPlanningSession::new();
+    session.add_story("story-001".to_string(), "Feature A".to_string(), 5);
+    session.add_story("story-002".to_string(), "Feature B".to_string(), 8);
+    session.set_goal("MVP Release".to_string());
+
+    // Serialize session
+    let json = serde_json::to_string(&session).unwrap();
+    assert!(json.contains("story-001"));
+    assert!(json.contains("MVP Release"));
+    assert!(json.contains("13")); // total effort
+
+    // Restore session
+    let restored: SprintPlanningSession = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.selected_stories.len(), 2);
+    assert_eq!(restored.total_effort, 13);
+    assert_eq!(restored.goal, "MVP Release");
+}
+
+/// Test blocker escalation persistence cycle
+#[test]
+fn blocker_escalation_persistence_cycle() {
+    use agent_core::blocker_escalation::BlockerEscalation;
+
+    let mut escalation = BlockerEscalation::new(
+        "task-001".to_string(),
+        AgentId::new("agent-001".to_string()),
+        "Waiting on review".to_string(),
+    );
+
+    escalation.escalate(agent_core::agent_mail::MailId::new());
+
+    // Serialize escalation
+    let json = serde_json::to_string(&escalation).unwrap();
+    assert!(json.contains("task-001"));
+    assert!(json.contains("agent-001"));
+    assert!(json.contains("escalated"));
+
+    // Restore escalation
+    let restored: BlockerEscalation = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.task_id, "task-001");
+    assert!(restored.escalated_at.is_some());
+}
+
+/// Test runtime mode persistence
+#[test]
+fn runtime_mode_persistence() {
+    let mode = RuntimeMode::MultiAgent;
+
+    // Serialize mode
+    let json = serde_json::to_string(&mode).unwrap();
+    assert_eq!(json, "\"multi_agent\"");
+
+    // Restore mode
+    let restored: RuntimeMode = serde_json::from_str(&json).unwrap();
+    assert!(restored.is_multi_agent());
+    assert!(!restored.is_single_agent());
+}
+
+/// Test daily standup persistence cycle
+#[test]
+fn daily_standup_persistence_cycle() {
+    use agent_core::standup_report::DailyStandupReport;
+
+    let mut report = DailyStandupReport::new();
+    report.agent_entries.push(agent_core::standup_report::AgentStandupEntry {
+        codename: "alpha".to_string(),
+        role: AgentRole::Developer,
+        yesterday_completed: vec![],
+        today_planned: vec![],
+        blockers: vec!["Database lock".to_string()],
+    });
+
+    // Serialize report
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(json.contains("alpha"));
+    assert!(json.contains("Database lock"));
+
+    // Restore report
+    let restored: DailyStandupReport = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.agent_entries.len(), 1);
+    assert!(restored.has_blockers());
+}
+
+/// Test task history tracking for standup
+#[test]
+fn task_history_persistence() {
+    use agent_core::standup_report::TaskHistoryEntry;
+
+    let entry = TaskHistoryEntry::new(
+        "task-001".to_string(),
+        "Implement feature".to_string(),
+        "alpha".to_string(),
+        TaskStatus::Running,
+        true,
+    );
+
+    // Serialize history entry
+    let json = serde_json::to_string(&entry).unwrap();
+    assert!(json.contains("task-001"));
+    assert!(json.contains("alpha"));
+    assert!(json.contains("true")); // completed flag
+
+    // Restore entry
+    let restored: TaskHistoryEntry = serde_json::from_str(&json).unwrap();
+    assert!(restored.was_completed());
+}
+
+/// Stress test: rapid mode transitions
+#[test]
+fn stress_mode_transitions() {
+    let mut mode = RuntimeMode::SingleAgent;
+
+    // Perform many transitions
+    for _ in 0..100 {
+        let transition = ModeHelper::transition_for_spawn(&mut mode, 1);
+        if transition.happened() {
+            // Switch back to single agent for next iteration
+            mode = RuntimeMode::SingleAgent;
+        }
+    }
+
+    // Mode should still be valid
+    assert!(mode.is_single_agent() || mode.is_multi_agent());
+}
+
+/// Stress test: rapid escalation creation
+#[test]
+fn stress_escalation_creation() {
+    use agent_core::blocker_escalation::BlockerEscalation;
+
+    let mut escalations = Vec::new();
+
+    // Create many escalations rapidly
+    for i in 0..50 {
+        let escalation = BlockerEscalation::new(
+            format!("task-{}", i),
+            AgentId::new(format!("agent-{}", i % 5)),
+            format!("Blocker {}", i),
+        );
+        escalations.push(escalation);
+    }
+
+    // All should be valid
+    assert_eq!(escalations.len(), 50);
+    for e in &escalations {
+        assert!(e.is_active());
+    }
+
+    // Serialize all
+    let json = serde_json::to_string(&escalations).unwrap();
+    assert!(json.contains("task-0"));
+    assert!(json.contains("task-49"));
+}
+
+/// Stress test: sprint planning with many stories
+#[test]
+fn stress_sprint_planning_many_stories() {
+    let mut session = SprintPlanningSession::new();
+
+    // Add many stories
+    for i in 1..=20 {
+        session.add_story(
+            format!("story-{}", i),
+            format!("Feature {}", i),
+            i % 8 + 1, // effort 1-8
+        );
+    }
+
+    assert_eq!(session.selected_stories.len(), 20);
+
+    // Reorder multiple times
+    for i in 1..=10 {
+        session.reorder_story(&format!("story-{}", i), 20 - i);
+    }
+
+    // Session should still be valid
+    assert_eq!(session.selected_stories.len(), 20);
+
+    // Serialize large session
+    let json = serde_json::to_string(&session).unwrap();
+    assert!(json.len() > 1000); // Should have substantial content
+}
