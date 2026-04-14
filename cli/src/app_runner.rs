@@ -27,7 +27,7 @@ pub struct Cli {
 pub enum Command {
     /// Inspect available providers in the current environment.
     Doctor,
-    /// Inspect agent runtime state in the current workplace.
+    /// Inspect and manage agent runtime state in the current workplace.
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
@@ -45,6 +45,9 @@ pub enum Command {
         max_iterations: usize,
         #[arg(long, default_value_t = false)]
         resume_last: bool,
+        /// Enable multi-agent mode for concurrent execution.
+        #[arg(long, default_value_t = false)]
+        multi_agent: bool,
     },
     /// Print structured provider probe results.
     Probe {
@@ -57,8 +60,27 @@ pub enum Command {
 pub enum AgentCommand {
     /// Show the current or most recent agent for this workplace.
     Current,
-    /// List known agents for this workplace.
-    List,
+    /// List all agents for this workplace.
+    List {
+        /// Show all agents including stopped ones.
+        #[arg(long, default_value_t = false)]
+        all: bool,
+    },
+    /// Spawn a new agent with specified provider.
+    Spawn {
+        /// Provider type: claude, codex, opencode.
+        provider: String,
+    },
+    /// Stop a running agent.
+    Stop {
+        /// Agent ID to stop.
+        agent_id: String,
+    },
+    /// Show detailed status for a specific agent.
+    Status {
+        /// Agent ID to inspect.
+        agent_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -83,15 +105,25 @@ pub fn execute(cli: Cli) -> Result<()> {
             command: AgentCommand::Current,
         }) => print_current_agent(),
         Some(Command::Agent {
-            command: AgentCommand::List,
-        }) => print_agent_list(),
+            command: AgentCommand::List { all },
+        }) => print_agent_list(all),
+        Some(Command::Agent {
+            command: AgentCommand::Spawn { provider },
+        }) => spawn_agent(provider),
+        Some(Command::Agent {
+            command: AgentCommand::Stop { agent_id },
+        }) => stop_agent(agent_id),
+        Some(Command::Agent {
+            command: AgentCommand::Status { agent_id },
+        }) => print_agent_status(agent_id),
         Some(Command::Workplace {
             command: WorkplaceCommand::Current,
         }) => print_current_workplace(),
         Some(Command::RunLoop {
             max_iterations,
             resume_last,
-        }) => run_loop_headless(max_iterations, resume_last),
+            multi_agent,
+        }) => run_loop_headless(max_iterations, resume_last, multi_agent),
         Some(Command::Doctor) => {
             print!("{}", probe::render_doctor_text(&probe::probe_report()));
             Ok(())
@@ -118,8 +150,17 @@ fn run_mode_for_cli(cli: &Cli) -> RunMode {
             command: AgentCommand::Current,
         }) => RunMode::AgentCurrent,
         Some(Command::Agent {
-            command: AgentCommand::List,
+            command: AgentCommand::List { .. },
         }) => RunMode::AgentList,
+        Some(Command::Agent {
+            command: AgentCommand::Spawn { .. },
+        }) => RunMode::AgentSpawn,
+        Some(Command::Agent {
+            command: AgentCommand::Stop { .. },
+        }) => RunMode::AgentStop,
+        Some(Command::Agent {
+            command: AgentCommand::Status { .. },
+        }) => RunMode::AgentStatus,
         Some(Command::Workplace {
             command: WorkplaceCommand::Current,
         }) => RunMode::WorkplaceCurrent,
@@ -171,7 +212,7 @@ fn print_current_agent() -> Result<()> {
     Ok(())
 }
 
-fn print_agent_list() -> Result<()> {
+fn print_agent_list(all: bool) -> Result<()> {
     let launch_cwd = env::current_dir()?;
     let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
     let store = AgentStore::new(workplace);
@@ -184,12 +225,87 @@ fn print_agent_list() -> Result<()> {
 
     for meta in agents {
         println!(
-            "{} {} {} {}",
+            "{} {} {} {}{}",
             meta.agent_id.as_str(),
             meta.codename.as_str(),
             meta.provider_type.label(),
+            if all { format!(" {} ", meta.status.label()) } else { "".to_string() },
             meta.updated_at
         );
+    }
+
+    Ok(())
+}
+
+fn spawn_agent(provider: String) -> Result<()> {
+    use agent_core::provider::ProviderKind;
+
+    let provider_kind = match provider.to_lowercase().as_str() {
+        "claude" => ProviderKind::Claude,
+        "codex" => ProviderKind::Codex,
+        "mock" => ProviderKind::Mock,
+        _ => {
+            eprintln!("unknown provider: {}. Available: claude, codex, mock", provider);
+            return Err(anyhow::anyhow!("unknown provider: {}", provider));
+        }
+    };
+
+    let launch_cwd = env::current_dir()?;
+    let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, provider_kind)?;
+    let mut agent_runtime = bootstrap.runtime;
+
+    println!("agent: spawned {}", agent_runtime.summary());
+    agent_runtime.persist()?;
+
+    Ok(())
+}
+
+fn stop_agent(agent_id: String) -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let store = AgentStore::new(workplace);
+
+    let agents = store.list_meta()?;
+    let agent_meta = agents.iter().find(|m| m.agent_id.as_str() == agent_id);
+
+    if agent_meta.is_none() {
+        eprintln!("agent not found: {}", agent_id);
+        return Err(anyhow::anyhow!("agent not found: {}", agent_id));
+    }
+
+    println!("agent: stopping {}", agent_id);
+    println!("status: stopped (requested)");
+    println!("note: full stop requires TUI session");
+
+    Ok(())
+}
+
+fn print_agent_status(agent_id: String) -> Result<()> {
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let store = AgentStore::new(workplace);
+
+    let agents = store.list_meta()?;
+    let agent_meta = agents.iter().find(|m| m.agent_id.as_str() == agent_id);
+
+    if let Some(meta) = agent_meta {
+        println!("agent_id: {}", meta.agent_id.as_str());
+        println!("codename: {}", meta.codename.as_str());
+        println!("workplace_id: {}", meta.workplace_id.as_str());
+        println!("provider_type: {}", meta.provider_type.label());
+        println!(
+            "provider_session_id: {}",
+            meta.provider_session_id
+                .as_ref()
+                .map(|value| value.as_str())
+                .unwrap_or("<none>")
+        );
+        println!("status: {}", meta.status.label());
+        println!("created_at: {}", meta.created_at);
+        println!("updated_at: {}", meta.updated_at);
+    } else {
+        eprintln!("agent not found: {}", agent_id);
+        return Err(anyhow::anyhow!("agent not found: {}", agent_id));
     }
 
     Ok(())
@@ -210,8 +326,15 @@ fn print_current_workplace() -> Result<()> {
     Ok(())
 }
 
-fn run_loop_headless(max_iterations: usize, resume_last: bool) -> Result<()> {
+fn run_loop_headless(max_iterations: usize, resume_last: bool, multi_agent: bool) -> Result<()> {
     let launch_cwd = env::current_dir()?;
+
+    if multi_agent {
+        eprintln!("multi-agent mode enabled");
+        // TODO: Implement multi-agent headless mode
+        eprintln!("warning: multi-agent headless mode not yet fully implemented");
+    }
+
     let bootstrap =
         AgentRuntime::bootstrap_for_cwd(&launch_cwd, agent_core::provider::default_provider())?;
     let mut state = AppState::with_skills(

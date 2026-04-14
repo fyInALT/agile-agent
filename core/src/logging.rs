@@ -27,6 +27,9 @@ pub enum RunMode {
     Probe,
     AgentCurrent,
     AgentList,
+    AgentSpawn,
+    AgentStop,
+    AgentStatus,
     WorkplaceCurrent,
 }
 
@@ -60,6 +63,9 @@ impl RunMode {
             Self::Probe => "probe",
             Self::AgentCurrent => "agent-current",
             Self::AgentList => "agent-list",
+            Self::AgentSpawn => "agent-spawn",
+            Self::AgentStop => "agent-stop",
+            Self::AgentStatus => "agent-status",
             Self::WorkplaceCurrent => "workplace-current",
         }
     }
