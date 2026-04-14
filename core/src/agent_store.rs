@@ -228,6 +228,12 @@ impl AgentStore {
         Ok(metas)
     }
 
+    /// List all agent IDs in the workplace
+    pub fn list_agent_ids(&self) -> Result<Vec<AgentId>> {
+        let metas = self.list_meta()?;
+        Ok(metas.iter().map(|m| m.agent_id.clone()).collect())
+    }
+
     pub fn next_agent_index(&self) -> Result<usize> {
         let agents_dir = self.workplace.agents_dir();
         if !agents_dir.exists() {
@@ -386,5 +392,20 @@ mod tests {
             .expect("load transcript");
 
         assert_eq!(loaded.entries.len(), 0);
+    }
+
+    #[test]
+    fn list_agent_ids_returns_all_saved_agents() {
+        let temp = TempDir::new().expect("tempdir");
+        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        let store = AgentStore::new(workplace);
+        store.save_meta(&meta("agent_001", "2026-04-12T00:00:00Z")).expect("save 1");
+        store.save_meta(&meta("agent_002", "2026-04-12T01:00:00Z")).expect("save 2");
+
+        let ids = store.list_agent_ids().expect("list agent ids");
+
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&AgentId::new("agent_001")));
+        assert!(ids.contains(&AgentId::new("agent_002")));
     }
 }

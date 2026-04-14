@@ -41,6 +41,18 @@ impl RuntimeSession {
             app.push_error_message(warning);
         }
         if matches!(bootstrap.kind, AgentBootstrapKind::Restored) {
+            // Restore agent state (input, task, loop settings)
+            if let Err(err) = bootstrap.runtime.restore_state(&mut app) {
+                app.push_error_message(format!("failed to restore agent state: {err}"));
+                logging::error_event(
+                    "agent.restore_state",
+                    "failed to restore state into session app state",
+                    serde_json::json!({
+                        "error": err.to_string(),
+                    }),
+                );
+            }
+            // Restore transcript
             if let Err(err) = bootstrap.runtime.restore_transcript(&mut app) {
                 app.push_error_message(format!("failed to restore agent transcript: {err}"));
                 logging::error_event(
@@ -311,5 +323,27 @@ mod tests {
         let contents = std::fs::read_to_string(log_path).expect("log file");
         assert!(contents.contains("\"event\":\"agent.bootstrap\""));
         assert!(contents.contains("\"event\":\"agent.restore_transcript\""));
+    }
+
+    #[test]
+    fn bootstrap_restores_agent_state_on_restart() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut first =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap first");
+        first.app.input = "draft input".to_string();
+        first.app.active_task_id = Some("task-restore-1".to_string());
+        first.app.loop_run_active = true;
+        first.app.remaining_loop_iterations = 5;
+        first.mark_stopped_and_persist().expect("persist first");
+
+        let restored =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap restored");
+
+        assert_eq!(restored.app.input, "draft input");
+        assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
+        assert!(restored.app.loop_run_active);
+        assert_eq!(restored.app.remaining_loop_iterations, 5);
     }
 }
