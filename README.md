@@ -97,6 +97,10 @@ The TUI provides:
 - transcript paging and overlay browsing
 - width-aware Markdown rendering for assistant output
 - codex-style tool output with unified diff rendering
+- Edit tool diff display with colored backgrounds:
+  - added lines with dark green background
+  - removed lines with dark red background
+  - full diff content without truncation
 - exec command previews with streaming output
 - patch summaries with file change statistics
 - a local skill browser
