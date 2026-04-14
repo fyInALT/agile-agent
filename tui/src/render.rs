@@ -86,30 +86,96 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     }
     fill_background(frame, area, Style::default().bg(Color::DarkGray));
 
-    // For single-agent mode, show one agent indicator
-    // In multi-agent mode, this would show all agents from AgentPool
-    let provider = state.app().selected_provider.label();
-    let status = if state.is_busy() {
-        "●"
-    } else {
-        "○"
-    };
-    let status_color = if state.is_busy() {
-        Color::Green
-    } else {
-        Color::Gray
-    };
+    let mut spans = Vec::new();
 
-    // Build status bar line: "● alpha [claude]    Ctrl+V to switch provider"
-    let mut spans = vec![
-        Span::styled(status, Style::default().fg(status_color)),
-        Span::raw(" "),
-        Span::styled("alpha", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        Span::styled("[", Style::default().fg(Color::Gray)),
-        Span::styled(provider, Style::default().fg(Color::Cyan)),
-        Span::styled("]", Style::default().fg(Color::Gray)),
-    ];
+    // Check if we have multi-agent mode
+    if state.is_multi_agent_mode() {
+        // Show all agents from AgentPool
+        let statuses = state.agent_statuses();
+        let focused_index = state.agent_pool.as_ref().map(|p| p.focused_slot_index()).unwrap_or(0);
+
+        // Build spans for each agent using owned strings
+        for (i, status) in statuses.iter().enumerate() {
+            let is_focused = i == focused_index;
+
+            // Status indicator
+            let indicator = if status.status.is_active() {
+                "●" // Active (responding/executing)
+            } else if status.status.is_idle() {
+                "○" // Idle
+            } else if status.status.is_terminal() {
+                "◌" // Stopped
+            } else {
+                "◐" // Other (starting, finishing, stopping, error)
+            };
+
+            let color = if status.status.is_active() {
+                Color::Green
+            } else if status.status.is_idle() {
+                if is_focused {
+                    Color::White
+                } else {
+                    Color::Gray
+                }
+            } else if status.status.is_terminal() {
+                Color::DarkGray
+            } else {
+                Color::Yellow
+            };
+
+            spans.push(Span::styled(indicator, Style::default().fg(color)));
+            spans.push(Span::raw(" "));
+
+            // Codename (highlight if focused) - use owned string
+            let codename = status.codename.as_str().to_string();
+            let codename_style = if is_focused {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            spans.push(Span::styled(codename, codename_style));
+
+            // Provider in brackets
+            spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
+            let provider_label = match status.provider_type {
+                agent_core::agent_runtime::ProviderType::Claude => "claude",
+                agent_core::agent_runtime::ProviderType::Codex => "codex",
+                agent_core::agent_runtime::ProviderType::Mock => "mock",
+                agent_core::agent_runtime::ProviderType::Opencode => "opencode",
+            };
+            spans.push(Span::styled(provider_label, Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+
+            // Separator between agents
+            spans.push(Span::raw("  "));
+        }
+
+        // Remove trailing separator
+        if spans.len() > 2 && spans.last().map(|s| s.content.as_ref() == "  ").unwrap_or(false) {
+            spans.pop();
+        }
+    } else {
+        // Single-agent mode: show traditional status bar
+        let provider = state.app().selected_provider.label();
+        let status = if state.is_busy() {
+            "●"
+        } else {
+            "○"
+        };
+        let status_color = if state.is_busy() {
+            Color::Green
+        } else {
+            Color::Gray
+        };
+
+        spans.push(Span::styled(status, Style::default().fg(status_color)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("alpha", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("[", Style::default().fg(Color::Gray)));
+        spans.push(Span::styled(provider, Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled("]", Style::default().fg(Color::Gray)));
+    }
 
     // Add loop indicator if running
     if state.workplace().loop_control.loop_run_active {
@@ -131,8 +197,12 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     }
 
     // Add right-aligned hint
-    let hint = " Ctrl+V:switch";
-    let total_len = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
+    let hint = if state.is_multi_agent_mode() {
+        " Tab:focus Ctrl+N:spawn Ctrl+X:stop"
+    } else {
+        " Ctrl+V:switch Ctrl+N:spawn"
+    };
+    let total_len: usize = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
     if total_len <= area.width as usize {
         let padding = area.width as usize - total_len;
         spans.push(Span::raw(" ".repeat(padding)));

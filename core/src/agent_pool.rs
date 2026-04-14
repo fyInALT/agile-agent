@@ -52,6 +52,7 @@ pub struct TaskQueueSnapshot {
 }
 
 /// Pool managing multiple agent slots
+#[derive(Debug)]
 pub struct AgentPool {
     /// All active agent slots
     slots: Vec<AgentSlot>,

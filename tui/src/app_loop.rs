@@ -92,12 +92,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     }
                                     ProviderSelectionCommand::Select(provider) => {
                                         state.close_provider_overlay();
-                                        // In multi-agent mode, this would spawn a new agent
-                                        // For now, show status message
-                                        state.app_mut().push_status_message(format!(
-                                            "spawn agent with {} (multi-agent: coming soon)",
-                                            provider.label()
-                                        ));
+                                        if let Some(agent_id) = state.spawn_agent(provider) {
+                                            state.app_mut().push_status_message(format!(
+                                                "spawned {} with {}",
+                                                agent_id.as_str(),
+                                                provider.label()
+                                            ));
+                                        } else {
+                                            state.app_mut().push_error_message("failed to spawn agent (pool full)");
+                                        }
                                     }
                                 }
                             }
@@ -115,11 +118,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     }
                                     ConfirmationCommand::Confirm => {
                                         state.close_confirmation_overlay();
-                                        // In multi-agent mode, this would stop the focused agent
-                                        // For now, show status message
-                                        state.app_mut().push_status_message(
-                                            "stop focused agent (multi-agent: coming soon)",
-                                        );
+                                        if let Some(agent_id) = state.stop_focused_agent() {
+                                            state.app_mut().push_status_message(format!(
+                                                "stopped agent {}",
+                                                agent_id
+                                            ));
+                                        } else {
+                                            state.app_mut().push_status_message("no agent to stop");
+                                        }
                                     }
                                 }
                             }
@@ -176,24 +182,48 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                         InputOutcome::OpenTranscript => state.open_transcript_overlay(),
                         InputOutcome::FocusNextAgent => {
-                            // In single-agent mode, this switches provider
-                            // In multi-agent mode, this would focus next agent
-                            state.app_mut().push_status_message("focus next (multi-agent: coming soon)");
+                            if let Some(status) = state.focus_next_agent() {
+                                state.app_mut().push_status_message(format!(
+                                    "focused {} ({})",
+                                    status.codename.as_str(),
+                                    status.status.label()
+                                ));
+                            } else {
+                                // Single-agent mode, no pool yet
+                                state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                            }
                         }
                         InputOutcome::FocusPreviousAgent => {
-                            state.app_mut().push_status_message("focus previous (multi-agent: coming soon)");
+                            if let Some(status) = state.focus_previous_agent() {
+                                state.app_mut().push_status_message(format!(
+                                    "focused {} ({})",
+                                    status.codename.as_str(),
+                                    status.status.label()
+                                ));
+                            } else {
+                                state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                            }
                         }
                         InputOutcome::FocusAgent(index) => {
-                            state.app_mut().push_status_message(format!(
-                                "focus agent {} (multi-agent: coming soon)",
-                                index + 1
-                            ));
+                            if let Some(status) = state.focus_agent_by_index(index) {
+                                state.app_mut().push_status_message(format!(
+                                    "focused {} ({})",
+                                    status.codename.as_str(),
+                                    status.status.label()
+                                ));
+                            } else {
+                                state.app_mut().push_status_message(format!(
+                                    "no agent at index {}",
+                                    index + 1
+                                ));
+                            }
                         }
                         InputOutcome::SpawnAgent => {
                             state.open_provider_overlay();
                         }
                         InputOutcome::StopFocusedAgent => {
-                            state.open_stop_confirmation("alpha");
+                            let codename = state.focused_agent_codename().to_string();
+                            state.open_stop_confirmation(&codename);
                         }
                         InputOutcome::Quit => state.app_mut().request_quit(),
                         InputOutcome::Submit(user_input) => {

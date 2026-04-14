@@ -211,6 +211,22 @@ pub struct AgentSlot {
     last_activity: Instant,
 }
 
+impl std::fmt::Debug for AgentSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentSlot")
+            .field("agent_id", &self.agent_id)
+            .field("codename", &self.codename)
+            .field("provider_type", &self.provider_type)
+            .field("status", &self.status)
+            .field("session_handle", &self.session_handle)
+            .field("transcript_len", &self.transcript.len())
+            .field("assigned_task_id", &self.assigned_task_id)
+            .field("has_provider_thread", &self.has_provider_thread())
+            .field("last_activity", &self.last_activity)
+            .finish()
+    }
+}
+
 impl AgentSlot {
     /// Create a new agent slot with given identity
     pub fn new(
