@@ -18,6 +18,7 @@ pub mod logging;
 pub mod loop_runner;
 pub mod mock_provider;
 pub mod multi_agent_session;
+pub mod persistence_coordinator;
 pub mod probe;
 pub mod provider;
 pub mod provider_thread;
