@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::provider::{ProviderEvent, SessionHandle};
@@ -197,6 +198,8 @@ pub struct AgentSlot {
     codename: AgentCodename,
     /// Provider type binding
     provider_type: ProviderType,
+    /// Agent role (ProductOwner, ScrumMaster, Developer)
+    role: AgentRole,
     /// Current runtime status
     status: AgentSlotStatus,
     /// Provider session handle for multi-turn continuity
@@ -219,6 +222,7 @@ impl std::fmt::Debug for AgentSlot {
             .field("agent_id", &self.agent_id)
             .field("codename", &self.codename)
             .field("provider_type", &self.provider_type)
+            .field("role", &self.role)
             .field("status", &self.status)
             .field("session_handle", &self.session_handle)
             .field("transcript_len", &self.transcript.len())
@@ -240,6 +244,29 @@ impl AgentSlot {
             agent_id,
             codename,
             provider_type,
+            role: AgentRole::default(),
+            status: AgentSlotStatus::idle(),
+            session_handle: None,
+            transcript: Vec::new(),
+            assigned_task_id: None,
+            event_rx: None,
+            thread_handle: None,
+            last_activity: Instant::now(),
+        }
+    }
+
+    /// Create a new agent slot with specific role
+    pub fn with_role(
+        agent_id: AgentId,
+        codename: AgentCodename,
+        provider_type: ProviderType,
+        role: AgentRole,
+    ) -> Self {
+        Self {
+            agent_id,
+            codename,
+            provider_type,
+            role,
             status: AgentSlotStatus::idle(),
             session_handle: None,
             transcript: Vec::new(),
@@ -262,6 +289,31 @@ impl AgentSlot {
             agent_id,
             codename,
             provider_type,
+            role: AgentRole::default(),
+            status: AgentSlotStatus::starting(),
+            session_handle: None,
+            transcript: Vec::new(),
+            assigned_task_id: None,
+            event_rx: Some(event_rx),
+            thread_handle: Some(thread_handle),
+            last_activity: Instant::now(),
+        }
+    }
+
+    /// Create a new agent slot with thread and role
+    pub fn with_thread_and_role(
+        agent_id: AgentId,
+        codename: AgentCodename,
+        provider_type: ProviderType,
+        role: AgentRole,
+        event_rx: Receiver<ProviderEvent>,
+        thread_handle: JoinHandle<()>,
+    ) -> Self {
+        Self {
+            agent_id,
+            codename,
+            provider_type,
+            role,
             status: AgentSlotStatus::starting(),
             session_handle: None,
             transcript: Vec::new(),
@@ -285,6 +337,17 @@ impl AgentSlot {
     /// Get the provider type
     pub fn provider_type(&self) -> ProviderType {
         self.provider_type
+    }
+
+    /// Get the agent's role
+    pub fn role(&self) -> AgentRole {
+        self.role
+    }
+
+    /// Set the agent's role
+    pub fn set_role(&mut self, role: AgentRole) {
+        self.role = role;
+        self.last_activity = Instant::now();
     }
 
     /// Get the current status

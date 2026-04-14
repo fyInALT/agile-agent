@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
@@ -15,6 +16,7 @@ pub struct AgentStatusSnapshot {
     pub agent_id: AgentId,
     pub codename: AgentCodename,
     pub provider_type: ProviderType,
+    pub role: AgentRole,
     pub status: AgentSlotStatus,
     pub assigned_task_id: Option<TaskId>,
 }
@@ -195,6 +197,7 @@ impl AgentPool {
                 agent_id: slot.agent_id().clone(),
                 codename: slot.codename().clone(),
                 provider_type: slot.provider_type(),
+                role: slot.role(),
                 status: slot.status().clone(),
                 assigned_task_id: slot.assigned_task_id().cloned(),
             })
