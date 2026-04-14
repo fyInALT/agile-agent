@@ -669,6 +669,74 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
     Some(format!("{count} background terminal{plural} running"))
 }
 
+/// Render resume overlay for shutdown snapshot restore
+pub fn render_resume_overlay(frame: &mut Frame<'_>, overlay: &crate::resume_overlay::ResumeOverlay) {
+    use ratatui::widgets::BorderType;
+    use ratatui::style::Stylize;
+
+    let area = centered_rect(60, 50, frame.area());
+    frame.render_widget(Clear, area);
+
+    // Build title
+    let title = Line::from("● Restored Session").bold();
+
+    // Build content
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(format!("Previous session had {} active agents.", overlay.agents_count())),
+        Line::from(""),
+    ];
+
+    // Show agent info
+    for agent in overlay.snapshot().agents.iter() {
+        let status_text = if agent.was_active {
+            "was active"
+        } else if agent.had_error {
+            "had error"
+        } else {
+            "idle"
+        };
+        let task_text = agent.assigned_task_id.as_ref()
+            .map(|t| format!(" (task: {})", t))
+            .unwrap_or_default();
+        lines.push(Line::from(format!(
+            "  {} [{}] - {}{}",
+            agent.meta.codename.as_str(),
+            agent.meta.provider_type.label(),
+            status_text,
+            task_text
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("Select an option:"));
+
+    // Build options
+    for (i, option) in overlay.options.iter().enumerate() {
+        let is_selected = i == overlay.selected_index;
+        let prefix = if is_selected { "> " } else { "  " };
+        let style = if is_selected {
+            Style::default().fg(ratatui::style::Color::Yellow).bold()
+        } else {
+            Style::default()
+        };
+        lines.push(Line::styled(
+            format!("{}{} {}", prefix, option.key_hint(), option.label()),
+            style,
+        ));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("Press R to resume or S to start fresh"));
+
+    let block = Block::bordered()
+        .title(title)
+        .border_type(BorderType::Rounded);
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+}
+
 #[cfg(test)]
 mod tests {
     use super::build_transcript_overlay_lines;

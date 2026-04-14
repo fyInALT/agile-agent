@@ -18,6 +18,7 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use std::env;
+use std::path::Path;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
@@ -30,6 +31,7 @@ use crate::render::render_app;
 use crate::terminal::AppTerminal;
 use crate::confirmation_overlay::ConfirmationCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
+use crate::resume_overlay::{ResumeOverlay, ResumeCommand};
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
 
@@ -38,7 +40,15 @@ const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
-    let session = RuntimeSession::bootstrap(launch_cwd, provider::default_provider(), resume_last)?;
+
+    // Check for shutdown snapshot and show resume dialog if exists
+    let effective_resume_last = if resume_last {
+        check_resume_snapshot(terminal, &launch_cwd)?
+    } else {
+        false
+    };
+
+    let session = RuntimeSession::bootstrap(launch_cwd, provider::default_provider(), effective_resume_last)?;
     let mut state = TuiState::from_session(session);
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
     let mut last_flush = Instant::now();
@@ -759,6 +769,79 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
         .app_mut()
         .push_status_message(format!("running task: {}", task.id));
     Some((task_engine::build_task_prompt(&task), true))
+}
+
+/// Check for shutdown snapshot and show resume dialog if exists
+///
+/// Returns true if user wants to resume, false if start fresh/clean.
+fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Result<bool> {
+    use agent_core::workplace_store::WorkplaceStore;
+    use crossterm::event::Event;
+
+    let workplace = WorkplaceStore::for_cwd(launch_cwd)?;
+    let snapshot = workplace.load_shutdown_snapshot()?;
+
+    if snapshot.is_none() {
+        // No snapshot, proceed with normal bootstrap
+        return Ok(false);
+    }
+
+    let snapshot = snapshot.unwrap();
+    logging::debug_event(
+        "tui.resume.check",
+        "found shutdown snapshot, showing resume dialog",
+        serde_json::json!({
+            "agents_count": snapshot.agents.len(),
+            "reason": format!("{:?}", snapshot.shutdown_reason),
+        }),
+    );
+
+    let mut overlay = ResumeOverlay::new(snapshot);
+
+    // Run resume overlay loop
+    loop {
+        terminal.draw(|frame| {
+            crate::render::render_resume_overlay(frame, &overlay);
+        })?;
+
+        // Poll for input with timeout
+        if crossterm::event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key_event) = crossterm::event::read()? {
+                if let Some(cmd) = overlay.handle_key_event(key_event) {
+                    match cmd {
+                        ResumeCommand::Resume => {
+                            logging::debug_event(
+                                "tui.resume.choice",
+                                "user chose to resume",
+                                serde_json::json!({}),
+                            );
+                            return Ok(true);
+                        }
+                        ResumeCommand::StartFresh => {
+                            logging::debug_event(
+                                "tui.resume.choice",
+                                "user chose start fresh",
+                                serde_json::json!({}),
+                            );
+                            // Clear snapshot for fresh start
+                            workplace.clear_shutdown_snapshot()?;
+                            return Ok(false);
+                        }
+                        ResumeCommand::CancelRestore => {
+                            logging::debug_event(
+                                "tui.resume.choice",
+                                "user chose cancel restore",
+                                serde_json::json!({}),
+                            );
+                            // Clear snapshot and start clean
+                            workplace.clear_shutdown_snapshot()?;
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
