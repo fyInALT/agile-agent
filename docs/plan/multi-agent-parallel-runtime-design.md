@@ -986,15 +986,855 @@ Existing single-agent workplaces work unchanged:
 - Single `meta.json` at root converted to agent-specific
 - Backlog unchanged (shared)
 
-## 11. Open Questions
+## 11. Graceful Shutdown and Full Restore
+
+### 11.1 Shutdown State Capture
+
+When shutting down, the system must capture complete resumable state for all agents:
+
+```rust
+pub struct ShutdownSnapshot {
+    /// Timestamp of shutdown
+    shutdown_at: String,
+    
+    /// Workplace metadata
+    workplace_meta: WorkplaceMeta,
+    
+    /// All agent snapshots
+    agents: Vec<AgentShutdownSnapshot>,
+    
+    /// Shared backlog state
+    backlog: BacklogState,
+    
+    /// Pending cross-agent messages (unprocessed)
+    pending_mail: Vec<AgentMail>,
+    
+    /// Shutdown reason (user_quit, crash, timeout, etc.)
+    shutdown_reason: ShutdownReason,
+}
+
+pub struct AgentShutdownSnapshot {
+    /// Agent identity
+    agent_id: AgentId,
+    codename: AgentCodename,
+    
+    /// Provider binding
+    provider_type: ProviderType,
+    session_handle: Option<SessionHandle>,
+    
+    /// Runtime status at shutdown
+    status: AgentSlotStatus,
+    
+    /// Complete transcript
+    transcript: Vec<TranscriptEntry>,
+    
+    /// Current input buffer (if any)
+    pending_input: Option<String>,
+    
+    /// Assigned task (if running)
+    assigned_task_id: Option<TaskId>,
+    
+    /// Task execution progress marker
+    task_progress: Option<TaskProgressMarker>,
+    
+    /// Provider thread state (if running)
+    provider_thread_state: Option<ProviderThreadSnapshot>,
+    
+    /// Unacknowledged events (if any)
+    pending_events: Vec<ProviderEvent>,
+}
+
+pub enum ShutdownReason {
+    /// User requested quit (Ctrl+C, /quit)
+    UserQuit,
+    
+    /// System shutdown signal
+    SystemSignal,
+    
+    /// Timeout waiting for providers
+    ProviderTimeout,
+    
+    /// Critical error requiring immediate shutdown
+    CriticalError { error: String },
+    
+    /// Clean exit after task completion
+    CleanExit,
+}
+
+pub struct ProviderThreadSnapshot {
+    /// Thread name
+    thread_name: String,
+    
+    /// Prompt being processed (for continuation)
+    current_prompt: Option<String>,
+    
+    /// Partial response accumulated
+    partial_response: Option<String>,
+    
+    /// Tool calls in progress
+    pending_tool_calls: Vec<ToolCallSnapshot>,
+    
+    /// Last event received
+    last_event_at: Instant,
+}
+
+pub struct TaskProgressMarker {
+    /// Task ID
+    task_id: TaskId,
+    
+    /// Number of provider turns completed
+    turns_completed: usize,
+    
+    /// Current loop phase
+    phase: LoopPhase,
+    
+    /// Continuation attempts made
+    continuation_attempts: u8,
+    
+    /// Verification attempts made
+    verification_attempts: usize,
+}
+```
+
+### 11.2 Shutdown Procedure
+
+```rust
+impl MultiAgentSession {
+    /// Execute graceful shutdown with full state capture
+    pub fn graceful_shutdown(&mut self, reason: ShutdownReason) -> Result<ShutdownSnapshot> {
+        logging::info_event(
+            "shutdown.start",
+            "starting graceful shutdown procedure",
+            serde_json::json!({
+                "reason": format!("{:?}", reason),
+                "active_agents": self.agents.active_count(),
+            }),
+        );
+        
+        // Phase 1: Signal all providers to finish current work
+        for slot in &mut self.agents.slots {
+            if slot.status.is_active() {
+                slot.status = AgentSlotStatus::Finishing;
+                // Send signal through channel if available
+                if let Some(tx) = &slot.event_tx {
+                    // Provider will see channel close and wrap up
+                    // We don't force-kill immediately
+                }
+            }
+        }
+        
+        // Phase 2: Collect final state from each agent
+        let mut agent_snapshots = Vec::new();
+        for slot in &mut self.agents.slots {
+            let snapshot = self.capture_agent_snapshot(slot)?;
+            agent_snapshots.push(snapshot);
+        }
+        
+        // Phase 3: Wait for provider threads (with configurable timeout)
+        let shutdown_timeout = Duration::from_secs(10);
+        let deadline = Instant::now() + shutdown_timeout;
+        
+        for slot in &mut self.agents.slots {
+            if let Some(handle) = slot.thread_handle.take() {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                self.wait_for_thread(handle, remaining, &slot.agent_id)?;
+            }
+        }
+        
+        // Phase 4: Persist complete shutdown snapshot
+        let snapshot = ShutdownSnapshot {
+            shutdown_at: Utc::now().to_rfc3339(),
+            workplace_meta: self.workplace.meta.clone(),
+            agents: agent_snapshots,
+            backlog: self.workplace.backlog.clone(),
+            pending_mail: self.mailbox.pending_messages.clone(),
+            shutdown_reason: reason,
+        };
+        
+        self.persistence.save_shutdown_snapshot(&snapshot)?;
+        
+        // Phase 5: Final flush of all pending persistence ops
+        self.persistence.force_flush_all()?;
+        
+        // Phase 6: Mark workplace as cleanly shutdown
+        self.workplace.mark_shutdown()?;
+        
+        logging::info_event(
+            "shutdown.complete",
+            "completed graceful shutdown",
+            serde_json::json!({
+                "agents_saved": snapshot.agents.len(),
+                "pending_mail": snapshot.pending_mail.len(),
+            }),
+        );
+        
+        Ok(snapshot)
+    }
+    
+    fn capture_agent_snapshot(&self, slot: &AgentSlot) -> Result<AgentShutdownSnapshot> {
+        // Collect transcript from agent store
+        let transcript = AgentStore::new(self.workplace.clone())
+            .load_transcript(&slot.agent_id)?
+            .into_transcript_entries();
+        
+        // Capture provider thread state if running
+        let provider_thread_state = if slot.status.is_active() {
+            Some(ProviderThreadSnapshot {
+                thread_name: format!("agent-{}", slot.agent_id.as_str()),
+                current_prompt: slot.current_prompt.clone(),
+                partial_response: slot.partial_response.clone(),
+                pending_tool_calls: slot.pending_tool_calls.clone(),
+                last_event_at: slot.last_activity,
+            })
+        } else {
+            None
+        };
+        
+        // Capture task progress if assigned
+        let task_progress = slot.assigned_task_id.as_ref()
+            .map(|task_id| self.capture_task_progress(task_id));
+        
+        Ok(AgentShutdownSnapshot {
+            agent_id: slot.agent_id.clone(),
+            codename: slot.codename.clone(),
+            provider_type: slot.provider_type,
+            session_handle: slot.session_handle.clone(),
+            status: slot.status.clone(),
+            transcript,
+            pending_input: slot.pending_input.clone(),
+            assigned_task_id: slot.assigned_task_id.clone(),
+            task_progress,
+            provider_thread_state,
+            pending_events: slot.pending_events.clone(),
+        })
+    }
+}
+```
+
+### 11.3 Full Restore Procedure
+
+```rust
+impl MultiAgentSession {
+    /// Restore complete session from shutdown snapshot
+    pub fn restore_from_snapshot(cwd: PathBuf) -> Result<Self> {
+        let workplace = WorkplaceStore::for_cwd(&cwd)?;
+        
+        // Check for shutdown snapshot
+        let snapshot = workplace.load_shutdown_snapshot()?;
+        
+        if snapshot.is_none() {
+            // No snapshot, bootstrap fresh
+            return Self::bootstrap_fresh(cwd);
+        }
+        
+        let snapshot = snapshot.expect("snapshot exists");
+        
+        logging::info_event(
+            "restore.start",
+            "starting session restore from shutdown snapshot",
+            serde_json::json!({
+                "shutdown_at": snapshot.shutdown_at,
+                "agents_count": snapshot.agents.len(),
+                "shutdown_reason": format!("{:?}", snapshot.shutdown_reason),
+            }),
+        );
+        
+        // Restore workplace state
+        let mut workplace_state = SharedWorkplaceState::restore(
+            workplace.clone(),
+            snapshot.backlog.clone(),
+        )?;
+        
+        // Create agent pool
+        let mut agent_pool = AgentPool::new(workplace.clone(), snapshot.agents.len());
+        
+        // Restore each agent
+        for agent_snapshot in &snapshot.agents {
+            let restored_agent = agent_pool.restore_agent_slot(agent_snapshot)?;
+            
+            // Determine if agent needs to resume work
+            if agent_snapshot.status.is_active() || agent_snapshot.assigned_task_id.is_some() {
+                restored_agent.mark_for_resume();
+            }
+        }
+        
+        // Restore pending mail
+        let mut mailbox = AgentMailbox::new();
+        mailbox.restore_pending(&snapshot.pending_mail);
+        
+        // Create session
+        let session = Self {
+            workplace: workplace_state,
+            agents: agent_pool,
+            mailbox,
+            persistence: AgentPersistenceCoordinator::new(workplace),
+            focused_index: 0,
+            should_quit: false,
+        };
+        
+        // Clear shutdown snapshot (restore complete)
+        workplace.clear_shutdown_snapshot()?;
+        
+        logging::info_event(
+            "restore.complete",
+            "completed session restore",
+            serde_json::json!({
+                "agents_restored": session.agents.slot_count(),
+                "agents_pending_resume": session.agents.pending_resume_count(),
+            }),
+        );
+        
+        Ok(session)
+    }
+    
+    /// Resume agents that were active at shutdown
+    pub fn resume_active_agents(&mut self) -> Result<Vec<AgentId>> {
+        let mut resumed = Vec::new();
+        
+        for slot in &mut self.agents.slots {
+            if slot.needs_resume() {
+                // Determine resume strategy based on shutdown state
+                match &slot.shutdown_state {
+                    Some(state) => {
+                        if let Some(task_id) = &state.assigned_task_id {
+                            // Resume task execution
+                            self.resume_agent_task(slot, task_id)?;
+                        } else if let Some(prompt) = &state.provider_thread_state.current_prompt {
+                            // Resume provider request
+                            self.resume_agent_prompt(slot, prompt.clone())?;
+                        } else {
+                            // Just mark as idle with restored transcript
+                            slot.status = AgentSlotStatus::Idle;
+                        }
+                    }
+                    None => {
+                        slot.status = AgentSlotStatus::Idle;
+                    }
+                }
+                resumed.push(slot.agent_id.clone());
+            }
+        }
+        
+        Ok(resumed)
+    }
+}
+```
+
+### 11.4 Resume Strategies
+
+| Shutdown State | Resume Action |
+|----------------|---------------|
+| Idle with transcript | Restore transcript, keep idle |
+| Responding (partial response) | Prompt to continue or discard |
+| ToolExecuting | Resume tool wait, or cancel with message |
+| Task assigned (in progress) | Resume task with continuation prompt |
+| Pending input in composer | Restore input to focused agent's composer |
+| Pending mail | Deliver to target agents on restore |
+
+### 11.5 User Experience for Resume
+
+On restart after shutdown, TUI should show:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ● Restored Session                                               │
+│                                                                  │
+│ Previous session had 3 active agents.                            │
+│                                                                  │
+│ ○ alpha [claude]  - was running task-1 (2 turns completed)      │
+│   bravo [codex]   - was idle                                     │
+│   charlie [mock]  - was responding (partial output)              │
+│                                                                  │
+│ [R] Resume all active agents                                     │
+│ [S] Start fresh (keep transcripts)                               │
+│ [C] Cancel restore, start clean                                  │
+│                                                                  │
+│ Press R to resume or S to start fresh                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 12. Cross-Agent Communication
+
+### 12.1 Communication Primitives
+
+Agents need to coordinate. Two basic primitives:
+
+```rust
+/// Direct chat message to specific agent
+pub struct AgentChat {
+    /// Sender agent ID
+    from: AgentId,
+    
+    /// Target agent ID  
+    to: AgentId,
+    
+    /// Message content
+    content: String,
+    
+    /// Timestamp
+    sent_at: String,
+    
+    /// Delivery status
+    status: ChatStatus,
+    
+    /// Optional context reference (task, transcript entry)
+    context_ref: Option<ContextRef>,
+}
+
+pub enum ChatStatus {
+    Pending,
+    Delivered,
+    Read,
+    Replied { reply_to: AgentId },
+}
+
+/// Mail-style message for async coordination
+pub struct AgentMail {
+    /// Unique mail ID
+    mail_id: MailId,
+    
+    /// Sender agent ID
+    from: AgentId,
+    
+    /// Target agent ID (or broadcast)
+    to: MailTarget,
+    
+    /// Message subject/type
+    subject: MailSubject,
+    
+    /// Message body
+    body: MailBody,
+    
+    /// Timestamp
+    sent_at: String,
+    
+    /// Read status
+    read_at: Option<String>,
+    
+    /// Action required
+    requires_action: bool,
+    
+    /// Action deadline (optional)
+    deadline: Option<String>,
+}
+
+pub enum MailTarget {
+    /// Direct to specific agent
+    Direct(AgentId),
+    
+    /// Broadcast to all agents
+    Broadcast,
+    
+    /// Broadcast to specific provider type
+    ProviderType(ProviderType),
+    
+    /// Broadcast to agents assigned tasks
+    TaskAssigned,
+}
+
+pub enum MailSubject {
+    /// Request help with task
+    TaskHelpRequest { task_id: TaskId },
+    
+    /// Report task completion
+    TaskCompleted { task_id: TaskId },
+    
+    /// Report blocking issue
+    TaskBlocked { task_id: TaskId, reason: String },
+    
+    /// Request context/information
+    InfoRequest { query: String },
+    
+    /// Provide information
+    InfoResponse { to_mail_id: MailId },
+    
+    /// Coordination request
+    CoordinationRequest { action: CoordinationAction },
+    
+    /// Status update
+    StatusUpdate { new_status: AgentSlotStatus },
+    
+    /// Custom message
+    Custom { label: String },
+}
+
+pub enum CoordinationAction {
+    /// Request target to pause
+    Pause,
+    
+    /// Request target to take over task
+    TakeOverTask { task_id: TaskId },
+    
+    /// Request target to wait for sender
+    WaitForSender,
+    
+    /// Notify target that sender is ready
+    SenderReady,
+    
+    /// Request sync point
+    SyncPoint { label: String },
+}
+
+pub enum MailBody {
+    /// Plain text message
+    Text(String),
+    
+    /// Structured data
+    Structured(serde_json::Value),
+    
+    /// Reference to transcript entry
+    TranscriptRef { agent_id: AgentId, entry_index: usize },
+    
+    /// Task context
+    TaskContext { task_id: TaskId, context: TaskContextSnapshot },
+}
+```
+
+### 12.2 Mailbox Implementation
+
+```rust
+pub struct AgentMailbox {
+    /// Incoming mail queue (per agent)
+    inbox: HashMap<AgentId, Vec<AgentMail>>,
+    
+    /// Outgoing mail queue (pending delivery)
+    outgoing: VecDeque<AgentMail>,
+    
+    /// Pending messages (not yet processed)
+    pending_messages: Vec<AgentMail>,
+    
+    /// Mail history for reference
+    history: Vec<AgentMail>,
+}
+
+impl AgentMailbox {
+    /// Send chat message to specific agent
+    pub fn send_chat(&mut self, from: &AgentId, to: &AgentId, content: String) -> Result<AgentChat>;
+    
+    /// Send mail to target(s)
+    pub fn send_mail(&mut self, mail: AgentMail) -> Result<MailId>;
+    
+    /// Get inbox for specific agent
+    pub fn inbox_for(&self, agent_id: &AgentId) -> &[AgentMail];
+    
+    /// Mark mail as read
+    pub fn mark_read(&mut self, agent_id: &AgentId, mail_id: &MailId) -> Result<()>;
+    
+    /// Process pending mail (called in event loop)
+    pub fn process_pending(&mut self) -> Vec<AgentMail>;
+    
+    /// Deliver pending mail to target agents
+    pub fn deliver(&mut self) -> Vec<MailDeliveryEvent>;
+    
+    /// Get unread count for agent
+    pub fn unread_count(&self, agent_id: &AgentId) -> usize;
+    
+    /// Get mail requiring action for agent
+    pub fn action_required(&self, agent_id: &AgentId) -> Vec<&AgentMail>;
+}
+
+pub struct MailDeliveryEvent {
+    mail: AgentMail,
+    target: AgentId,
+    delivered_at: String,
+}
+```
+
+### 12.3 Mail Injection into Provider Prompt
+
+Agents can receive mail while executing. Mail is injected into the next provider turn:
+
+```rust
+/// Build prompt with mail context
+pub fn build_prompt_with_mail(
+    base_prompt: String,
+    inbox: &[AgentMail],
+) -> String {
+    if inbox.is_empty() {
+        return base_prompt;
+    }
+    
+    let mut prompt = base_prompt;
+    prompt.push_str("\n\n---\nMessages from other agents:\n");
+    
+    for mail in inbox {
+        prompt.push_str(&format!(
+            "\n[{}] From {}: {}\n",
+            mail.subject.label(),
+            mail.from.as_str(),
+            mail.body.summary()
+        ));
+        
+        if mail.requires_action {
+            prompt.push_str("  (Action required)\n");
+        }
+    }
+    
+    prompt.push_str("\nConsider these messages in your response if relevant.\n");
+    prompt
+}
+```
+
+### 12.4 Coordination Use Cases
+
+| Use Case | Mail Type | Flow |
+|----------|-----------|------|
+| Agent stuck on task | TaskHelpRequest | Other agents offer suggestions |
+| Agent completes task | TaskCompleted | Backlog updated, next task assigned |
+| Agent hits blocker | TaskBlocked | Human notified, other agents may take over |
+| Need info from another agent | InfoRequest | Target agent responds in next turn |
+| Two agents working on same area | CoordinationRequest | Sync points, handoffs |
+| Long-running task checkpoint | StatusUpdate | Progress visible to all |
+
+## 13. TUI View Modes
+
+### 13.1 Mode Overview
+
+The TUI should support multiple viewing modes for different workflows:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     TUI View Modes                               │
+│                                                                  │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
+│  │ Focused │ │ Split   │ │ Dashboard│ │ Mail   │ │ Task   │   │
+│  │  View   │ │  View   │ │  View   │ │  View  │ │ Matrix │   │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘   │
+│                                                                  │
+│  Ctrl+V 1-5 to switch between modes                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.2 Mode 1: Focused View (Default)
+
+Single agent transcript focus, similar to current TUI:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ● alpha [claude] ● bravo [codex] ○ charlie [mock]    Ctrl+V 2   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│ [Focused Agent: alpha]                                           │
+│                                                                  │
+│ › user: Implement the authentication system                      │
+│                                                                  │
+│ assistant: I'll implement the authentication system...           │
+│ • finished tool read_file                                        │
+│ • finished tool write_file                                       │
+│ The authentication system is now implemented.                   │
+│                                                                  │
+│ (scrolling transcript for focused agent)                         │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ Working: task-1 (45s)                                            │
+├─────────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Ask alpha to do anything...                                 │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│ tab next  ←prev  →next  a agents  m mail  t tasks  Ctrl+V mode  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.3 Mode 2: Split View
+
+Two agents side by side for comparison/coordination:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Split View: alpha [claude] | bravo [codex]          Ctrl+V 3    │
+├─────────────────────────────────────────────┬───────────────────┤
+│ [alpha]                                      │ [bravo]           │
+│                                              │                   │
+│ › user: Write tests                          │ › user: Write UI  │
+│                                              │                   │
+│ assistant: I'll write comprehensive...       │ assistant: The UI │
+│ • finished tool read_file                    │ components are... │
+│ • running tool exec_command                  │ • finished tool   │
+│                                              │   write_file      │
+│                                              │                   │
+│ Working: task-1 (32s)                        │ Idle              │
+├─────────────────────────────────────────────┴───────────────────┤
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Message to both: ... [alpha] [bravo] [both]                 │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│ ←→ select side  s swap  e equal  Ctrl+V mode                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.4 Mode 3: Dashboard View
+
+All agents visible in compact cards:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Agent Dashboard                              Ctrl+V 4           │
+├─────────────────────────────────────────────────────────────────┤
+│ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐          │
+│ │ ● alpha       │ │ ● bravo       │ │ ○ charlie     │          │
+│ │ [claude]      │ │ [codex]       │ │ [mock]        │          │
+│ │               │ │               │ │               │          │
+│ │ Working       │ │ Working       │ │ Idle          │          │
+│ │ task-1        │ │ task-2        │ │               │          │
+│ │ 32s elapsed   │ │ 1m 15s        │ │ 3 mails       │          │
+│ │               │ │               │ │               │          │
+│ │ Last: read_   │ │ Last: patch_  │ │ Last: idle    │          │
+│ │ file          │ │ apply         │ │               │          │
+│ └───────────────┘ └───────────────┘ └───────────────┘          │
+│                                                                  │
+│ ┌───────────────┐ ┌───────────────┐                             │
+│ │ ○ delta       │ │ ○ echo        │                             │
+│ │ [claude]      │ │ [codex]       │                             │
+│ │               │ │               │                             │
+│ │ Stopped       │ │ Error         │                             │
+│ │ user cancel   │ │ timeout       │                             │
+│ └───────────────┘ └───────────────┘                             │
+├─────────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Select agent to focus: 1-6                                  │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│ n new  x stop selected  r restart  Ctrl+V mode                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.5 Mode 4: Mail View
+
+Focus on cross-agent communication:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Agent Mail (3 unread)                         Ctrl+V 5         │
+├─────────────────────────────────────────────────────────────────┤
+│ Inbox                                                            │
+│                                                                  │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ ★ [TaskHelp] From bravo: Stuck on authentication           │ │
+│ │   task-2 needs help with auth flow                          │ │
+│ │   (Action required)                                         │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │   [StatusUpdate] From alpha: Task completed                 │ │
+│ │   task-1 finished successfully                              │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │   [InfoRequest] From charlie: What's the API schema?        │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ Compose Mail                                                     │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ To: [bravo ] Subject: [TaskHelp ] Body: ...                 │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│ ↑↓ select  r reply  m mark read  c compose  Ctrl+V mode        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.6 Mode 5: Task Matrix View
+
+Task assignment and progress across agents:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Task Matrix                                  Ctrl+V 1           │
+├─────────────────────────────────────────────────────────────────┤
+│ Tasks        │ alpha    │ bravo    │ charlie  │ Status         │
+│──────────────│──────────│──────────│──────────│────────────────│
+│ task-1       │ ● ● ●    │          │          │ Running        │
+│ (auth)       │ 32s      │          │          │ alpha          │
+│──────────────│──────────│──────────│──────────│────────────────│
+│ task-2       │          │ ● ● ●    │          │ Running        │
+│ (tests)      │          │ 1m15s    │          │ bravo          │
+│──────────────│──────────│──────────│──────────│────────────────│
+│ task-3       │          │          │ ○ ○ ○    │ Ready          │
+│ (docs)       │          │          │ assigned │ waiting        │
+│──────────────│──────────│──────────│──────────│────────────────│
+│ task-4       │ ○ ○ ○    │ ○ ○ ○    │ ○ ○ ○    │ Blocked        │
+│ (deploy)     │ waiting  │ waiting  │ waiting  │ dep: task-1    │
+│──────────────│──────────│──────────│──────────│────────────────│
+│ todo-5       │          │          │          │ Candidate      │
+│ (ui polish)  │          │          │          │ unassigned     │
+├─────────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Assign task-3 to: [alpha] [bravo] [charlie]                 │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│ ↑↓ select task  ←→ select agent  a assign  Ctrl+V mode         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.7 Mode Switching Keys
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+V 1` | Focused View |
+| `Ctrl+V 2` | Split View |
+| `Ctrl+V 3` | Dashboard View |
+| `Ctrl+V 4` | Mail View |
+| `Ctrl+V 5` | Task Matrix View |
+| `Ctrl+V Space` | Quick switch menu |
+
+### 13.8 View State Persistence
+
+```rust
+pub struct TuiViewState {
+    /// Current view mode
+    mode: ViewMode,
+    
+    /// Focused agent index (for Focused/Dashboard modes)
+    focused_agent: usize,
+    
+    /// Left/right agent for Split View
+    split_left: usize,
+    split_right: usize,
+    
+    /// Selected mail index (for Mail View)
+    selected_mail: usize,
+    
+    /// Selected task row (for Task Matrix View)
+    selected_task: usize,
+    
+    /// Scroll offsets per agent transcript
+    transcript_scroll_offsets: HashMap<AgentId, usize>,
+    
+    /// Follow-tail state per agent
+    transcript_follow_tails: HashMap<AgentId, bool>,
+}
+
+pub enum ViewMode {
+    Focused,
+    Split,
+    Dashboard,
+    Mail,
+    TaskMatrix,
+}
+```
+
+### 13.9 Responsive Layout Considerations
+
+| Terminal Width | Layout Adaptation |
+|----------------|-------------------|
+| < 80 cols | Single column, minimal status |
+| 80-120 cols | Standard layout, 2 cards in dashboard |
+| 120-160 cols | Full layout, 3 cards in dashboard, split view optimal |
+| > 160 cols | Extended dashboard (4+ cards), wider split |
+
+## 14. Open Questions
 
 1. **Opencode provider**: Should we add now or defer to separate sprint?
 2. **Task stealing**: Should idle agents steal tasks from busy ones?
-3. **Agent limits**: What's the reasonable max concurrent agents?
-4. **Cross-agent communication**: Should agents be able to call each other?
+3. **Agent limits**: What's the reasonable max concurrent agents? (Suggested: 8)
+4. **Cross-agent communication**: Implemented via Mail system (Section 12)
 5. **Resource pooling**: Should we pool MCP connections across agents?
+6. **Mail priority**: Should urgent mail interrupt running agents?
+7. **Broadcast efficiency**: Should broadcast mail be deduplicated?
+8. **View persistence**: Should TUI view mode persist across sessions?
 
-## 12. References
+## 15. References
 
 - `agent_runtime.rs`: Current single-agent runtime
 - `runtime_session.rs`: Current session model
