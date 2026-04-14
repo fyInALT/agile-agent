@@ -6,6 +6,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::agent_mail::AgentMail;
 use crate::agent_runtime::AgentMeta;
 use crate::backlog::BacklogState;
 
@@ -68,6 +69,8 @@ pub struct ShutdownSnapshot {
     pub agents: Vec<AgentShutdownSnapshot>,
     /// Backlog state
     pub backlog: BacklogState,
+    /// Pending cross-agent messages (unprocessed)
+    pub pending_mail: Vec<AgentMail>,
     /// Reason for shutdown
     pub shutdown_reason: ShutdownReason,
 }
@@ -78,6 +81,7 @@ impl ShutdownSnapshot {
         workplace_id: String,
         agents: Vec<AgentShutdownSnapshot>,
         backlog: BacklogState,
+        pending_mail: Vec<AgentMail>,
         reason: ShutdownReason,
     ) -> Self {
         Self {
@@ -85,6 +89,7 @@ impl ShutdownSnapshot {
             workplace_id,
             agents,
             backlog,
+            pending_mail,
             shutdown_reason: reason,
         }
     }
@@ -94,8 +99,9 @@ impl ShutdownSnapshot {
         workplace_id: String,
         agents: Vec<AgentShutdownSnapshot>,
         backlog: BacklogState,
+        pending_mail: Vec<AgentMail>,
     ) -> Self {
-        Self::new(workplace_id, agents, backlog, ShutdownReason::Interrupted)
+        Self::new(workplace_id, agents, backlog, pending_mail, ShutdownReason::Interrupted)
     }
 
     /// Check if any agents were active at shutdown
@@ -109,6 +115,11 @@ impl ShutdownSnapshot {
             .iter()
             .filter(|a| a.was_active || a.assigned_task_id.is_some())
             .count()
+    }
+
+    /// Get count of pending mail
+    pub fn pending_mail_count(&self) -> usize {
+        self.pending_mail.len()
     }
 }
 
@@ -216,11 +227,13 @@ mod tests {
             "wp_test".to_string(),
             vec![idle, active],
             BacklogState::default(),
+            vec![], // no pending mail
             ShutdownReason::UserQuit,
         );
 
         assert!(snapshot.has_active_agents());
         assert_eq!(snapshot.resume_count(), 1);
+        assert_eq!(snapshot.pending_mail_count(), 0);
     }
 
     #[test]
@@ -254,8 +267,30 @@ mod tests {
             "wp_test".to_string(),
             vec![AgentShutdownSnapshot::idle(test_meta("agent_001"))],
             BacklogState::default(),
+            vec![], // no pending mail
         );
 
         assert_eq!(snapshot.shutdown_reason, ShutdownReason::Interrupted);
+    }
+
+    #[test]
+    fn shutdown_snapshot_with_pending_mail() {
+        use crate::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let mail = AgentMail::new(
+            AgentId::new("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Announcement".to_string() },
+            MailBody::Text("Hello all".to_string()),
+        );
+
+        let snapshot = ShutdownSnapshot::interrupted(
+            "wp_test".to_string(),
+            vec![AgentShutdownSnapshot::idle(test_meta("agent_001"))],
+            BacklogState::default(),
+            vec![mail],
+        );
+
+        assert_eq!(snapshot.pending_mail_count(), 1);
     }
 }

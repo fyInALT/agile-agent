@@ -583,6 +583,7 @@ mod tests {
             workplace_id: "test".to_string(),
             backlog: crate::backlog::BacklogState::default(),
             agents: vec![agent1, agent2],
+            pending_mail: vec![], // no pending mail in test
             shutdown_reason: ShutdownReason::UserQuit,
             shutdown_at: "2026-04-14T00:00:00Z".to_string(),
         };

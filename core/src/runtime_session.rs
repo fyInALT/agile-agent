@@ -240,6 +240,7 @@ impl RuntimeSession {
             self.agent_runtime.meta().workplace_id.as_str().to_string(),
             vec![agent_snapshot],
             self.workplace.backlog.clone(),
+            vec![], // no pending mail in single-agent mode
             reason,
         )
     }

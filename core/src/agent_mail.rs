@@ -304,6 +304,13 @@ impl AgentMailbox {
             .unwrap_or(0)
     }
 
+    /// Get mail requiring action for agent (returns references)
+    pub fn action_required(&self, agent_id: &AgentId) -> Vec<&AgentMail> {
+        self.inbox.get(agent_id)
+            .map(|inbox| inbox.iter().filter(|m| m.requires_action && !m.is_read()).collect())
+            .unwrap_or_default()
+    }
+
     /// Mark a mail as read
     pub fn mark_read(&mut self, agent_id: &AgentId, mail_id: &MailId) -> bool {
         if let Some(inbox) = self.inbox.get_mut(agent_id) {
@@ -394,6 +401,52 @@ impl AgentMailbox {
     pub fn outgoing_count(&self) -> usize {
         self.outgoing.len()
     }
+
+    /// Restore pending mail from snapshot (used on session restore)
+    pub fn restore_pending(&mut self, pending_mail: &[AgentMail]) {
+        for mail in pending_mail {
+            self.pending_delivery.push(mail.clone());
+        }
+    }
+
+    /// Get all pending mail for snapshot
+    pub fn pending_mail_for_snapshot(&self) -> Vec<AgentMail> {
+        self.pending_delivery.clone()
+    }
+
+    /// Deliver pending mail and generate delivery events
+    pub fn deliver(&mut self, agent_ids: &[AgentId]) -> Vec<MailDeliveryEvent> {
+        let mut events = Vec::new();
+        while let Some(mail) = self.pending_delivery.pop() {
+            let delivered_at = Utc::now().to_rfc3339();
+            for agent_id in agent_ids {
+                self.inbox.entry(agent_id.clone()).or_default().push(mail.clone());
+                events.push(MailDeliveryEvent {
+                    mail: mail.clone(),
+                    target: agent_id.clone(),
+                    delivered_at: delivered_at.clone(),
+                });
+            }
+            self.history.push(mail);
+        }
+        events
+    }
+
+    /// Get mail history
+    pub fn history(&self) -> &[AgentMail] {
+        &self.history
+    }
+}
+
+/// Event generated when mail is delivered to an agent
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailDeliveryEvent {
+    /// The delivered mail
+    pub mail: AgentMail,
+    /// Target agent that received the mail
+    pub target: AgentId,
+    /// Timestamp when delivered
+    pub delivered_at: String,
 }
 
 #[cfg(test)]
@@ -741,5 +794,122 @@ mod tests {
 
         assert_eq!(mailbox.unread_count(&agent1), 1);
         assert_eq!(mailbox.unread_count(&agent2), 1);
+    }
+
+    #[test]
+    fn action_required_returns_unread_action_mails() {
+        let mut mailbox = AgentMailbox::new();
+        let recipient = make_agent_id("recipient");
+
+        // Send normal mail
+        let normal_mail = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Direct(recipient.clone()),
+            MailSubject::Custom { label: "Normal".to_string() },
+            MailBody::Text("Just info".to_string()),
+        );
+        // Send action-required mail
+        let action_mail = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Direct(recipient.clone()),
+            MailSubject::TaskHelpRequest { task_id: make_task_id("task-1") },
+            MailBody::Text("Need help".to_string()),
+        ).with_action_required();
+
+        mailbox.send_mail(normal_mail);
+        mailbox.send_mail(action_mail);
+        mailbox.process_pending();
+
+        // action_required should return only the action-required mail
+        let action_mails = mailbox.action_required(&recipient);
+        assert_eq!(action_mails.len(), 1);
+        assert!(action_mails[0].requires_action);
+    }
+
+    #[test]
+    fn restore_pending_from_snapshot() {
+        let mut mailbox = AgentMailbox::new();
+        let agent1 = make_agent_id("agent1");
+
+        // Create pending mail
+        let mail1 = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Broadcast1".to_string() },
+            MailBody::Text("Message1".to_string()),
+        );
+        let mail2 = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Broadcast2".to_string() },
+            MailBody::Text("Message2".to_string()),
+        );
+
+        // Restore pending mail
+        mailbox.restore_pending(&[mail1.clone(), mail2.clone()]);
+        assert_eq!(mailbox.pending_count(), 2);
+
+        // Deliver pending mail
+        let events = mailbox.deliver(&[agent1.clone()]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(mailbox.unread_count(&agent1), 2);
+    }
+
+    #[test]
+    fn deliver_generates_delivery_events() {
+        let mut mailbox = AgentMailbox::new();
+        let agent1 = make_agent_id("agent1");
+        let agent2 = make_agent_id("agent2");
+
+        // Create pending mail
+        let mail = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Test".to_string() },
+            MailBody::Text("Test message".to_string()),
+        );
+        mailbox.restore_pending(&[mail.clone()]);
+
+        // Deliver and get events
+        let events = mailbox.deliver(&[agent1.clone(), agent2.clone()]);
+        assert_eq!(events.len(), 2); // One event per agent
+
+        // Verify event structure
+        assert_eq!(events[0].target, agent1);
+        assert_eq!(events[1].target, agent2);
+        assert!(!events[0].delivered_at.is_empty());
+    }
+
+    #[test]
+    fn pending_mail_for_snapshot() {
+        let mut mailbox = AgentMailbox::new();
+
+        let mail = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Broadcast,
+            MailSubject::Custom { label: "Test".to_string() },
+            MailBody::Text("Test".to_string()),
+        );
+        mailbox.restore_pending(&[mail.clone()]);
+
+        let snapshot_mails = mailbox.pending_mail_for_snapshot();
+        assert_eq!(snapshot_mails.len(), 1);
+    }
+
+    #[test]
+    fn mailbox_history_tracks_all_mails() {
+        let mut mailbox = AgentMailbox::new();
+        let recipient = make_agent_id("recipient");
+
+        let mail1 = AgentMail::new(
+            make_agent_id("sender"),
+            MailTarget::Direct(recipient.clone()),
+            MailSubject::Custom { label: "Test1".to_string() },
+            MailBody::Text("Message1".to_string()),
+        );
+        mailbox.send_mail(mail1);
+        mailbox.process_pending();
+
+        assert_eq!(mailbox.history().len(), 1);
     }
 }

@@ -179,6 +179,7 @@ mod tests {
                 },
             ],
             BacklogState::default(),
+            vec![], // no pending mail
             ShutdownReason::UserQuit,
         )
     }
