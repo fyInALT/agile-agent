@@ -19,6 +19,7 @@ pub mod loop_runner;
 pub mod mock_provider;
 pub mod probe;
 pub mod provider;
+pub mod provider_thread;
 pub mod providers;
 pub mod runtime_session;
 pub mod session_store;
