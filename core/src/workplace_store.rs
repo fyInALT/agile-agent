@@ -101,6 +101,14 @@ impl WorkplaceStore {
         self.path.join("meta.json")
     }
 
+    pub fn kanban_dir(&self) -> PathBuf {
+        self.path.join("kanban")
+    }
+
+    pub fn kanban_elements_dir(&self) -> PathBuf {
+        self.kanban_dir().join("elements")
+    }
+
     pub fn load_meta(&self) -> Result<WorkplaceMeta> {
         let path = self.meta_path();
         let payload = fs::read_to_string(&path)
@@ -234,11 +242,11 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
-    use crate::logging::RunMode;
     use super::WorkplaceMeta;
     use super::WorkplaceStore;
     use super::slugify;
+    use crate::logging;
+    use crate::logging::RunMode;
     use tempfile::TempDir;
 
     #[test]
@@ -305,5 +313,16 @@ mod tests {
 
         assert_eq!(loaded.workplace_id, *store.workplace_id());
         assert_eq!(loaded.root_cwd, store.root_cwd().display().to_string());
+    }
+
+    #[test]
+    fn kanban_dirs_are_correct() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = TempDir::new().expect("root");
+        let store =
+            WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
+
+        assert!(store.kanban_dir().ends_with("kanban"));
+        assert!(store.kanban_elements_dir().ends_with("kanban/elements"));
     }
 }
