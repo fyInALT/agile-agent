@@ -122,7 +122,7 @@ mod serde_field_tests {
 
     #[test]
     fn test_serde_preserves_tags() {
-        let mut task = TaskElement::new("Task with tags");
+        let task = TaskElement::new("Task with tags");
         // Add tags through the inner element
         // Note: We need to verify tags serialization works
 

@@ -19,7 +19,13 @@ pub trait KanbanElementRepository: Send + Sync {
     /// List elements by type identifier (trait-based)
     fn list_by_type_identifier(&self, type_id: &ElementTypeIdentifier) -> Result<Vec<KanbanElement>, KanbanError> {
         // Default implementation using conversion
-        let type_: ElementType = type_id.clone().into();
+        let type_: ElementType = type_id
+            .clone()
+            .try_into()
+            .map_err(|_| KanbanError::ConversionError(format!(
+                "unknown element type: {}",
+                type_id.name()
+            )))?;
         self.list_by_type(type_)
     }
 
@@ -29,7 +35,13 @@ pub trait KanbanElementRepository: Send + Sync {
     /// List elements by status type (trait-based)
     fn list_by_status_type(&self, status_type: &StatusType) -> Result<Vec<KanbanElement>, KanbanError> {
         // Default implementation using conversion
-        let status: Status = status_type.clone().into();
+        let status: Status = status_type
+            .clone()
+            .try_into()
+            .map_err(|_| KanbanError::ConversionError(format!(
+                "unknown status type: {}",
+                status_type.name()
+            )))?;
         self.list_by_status(status)
     }
 
@@ -57,7 +69,13 @@ pub trait KanbanElementRepository: Send + Sync {
     /// Generate a new ID for the given element type identifier (trait-based)
     fn new_id_for_type(&self, type_id: &ElementTypeIdentifier) -> Result<ElementId, KanbanError> {
         // Default implementation using conversion
-        let type_: ElementType = type_id.clone().into();
+        let type_: ElementType = type_id
+            .clone()
+            .try_into()
+            .map_err(|_| KanbanError::ConversionError(format!(
+                "unknown element type: {}",
+                type_id.name()
+            )))?;
         self.new_id(type_)
     }
 }

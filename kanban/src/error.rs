@@ -19,6 +19,8 @@ pub enum KanbanError {
     InvalidInput(String),
     /// Element has dependents (other elements depend on it)
     HasDependents(Vec<String>),
+    /// Conversion error (unknown status/type)
+    ConversionError(String),
 }
 
 impl fmt::Display for KanbanError {
@@ -36,6 +38,9 @@ impl fmt::Display for KanbanError {
             KanbanError::InvalidInput(msg) => write!(f, "invalid input: {}", msg),
             KanbanError::HasDependents(deps) => {
                 write!(f, "element has dependents: {}", deps.join(", "))
+            }
+            KanbanError::ConversionError(msg) => {
+                write!(f, "conversion error: {}", msg)
             }
         }
     }

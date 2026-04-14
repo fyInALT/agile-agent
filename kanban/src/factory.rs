@@ -11,28 +11,33 @@ use std::sync::Arc;
 
 /// ElementFactory - creates elements dynamically based on type
 ///
-/// Uses ElementTypeRegistry for extensibility (future custom element types).
+/// Note: The registry-based extensibility pattern is preserved for future use.
+/// Currently uses hardcoded builtin types for element creation.
 pub struct ElementFactory {
-    #[allow(dead_code)]
-    registry: Option<Arc<ElementTypeRegistry>>,
+    // Reserved for future registry-based extensibility
+    _reserved: (),
 }
 
 impl ElementFactory {
     /// Create a new factory with default builtin element types
     pub fn new() -> Self {
-        Self { registry: None }
+        Self { _reserved: () }
     }
 
-    /// Create a factory with a custom registry
-    pub fn with_registry(registry: ElementTypeRegistry) -> Self {
-        Self {
-            registry: Some(Arc::new(registry)),
-        }
+    /// Create a factory with a custom registry (reserved for future use)
+    ///
+    /// Currently equivalent to `new()` - registry extensibility is planned
+    /// but not yet implemented in create() methods.
+    pub fn with_registry(_registry: ElementTypeRegistry) -> Self {
+        Self { _reserved: () }
     }
 
-    /// Create a factory with shared registry
-    pub fn with_shared_registry(registry: Arc<ElementTypeRegistry>) -> Self {
-        Self { registry: Some(registry) }
+    /// Create a factory with shared registry (reserved for future use)
+    ///
+    /// Currently equivalent to `new()` - registry extensibility is planned
+    /// but not yet implemented in create() methods.
+    pub fn with_shared_registry(_registry: Arc<ElementTypeRegistry>) -> Self {
+        Self { _reserved: () }
     }
 
     /// Check if this factory can create an element of the given type

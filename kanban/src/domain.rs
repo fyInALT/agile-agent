@@ -1,7 +1,9 @@
 //! Core domain types for the kanban system
 
+use crate::error::KanbanError;
 use crate::types::{StatusType, ElementTypeIdentifier};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -88,18 +90,23 @@ impl From<Status> for StatusType {
 }
 
 /// Convert from StatusType to Status enum (for known statuses)
-impl From<StatusType> for Status {
-    fn from(status_type: StatusType) -> Self {
+impl TryFrom<StatusType> for Status {
+    type Error = KanbanTransitionError;
+
+    fn try_from(status_type: StatusType) -> Result<Self, Self::Error> {
         match status_type.name() {
-            "plan" => Status::Plan,
-            "backlog" => Status::Backlog,
-            "blocked" => Status::Blocked,
-            "ready" => Status::Ready,
-            "todo" => Status::Todo,
-            "in_progress" => Status::InProgress,
-            "done" => Status::Done,
-            "verified" => Status::Verified,
-            _ => Status::Plan, // Default fallback for unknown statuses
+            "plan" => Ok(Status::Plan),
+            "backlog" => Ok(Status::Backlog),
+            "blocked" => Ok(Status::Blocked),
+            "ready" => Ok(Status::Ready),
+            "todo" => Ok(Status::Todo),
+            "in_progress" => Ok(Status::InProgress),
+            "done" => Ok(Status::Done),
+            "verified" => Ok(Status::Verified),
+            _ => Err(KanbanTransitionError {
+                from: Status::Plan, // dummy value, not used in error
+                to: Status::Plan,  // dummy value, not used in error
+            }),
         }
     }
 }
@@ -185,16 +192,21 @@ impl From<ElementType> for ElementTypeIdentifier {
 }
 
 /// Convert from ElementTypeIdentifier to ElementType enum (for known types)
-impl From<ElementTypeIdentifier> for ElementType {
-    fn from(type_id: ElementTypeIdentifier) -> Self {
+impl TryFrom<ElementTypeIdentifier> for ElementType {
+    type Error = KanbanError;
+
+    fn try_from(type_id: ElementTypeIdentifier) -> Result<Self, Self::Error> {
         match type_id.name() {
-            "sprint" => ElementType::Sprint,
-            "story" => ElementType::Story,
-            "task" => ElementType::Task,
-            "idea" => ElementType::Idea,
-            "issue" => ElementType::Issue,
-            "tips" => ElementType::Tips,
-            _ => ElementType::Task, // Default fallback for unknown types
+            "sprint" => Ok(ElementType::Sprint),
+            "story" => Ok(ElementType::Story),
+            "task" => Ok(ElementType::Task),
+            "idea" => Ok(ElementType::Idea),
+            "issue" => Ok(ElementType::Issue),
+            "tips" => Ok(ElementType::Tips),
+            _ => Err(KanbanError::ConversionError(format!(
+                "unknown element type: {}",
+                type_id.name()
+            ))),
         }
     }
 }

@@ -179,7 +179,7 @@ mod kanban_element_trait_tests {
         }
 
         fn set_status(&mut self, status: StatusType) {
-            let status_enum: agent_kanban::domain::Status = status.into();
+            let status_enum: agent_kanban::domain::Status = status.try_into().expect("valid status");
             self.inner.set_status(status_enum);
         }
 

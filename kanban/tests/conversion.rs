@@ -2,6 +2,7 @@
 
 use agent_kanban::domain::{Status, ElementType};
 use agent_kanban::types::{StatusType, ElementTypeIdentifier};
+use std::convert::TryFrom;
 
 mod status_conversion_tests {
     use super::*;
@@ -16,16 +17,17 @@ mod status_conversion_tests {
 
     #[test]
     fn test_status_from_status_type() {
-        assert_eq!(Status::from(StatusType::new("plan")), Status::Plan);
-        assert_eq!(Status::from(StatusType::new("backlog")), Status::Backlog);
-        assert_eq!(Status::from(StatusType::new("in_progress")), Status::InProgress);
-        assert_eq!(Status::from(StatusType::new("verified")), Status::Verified);
+        assert_eq!(Status::try_from(StatusType::new("plan")).unwrap(), Status::Plan);
+        assert_eq!(Status::try_from(StatusType::new("backlog")).unwrap(), Status::Backlog);
+        assert_eq!(Status::try_from(StatusType::new("in_progress")).unwrap(), Status::InProgress);
+        assert_eq!(Status::try_from(StatusType::new("verified")).unwrap(), Status::Verified);
     }
 
     #[test]
-    fn test_status_from_unknown_status_type_fallback() {
-        // Unknown status types should fall back to Plan
-        assert_eq!(Status::from(StatusType::new("custom_unknown")), Status::Plan);
+    fn test_status_from_unknown_status_type_error() {
+        // Unknown status types should return an error
+        let result = Status::try_from(StatusType::new("custom_unknown"));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -49,15 +51,16 @@ mod element_type_conversion_tests {
 
     #[test]
     fn test_element_type_from_identifier() {
-        assert_eq!(ElementType::from(ElementTypeIdentifier::new("sprint")), ElementType::Sprint);
-        assert_eq!(ElementType::from(ElementTypeIdentifier::new("story")), ElementType::Story);
-        assert_eq!(ElementType::from(ElementTypeIdentifier::new("task")), ElementType::Task);
-        assert_eq!(ElementType::from(ElementTypeIdentifier::new("tips")), ElementType::Tips);
+        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("sprint")).unwrap(), ElementType::Sprint);
+        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("story")).unwrap(), ElementType::Story);
+        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("task")).unwrap(), ElementType::Task);
+        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("tips")).unwrap(), ElementType::Tips);
     }
 
     #[test]
-    fn test_element_type_from_unknown_identifier_fallback() {
-        // Unknown element types should fall back to Task
-        assert_eq!(ElementType::from(ElementTypeIdentifier::new("custom_unknown")), ElementType::Task);
+    fn test_element_type_from_unknown_identifier_error() {
+        // Unknown element types should return an error
+        let result = ElementType::try_from(ElementTypeIdentifier::new("custom_unknown"));
+        assert!(result.is_err());
     }
 }

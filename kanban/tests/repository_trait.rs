@@ -137,9 +137,8 @@ mod repository_trait_tests {
         let id2 = repo.new_id_for_type(&ElementTypeIdentifier::new("story")).unwrap();
         assert_eq!(id2.as_str(), "story-001");
 
-        // Unknown type should fallback to task (via conversion)
-        let id3 = repo.new_id_for_type(&ElementTypeIdentifier::new("custom")).unwrap();
-        // Fallback to Task since unknown types convert to Task
-        assert_eq!(id3.as_str(), "task-002");
+        // Unknown type should return an error (no silent fallback)
+        let result = repo.new_id_for_type(&ElementTypeIdentifier::new("custom"));
+        assert!(result.is_err());
     }
 }

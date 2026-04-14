@@ -107,7 +107,7 @@ impl KanbanElementTrait for SprintElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
@@ -195,7 +195,7 @@ impl KanbanElementTrait for StoryElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
@@ -283,7 +283,7 @@ impl KanbanElementTrait for TaskElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
@@ -365,7 +365,7 @@ impl KanbanElementTrait for IdeaElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
@@ -447,7 +447,7 @@ impl KanbanElementTrait for IssueElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
@@ -545,7 +545,7 @@ impl KanbanElementTrait for TipsElement {
     }
 
     fn set_status(&mut self, status: StatusType) {
-        let status_enum: crate::domain::Status = status.into();
+        let status_enum: crate::domain::Status = status.try_into().expect("invalid status type");
         self.inner.set_status(status_enum);
     }
 
