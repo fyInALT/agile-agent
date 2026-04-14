@@ -271,6 +271,14 @@ mod element_registry_tests {
             self.title.clone()
         }
 
+        fn set_id(&mut self, id: ElementId) {
+            self.id = Some(id);
+        }
+
+        fn set_status(&mut self, status: StatusType) {
+            self.status = status;
+        }
+
         fn implementation_type(&self) -> &'static str {
             "TestElement"
         }

@@ -3,8 +3,6 @@
 //! TDD: Tests for concrete KanbanStatus and KanbanElementTypeTrait implementations
 
 use agent_kanban::builtin::{builtin_statuses_impl, builtin_element_types_impl};
-use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait};
-use agent_kanban::types::{StatusType, ElementTypeIdentifier};
 
 mod builtin_status_tests {
     use super::*;

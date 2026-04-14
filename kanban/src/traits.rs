@@ -2,6 +2,7 @@
 //!
 //! Extensible traits replacing fixed enums, following Decision Layer pattern.
 
+use crate::serde::ElementSerde;
 use crate::types::{StatusType, ElementTypeIdentifier};
 
 /// KanbanStatus trait - extensible status implementation
@@ -45,6 +46,8 @@ pub trait KanbanElementTypeTrait: Send + Sync + 'static {
 /// Replaces fixed KanbanElement enum with trait-based implementation,
 /// enabling custom element types with custom behavior.
 pub trait KanbanElementTrait: Send + Sync + 'static {
+    // === Core identity methods ===
+
     /// Get the element ID (if assigned)
     fn id(&self) -> Option<crate::domain::ElementId>;
 
@@ -56,6 +59,78 @@ pub trait KanbanElementTrait: Send + Sync + 'static {
 
     /// Get the element title
     fn title(&self) -> String;
+
+    // === Content and metadata ===
+
+    /// Get the element content/description (default: empty string)
+    fn content(&self) -> String {
+        String::new()
+    }
+
+    /// Get the element dependencies (default: empty vec)
+    fn dependencies(&self) -> Vec<crate::domain::ElementId> {
+        Vec::new()
+    }
+
+    /// Get the parent element ID (default: None)
+    fn parent(&self) -> Option<crate::domain::ElementId> {
+        None
+    }
+
+    /// Get the assignee (default: None)
+    fn assignee(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the priority (default: Medium)
+    fn priority(&self) -> crate::domain::Priority {
+        crate::domain::Priority::Medium
+    }
+
+    /// Get the effort/story points (default: None)
+    fn effort(&self) -> Option<u32> {
+        None
+    }
+
+    /// Get the blocked reason (default: None)
+    fn blocked_reason(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the tags (default: empty vec)
+    fn tags(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    // === Mutation methods ===
+
+    /// Set the element ID
+    fn set_id(&mut self, id: crate::domain::ElementId);
+
+    /// Set the status
+    fn set_status(&mut self, status: StatusType);
+
+    // === Serialization ===
+
+    /// Convert to ElementSerde for serialization
+    fn to_serde(&self) -> ElementSerde {
+        ElementSerde::new(
+            self.element_type().name().to_string(),
+            self.title(),
+            self.content(),
+            self.status().name().to_string(),
+            self.id().map(|id| id.as_str().to_string()),
+            Some(self.priority().as_str().to_string()),
+            self.effort(),
+            self.assignee(),
+            self.blocked_reason(),
+            self.tags(),
+            self.dependencies().iter().map(|d| d.as_str().to_string()).collect(),
+            self.parent().map(|p| p.as_str().to_string()),
+        )
+    }
+
+    // === Debug and utility ===
 
     /// Get the concrete implementation type name (for debugging)
     fn implementation_type(&self) -> &'static str;

@@ -4,7 +4,6 @@
 
 use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
 use agent_kanban::types::{StatusType, ElementTypeIdentifier, builtin_statuses, builtin_element_types};
-use agent_kanban::domain::BaseElement;
 
 mod kanban_status_trait_tests {
     use super::*;
@@ -151,29 +150,37 @@ mod kanban_element_type_trait_tests {
 
 mod kanban_element_trait_tests {
     use super::*;
-    use agent_kanban::domain::{ElementId, BaseElement, KanbanElement};
-    use std::sync::RwLock;
+    use agent_kanban::domain::{ElementId, KanbanElement};
 
     /// Test wrapper to implement KanbanElementTrait using existing KanbanElement
     struct TestKanbanElement {
-        inner: RwLock<KanbanElement>,
+        inner: KanbanElement,
     }
 
     impl KanbanElementTrait for TestKanbanElement {
         fn id(&self) -> Option<ElementId> {
-            self.inner.read().unwrap().id().cloned()
+            self.inner.id().cloned()
         }
 
         fn element_type(&self) -> ElementTypeIdentifier {
-            ElementTypeIdentifier::new(self.inner.read().unwrap().element_type().as_str())
+            ElementTypeIdentifier::new(self.inner.element_type().as_str())
         }
 
         fn status(&self) -> StatusType {
-            StatusType::new(self.inner.read().unwrap().status().to_string().to_lowercase())
+            StatusType::new(self.inner.status().to_string().to_lowercase())
         }
 
         fn title(&self) -> String {
-            self.inner.read().unwrap().title().to_string()
+            self.inner.title().to_string()
+        }
+
+        fn set_id(&mut self, id: ElementId) {
+            self.inner.set_id(id);
+        }
+
+        fn set_status(&mut self, status: StatusType) {
+            let status_enum: agent_kanban::domain::Status = status.into();
+            self.inner.set_status(status_enum);
         }
 
         fn implementation_type(&self) -> &'static str {
@@ -181,9 +188,8 @@ mod kanban_element_trait_tests {
         }
 
         fn clone_boxed(&self) -> Box<dyn KanbanElementTrait> {
-            let inner = self.inner.read().unwrap().clone();
             Box::new(TestKanbanElement {
-                inner: RwLock::new(inner),
+                inner: self.inner.clone(),
             })
         }
     }
@@ -191,9 +197,7 @@ mod kanban_element_trait_tests {
     #[test]
     fn test_kanban_element_trait_has_id() {
         let task = KanbanElement::new_task("Test Task");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         // Initially no ID
         assert!(elem.id().is_none());
     }
@@ -201,45 +205,35 @@ mod kanban_element_trait_tests {
     #[test]
     fn test_kanban_element_trait_has_element_type() {
         let task = KanbanElement::new_task("Test Task");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         assert_eq!(elem.element_type().name(), "task");
     }
 
     #[test]
     fn test_kanban_element_trait_has_status() {
         let task = KanbanElement::new_task("Test Task");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         assert_eq!(elem.status().name(), "plan");
     }
 
     #[test]
     fn test_kanban_element_trait_has_title() {
         let task = KanbanElement::new_task("My Task Title");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         assert_eq!(elem.title(), "My Task Title");
     }
 
     #[test]
     fn test_kanban_element_trait_has_implementation_type() {
         let task = KanbanElement::new_task("Test Task");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         assert_eq!(elem.implementation_type(), "TestKanbanElement");
     }
 
     #[test]
     fn test_kanban_element_trait_has_clone_boxed() {
         let task = KanbanElement::new_task("Test Task");
-        let elem = TestKanbanElement {
-            inner: RwLock::new(task),
-        };
+        let elem = TestKanbanElement { inner: task };
         let cloned = elem.clone_boxed();
         assert_eq!(cloned.title(), "Test Task");
         assert_eq!(cloned.implementation_type(), "TestKanbanElement");

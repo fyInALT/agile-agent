@@ -2,6 +2,7 @@
 //!
 //! Extensible status transition rules replacing hardcoded valid_transitions().
 
+use crate::traits::KanbanElementTrait;
 use crate::types::StatusType;
 use std::sync::RwLock;
 
@@ -16,8 +17,16 @@ pub trait TransitionRule: Send + Sync + 'static {
     /// Get the to status type
     fn to_status(&self) -> StatusType;
 
-    /// Check if transition is valid for given element context (optional)
+    /// Check if transition is valid (deprecated: use is_valid_for)
     fn is_valid(&self) -> bool {
+        true
+    }
+
+    /// Check if transition is valid for specific element context
+    ///
+    /// Default implementation returns true (always valid).
+    /// Custom implementations can enforce type-specific rules.
+    fn is_valid_for(&self, _element: &dyn KanbanElementTrait) -> bool {
         true
     }
 
@@ -155,12 +164,41 @@ impl TransitionRegistry {
         })
     }
 
+    /// Check if a transition is valid for specific element (thread-safe)
+    pub fn can_transition_for(
+        &self,
+        from: &StatusType,
+        to: &StatusType,
+        element: &dyn KanbanElementTrait,
+    ) -> bool {
+        let rules = self.rules.read().unwrap();
+        rules.iter().any(|r| {
+            r.from_status().name() == from.name()
+                && r.to_status().name() == to.name()
+                && r.is_valid_for(element)
+        })
+    }
+
     /// Get all valid transitions from a status (thread-safe)
     pub fn valid_transitions(&self, from: &StatusType) -> Vec<StatusType> {
         let rules = self.rules.read().unwrap();
         rules
             .iter()
             .filter(|r| r.from_status().name() == from.name())
+            .map(|r| r.to_status())
+            .collect()
+    }
+
+    /// Get all valid transitions for specific element (thread-safe)
+    pub fn valid_transitions_for(
+        &self,
+        from: &StatusType,
+        element: &dyn KanbanElementTrait,
+    ) -> Vec<StatusType> {
+        let rules = self.rules.read().unwrap();
+        rules
+            .iter()
+            .filter(|r| r.from_status().name() == from.name() && r.is_valid_for(element))
             .map(|r| r.to_status())
             .collect()
     }

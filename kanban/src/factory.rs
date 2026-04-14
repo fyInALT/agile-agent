@@ -4,8 +4,9 @@
 
 use crate::elements::{SprintElement, StoryElement, TaskElement, IdeaElement, IssueElement, TipsElement};
 use crate::registry::ElementTypeRegistry;
+use crate::serde::ElementSerde;
 use crate::traits::KanbanElementTrait;
-use crate::types::ElementTypeIdentifier;
+use crate::types::{ElementTypeIdentifier, StatusType};
 use std::sync::Arc;
 
 /// ElementFactory - creates elements dynamically based on type
@@ -114,6 +115,77 @@ impl ElementFactory {
         agent_id: &str,
     ) -> Box<dyn KanbanElementTrait> {
         Box::new(TipsElement::new(title, target_task, agent_id))
+    }
+
+    /// Create an element from ElementSerde (deserialization)
+    ///
+    /// Reconstructs an element from its serialized form.
+    pub fn from_serde(&self, serde: &ElementSerde) -> Option<Box<dyn KanbanElementTrait>> {
+        match serde.element_type.as_str() {
+            "sprint" => {
+                let mut element = SprintElement::new(&serde.title, &serde.content);
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            "story" => {
+                let mut element = StoryElement::new(&serde.title, &serde.content);
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            "task" => {
+                let mut element = TaskElement::new(&serde.title);
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            "idea" => {
+                let mut element = IdeaElement::new(&serde.title);
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            "issue" => {
+                let mut element = IssueElement::new(&serde.title);
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            "tips" => {
+                // Tips needs target_task and agent_id - use defaults for now
+                let target_task = crate::domain::ElementId::new(crate::domain::ElementType::Task, 0);
+                let mut element = TipsElement::new(&serde.title, target_task, "unknown");
+                if let Some(id_str) = &serde.id {
+                    if let Ok(id) = crate::domain::ElementId::parse(id_str) {
+                        element.set_id(id);
+                    }
+                }
+                element.set_status(StatusType::new(&serde.status));
+                Some(Box::new(element))
+            }
+            _ => None,
+        }
     }
 }
 
