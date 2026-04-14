@@ -26,6 +26,7 @@ pub mod probe;
 pub mod provider;
 pub mod provider_thread;
 pub mod providers;
+pub mod runtime_mode;
 pub mod runtime_session;
 pub mod shutdown_snapshot;
 pub mod session_store;
