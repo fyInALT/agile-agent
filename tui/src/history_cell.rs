@@ -921,6 +921,9 @@ fn render_generic_tool_call_lines(
         return render_edit_tool_lines(input_preview, output_preview, success, started, width, mode);
     }
 
+    // All git commands use the same color to distinguish from other commands
+    const GIT_COLOR: Color = Color::Magenta;
+
     let mut lines = Vec::new();
     let bullet_style = if started {
         Style::default().fg(Color::Blue)
@@ -935,9 +938,9 @@ fn render_generic_tool_call_lines(
         .filter(|v| !v.trim().is_empty())
         .and_then(|input| detect_git_command(input));
 
-    let (header_text, header_style) = if let Some(ref git) = git_label {
+    let (header_text, header_style) = if git_label.is_some() {
         let prefix = if started { "Calling" } else { "Called" };
-        (prefix, git.style)
+        (prefix, Style::default().fg(GIT_COLOR))
     } else {
         let prefix = if started { "Calling" } else { "Called" };
         (prefix, bullet_style)
@@ -987,7 +990,7 @@ fn render_generic_tool_call_lines(
                     width,
                     DETAIL_INITIAL_PREFIX,
                     DETAIL_CONTINUATION_PREFIX,
-                    git.style,
+                    header_style,
                     ToolRenderMode::Full,
                 ));
             } else {
@@ -996,7 +999,7 @@ fn render_generic_tool_call_lines(
                     width,
                     DETAIL_INITIAL_PREFIX,
                     DETAIL_CONTINUATION_PREFIX,
-                    git.style,
+                    header_style,
                     ToolRenderMode::Full,
                 ));
             }
@@ -1328,7 +1331,6 @@ struct PatchDiffEntry {
 /// Represents a detected git command with a display-friendly name and style
 struct GitCommandLabel {
     label: &'static str,
-    style: Style,
     detail: Option<String>,
 }
 
@@ -1336,7 +1338,6 @@ struct GitCommandLabel {
 ///
 /// Returns a GitCommandLabel with:
 /// - label: A short display name like "Git Diff" or "Git Commit"
-/// - style: Color styling for the label
 /// - detail: Optional additional context (e.g., file paths, branch names)
 fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     let trimmed = input.trim();
@@ -1345,22 +1346,19 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed == "git diff" {
         return Some(GitCommandLabel {
             label: "Git Diff",
-            style: Style::default().fg(Color::Red),
             detail: None,
         });
     }
     if trimmed == "git diff --staged" || trimmed == "git diff --cached" {
         return Some(GitCommandLabel {
-            label: "Git Diff (Staged)",
-            style: Style::default().fg(Color::Green),
-            detail: None,
+            label: "Git Diff",
+            detail: Some("staged".to_string()),
         });
     }
     if trimmed.starts_with("git diff --stat") {
         let detail = trimmed.strip_prefix("git diff --stat").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Diff",
-            style: Style::default().fg(Color::Red),
             detail,
         });
     }
@@ -1368,7 +1366,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git diff").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Diff",
-            style: Style::default().fg(Color::Red),
             detail,
         });
     }
@@ -1377,7 +1374,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed == "git status" || trimmed == "git status --porcelain" {
         return Some(GitCommandLabel {
             label: "Git Status",
-            style: Style::default().fg(Color::Yellow),
             detail: None,
         });
     }
@@ -1387,7 +1383,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git log").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Log",
-            style: Style::default().fg(Color::Cyan),
             detail,
         });
     }
@@ -1411,7 +1406,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         }).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Commit",
-            style: Style::default().fg(Color::Green),
             detail,
         });
     }
@@ -1421,14 +1415,12 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git add").map(|s| s.trim().to_string());
         return Some(GitCommandLabel {
             label: "Git Add",
-            style: Style::default().fg(Color::Green),
             detail,
         });
     }
     if trimmed == "git add" {
         return Some(GitCommandLabel {
             label: "Git Add",
-            style: Style::default().fg(Color::Green),
             detail: Some("all".to_string()),
         });
     }
@@ -1437,7 +1429,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed == "git branch" || trimmed.starts_with("git branch ") {
         return Some(GitCommandLabel {
             label: "Git Branch",
-            style: Style::default().fg(Color::Magenta),
             detail: None,
         });
     }
@@ -1447,7 +1438,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git checkout").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Checkout",
-            style: Style::default().fg(Color::Blue),
             detail,
         });
     }
@@ -1457,7 +1447,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git push").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Push",
-            style: Style::default().fg(Color::Green),
             detail,
         });
     }
@@ -1467,7 +1456,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git pull").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Pull",
-            style: Style::default().fg(Color::Yellow),
             detail,
         });
     }
@@ -1477,7 +1465,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git fetch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Fetch",
-            style: Style::default().fg(Color::Cyan),
             detail,
         });
     }
@@ -1486,7 +1473,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed.starts_with("git stash") {
         return Some(GitCommandLabel {
             label: "Git Stash",
-            style: Style::default().fg(Color::Yellow),
             detail: None,
         });
     }
@@ -1496,7 +1482,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git merge").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Merge",
-            style: Style::default().fg(Color::Magenta),
             detail,
         });
     }
@@ -1506,7 +1491,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git rebase").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Rebase",
-            style: Style::default().fg(Color::Cyan),
             detail,
         });
     }
@@ -1516,7 +1500,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
         let detail = trimmed.strip_prefix("git clone").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Clone",
-            style: Style::default().fg(Color::Green),
             detail,
         });
     }
@@ -1525,7 +1508,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed.starts_with("git show") {
         return Some(GitCommandLabel {
             label: "Git Show",
-            style: Style::default().fg(Color::Cyan),
             detail: None,
         });
     }
@@ -1534,7 +1516,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed.starts_with("git remote") {
         return Some(GitCommandLabel {
             label: "Git Remote",
-            style: Style::default().fg(Color::Yellow),
             detail: None,
         });
     }
@@ -1543,7 +1524,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed.starts_with("git config") {
         return Some(GitCommandLabel {
             label: "Git Config",
-            style: Style::default().fg(Color::Blue),
             detail: None,
         });
     }
@@ -1552,7 +1532,6 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     if trimmed.starts_with("git reset") {
         return Some(GitCommandLabel {
             label: "Git Reset",
-            style: Style::default().fg(Color::Red),
             detail: None,
         });
     }
