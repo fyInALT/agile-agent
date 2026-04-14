@@ -629,4 +629,233 @@ mod tests {
         );
         assert!(matches!(outcome, InputOutcome::OpenSkills));
     }
+
+    #[test]
+    fn alt_1_switches_to_focused_view() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        // First switch to a different mode
+        state.view_state.switch_by_number(2);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SwitchViewMode(1)));
+    }
+
+    #[test]
+    fn alt_2_switches_to_split_view() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SwitchViewMode(2)));
+    }
+
+    #[test]
+    fn alt_v_cycles_view_modes() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT),
+        );
+
+        assert!(matches!(outcome, InputOutcome::NextViewMode));
+    }
+
+    #[test]
+    fn split_view_left_arrow_focuses_left() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(2); // Split mode
+        state.view_state.split.focused_side = 1; // Start on right
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SplitFocusLeft));
+    }
+
+    #[test]
+    fn split_view_right_arrow_focuses_right() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(2); // Split mode
+        state.view_state.split.focused_side = 0; // Start on left
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SplitFocusRight));
+    }
+
+    #[test]
+    fn split_view_s_swaps_agents() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(2); // Split mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SplitSwap));
+    }
+
+    #[test]
+    fn split_view_e_equal_split() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(2); // Split mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SplitEqual));
+    }
+
+    #[test]
+    fn dashboard_down_selects_next() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(3); // Dashboard mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::DashboardNext));
+    }
+
+    #[test]
+    fn dashboard_up_selects_prev() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(3); // Dashboard mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::DashboardPrev));
+    }
+
+    #[test]
+    fn dashboard_number_selects_card() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(3); // Dashboard mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::DashboardSelect(51))); // '3' as u8 = 51
+    }
+
+    #[test]
+    fn mail_down_selects_next() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(4); // Mail mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::MailNext));
+    }
+
+    #[test]
+    fn mail_up_selects_prev() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(4); // Mail mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::MailPrev));
+    }
+
+    #[test]
+    fn mail_c_starts_compose() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(4); // Mail mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::MailComposeStart));
+    }
+
+    #[test]
+    fn mail_m_marks_read() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(4); // Mail mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::MailMarkRead));
+    }
+
+    #[test]
+    fn view_keys_blocked_when_composer_not_empty() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(2); // Split mode
+        state.composer.insert_text("text");
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+
+        // Should add 't' to composer, not navigate
+        assert!(matches!(outcome, InputOutcome::None));
+    }
+
+    #[test]
+    fn view_keys_blocked_in_wrong_mode() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        // Stay in Focused mode (default)
+        state.composer.insert_text("text");
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+
+        // Left with text in composer moves cursor, not split navigation
+        assert!(matches!(outcome, InputOutcome::None));
+    }
 }
