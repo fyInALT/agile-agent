@@ -196,6 +196,24 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
         ));
     }
 
+    // Add mail indicator if unread mail exists
+    let unread_count = state.focused_unread_mail_count();
+    let action_count = state.focused_action_required_count();
+    if unread_count > 0 {
+        spans.push(Span::raw(" "));
+        if action_count > 0 {
+            spans.push(Span::styled(
+                format!("📬{}!", action_count),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!("📬{}", unread_count),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+    }
+
     // Add right-aligned hint
     let hint = if state.is_multi_agent_mode() {
         " Tab:focus Ctrl+N:spawn Ctrl+X:stop"

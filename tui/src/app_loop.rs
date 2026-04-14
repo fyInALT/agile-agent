@@ -528,6 +528,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             }
         }
 
+        // Process pending mail delivery
+        if state.mailbox.pending_count() > 0 {
+            let delivered_to = state.mailbox.process_pending();
+            for agent_id in delivered_to {
+                state.app_mut().push_status_message(format!("📬 {} received mail", agent_id.as_str()));
+            }
+        }
+
         if state.drain_active_stream_commit_tick() {
             state.persist_if_changed()?;
         }

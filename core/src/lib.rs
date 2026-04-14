@@ -1,3 +1,4 @@
+pub mod agent_mail;
 pub mod agent_memory;
 pub mod agent_messages;
 pub mod agent_pool;

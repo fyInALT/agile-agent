@@ -6,6 +6,8 @@ use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
+
 use crate::agent_runtime::{AgentId, AgentCodename, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::provider::{ProviderEvent, SessionHandle};
@@ -150,7 +152,7 @@ impl AgentSlotStatus {
 }
 
 /// Unique identifier for a task assigned to an agent
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskId(String);
 
 impl TaskId {

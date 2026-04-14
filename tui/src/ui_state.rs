@@ -1,3 +1,4 @@
+use agent_core::agent_mail::AgentMailbox;
 use agent_core::agent_pool::AgentPool;
 use agent_core::agent_pool::AgentStatusSnapshot;
 use agent_core::agent_runtime::AgentId;
@@ -78,6 +79,8 @@ pub struct TuiState {
     pub agent_pool: Option<AgentPool>,
     /// Event aggregator for polling all agent channels
     pub event_aggregator: EventAggregator,
+    /// Mailbox for cross-agent communication
+    pub mailbox: AgentMailbox,
     /// Provider selection overlay (for agent creation)
     pub provider_overlay: Option<ProviderSelectionOverlay>,
     /// Confirmation overlay (for agent stop)
@@ -106,6 +109,7 @@ impl TuiState {
             agent_view_states: std::collections::HashMap::new(),
             agent_pool: None,
             event_aggregator: EventAggregator::new(),
+            mailbox: AgentMailbox::new(),
             provider_overlay: None,
             confirmation_overlay: None,
         }
@@ -127,6 +131,51 @@ impl TuiState {
     /// Get workplace (shared state) mutable reference
     pub fn workplace_mut(&mut self) -> &mut SharedWorkplaceState {
         self.session.workplace_mut()
+    }
+
+    /// Get unread mail count for focused agent
+    pub fn focused_unread_mail_count(&self) -> usize {
+        if let Some(agent_id) = self.focused_agent_id() {
+            self.mailbox.unread_count(&agent_id)
+        } else {
+            0
+        }
+    }
+
+    /// Get action-required mail count for focused agent
+    pub fn focused_action_required_count(&self) -> usize {
+        if let Some(agent_id) = self.focused_agent_id() {
+            self.mailbox.action_required_count(&agent_id)
+        } else {
+            0
+        }
+    }
+
+    /// Get formatted unread mail for focused agent's prompt
+    pub fn focused_unread_mail_for_prompt(&self) -> String {
+        if let Some(agent_id) = self.focused_agent_id() {
+            let inbox = self.mailbox.inbox_for(&agent_id);
+            if let Some(mails) = inbox {
+                let unread = mails.iter().filter(|m| !m.is_read());
+                let formatted = unread.map(|m| m.format_for_prompt()).collect::<Vec<_>>();
+                if formatted.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n=== Incoming Messages ===\n{}\n=== End Messages ===\n\n", formatted.join("\n"))
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// Mark all mail as read for focused agent
+    pub fn mark_focused_mail_read(&mut self) {
+        if let Some(agent_id) = self.focused_agent_id() {
+            self.mailbox.clear_inbox(&agent_id);
+        }
     }
 
     /// Save current transcript view state for a specific agent
@@ -385,6 +434,16 @@ impl TuiState {
         prompt: String,
         provider: ProviderKind,
     ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+        // Get mail prefix and mark read BEFORE borrowing agent_pool
+        let mail_prefix = self.focused_unread_mail_for_prompt();
+        let augmented_prompt = if mail_prefix.is_empty() {
+            prompt
+        } else {
+            format!("{}{}", mail_prefix, prompt)
+        };
+        // Mark mail as read after preparing injection
+        self.mark_focused_mail_read();
+
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
@@ -406,7 +465,7 @@ impl TuiState {
 
         let thread_handle = agent_core::provider::start_provider_with_handle(
             provider,
-            prompt,
+            augmented_prompt,
             cwd,
             session_handle,
             thread_name,
