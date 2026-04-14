@@ -1375,6 +1375,60 @@ struct GitCommandLabel {
     detail: Option<String>,
 }
 
+/// Git command pattern for detection
+struct GitPattern {
+    /// The git subcommand to match
+    subcommand: &'static str,
+    /// Display label (e.g., "Git Diff")
+    label: &'static str,
+    /// Whether to show arguments as detail
+    show_args_as_detail: bool,
+}
+
+/// Table of git commands for detection
+const GIT_PATTERNS: &[GitPattern] = &[
+    GitPattern { subcommand: "diff", label: "Git Diff", show_args_as_detail: true },
+    GitPattern { subcommand: "status", label: "Git Status", show_args_as_detail: false },
+    GitPattern { subcommand: "log", label: "Git Log", show_args_as_detail: true },
+    GitPattern { subcommand: "commit", label: "Git Commit", show_args_as_detail: true },
+    GitPattern { subcommand: "add", label: "Git Add", show_args_as_detail: true },
+    GitPattern { subcommand: "branch", label: "Git Branch", show_args_as_detail: false },
+    GitPattern { subcommand: "checkout", label: "Git Checkout", show_args_as_detail: true },
+    GitPattern { subcommand: "push", label: "Git Push", show_args_as_detail: true },
+    GitPattern { subcommand: "pull", label: "Git Pull", show_args_as_detail: true },
+    GitPattern { subcommand: "fetch", label: "Git Fetch", show_args_as_detail: true },
+    GitPattern { subcommand: "stash", label: "Git Stash", show_args_as_detail: false },
+    GitPattern { subcommand: "merge", label: "Git Merge", show_args_as_detail: true },
+    GitPattern { subcommand: "rebase", label: "Git Rebase", show_args_as_detail: true },
+    GitPattern { subcommand: "clone", label: "Git Clone", show_args_as_detail: true },
+    GitPattern { subcommand: "show", label: "Git Show", show_args_as_detail: false },
+    GitPattern { subcommand: "remote", label: "Git Remote", show_args_as_detail: false },
+    GitPattern { subcommand: "config", label: "Git Config", show_args_as_detail: false },
+    GitPattern { subcommand: "reset", label: "Git Reset", show_args_as_detail: true },
+    GitPattern { subcommand: "init", label: "Git Init", show_args_as_detail: true },
+    GitPattern { subcommand: "rm", label: "Git RM", show_args_as_detail: true },
+    GitPattern { subcommand: "mv", label: "Git MV", show_args_as_detail: true },
+    GitPattern { subcommand: "restore", label: "Git Restore", show_args_as_detail: true },
+    GitPattern { subcommand: "switch", label: "Git Switch", show_args_as_detail: true },
+    GitPattern { subcommand: "clean", label: "Git Clean", show_args_as_detail: true },
+    GitPattern { subcommand: "bisect", label: "Git Bisect", show_args_as_detail: false },
+    GitPattern { subcommand: "cherry-pick", label: "Git Cherry-Pick", show_args_as_detail: true },
+    GitPattern { subcommand: "revert", label: "Git Revert", show_args_as_detail: true },
+    GitPattern { subcommand: "tag", label: "Git Tag", show_args_as_detail: true },
+    GitPattern { subcommand: "describe", label: "Git Describe", show_args_as_detail: false },
+    GitPattern { subcommand: "reflog", label: "Git Reflog", show_args_as_detail: false },
+    GitPattern { subcommand: "worktree", label: "Git Worktree", show_args_as_detail: true },
+    GitPattern { subcommand: "grep", label: "Git Grep", show_args_as_detail: true },
+    GitPattern { subcommand: "archive", label: "Git Archive", show_args_as_detail: true },
+    GitPattern { subcommand: "bundle", label: "Git Bundle", show_args_as_detail: false },
+    GitPattern { subcommand: "fsck", label: "Git FSCK", show_args_as_detail: false },
+    GitPattern { subcommand: "gc", label: "Git GC", show_args_as_detail: false },
+    GitPattern { subcommand: "prune", label: "Git Prune", show_args_as_detail: false },
+    GitPattern { subcommand: "submodule", label: "Git Submodule", show_args_as_detail: true },
+    GitPattern { subcommand: "notes", label: "Git Notes", show_args_as_detail: false },
+    GitPattern { subcommand: "patch-id", label: "Git Patch-ID", show_args_as_detail: false },
+];
+
 /// Detect git commands and return a formatted label for display
 ///
 /// Returns a GitCommandLabel with:
@@ -1383,397 +1437,49 @@ struct GitCommandLabel {
 fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
     let trimmed = input.trim();
 
-    // git diff commands
-    if trimmed == "git diff" {
-        return Some(GitCommandLabel {
-            label: "Git Diff",
-            detail: None,
-        });
-    }
+    // Handle special cases
     if trimmed == "git diff --staged" || trimmed == "git diff --cached" {
         return Some(GitCommandLabel {
             label: "Git Diff",
             detail: Some("staged".to_string()),
         });
     }
-    if trimmed.starts_with("git diff --stat") {
-        let detail = trimmed.strip_prefix("git diff --stat").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Diff",
-            detail,
-        });
-    }
-    if trimmed.starts_with("git diff") {
-        let detail = trimmed.strip_prefix("git diff").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Diff",
-            detail,
-        });
+
+    // Check for "git <subcommand>" pattern
+    let prefix = "git ";
+    if !trimmed.starts_with(prefix) {
+        return None;
     }
 
-    // git status
-    if trimmed == "git status" || trimmed == "git status --porcelain" {
-        return Some(GitCommandLabel {
-            label: "Git Status",
-            detail: None,
-        });
-    }
+    let after_git = &trimmed[prefix.len()..];
 
-    // git log
-    if trimmed.starts_with("git log") {
-        let detail = trimmed.strip_prefix("git log").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Log",
-            detail,
-        });
-    }
+    for pattern in GIT_PATTERNS {
+        let subcommand_with_args = format!("{} ", pattern.subcommand);
 
-    // git commit
-    if trimmed.starts_with("git commit") {
-        let detail = trimmed.strip_prefix("git commit").map(|s| {
-            let s = s.trim();
-            if s.starts_with("-m ") {
-                s.strip_prefix("-m ").map(|msg| {
-                    let msg = msg.trim();
-                    if msg.starts_with('"') && msg.ends_with('"') {
-                        msg[1..msg.len()-1].to_string()
-                    } else {
-                        msg.to_string()
-                    }
-                }).unwrap_or_else(|| s.to_string())
+        if after_git == pattern.subcommand {
+            // Exact match (e.g., "git add" without args)
+            let detail = if pattern.subcommand == "add" {
+                Some("all".to_string())
             } else {
-                s.to_string()
-            }
-        }).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Commit",
-            detail,
-        });
-    }
-
-    // git add
-    if trimmed.starts_with("git add ") {
-        let detail = trimmed.strip_prefix("git add").map(|s| s.trim().to_string());
-        return Some(GitCommandLabel {
-            label: "Git Add",
-            detail,
-        });
-    }
-    if trimmed == "git add" {
-        return Some(GitCommandLabel {
-            label: "Git Add",
-            detail: Some("all".to_string()),
-        });
-    }
-
-    // git branch
-    if trimmed == "git branch" || trimmed.starts_with("git branch ") {
-        return Some(GitCommandLabel {
-            label: "Git Branch",
-            detail: None,
-        });
-    }
-
-    // git checkout
-    if trimmed.starts_with("git checkout") {
-        let detail = trimmed.strip_prefix("git checkout").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Checkout",
-            detail,
-        });
-    }
-
-    // git push
-    if trimmed.starts_with("git push") {
-        let detail = trimmed.strip_prefix("git push").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Push",
-            detail,
-        });
-    }
-
-    // git pull
-    if trimmed.starts_with("git pull") {
-        let detail = trimmed.strip_prefix("git pull").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Pull",
-            detail,
-        });
-    }
-
-    // git fetch
-    if trimmed.starts_with("git fetch") {
-        let detail = trimmed.strip_prefix("git fetch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Fetch",
-            detail,
-        });
-    }
-
-    // git stash
-    if trimmed.starts_with("git stash") {
-        return Some(GitCommandLabel {
-            label: "Git Stash",
-            detail: None,
-        });
-    }
-
-    // git merge
-    if trimmed.starts_with("git merge") {
-        let detail = trimmed.strip_prefix("git merge").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Merge",
-            detail,
-        });
-    }
-
-    // git rebase
-    if trimmed.starts_with("git rebase") {
-        let detail = trimmed.strip_prefix("git rebase").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Rebase",
-            detail,
-        });
-    }
-
-    // git clone
-    if trimmed.starts_with("git clone") {
-        let detail = trimmed.strip_prefix("git clone").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Clone",
-            detail,
-        });
-    }
-
-    // git show
-    if trimmed.starts_with("git show") {
-        return Some(GitCommandLabel {
-            label: "Git Show",
-            detail: None,
-        });
-    }
-
-    // git remote
-    if trimmed.starts_with("git remote") {
-        return Some(GitCommandLabel {
-            label: "Git Remote",
-            detail: None,
-        });
-    }
-
-    // git config
-    if trimmed.starts_with("git config") {
-        return Some(GitCommandLabel {
-            label: "Git Config",
-            detail: None,
-        });
-    }
-
-    // git reset
-    if trimmed.starts_with("git reset") {
-        let detail = trimmed.strip_prefix("git reset").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Reset",
-            detail,
-        });
-    }
-
-    // git init
-    if trimmed.starts_with("git init") {
-        let detail = trimmed.strip_prefix("git init").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Init",
-            detail,
-        });
-    }
-
-    // git rm
-    if trimmed.starts_with("git rm") {
-        let detail = trimmed.strip_prefix("git rm").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git RM",
-            detail,
-        });
-    }
-
-    // git mv
-    if trimmed.starts_with("git mv") {
-        let detail = trimmed.strip_prefix("git mv").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git MV",
-            detail,
-        });
-    }
-
-    // git restore (modern git)
-    if trimmed.starts_with("git restore") {
-        let detail = trimmed.strip_prefix("git restore").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Restore",
-            detail,
-        });
-    }
-
-    // git switch (modern git)
-    if trimmed.starts_with("git switch") {
-        let detail = trimmed.strip_prefix("git switch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Switch",
-            detail,
-        });
-    }
-
-    // git clean
-    if trimmed.starts_with("git clean") {
-        let detail = trimmed.strip_prefix("git clean").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Clean",
-            detail,
-        });
-    }
-
-    // git bisect
-    if trimmed.starts_with("git bisect") {
-        return Some(GitCommandLabel {
-            label: "Git Bisect",
-            detail: None,
-        });
-    }
-
-    // git cherry-pick
-    if trimmed.starts_with("git cherry-pick") {
-        let detail = trimmed.strip_prefix("git cherry-pick").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Cherry-Pick",
-            detail,
-        });
-    }
-
-    // git revert
-    if trimmed.starts_with("git revert") {
-        let detail = trimmed.strip_prefix("git revert").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Revert",
-            detail,
-        });
-    }
-
-    // git tag
-    if trimmed.starts_with("git tag") {
-        let detail = trimmed.strip_prefix("git tag").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Tag",
-            detail,
-        });
-    }
-
-    // git describe
-    if trimmed.starts_with("git describe") {
-        return Some(GitCommandLabel {
-            label: "Git Describe",
-            detail: None,
-        });
-    }
-
-    // git reflog
-    if trimmed.starts_with("git reflog") {
-        return Some(GitCommandLabel {
-            label: "Git Reflog",
-            detail: None,
-        });
-    }
-
-    // git worktree
-    if trimmed.starts_with("git worktree") {
-        let detail = trimmed.strip_prefix("git worktree").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Worktree",
-            detail,
-        });
-    }
-
-    // git grep
-    if trimmed.starts_with("git grep") {
-        let detail = trimmed.strip_prefix("git grep").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Grep",
-            detail,
-        });
-    }
-
-    // git archive
-    if trimmed.starts_with("git archive") {
-        let detail = trimmed.strip_prefix("git archive").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Archive",
-            detail,
-        });
-    }
-
-    // git bundle
-    if trimmed.starts_with("git bundle") {
-        return Some(GitCommandLabel {
-            label: "Git Bundle",
-            detail: None,
-        });
-    }
-
-    // git fsck
-    if trimmed.starts_with("git fsck") {
-        return Some(GitCommandLabel {
-            label: "Git FSCK",
-            detail: None,
-        });
-    }
-
-    // git gc
-    if trimmed.starts_with("git gc") {
-        return Some(GitCommandLabel {
-            label: "Git GC",
-            detail: None,
-        });
-    }
-
-    // git prune
-    if trimmed.starts_with("git prune") {
-        return Some(GitCommandLabel {
-            label: "Git Prune",
-            detail: None,
-        });
-    }
-
-    // git submodules
-    if trimmed.starts_with("git submodule") {
-        let detail = trimmed.strip_prefix("git submodule").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Submodule",
-            detail,
-        });
-    }
-
-    // git notes
-    if trimmed.starts_with("git notes") {
-        return Some(GitCommandLabel {
-            label: "Git Notes",
-            detail: None,
-        });
-    }
-
-    // git patch-id
-    if trimmed.starts_with("git patch-id") {
-        return Some(GitCommandLabel {
-            label: "Git Patch-ID",
-            detail: None,
-        });
-    }
-
-    // git diff with pathspec (needs to come after more specific diff checks)
-    if trimmed.starts_with("git diff") {
-        let detail = trimmed.strip_prefix("git diff").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        return Some(GitCommandLabel {
-            label: "Git Diff",
-            detail,
-        });
+                None
+            };
+            return Some(GitCommandLabel {
+                label: pattern.label,
+                detail,
+            });
+        } else if after_git.starts_with(&subcommand_with_args) {
+            // Prefix match with arguments (e.g., "git add file.txt")
+            let detail = if pattern.show_args_as_detail {
+                let args = after_git[subcommand_with_args.len()..].trim().to_string();
+                if args.is_empty() { None } else { Some(args) }
+            } else {
+                None
+            };
+            return Some(GitCommandLabel {
+                label: pattern.label,
+                detail,
+            });
+        }
     }
 
     None

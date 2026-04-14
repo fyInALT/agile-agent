@@ -13,7 +13,7 @@ use crate::provider::{LlmProvider, LlmResponse, LlmStreamChunk, LlmUsage};
 pub struct MockLlmConfig {
     /// Response to return for all requests
     pub response: String,
-    /// Simulated delay in milliseconds
+    /// Simulated delay in milliseconds (0 for no delay)
     pub delay_ms: u64,
     /// Whether to fail requests
     pub should_fail: bool,
@@ -21,16 +21,19 @@ pub struct MockLlmConfig {
     pub error_message: String,
     /// Token count for the response
     pub token_count: usize,
+    /// Prompt token count (for usage tracking)
+    pub prompt_tokens: u32,
 }
 
 impl Default for MockLlmConfig {
     fn default() -> Self {
         Self {
             response: "Mock response".to_string(),
-            delay_ms: 10,
+            delay_ms: 0,
             should_fail: false,
             error_message: "Mock error".to_string(),
             token_count: 5,
+            prompt_tokens: 10,
         }
     }
 }
@@ -179,10 +182,15 @@ impl LlmProvider for MockLlmProvider {
     fn complete_with_model(&self, prompt: &str, model: ModelType) -> Result<LlmResponse> {
         self.record_call(prompt, model);
 
-        let config = self.config.lock().unwrap();
+        let config = self.config.lock().unwrap().clone();
 
         if config.should_fail {
             return Err(anyhow::anyhow!("{}", config.error_message));
+        }
+
+        // Apply delay if configured
+        if config.delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(config.delay_ms));
         }
 
         // Determine which response to use
@@ -205,9 +213,9 @@ impl LlmProvider for MockLlmProvider {
         Ok(LlmResponse {
             content: response,
             usage: Some(LlmUsage {
-                prompt_tokens: 10,
+                prompt_tokens: config.prompt_tokens,
                 completion_tokens: config.token_count as u32,
-                total_tokens: 10 + config.token_count as u32,
+                total_tokens: config.prompt_tokens + config.token_count as u32,
             }),
         })
     }
@@ -225,14 +233,20 @@ impl LlmProvider for MockLlmProvider {
     {
         self.record_call(prompt, model);
 
-        let config = self.config.lock().unwrap();
+        let config = self.config.lock().unwrap().clone();
 
         if config.should_fail {
             return Err(anyhow::anyhow!("{}", config.error_message));
         }
 
-        // Stream the response word by word
+        // Apply delay if configured
+        if config.delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(config.delay_ms));
+        }
+
+        // Stream the response word by word, marking last chunk as finished
         let words: Vec<&str> = config.response.split_whitespace().collect();
+        let last_index = words.len().saturating_sub(1);
         for (i, word) in words.iter().enumerate() {
             callback(LlmStreamChunk {
                 content: if i == 0 {
@@ -240,14 +254,9 @@ impl LlmProvider for MockLlmProvider {
                 } else {
                     format!(" {}", word)
                 },
-                is_finished: false,
+                is_finished: i == last_index,
             });
         }
-
-        callback(LlmStreamChunk {
-            content: String::new(),
-            is_finished: true,
-        });
 
         Ok(())
     }
