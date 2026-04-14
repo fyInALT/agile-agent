@@ -21,6 +21,7 @@ pub mod provider;
 pub mod providers;
 pub mod runtime_session;
 pub mod session_store;
+pub mod shared_state;
 pub mod skills;
 pub mod storage;
 pub mod task_artifacts;
