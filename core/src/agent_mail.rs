@@ -90,6 +90,22 @@ pub enum MailSubject {
     Custom { label: String },
 }
 
+impl MailSubject {
+    /// Get display label for this subject
+    pub fn label(&self) -> String {
+        match self {
+            Self::TaskHelpRequest { task_id } => format!("Help: {}", task_id.as_str()),
+            Self::TaskCompleted { task_id } => format!("Done: {}", task_id.as_str()),
+            Self::TaskBlocked { task_id, reason } => format!("Blocked: {} - {}", task_id.as_str(), reason),
+            Self::InfoRequest { query } => format!("Info: {}", query),
+            Self::InfoResponse { to_mail_id } => format!("Reply to {}", to_mail_id.as_str()),
+            Self::CoordinationRequest { action } => format!("Coord: {:?}", action),
+            Self::StatusUpdate { new_status } => format!("Status: {}", new_status),
+            Self::Custom { label } => label.clone(),
+        }
+    }
+}
+
 /// Coordination action types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

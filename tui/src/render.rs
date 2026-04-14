@@ -18,11 +18,46 @@ use std::time::Instant;
 use crate::composer::footer::build_footer_line;
 use crate::transcript::cells;
 use crate::ui_state::TuiState;
+use crate::view_mode::ViewMode;
+use agent_core::agent_pool::AgentStatusSnapshot;
 
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     frame.render_widget(Clear, frame.area());
     state.sync_busy_started_at();
     state.transcript_render_width = Some(frame.area().width.max(1) as usize);
+
+    // Adjust view states for terminal width
+    state.view_state.adjust_for_width(frame.area().width);
+
+    // Render based on current view mode
+    match state.view_state.mode {
+        ViewMode::Focused => render_focused_view(frame, state),
+        ViewMode::Split => render_split_view(frame, state),
+        ViewMode::Dashboard => render_dashboard_view(frame, state),
+        ViewMode::Mail => render_mail_view(frame, state),
+        ViewMode::TaskMatrix => render_task_matrix_view(frame, state),
+    }
+
+    // Overlay rendering (applies to all modes)
+    if state.app().skill_browser_open {
+        render_skill_browser(frame, state);
+    }
+
+    if state.is_overlay_open() {
+        render_transcript_overlay(frame, state);
+    }
+
+    if state.is_provider_overlay_open() {
+        render_provider_selection_overlay(frame, state);
+    }
+
+    if state.is_confirmation_overlay_open() {
+        render_confirmation_overlay(frame, state);
+    }
+}
+
+/// Render focused (single agent) view - default mode
+fn render_focused_view(frame: &mut Frame<'_>, state: &mut TuiState) {
     let composer_height = state.composer.desired_height(frame.area().width, 8);
     let committed_cells = cells::build_cells(&state.app().transcript, frame.area().width);
     let committed_lines = cells::flatten_cells(&committed_cells);
@@ -61,22 +96,114 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     }
     render_composer(frame, state, areas[4]);
     render_footer(frame, state, areas[5]);
+}
 
-    if state.app().skill_browser_open {
-        render_skill_browser(frame, state);
+/// Render split view - two agents side by side
+fn render_split_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let composer_height = state.composer.desired_height(frame.area().width, 8);
+
+    // Calculate split ratio
+    let left_width = (frame.area().width as f32 * state.view_state.split.split_ratio) as u16;
+    let right_width = frame.area().width.saturating_sub(left_width);
+
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Status bar with mode indicator
+            Constraint::Min(1),    // Split transcript area
+            Constraint::Length(composer_height),
+            Constraint::Length(1), // Footer with split-specific hints
+        ])
+        .split(frame.area());
+
+    // Render status bar with split mode indicator
+    render_split_status_bar(frame, state, areas[0]);
+
+    // Split the transcript area horizontally
+    let transcript_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(left_width),
+            Constraint::Length(right_width),
+        ])
+        .split(areas[1]);
+
+    // Get agent statuses for left/right
+    let statuses = state.agent_statuses();
+    let left_idx = state.view_state.split.left_agent_index.min(statuses.len().saturating_sub(1));
+    let right_idx = state.view_state.split.right_agent_index.min(statuses.len().saturating_sub(1));
+
+    // Render left agent transcript
+    if statuses.len() > left_idx {
+        render_agent_panel(frame, state, left_idx, transcript_areas[0], state.view_state.split.focused_side == 0);
     }
 
-    if state.is_overlay_open() {
-        render_transcript_overlay(frame, state);
+    // Render right agent transcript
+    if statuses.len() > right_idx {
+        render_agent_panel(frame, state, right_idx, transcript_areas[1], state.view_state.split.focused_side == 1);
     }
 
-    if state.is_provider_overlay_open() {
-        render_provider_selection_overlay(frame, state);
-    }
+    // Render composer (for focused side)
+    render_composer(frame, state, areas[2]);
 
-    if state.is_confirmation_overlay_open() {
-        render_confirmation_overlay(frame, state);
+    // Render split-specific footer
+    render_split_footer(frame, state, areas[3]);
+}
+
+/// Render dashboard view - all agents in compact cards
+fn render_dashboard_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Status bar
+            Constraint::Min(1),    // Dashboard cards
+            Constraint::Length(1), // Footer
+        ])
+        .split(frame.area());
+
+    render_dashboard_status_bar(frame, state, areas[0]);
+    render_dashboard_cards(frame, state, areas[1]);
+    render_dashboard_footer(frame, state, areas[2]);
+}
+
+/// Render mail view - cross-agent communication focus
+fn render_mail_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let composer_height = if state.view_state.mail.composing { 3 } else { 1 };
+
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Status bar
+            Constraint::Min(1),    // Mail list
+            Constraint::Length(composer_height), // Composer or hint
+            Constraint::Length(1), // Footer
+        ])
+        .split(frame.area());
+
+    render_mail_status_bar(frame, state, areas[0]);
+    render_mail_list(frame, state, areas[1]);
+    if state.view_state.mail.composing {
+        render_mail_composer(frame, state, areas[2]);
+    } else {
+        render_mail_hint(frame, state, areas[2]);
     }
+    render_mail_footer(frame, state, areas[3]);
+}
+
+/// Render task matrix view - task assignment grid
+fn render_task_matrix_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Status bar
+            Constraint::Min(1),    // Task matrix grid
+            Constraint::Length(1), // Footer
+        ])
+        .split(frame.area());
+
+    render_task_matrix_status_bar(frame, state, areas[0]);
+    render_task_matrix_grid(frame, state, areas[1]);
+    render_task_matrix_footer(frame, state, areas[2]);
 }
 
 /// Render the agent status bar showing all agent indicators
@@ -604,6 +731,403 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+// =============================================================================
+// Split View Helper Functions
+// =============================================================================
+
+fn render_split_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let mut spans = Vec::new();
+
+    // View mode indicator
+    spans.push(Span::styled("Split View", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+    spans.push(Span::raw(": "));
+
+    let statuses = state.agent_statuses();
+    let left_idx = state.view_state.split.left_agent_index.min(statuses.len().saturating_sub(1));
+    let right_idx = state.view_state.split.right_agent_index.min(statuses.len().saturating_sub(1));
+
+    if statuses.len() > left_idx {
+        let left = &statuses[left_idx];
+        let left_indicator = if left.status.is_active() { "●" } else if left.status.is_idle() { "○" } else { "◌" };
+        let left_color = if state.view_state.split.focused_side == 0 { Color::White } else { Color::Gray };
+        spans.push(Span::styled(left_indicator, Style::default().fg(Color::Green)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(left.codename.as_str(), Style::default().fg(left_color)));
+        spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(left.provider_type.label(), Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+    }
+
+    spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+
+    if statuses.len() > right_idx {
+        let right = &statuses[right_idx];
+        let right_indicator = if right.status.is_active() { "●" } else if right.status.is_idle() { "○" } else { "◌" };
+        let right_color = if state.view_state.split.focused_side == 1 { Color::White } else { Color::Gray };
+        spans.push(Span::styled(right_indicator, Style::default().fg(Color::Green)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(right.codename.as_str(), Style::default().fg(right_color)));
+        spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(right.provider_type.label(), Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+    }
+
+    // Right-aligned hint
+    let hint = " ←→ select  s swap  e equal";
+    let total_len: usize = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
+    if total_len <= area.width as usize {
+        spans.push(Span::raw(" ".repeat(area.width as usize - total_len)));
+    }
+    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_agent_panel(frame: &mut Frame<'_>, _state: &mut TuiState, _agent_idx: usize, area: Rect, is_focused: bool) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // Draw border
+    let border_style = if is_focused {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Render transcript for this agent (placeholder for now)
+    let placeholder_text = if is_focused {
+        "Focused agent transcript"
+    } else {
+        "Other agent transcript"
+    };
+
+    frame.render_widget(
+        Paragraph::new(placeholder_text)
+            .style(Style::default().fg(Color::Gray)),
+        inner_area,
+    );
+}
+
+fn render_split_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let footer_line = build_footer_line(state, area.width);
+    frame.render_widget(Paragraph::new(footer_line), area);
+}
+
+// =============================================================================
+// Dashboard View Helper Functions
+// =============================================================================
+
+fn render_dashboard_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let spans = vec![
+        Span::styled("Agent Dashboard", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_dashboard_cards(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let statuses = state.agent_statuses();
+    if statuses.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No agents spawned. Press Ctrl+N to spawn.")
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    // Calculate card grid layout
+    let cards_per_row = state.view_state.dashboard.cards_per_row.max(1);
+    let card_width = (area.width / cards_per_row as u16).max(20);
+
+    // Render each agent as a card
+    for (i, status) in statuses.iter().enumerate() {
+        let row = i / cards_per_row;
+        let col = i % cards_per_row;
+
+        let card_area = Rect {
+            x: area.x + (col as u16) * card_width,
+            y: area.y + (row as u16) * 4,
+            width: card_width.saturating_sub(1),
+            height: 4,
+        };
+
+        if card_area.y + card_area.height > area.y + area.height {
+            break;
+        }
+
+        render_agent_card(frame, status, card_area, state.view_state.dashboard.selected_card_index == i);
+    }
+}
+
+fn render_agent_card(frame: &mut Frame<'_>, status: &AgentStatusSnapshot, area: Rect, is_selected: bool) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let border_style = if is_selected {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let indicator = if status.status.is_active() { "●" } else if status.status.is_idle() { "○" } else { "◌" };
+    let status_color = if status.status.is_active() { Color::Green } else { Color::Gray };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Card content
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(indicator, Style::default().fg(status_color)),
+            Span::raw(" "),
+            Span::styled(status.codename.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled(status.provider_type.label(), Style::default().fg(Color::Cyan)),
+            Span::styled("]", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(vec![
+            Span::styled(status.status.label(), Style::default().fg(status_color)),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_dashboard_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let spans = vec![
+        Span::styled("n new  x stop  1-9 select", Style::default().fg(Color::Gray)),
+        Span::raw("  "),
+        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+// =============================================================================
+// Mail View Helper Functions
+// =============================================================================
+
+fn render_mail_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let unread = state.focused_unread_mail_count();
+    let action_required = state.focused_action_required_count();
+
+    let mut spans = vec![
+        Span::styled("Mail", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+    ];
+
+    if unread > 0 {
+        spans.push(Span::styled(
+            format!("📬{} unread", unread),
+            Style::default().fg(Color::Yellow),
+        ));
+        if action_required > 0 {
+            spans.push(Span::styled(
+                format!(" {}!", action_required),
+                Style::default().fg(Color::Red),
+            ));
+        }
+    } else {
+        spans.push(Span::styled("No unread mail", Style::default().fg(Color::Gray)));
+    }
+
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_mail_list(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+
+    let focused_id = state.focused_agent_id();
+    if focused_id.is_none() {
+        frame.render_widget(
+            Paragraph::new("No agent selected")
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    let inbox = state.mailbox.inbox_for(&focused_id.unwrap());
+    if inbox.is_none() || inbox.unwrap().is_empty() {
+        frame.render_widget(
+            Paragraph::new("Inbox is empty")
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    let mails = inbox.unwrap();
+    let selected_idx = state.view_state.mail.selected_mail_index;
+
+    let lines: Vec<Line> = mails.iter().enumerate().map(|(i, mail)| {
+        let is_selected = i == selected_idx;
+        let is_unread = !mail.is_read();
+        let is_action = mail.requires_action;
+
+        let indicator = if is_action { "[!] " } else if is_unread { "● " } else { "○ " };
+        let color = if is_action { Color::Red } else if is_unread { Color::Yellow } else { Color::Gray };
+
+        let style = if is_selected {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+
+        Line::from(vec![
+            Span::styled(indicator, style),
+            Span::styled(mail.subject.label(), style),
+        ])
+    }).collect();
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_mail_composer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    frame.render_widget(block, area);
+
+    let compose_text = state.view_state.mail.compose_buffer.clone();
+    frame.render_widget(
+        Paragraph::new(format!("Compose: {}", compose_text))
+            .style(Style::default().fg(Color::White)),
+        Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
+    );
+}
+
+fn render_mail_hint(frame: &mut Frame<'_>, _state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+
+    frame.render_widget(
+        Paragraph::new("c compose  r reply  m mark read")
+            .style(Style::default().fg(Color::DarkGray)),
+        area,
+    );
+}
+
+fn render_mail_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let spans = vec![
+        Span::styled("↑↓ select  Enter view", Style::default().fg(Color::Gray)),
+        Span::raw("  "),
+        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+// =============================================================================
+// Task Matrix View Helper Functions
+// =============================================================================
+
+fn render_task_matrix_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let spans = vec![
+        Span::styled("Task Matrix", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_task_matrix_grid(frame: &mut Frame<'_>, _state: &TuiState, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // Placeholder for task matrix - would need integration with backlog/tasks
+    frame.render_widget(
+        Paragraph::new("Task matrix requires backlog integration")
+            .style(Style::default().fg(Color::Gray)),
+        area,
+    );
+}
+
+fn render_task_matrix_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::DarkGray));
+
+    let spans = vec![
+        Span::styled("↑↓←→ navigate  a assign", Style::default().fg(Color::Gray)),
+        Span::raw("  "),
+        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+    ];
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn fill_background(frame: &mut Frame<'_>, area: Rect, style: Style) {
