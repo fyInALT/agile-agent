@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -215,27 +215,34 @@ impl ThreadSafeBacklog {
 
     /// Acquire read lock with timeout
     ///
+    /// Polls for lock acquisition until timeout expires.
     /// Returns None if lock cannot be acquired within timeout.
-    pub fn read_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<BacklogState>> {
-        // std::sync::Mutex doesn't have try_lock_for, use try_lock
-        match self.inner.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                // Would block - in real implementation would poll with timeout
-                // For simplicity, we return None immediately
-                // In production, use parking_lot::Mutex which has try_lock_for
-                None
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                // Lock is poisoned (thread panicked while holding it)
-                // We still want to access the data
-                Some(e.into_inner())
+    pub fn read_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
+        let deadline = Instant::now() + timeout;
+
+        // Poll for lock acquisition
+        while Instant::now() < deadline {
+            match self.inner.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    // Brief sleep to avoid tight spin loop
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    // Lock is poisoned (thread panicked while holding it)
+                    // We still want to access the data
+                    return Some(e.into_inner());
+                }
             }
         }
+
+        // Timeout expired without acquiring lock
+        None
     }
 
     /// Acquire write lock with timeout (same as read for Mutex)
-    pub fn write_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<BacklogState>> {
+    pub fn write_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
         self.read_with_timeout(timeout)
     }
 
