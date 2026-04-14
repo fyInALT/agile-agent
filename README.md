@@ -10,6 +10,7 @@ Current product scope:
 - a persisted single-agent runtime identity
 - a single-agent autonomous execution loop
 - headless CLI execution for automation and experiments
+- extensible Kanban domain model with trait-based architecture
 
 ## Status
 
@@ -17,12 +18,17 @@ Implemented:
 
 - V1: interactive execution substrate
 - V2: single-agent autonomous execution loop
+- Kanban domain model with trait + registry pattern for extensibility
+
+In progress:
+
+- Decision layer for autonomous development (specification complete, implementation pending)
+- Multi-agent parallel development architecture
 
 Not started yet:
 
-- multi-agent parallel development
 - Scrum-style coordination between sub-agents
-- workflow self-improvement
+- Workflow self-improvement
 
 ## Workspace
 
@@ -31,6 +37,7 @@ agile-agent/
 ├── cli/   # `agile-agent` binary and subcommands
 ├── core/  # providers, state, loop runner, persistence, verification
 ├── docs/  # specs and superpowers artifacts
+├── kanban/  # trait-based Kanban domain model
 ├── scripts/  # developer helper scripts
 ├── test-support/  # shared test harnesses and fixtures
 └── tui/   # interactive terminal UI
@@ -41,6 +48,7 @@ Workspace crates:
 - `agent-cli`: the `agile-agent` binary, TUI entrypoint, and CLI subcommands such as `doctor`, `probe`, `agent`, `workplace`, `resume-last`, and headless `run-loop`
 - `agent-core`: providers, backlog/task models, persistence, verification, and artifacts
 - `agent-tui`: codex-style terminal UI
+- `agent-kanban`: trait-based Kanban domain model with extensible types and registries
 - `agent-test-support`: shared test helpers for workspace crates
 
 Key docs:
@@ -287,6 +295,29 @@ Verification is intentionally simple today:
 
 Verification evidence is stored with task artifacts so failed runs can be inspected later.
 
+## Kanban Domain Model
+
+The Kanban module provides a trait-based domain model for project management:
+
+### Architecture
+
+- **Trait + Registry Pattern**: Extensible types via traits rather than enums
+- **StatusType**: Trait-based status with `StatusRegistry` for discovery
+- **ElementTypeIdentifier**: Trait-based element types with `ElementTypeRegistry`
+- **KanbanElementTrait**: Full element trait with accessor methods
+- **TransitionRule**: Extensible transition validation with element context
+
+### Key Benefits
+
+- Adding new status: implement `KanbanStatus` trait + register
+- Adding new element type: implement `KanbanElementTrait` + register
+- Adding custom transition rules: implement `TransitionRule` + register
+- No core modifications needed for extensions
+
+### Serialization
+
+`ElementSerde` proxy struct enables serialization of trait objects for persistence.
+
 ## Persistence
 
 Local state is stored under the platform-local data directory returned by `dirs::data_local_dir()`, inside an `agile-agent/` directory.
@@ -322,7 +353,15 @@ Persisted state includes:
 
 ## Documentation
 
-Implementation-facing specs live under `docs/plan/spec/`.
+Implementation-facing specs live under `docs/plan/spec/`:
+
+- `agent-runtime-phase-1-*.md`: agent identity, persistence, restore/reattach specs
+- `sprint-*.md`: TUI and loop implementation sprints
+- `tui-parity-with-codex-spec.md`: codex-style TUI features
+- `v2-sprint-*.md`: autonomous loop sprint specs
+- `kanban/`: trait-based Kanban domain model specs
+- `decision-layer/`: decision layer architecture for autonomous development
+- `multi-agent/`: multi-agent parallel development architecture specs
 
 ## Debug Logging
 
@@ -359,10 +398,12 @@ Logging failures are non-fatal: the runtime continues even if logging encounters
 - a local TUI + CLI for driving existing AI coding tools
 - a persisted single-agent execution substrate
 - a small autonomous loop for repo-local engineering work
+- an extensible Kanban domain model with trait-based architecture
 
 It is not yet:
 
-- a multi-agent coordinator
+- a multi-agent coordinator (specification in progress)
+- a decision layer for fully autonomous development (specification complete)
 - a Scrum automation engine
 - a self-improving workflow platform
 - a full project-management system
