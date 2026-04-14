@@ -246,10 +246,11 @@ mod tests {
         let rendered = lines_to_strings(&lines);
 
         assert!(rendered.iter().any(|line| line.contains("Ran")));
+        // git commands show friendly label instead of raw command
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("git diff README.md"))
+                .any(|line| line.contains("Git Diff"))
         );
         assert!(
             rendered
@@ -327,10 +328,11 @@ mod tests {
         let lines = flatten_cells(&build_cells(&entries, 80));
         let rendered = lines_to_strings(&lines);
 
+        // git commands show friendly label
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("You ran git status"))
+                .any(|line| line.contains("You ran Git Status"))
         );
     }
 

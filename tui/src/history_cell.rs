@@ -866,22 +866,43 @@ fn render_exec_header_lines(
         return lines;
     }
 
+    // Check if this is a git command for friendly label display
+    let git_label = detect_git_command(command);
+
     let command_lines = command.lines().collect::<Vec<_>>();
     let first_segments = wrap_text_segments(
         command_lines.first().copied().unwrap_or_default(),
         width.saturating_sub(header_prefix.len() + 1).max(1),
     );
     let first_segment = first_segments.first().cloned().unwrap_or_default();
+
+    // Build header with git-specific label if detected
+    let header_text = if let Some(ref git) = git_label {
+        if let Some(ref detail) = git.detail {
+            format!("{} ({})", git.label, detail)
+        } else {
+            git.label.to_string()
+        }
+    } else {
+        first_segment.clone()
+    };
+
     let mut header = header_prefix;
-    if !first_segment.is_empty() {
+    if !header_text.is_empty() {
         header.push(' ');
-        header.push_str(&first_segment);
+        header.push_str(&header_text);
     }
     lines.push(Line::from(vec![Span::styled(
         header,
         bullet_style.add_modifier(Modifier::BOLD),
     )]));
 
+    // For git commands, don't show the raw command as continuation since we show the friendly label
+    if git_label.is_some() {
+        return lines;
+    }
+
+    // Show raw command continuation for non-git commands
     let mut continuation_segments = first_segments.into_iter().skip(1).collect::<Vec<_>>();
     for raw_line in command_lines.into_iter().skip(1) {
         continuation_segments.extend(wrap_text_segments(
@@ -1530,9 +1551,208 @@ fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
 
     // git reset
     if trimmed.starts_with("git reset") {
+        let detail = trimmed.strip_prefix("git reset").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         return Some(GitCommandLabel {
             label: "Git Reset",
+            detail,
+        });
+    }
+
+    // git init
+    if trimmed.starts_with("git init") {
+        let detail = trimmed.strip_prefix("git init").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Init",
+            detail,
+        });
+    }
+
+    // git rm
+    if trimmed.starts_with("git rm") {
+        let detail = trimmed.strip_prefix("git rm").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git RM",
+            detail,
+        });
+    }
+
+    // git mv
+    if trimmed.starts_with("git mv") {
+        let detail = trimmed.strip_prefix("git mv").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git MV",
+            detail,
+        });
+    }
+
+    // git restore (modern git)
+    if trimmed.starts_with("git restore") {
+        let detail = trimmed.strip_prefix("git restore").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Restore",
+            detail,
+        });
+    }
+
+    // git switch (modern git)
+    if trimmed.starts_with("git switch") {
+        let detail = trimmed.strip_prefix("git switch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Switch",
+            detail,
+        });
+    }
+
+    // git clean
+    if trimmed.starts_with("git clean") {
+        let detail = trimmed.strip_prefix("git clean").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Clean",
+            detail,
+        });
+    }
+
+    // git bisect
+    if trimmed.starts_with("git bisect") {
+        return Some(GitCommandLabel {
+            label: "Git Bisect",
             detail: None,
+        });
+    }
+
+    // git cherry-pick
+    if trimmed.starts_with("git cherry-pick") {
+        let detail = trimmed.strip_prefix("git cherry-pick").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Cherry-Pick",
+            detail,
+        });
+    }
+
+    // git revert
+    if trimmed.starts_with("git revert") {
+        let detail = trimmed.strip_prefix("git revert").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Revert",
+            detail,
+        });
+    }
+
+    // git tag
+    if trimmed.starts_with("git tag") {
+        let detail = trimmed.strip_prefix("git tag").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Tag",
+            detail,
+        });
+    }
+
+    // git describe
+    if trimmed.starts_with("git describe") {
+        return Some(GitCommandLabel {
+            label: "Git Describe",
+            detail: None,
+        });
+    }
+
+    // git reflog
+    if trimmed.starts_with("git reflog") {
+        return Some(GitCommandLabel {
+            label: "Git Reflog",
+            detail: None,
+        });
+    }
+
+    // git worktree
+    if trimmed.starts_with("git worktree") {
+        let detail = trimmed.strip_prefix("git worktree").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Worktree",
+            detail,
+        });
+    }
+
+    // git grep
+    if trimmed.starts_with("git grep") {
+        let detail = trimmed.strip_prefix("git grep").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Grep",
+            detail,
+        });
+    }
+
+    // git archive
+    if trimmed.starts_with("git archive") {
+        let detail = trimmed.strip_prefix("git archive").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Archive",
+            detail,
+        });
+    }
+
+    // git bundle
+    if trimmed.starts_with("git bundle") {
+        return Some(GitCommandLabel {
+            label: "Git Bundle",
+            detail: None,
+        });
+    }
+
+    // git fsck
+    if trimmed.starts_with("git fsck") {
+        return Some(GitCommandLabel {
+            label: "Git FSCK",
+            detail: None,
+        });
+    }
+
+    // git gc
+    if trimmed.starts_with("git gc") {
+        return Some(GitCommandLabel {
+            label: "Git GC",
+            detail: None,
+        });
+    }
+
+    // git prune
+    if trimmed.starts_with("git prune") {
+        return Some(GitCommandLabel {
+            label: "Git Prune",
+            detail: None,
+        });
+    }
+
+    // git submodules
+    if trimmed.starts_with("git submodule") {
+        let detail = trimmed.strip_prefix("git submodule").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Submodule",
+            detail,
+        });
+    }
+
+    // git notes
+    if trimmed.starts_with("git notes") {
+        return Some(GitCommandLabel {
+            label: "Git Notes",
+            detail: None,
+        });
+    }
+
+    // git patch-id
+    if trimmed.starts_with("git patch-id") {
+        return Some(GitCommandLabel {
+            label: "Git Patch-ID",
+            detail: None,
+        });
+    }
+
+    // git diff with pathspec (needs to come after more specific diff checks)
+    if trimmed.starts_with("git diff") {
+        let detail = trimmed.strip_prefix("git diff").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Diff",
+            detail,
         });
     }
 
@@ -2410,5 +2630,130 @@ mod git_detection_tests {
             }
         }
         panic!("Expected to find Git Diff label in output: {:?}", lines);
+    }
+
+    // Tests for additional git commands added
+    #[test]
+    fn detect_git_command_recognizes_git_init() {
+        assert!(detect_git_command("git init").is_some());
+        assert!(detect_git_command("git init my-repo").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_restore() {
+        assert!(detect_git_command("git restore src/main.rs").is_some());
+        assert!(detect_git_command("git restore --staged .").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_switch() {
+        assert!(detect_git_command("git switch main").is_some());
+        assert!(detect_git_command("git switch -c feature/test").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_clean() {
+        assert!(detect_git_command("git clean -fd").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_rm() {
+        assert!(detect_git_command("git rm src/main.rs").is_some());
+        assert!(detect_git_command("git rm -f src/main.rs").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_mv() {
+        assert!(detect_git_command("git mv old.txt new.txt").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_cherry_pick() {
+        assert!(detect_git_command("git cherry-pick abc123").is_some());
+        assert!(detect_git_command("git cherry-pick --no-commit abc123").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_revert() {
+        assert!(detect_git_command("git revert HEAD~1").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_tag() {
+        assert!(detect_git_command("git tag v1.0.0").is_some());
+        assert!(detect_git_command("git tag -a v1.0.0 -m \"release\"").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_worktree() {
+        assert!(detect_git_command("git worktree list").is_some());
+        assert!(detect_git_command("git worktree add feature origin/main").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_grep() {
+        assert!(detect_git_command("git grep \"pattern\"").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_bisect() {
+        assert!(detect_git_command("git bisect start").is_some());
+        assert!(detect_git_command("git bisect bad").is_some());
+        assert!(detect_git_command("git bisect good v1.0.0").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_describe() {
+        assert!(detect_git_command("git describe").is_some());
+        assert!(detect_git_command("git describe --tags").is_some());
+    }
+
+    #[test]
+    fn detect_git_command_recognizes_git_reflog() {
+        assert!(detect_git_command("git reflog").is_some());
+        assert!(detect_git_command("git reflog show --all").is_some());
+    }
+
+    #[test]
+    fn render_exec_header_shows_git_label_for_git_diff() {
+        let lines = render_exec_header_lines(
+            "Ran",
+            "git diff --stat",
+            Style::default().fg(Color::Green),
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show friendly label instead of raw command
+        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' in: {:?}", rendered);
+        // Should not show the raw command
+        assert!(!rendered.iter().any(|line| line.contains("git diff --stat")), "Should not contain raw command: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_exec_header_shows_git_label_for_git_status() {
+        let lines = render_exec_header_lines(
+            "Ran",
+            "git status",
+            Style::default().fg(Color::Green),
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Git Status")), "Expected 'Git Status' in: {:?}", rendered);
+    }
+
+    #[test]
+    fn render_exec_header_shows_non_git_command() {
+        let lines = render_exec_header_lines(
+            "Ran",
+            "cargo build",
+            Style::default().fg(Color::Green),
+            80,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Non-git commands should show the raw command
+        assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
     }
 }
