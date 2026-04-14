@@ -194,8 +194,6 @@ impl AppState {
 
     pub fn begin_provider_response(&mut self) {
         self.status = AppStatus::Responding;
-        self.transcript
-            .push(TranscriptEntry::Assistant(String::new()));
     }
 
     pub fn append_assistant_chunk(&mut self, chunk: &str) {
@@ -957,6 +955,16 @@ mod tests {
             state.transcript,
             vec![TranscriptEntry::Assistant("hello world".to_string())]
         );
+    }
+
+    #[test]
+    fn begin_provider_response_does_not_insert_empty_assistant_message() {
+        let mut state = AppState::new(ProviderKind::Mock);
+
+        state.begin_provider_response();
+
+        assert!(state.transcript.is_empty());
+        assert_eq!(state.status, AppStatus::Responding);
     }
 
     #[test]

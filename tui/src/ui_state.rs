@@ -84,17 +84,7 @@ impl TuiState {
     }
 
     pub fn append_active_assistant_chunk(&mut self, chunk: &str) {
-        if chunk.is_empty() {
-            return;
-        }
-
-        if let Some(TranscriptEntry::Assistant(text)) = self.active_entries.last_mut() {
-            text.push_str(chunk);
-        } else {
-            self.active_entries
-                .push(TranscriptEntry::Assistant(chunk.to_string()));
-        }
-        self.bump_active_entries_revision();
+        self.append_streaming_text_chunk(StreamTextKind::Assistant, chunk);
     }
 
     pub fn append_active_thinking_chunk(&mut self, chunk: &str) {
@@ -102,13 +92,70 @@ impl TuiState {
             return;
         }
 
-        if let Some(TranscriptEntry::Thinking(text)) = self.active_entries.last_mut() {
-            text.push_str(chunk);
-        } else {
-            self.active_entries
-                .push(TranscriptEntry::Thinking(chunk.to_string()));
+        self.append_streaming_text_chunk(StreamTextKind::Thinking, chunk);
+    }
+
+    fn append_streaming_text_chunk(&mut self, kind: StreamTextKind, chunk: &str) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        let tail_index = self.ensure_streaming_text_tail(kind);
+        let mut committed = None;
+        if let Some(existing) = self.active_entries.get_mut(tail_index) {
+            let existing = match (kind, existing) {
+                (StreamTextKind::Assistant, TranscriptEntry::Assistant(text)) => text,
+                (StreamTextKind::Thinking, TranscriptEntry::Thinking(text)) => text,
+                _ => return,
+            };
+            existing.push_str(chunk);
+            if let Some(split_index) = existing.rfind('\n').map(|index| index + 1) {
+                let remainder = existing.split_off(split_index);
+                let finished = std::mem::replace(existing, remainder);
+                if !finished.is_empty() {
+                    committed = Some(finished);
+                }
+            }
+        }
+
+        self.drop_empty_streaming_text_tail(kind);
+        if let Some(committed) = committed {
+            match kind {
+                StreamTextKind::Assistant => self.session.app.append_assistant_chunk(&committed),
+                StreamTextKind::Thinking => self.session.app.append_thinking_chunk(&committed),
+            }
         }
         self.bump_active_entries_revision();
+    }
+
+    fn ensure_streaming_text_tail(&mut self, kind: StreamTextKind) -> usize {
+        match (kind, self.active_entries.last()) {
+            (StreamTextKind::Assistant, Some(TranscriptEntry::Assistant(_)))
+            | (StreamTextKind::Thinking, Some(TranscriptEntry::Thinking(_))) => {
+                self.active_entries.len().saturating_sub(1)
+            }
+            (StreamTextKind::Assistant, _) => {
+                self.active_entries
+                    .push(TranscriptEntry::Assistant(String::new()));
+                self.active_entries.len().saturating_sub(1)
+            }
+            (StreamTextKind::Thinking, _) => {
+                self.active_entries
+                    .push(TranscriptEntry::Thinking(String::new()));
+                self.active_entries.len().saturating_sub(1)
+            }
+        }
+    }
+
+    fn drop_empty_streaming_text_tail(&mut self, kind: StreamTextKind) {
+        let should_drop = match (kind, self.active_entries.last()) {
+            (StreamTextKind::Assistant, Some(TranscriptEntry::Assistant(text))) => text.is_empty(),
+            (StreamTextKind::Thinking, Some(TranscriptEntry::Thinking(text))) => text.is_empty(),
+            _ => false,
+        };
+        if should_drop {
+            self.active_entries.pop();
+        }
     }
 
     pub fn push_active_exec_started(
@@ -505,6 +552,8 @@ impl TuiState {
         }
         for entry in std::mem::take(&mut self.active_entries) {
             match entry {
+                TranscriptEntry::Assistant(text) => self.session.app.append_assistant_chunk(&text),
+                TranscriptEntry::Thinking(text) => self.session.app.append_thinking_chunk(&text),
                 TranscriptEntry::ExecCommand {
                     call_id,
                     source,
@@ -681,6 +730,12 @@ impl TuiState {
         self.busy_started_at = None;
         Ok(summary)
     }
+}
+
+#[derive(Clone, Copy)]
+enum StreamTextKind {
+    Assistant,
+    Thinking,
 }
 
 #[cfg(test)]
@@ -1018,6 +1073,26 @@ mod tests {
     }
 
     #[test]
+    fn assistant_chunks_commit_completed_lines_and_keep_partial_tail_active() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_assistant_chunk("hello ");
+        state.append_active_assistant_chunk("world\nnext");
+
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "hello world\n"
+        ));
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::Assistant(text)) if text == "next"
+        ));
+    }
+
+    #[test]
     fn active_thinking_chunks_stay_in_live_tail_until_finalize() {
         let temp = TempDir::new().expect("tempdir");
         let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
@@ -1043,6 +1118,26 @@ mod tests {
         assert!(matches!(
             state.app().transcript.last(),
             Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2"
+        ));
+    }
+
+    #[test]
+    fn thinking_chunks_commit_completed_lines_and_keep_partial_tail_active() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.append_active_thinking_chunk("step 1 ");
+        state.append_active_thinking_chunk("step 2\nnext");
+
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Thinking(text)) if text == "step 1 step 2\n"
+        ));
+        assert!(matches!(
+            state.active_entries.last(),
+            Some(TranscriptEntry::Thinking(text)) if text == "next"
         ));
     }
 
