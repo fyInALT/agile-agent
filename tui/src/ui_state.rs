@@ -760,6 +760,15 @@ impl TuiState {
         self.session.app.input = self.composer.text().to_string();
     }
 
+    pub fn replace_transcript(&mut self, transcript: Vec<TranscriptEntry>) {
+        self.session.app.transcript = transcript;
+        self.transcript_rendered_lines.clear();
+        self.transcript_last_cell_range = None;
+        if self.transcript_follow_tail {
+            self.transcript_scroll_offset = self.transcript_max_scroll;
+        }
+    }
+
     pub fn into_app_state(mut self) -> AppState {
         self.sync_app_input_from_composer();
         self.session.app
@@ -1566,6 +1575,25 @@ mod tests {
                 .scroll_offset,
             usize::MAX
         );
+    }
+
+    #[test]
+    fn replace_transcript_swaps_committed_history_and_clears_scroll_anchors() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.transcript_rendered_lines = vec!["stale".to_string()];
+        state.transcript_last_cell_range = Some((10, 2));
+
+        state.replace_transcript(vec![TranscriptEntry::Status("replaced".to_string())]);
+
+        assert_eq!(
+            state.app().transcript,
+            vec![TranscriptEntry::Status("replaced".to_string())]
+        );
+        assert!(state.transcript_rendered_lines.is_empty());
+        assert!(state.transcript_last_cell_range.is_none());
     }
 
     #[test]
