@@ -88,6 +88,9 @@ The TUI provides:
 - multiline editing and paste support
 - transcript paging and overlay browsing
 - width-aware Markdown rendering for assistant output
+- codex-style tool output with unified diff rendering
+- exec command previews with streaming output
+- patch summaries with file change statistics
 - a local skill browser
 - slash commands for provider inspection, backlog updates, and loop control
 - current agent identity in the footer
