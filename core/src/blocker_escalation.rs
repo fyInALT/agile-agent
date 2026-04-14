@@ -102,11 +102,10 @@ impl BlockerEscalation {
         self.resolved_by = Some(resolved_by);
         self.status = EscalationStatus::Resolved;
 
-        // Calculate resolution time
-        if let Some(escalated) = self.escalated_at {
-            let duration = self.resolved_at.unwrap() - escalated;
-            self.resolution_time_minutes = Some(duration.num_minutes() as u64);
-        }
+        // Calculate resolution time from escalation if available, otherwise from detection
+        let start_time = self.escalated_at.unwrap_or(self.detected_at);
+        let duration = self.resolved_at.unwrap() - start_time;
+        self.resolution_time_minutes = Some(duration.num_minutes() as u64);
     }
 
     /// Cancel this escalation
@@ -452,6 +451,26 @@ mod tests {
         assert!(escalation.resolved_by.is_some());
         assert!(escalation.resolution_time_minutes.is_some());
         assert!(!escalation.is_active());
+        assert!(escalation.is_resolved());
+    }
+
+    #[test]
+    fn escalation_resolve_without_escalation() {
+        // Test resolving directly from Detected status (without escalate)
+        let mut escalation = BlockerEscalation::new(
+            "task-001".to_string(),
+            AgentId::new("agent-1".to_string()),
+            "Waiting on dependency".to_string(),
+        );
+
+        // Resolve directly without escalating first
+        escalation.resolve(AgentId::new("scrum-master".to_string()));
+
+        assert_eq!(escalation.status, EscalationStatus::Resolved);
+        assert!(escalation.resolved_at.is_some());
+        assert!(escalation.escalated_at.is_none());
+        // Resolution time should still be calculated from detected_at
+        assert!(escalation.resolution_time_minutes.is_some());
         assert!(escalation.is_resolved());
     }
 

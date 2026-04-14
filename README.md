@@ -11,6 +11,7 @@ Current product scope:
 - a single-agent autonomous execution loop
 - headless CLI execution for automation and experiments
 - extensible Kanban domain model with trait-based architecture
+- multi-agent coordination with Scrum-style roles (foundation implemented)
 
 ## Status
 
@@ -19,15 +20,15 @@ Implemented:
 - V1: interactive execution substrate
 - V2: single-agent autonomous execution loop
 - Kanban domain model with trait + registry pattern for extensibility
+- Multi-agent foundation: AgentRole, RuntimeMode, Data Migration, Scrum coordination
 
 In progress:
 
 - Decision layer for autonomous development (specification complete, implementation pending)
-- Multi-agent parallel development architecture
+- Full multi-agent parallel runtime with concurrent execution
 
 Not started yet:
 
-- Scrum-style coordination between sub-agents
 - Workflow self-improvement
 
 ## Workspace
@@ -394,6 +395,84 @@ Logged events include:
 The default log level is `debug`. Logs are structured JSON Lines for easy filtering and analysis.
 
 Logging failures are non-fatal: the runtime continues even if logging encounters errors.
+
+## Multi-Agent Foundation
+
+Sprint 10-11 implemented foundational multi-agent coordination features:
+
+### Agent Roles
+
+Three Scrum-style roles for agent coordination:
+
+- **ProductOwner**: Focus on requirements, priorities, backlog grooming
+- **ScrumMaster**: Focus on process health, blocker resolution, coordination
+- **Developer**: Focus on implementation quality, testing coverage, delivery
+
+Each role has:
+- Role-specific prompt prefixes
+- Default skills relevant to role focus
+- Skill relevance filtering
+
+### Runtime Modes
+
+Two runtime modes for backward compatibility:
+
+- **SingleAgent**: Default mode, single agent execution (backward compatible)
+- **MultiAgent**: Multiple concurrent agents with shared workplace state
+
+Mode transition happens automatically when spawning second agent.
+
+### Scrum Coordination
+
+#### Sprint Planning
+
+- `SprintPlanningSession`: Story selection, effort estimation, goal definition
+- Story prioritization with add/remove/reorder
+- Sprint commitment tracking
+- Capacity calculation with buffer
+
+#### Daily Standup
+
+- `DailyStandupReport`: Per-agent status (completed, planned, blockers)
+- Task history tracking for yesterday's work
+- Blocker summary for standup display
+
+#### Blocker Escalation
+
+- `BlockerEscalation`: Detect blocked agents, escalate to ScrumMaster
+- Resolution time tracking
+- Escalation statistics
+
+### Data Migration
+
+Automatic migration from legacy single-agent format:
+
+- Detects legacy `meta.json`, `state.json`, `transcript.json` at workplace root
+- Moves files to `agents/agent_001/` subdirectory
+- Creates workplace-level `workplace_meta.json`
+- Preserves existing backlog
+- Rollback on failure
+
+### CLI Commands
+
+New multi-agent CLI commands:
+
+```bash
+# List all agents including stopped ones
+cargo run -p agent-cli -- agent list --all
+
+# Show detailed agent status
+cargo run -p agent-cli -- agent status <agent-id>
+
+# Spawn new agent with provider
+cargo run -p agent-cli -- agent spawn claude
+
+# Stop an agent
+cargo run -p agent-cli -- agent stop <agent-id>
+
+# Run loop with multi-agent flag (future)
+cargo run -p agent-cli -- run-loop --multi-agent --max-iterations 5
+```
 
 ## Current Boundaries
 
