@@ -20,6 +20,7 @@ use std::env;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::input::InputOutcome;
 use crate::input::handle_key_event;
@@ -31,17 +32,27 @@ use crate::provider_overlay::ProviderSelectionCommand;
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
 
+/// Interval for periodic persistence flush
+const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
+
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
     let session = RuntimeSession::bootstrap(launch_cwd, provider::default_provider(), resume_last)?;
     let mut state = TuiState::from_session(session);
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
+    let mut last_flush = Instant::now();
 
     loop {
         terminal.draw(|frame| render_app(frame, &mut state))?;
 
         if state.workplace().loop_control.should_quit {
             break;
+        }
+
+        // Periodic persistence flush
+        if last_flush.elapsed() >= PERSISTENCE_FLUSH_INTERVAL {
+            state.persist_if_changed()?;
+            last_flush = Instant::now();
         }
 
         if state.workplace().loop_control.loop_run_active
