@@ -95,7 +95,7 @@ impl LlmClient {
         let response = self.execute_request(request).await?;
 
         let choice = response.choices.first()
-            .ok_or_else(|| anyhow::anyhow!("No choices in response"))?;
+            .ok_or_else(|| LlmError::Parse("No choices in response".to_string()))?;
         Ok(choice.message.content.clone())
     }
 
@@ -136,7 +136,8 @@ impl LlmClient {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(anyhow::anyhow!("HTTP error: {}", status));
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(LlmError::Api(format!("HTTP {}: {}", status, error_text)));
         }
 
         let mut stream = response.bytes_stream();
@@ -159,7 +160,7 @@ impl LlmClient {
                         }
                     }
                 }
-                Err(e) => return Err(anyhow::anyhow!("Network error: {}", e)),
+                Err(e) => return Err(LlmError::Network(e)),
             }
         }
 
