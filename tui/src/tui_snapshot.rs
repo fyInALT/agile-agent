@@ -41,8 +41,6 @@ impl TuiShutdownSnapshot {
 
     /// Create snapshot from current TuiViewState
     pub fn from_view_state(view_state: &crate::view_mode::TuiViewState) -> Self {
-        use chrono::Utc;
-
         let split_state = Some(SplitViewSnapshot {
             left_agent_index: view_state.split.left_agent_index,
             right_agent_index: view_state.split.right_agent_index,
@@ -120,7 +118,7 @@ pub struct MailViewSnapshot {
 
 /// Serde module for f32 split ratio
 mod split_ratio_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
     where

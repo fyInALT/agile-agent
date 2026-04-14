@@ -1238,17 +1238,109 @@ fn render_task_matrix_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_task_matrix_grid(frame: &mut Frame<'_>, _state: &TuiState, area: Rect) {
+fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     if area.height == 0 || area.width == 0 {
         return;
     }
 
-    // Placeholder for task matrix - would need integration with backlog/tasks
-    frame.render_widget(
-        Paragraph::new("Task matrix requires backlog integration")
-            .style(Style::default().fg(Color::Gray)),
-        area,
-    );
+    // Get kanban service from SharedWorkplaceState
+    let kanban = state.session.workplace().kanban();
+
+    if kanban.is_none() {
+        frame.render_widget(
+            Paragraph::new("Kanban not initialized. Start a multi-agent session to use task matrix.")
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    let kanban = kanban.unwrap();
+
+    // Get tasks from kanban
+    use agent_kanban::domain::ElementType;
+    let tasks = kanban.list_by_type(ElementType::Task);
+
+    if tasks.is_err() || tasks.as_ref().unwrap().is_empty() {
+        frame.render_widget(
+            Paragraph::new("No tasks in backlog. Press Ctrl+N to spawn agents and create tasks.")
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    let tasks = tasks.unwrap();
+
+    // Column headers: Status columns (Todo, InProgress, Done, Verified)
+    let columns = ["Todo", "InProg", "Done", "Verified"];
+    let column_width = area.width / 4;
+
+    // Render header row
+    let header_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+
+    let header_spans: Vec<Span> = columns.iter().enumerate().map(|(i, col)| {
+        Span::styled(
+            format!("  {:width$}", col, width = column_width as usize - 2),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )
+    }).collect();
+    frame.render_widget(Paragraph::new(Line::from(header_spans)), header_area);
+
+    // Render task rows
+    let row_height = 1;
+    let max_rows = (area.height - 1) / row_height;
+
+    // Group tasks by status
+    use agent_kanban::domain::Status;
+    let todo_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Todo || t.status() == Status::Ready).collect();
+    let in_progress_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::InProgress).collect();
+    let done_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Done).collect();
+    let verified_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Verified).collect();
+
+    // Render rows
+    for row_idx in 0..max_rows as usize {
+        let row_area = Rect {
+            x: area.x,
+            y: area.y + 1 + row_idx as u16,
+            width: area.width,
+            height: row_height,
+        };
+
+        // Get tasks for each column in this row
+        let todo_task = todo_tasks.get(row_idx);
+        let in_progress_task = in_progress_tasks.get(row_idx);
+        let done_task = done_tasks.get(row_idx);
+        let verified_task = verified_tasks.get(row_idx);
+
+        let task_spans: Vec<Span> = [
+            (todo_task, Color::Gray),
+            (in_progress_task, Color::Green),
+            (done_task, Color::Cyan),
+            (verified_task, Color::Blue),
+        ].iter().enumerate().map(|(col_idx, (task, color))| {
+            let task_text = if let Some(t) = task {
+                // Truncate title to fit column
+                let title = t.title();
+                let max_len = column_width as usize - 4;
+                if title.len() > max_len {
+                    format!("  {}...", &title[..max_len.saturating_sub(3)])
+                } else {
+                    format!("  {}", title)
+                }
+            } else {
+                format!("  {:width$}", "", width = column_width as usize - 2)
+            };
+            Span::styled(task_text, Style::default().fg(*color))
+        }).collect();
+
+        frame.render_widget(Paragraph::new(Line::from(task_spans)), row_area);
+    }
 }
 
 fn render_task_matrix_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
