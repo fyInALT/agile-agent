@@ -19,6 +19,8 @@ pub struct AgentState {
     pub loop_phase: LoopPhase,
     pub loop_run_active: bool,
     pub remaining_loop_iterations: usize,
+    /// Whether the agent was interrupted during execution (crash, force quit, etc.)
+    pub was_interrupted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +40,23 @@ impl AgentState {
             loop_phase: state.loop_phase,
             loop_run_active: state.loop_run_active,
             remaining_loop_iterations: state.remaining_loop_iterations,
+            was_interrupted: false, // Will be set to true on shutdown if executing
+        }
+    }
+
+    /// Create a state snapshot marking the agent as interrupted
+    pub fn interrupted_from_app_state(state: &AppState) -> Self {
+        Self {
+            cwd: state.cwd.display().to_string(),
+            draft_input: state.input.clone(),
+            enabled_skill_names: state.skills.enabled_names.iter().cloned().collect(),
+            active_task_id: state.active_task_id.clone(),
+            active_task_had_error: state.active_task_had_error,
+            continuation_attempts: state.continuation_attempts,
+            loop_phase: state.loop_phase,
+            loop_run_active: state.loop_run_active,
+            remaining_loop_iterations: state.remaining_loop_iterations,
+            was_interrupted: true,
         }
     }
 
@@ -75,6 +94,10 @@ impl AgentState {
             .collect();
         state.skills.enabled_names = restored_enabled;
 
+        if self.was_interrupted {
+            warnings.push("agent was interrupted during previous execution".to_string());
+        }
+
         RestoreAgentStateResult { warnings }
     }
 }
@@ -103,5 +126,20 @@ mod tests {
         assert_eq!(restored.active_task_id.as_deref(), Some("task-1"));
         assert_eq!(restored.loop_phase, LoopPhase::Executing);
         assert!(restored.loop_run_active);
+    }
+
+    #[test]
+    fn interrupted_state_produces_warning_on_restore() {
+        let mut state = AppState::new(ProviderKind::Mock);
+        state.loop_phase = LoopPhase::Executing;
+
+        let snapshot = AgentState::interrupted_from_app_state(&state);
+        assert!(snapshot.was_interrupted);
+
+        let mut restored = AppState::new(ProviderKind::Mock);
+        let result = snapshot.apply_to_app_state(&mut restored);
+
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("interrupted"));
     }
 }

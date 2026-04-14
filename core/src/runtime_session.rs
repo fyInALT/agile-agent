@@ -6,6 +6,7 @@ use anyhow::Result;
 use crate::agent_runtime::AgentBootstrapKind;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
+use crate::app::LoopPhase;
 use crate::backlog_store;
 use crate::logging;
 use crate::provider::ProviderKind;
@@ -41,18 +42,7 @@ impl RuntimeSession {
             app.push_error_message(warning);
         }
         if matches!(bootstrap.kind, AgentBootstrapKind::Restored) {
-            // Restore agent state (input, task, loop settings)
-            if let Err(err) = bootstrap.runtime.restore_state(&mut app) {
-                app.push_error_message(format!("failed to restore agent state: {err}"));
-                logging::error_event(
-                    "agent.restore_state",
-                    "failed to restore state into session app state",
-                    serde_json::json!({
-                        "error": err.to_string(),
-                    }),
-                );
-            }
-            // Restore transcript
+            // Restore transcript first (so warnings can be appended)
             if let Err(err) = bootstrap.runtime.restore_transcript(&mut app) {
                 app.push_error_message(format!("failed to restore agent transcript: {err}"));
                 logging::error_event(
@@ -62,6 +52,24 @@ impl RuntimeSession {
                         "error": err.to_string(),
                     }),
                 );
+            }
+            // Restore agent state (input, task, loop settings)
+            match bootstrap.runtime.restore_state(&mut app) {
+                Ok(result) => {
+                    for warning in result.warnings {
+                        app.push_error_message(warning);
+                    }
+                }
+                Err(err) => {
+                    app.push_error_message(format!("failed to restore agent state: {err}"));
+                    logging::error_event(
+                        "agent.restore_state",
+                        "failed to restore state into session app state",
+                        serde_json::json!({
+                            "error": err.to_string(),
+                        }),
+                    );
+                }
             }
         }
         announce_bootstrap_kind(&mut app, &bootstrap.kind, &bootstrap.runtime);
@@ -160,6 +168,41 @@ impl RuntimeSession {
         self.persist_all()
     }
 
+    /// Mark agent as interrupted and persist (for unexpected shutdown during execution)
+    pub fn mark_interrupted_and_persist(&mut self) -> Result<()> {
+        self.sync_app_to_workplace();
+        self.agent_runtime.sync_from_app_state(&self.app);
+        self.agent_runtime.mark_stopped();
+        // Save state with interrupted flag
+        self.agent_runtime.persist_interrupted_state(&self.app)?;
+        self.agent_runtime.persist()?;
+        self.agent_runtime.persist_transcript(&self.app)?;
+        self.agent_runtime.persist_messages(&self.app)?;
+        self.agent_runtime.persist_memory(&self.app)?;
+        backlog_store::save_backlog_for_workplace(
+            &self.workplace.backlog,
+            self.agent_runtime.workplace(),
+        )?;
+        session_store::save_recent_session_for_workplace(
+            &self.app,
+            self.agent_runtime.workplace(),
+        )?;
+        logging::debug_event(
+            "agent.persist_interrupted",
+            "persisted interrupted agent state",
+            serde_json::json!({
+                "agent_id": self.agent_runtime.agent_id().as_str(),
+                "loop_phase": self.app.loop_phase,
+            }),
+        );
+        Ok(())
+    }
+
+    /// Check if the current agent state indicates an interrupted session
+    pub fn was_interrupted(&self) -> bool {
+        matches!(self.app.loop_phase, LoopPhase::Executing | LoopPhase::Planning | LoopPhase::Verifying)
+    }
+
     pub fn switch_agent(&mut self, provider_kind: ProviderKind) -> Result<String> {
         self.sync_app_to_workplace();
         self.agent_runtime.sync_from_app_state(&self.app);
@@ -243,6 +286,7 @@ fn announce_bootstrap_kind(app: &mut AppState, kind: &AgentBootstrapKind, runtim
 #[cfg(test)]
 mod tests {
     use super::RuntimeSession;
+    use super::LoopPhase;
     use crate::app::TranscriptEntry;
     use crate::logging;
     use crate::logging::RunMode;
@@ -345,5 +389,45 @@ mod tests {
         assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
         assert!(restored.app.loop_run_active);
         assert_eq!(restored.app.remaining_loop_iterations, 5);
+    }
+
+    #[test]
+    fn mark_interrupted_perserves_interrupted_flag() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+        session.app.loop_phase = LoopPhase::Executing;
+        session.mark_interrupted_and_persist().expect("interrupted persist");
+
+        let restored =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap restored");
+
+        // Check that warnings include interrupted message
+        let has_interrupted_warning = restored.app.transcript.iter().any(|entry| {
+            matches!(entry, TranscriptEntry::Error(text) if text.contains("interrupted"))
+        });
+        assert!(has_interrupted_warning);
+    }
+
+    #[test]
+    fn was_interrupted_detects_active_phases() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut session =
+            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+                .expect("bootstrap");
+
+        // Idle is not interrupted
+        session.app.loop_phase = LoopPhase::Idle;
+        assert!(!session.was_interrupted());
+
+        // Executing is interrupted
+        session.app.loop_phase = LoopPhase::Executing;
+        assert!(session.was_interrupted());
+
+        // Planning is interrupted
+        session.app.loop_phase = LoopPhase::Planning;
+        assert!(session.was_interrupted());
     }
 }

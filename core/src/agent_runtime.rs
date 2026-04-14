@@ -291,6 +291,12 @@ impl AgentRuntime {
             .save_state(&self.meta.agent_id, &AgentState::from_app_state(state))
     }
 
+    /// Persist state with interrupted flag set
+    pub fn persist_interrupted_state(&self, state: &AppState) -> Result<std::path::PathBuf> {
+        AgentStore::new(self.workplace.clone())
+            .save_state(&self.meta.agent_id, &AgentState::interrupted_from_app_state(state))
+    }
+
     pub fn restore_state(&self, state: &mut AppState) -> Result<RestoreAgentStateResult> {
         let snapshot = AgentStore::new(self.workplace.clone()).load_state(&self.meta.agent_id)?;
         Ok(snapshot.apply_to_app_state(state))
