@@ -15,6 +15,7 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
+use crate::markdown_stream::MarkdownStreamCollector;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
 use crate::composer::textarea::TextAreaState;
@@ -219,6 +220,7 @@ impl TuiState {
                     kind: StreamTextKind::Assistant,
                     tail: text,
                     pending_commits: VecDeque::new(),
+                    collector: MarkdownStreamCollector::new(None),
                     policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
@@ -229,6 +231,7 @@ impl TuiState {
                     kind: StreamTextKind::Thinking,
                     tail: text,
                     pending_commits: VecDeque::new(),
+                    collector: MarkdownStreamCollector::new(None),
                     policy: AdaptiveChunkingPolicy::default(),
                 });
                 self.bump_active_entries_revision();
@@ -302,6 +305,7 @@ impl TuiState {
 
         let mut committed = None;
         let stream = self.ensure_active_stream(kind);
+        stream.collector.push_delta(chunk);
         stream.tail.push_str(chunk);
         if let Some(split_index) = stream.tail.rfind('\n').map(|index| index + 1) {
             let remainder = stream.tail.split_off(split_index);
@@ -312,8 +316,10 @@ impl TuiState {
         }
 
         if let Some(committed) = committed {
+            let rendered_lines = stream.collector.commit_complete_lines().len().max(1);
             stream.pending_commits.push_back(QueuedStreamCommit {
                 text: committed,
+                rendered_lines,
                 enqueued_at: Instant::now(),
             });
         }
@@ -336,6 +342,7 @@ impl TuiState {
                 kind,
                 tail: String::new(),
                 pending_commits: VecDeque::new(),
+                collector: MarkdownStreamCollector::new(None),
                 policy: AdaptiveChunkingPolicy::default(),
             });
         }
@@ -357,19 +364,29 @@ impl TuiState {
         let now = Instant::now();
         let next = self.active_stream_mut().and_then(|stream| {
             let snapshot = QueueSnapshot {
-                queued_lines: stream.pending_commits.len(),
+                queued_lines: stream
+                    .pending_commits
+                    .iter()
+                    .map(|commit| commit.rendered_lines)
+                    .sum(),
                 oldest_age: stream.oldest_queued_age(now),
             };
             let decision = stream.policy.decide(snapshot, now);
-            let drain_count = decision.drain_lines.min(stream.pending_commits.len());
-            if drain_count == 0 {
+            let mut remaining = decision.drain_lines;
+            if remaining == 0 {
                 return None;
             }
-            let drained = stream
-                .pending_commits
-                .drain(..drain_count)
-                .map(|commit| commit.text)
-                .collect::<Vec<_>>();
+            let mut drained = Vec::new();
+            while remaining > 0 {
+                let Some(commit) = stream.pending_commits.pop_front() else {
+                    break;
+                };
+                remaining = remaining.saturating_sub(commit.rendered_lines);
+                drained.push(commit.text);
+            }
+            if drained.is_empty() {
+                return None;
+            }
             Some((stream.kind, drained))
         });
         let Some((kind, drained)) = next else {
@@ -924,12 +941,20 @@ impl TuiState {
     }
 
     fn flush_stream_to_transcript(&mut self, stream: ActiveStream) {
-        for commit in stream.pending_commits {
-            self.commit_stream_text(stream.kind, &commit.text);
+        let ActiveStream {
+            kind,
+            tail,
+            pending_commits,
+            mut collector,
+            ..
+        } = stream;
+        for commit in pending_commits {
+            self.commit_stream_text(kind, &commit.text);
         }
-        if !stream.tail.is_empty() {
-            self.commit_stream_text(stream.kind, &stream.tail);
+        if !tail.is_empty() {
+            self.commit_stream_text(kind, &tail);
         }
+        let _ = collector.finalize_and_drain();
     }
 
     fn flush_active_stream_to_transcript(&mut self) {
@@ -1079,6 +1104,7 @@ pub struct ActiveStream {
     pub(crate) kind: StreamTextKind,
     pub(crate) tail: String,
     pub(crate) pending_commits: VecDeque<QueuedStreamCommit>,
+    pub(crate) collector: MarkdownStreamCollector,
     pub(crate) policy: AdaptiveChunkingPolicy,
 }
 
@@ -1100,6 +1126,7 @@ impl ActiveStream {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueuedStreamCommit {
     pub(crate) text: String,
+    pub(crate) rendered_lines: usize,
     pub(crate) enqueued_at: Instant,
 }
 

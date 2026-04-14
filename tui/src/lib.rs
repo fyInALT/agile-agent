@@ -12,6 +12,7 @@ mod exec_semantics;
 mod history_cell;
 mod input;
 mod markdown;
+mod markdown_stream;
 mod render;
 mod streaming;
 mod terminal;

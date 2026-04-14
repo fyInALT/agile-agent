@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use pulldown_cmark::CodeBlockKind;
 use pulldown_cmark::Event;
 use pulldown_cmark::Parser;
@@ -9,6 +11,18 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use textwrap::wrap;
+
+pub fn append_markdown(
+    text: &str,
+    max_width: Option<usize>,
+    _cwd: Option<&Path>,
+    out: &mut Vec<Line<'static>>,
+) {
+    out.extend(render_markdown_lines(
+        text,
+        max_width.unwrap_or(usize::MAX.saturating_sub(1)),
+    ));
+}
 
 pub fn render_markdown_lines(text: &str, max_width: usize) -> Vec<Line<'static>> {
     if text.is_empty() {
