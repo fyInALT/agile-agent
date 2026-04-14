@@ -175,7 +175,7 @@ mod issue_tests {
         match issue {
             KanbanElement::Issue(i) => {
                 assert_eq!(i.base.title, "Bug in login");
-                assert!(i.base.priority == Priority::High || i.base.priority == Priority::Medium);
+                assert_eq!(i.base.priority, Priority::High); // Issues default to High priority
             }
             _ => panic!("Expected Issue variant"),
         }

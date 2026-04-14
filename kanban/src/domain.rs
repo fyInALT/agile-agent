@@ -446,9 +446,9 @@ pub struct Issue {
 
 impl Issue {
     pub fn new(title: &str) -> Self {
-        Issue {
-            base: BaseElement::new(ElementType::Issue, title),
-        }
+        let mut base = BaseElement::new(ElementType::Issue, title);
+        base.priority = Priority::High; // Issues default to High priority
+        Issue { base }
     }
 }
 
@@ -797,6 +797,28 @@ impl KanbanElement {
 
     pub fn remove_reference(&mut self, id: &ElementId) {
         self.base_mut().references.retain(|r| r != id);
+    }
+
+    /// Set the effort (story points) for this element
+    pub fn set_effort(&mut self, effort: u32) {
+        self.base_mut().effort = Some(effort);
+    }
+
+    /// Clear the effort for this element
+    pub fn clear_effort(&mut self) {
+        self.base_mut().effort = None;
+    }
+
+    /// Block this element with a reason
+    pub fn block(&mut self, reason: &str) -> Result<(), KanbanTransitionError> {
+        self.base_mut().blocked_reason = Some(reason.to_string());
+        self.base_mut().transition(Status::Blocked)
+    }
+
+    /// Unblock this element
+    pub fn unblock(&mut self) -> Result<(), KanbanTransitionError> {
+        self.base_mut().blocked_reason = None;
+        self.base_mut().transition(Status::Backlog)
     }
 }
 

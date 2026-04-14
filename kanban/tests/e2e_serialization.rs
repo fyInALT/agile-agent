@@ -219,3 +219,71 @@ fn test_sprint_active_field_serialization() {
         _ => panic!("Expected Sprint"),
     }
 }
+
+#[test]
+fn test_status_history_roundtrip_serialization() {
+    let mut task = KanbanElement::new_task("Task");
+
+    // Transition through several statuses
+    task.transition(Status::Backlog).unwrap();
+    task.transition(Status::Ready).unwrap();
+    task.transition(Status::Todo).unwrap();
+
+    // Serialize and deserialize
+    let json = serde_json::to_string(&task).unwrap();
+    let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
+
+    // Verify status_history is preserved
+    let history = deserialized.status_history();
+    assert_eq!(history.len(), 4); // Plan + 3 transitions
+    assert_eq!(history[0].status, Status::Plan);
+    assert_eq!(history[1].status, Status::Backlog);
+    assert_eq!(history[2].status, Status::Ready);
+    assert_eq!(history[3].status, Status::Todo);
+}
+
+#[test]
+fn test_blocked_reason_roundtrip_serialization() {
+    let mut task = KanbanElement::new_task("Task");
+    task.transition(Status::Backlog).unwrap();
+    task.block("Waiting for deps").unwrap();
+
+    // Serialize and deserialize
+    let json = serde_json::to_string(&task).unwrap();
+    let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
+
+    match deserialized {
+        KanbanElement::Task(t) => {
+            assert_eq!(t.base.blocked_reason.as_ref().unwrap(), "Waiting for deps");
+        }
+        _ => panic!("Expected Task"),
+    }
+}
+
+#[test]
+fn test_tags_roundtrip_serialization() {
+    let mut task = KanbanElement::new_task("Task");
+    task.add_tag("bug");
+    task.add_tag("urgent");
+
+    // Serialize and deserialize
+    let json = serde_json::to_string(&task).unwrap();
+    let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(deserialized.base().tags, vec!["bug", "urgent"]);
+}
+
+#[test]
+fn test_references_roundtrip_serialization() {
+    let mut task = KanbanElement::new_task("Task");
+    let ref1 = ElementId::new(ElementType::Story, 1);
+    let ref2 = ElementId::new(ElementType::Task, 5);
+    task.add_reference(ref1.clone());
+    task.add_reference(ref2.clone());
+
+    // Serialize and deserialize
+    let json = serde_json::to_string(&task).unwrap();
+    let deserialized: KanbanElement = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(deserialized.references().len(), 2);
+}

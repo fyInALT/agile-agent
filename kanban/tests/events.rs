@@ -21,6 +21,14 @@ impl CountingSubscriber {
     }
 }
 
+impl Clone for CountingSubscriber {
+    fn clone(&self) -> Self {
+        CountingSubscriber {
+            count: self.count.clone(),
+        }
+    }
+}
+
 impl KanbanEventSubscriber for CountingSubscriber {
     fn on_event(&self, _event: &KanbanEvent) {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -125,29 +133,54 @@ fn test_event_debug() {
 #[test]
 fn test_subscriber_receives_single_event() {
     let bus = KanbanEventBus::new();
-    let subscriber = Box::new(CountingSubscriber::new());
-    bus.subscribe(subscriber);
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    struct SingleCounter(Arc<AtomicUsize>);
+    impl KanbanEventSubscriber for SingleCounter {
+        fn on_event(&self, _event: &KanbanEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    bus.subscribe(Box::new(SingleCounter(counter.clone())));
 
     let event = KanbanEvent::Created {
         element_id: ElementId::new(ElementType::Task, 1),
         element_type: ElementType::Task,
     };
     bus.publish(event);
+
+    // Verify the subscriber actually received the event
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn test_multiple_subscribers_all_receive_events() {
     let bus = KanbanEventBus::new();
-    let subscriber1 = Box::new(CountingSubscriber::new());
-    let subscriber2 = Box::new(CountingSubscriber::new());
-    bus.subscribe(subscriber1);
-    bus.subscribe(subscriber2);
+    let counter1 = Arc::new(AtomicUsize::new(0));
+    let counter2 = Arc::new(AtomicUsize::new(0));
+
+    struct MultiCounter(Arc<AtomicUsize>);
+    impl KanbanEventSubscriber for MultiCounter {
+        fn on_event(&self, _event: &KanbanEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let sub1 = Box::new(MultiCounter(counter1.clone()));
+    let sub2 = Box::new(MultiCounter(counter2.clone()));
+    bus.subscribe(sub1);
+    bus.subscribe(sub2);
 
     let event = KanbanEvent::Created {
         element_id: ElementId::new(ElementType::Task, 1),
         element_type: ElementType::Task,
     };
     bus.publish(event);
+
+    // Both subscribers should have received the event
+    assert_eq!(counter1.load(Ordering::SeqCst), 1);
+    assert_eq!(counter2.load(Ordering::SeqCst), 1);
 }
 
 #[test]

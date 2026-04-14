@@ -9,6 +9,7 @@ fn test_git_operations_integration() {
 }
 
 #[test]
+#[ignore = "GitOperations is a placeholder - commit_changes returns Ok unconditionally"]
 fn test_commit_changes_integration() {
     let ops = GitOperations::new("/tmp/test-repo");
     let result = ops.commit_changes("agent-1", "Add kanban elements");
@@ -16,6 +17,7 @@ fn test_commit_changes_integration() {
 }
 
 #[test]
+#[ignore = "GitOperations is a placeholder - fetch_and_rebase returns Ok unconditionally"]
 fn test_fetch_and_rebase_integration() {
     let ops = GitOperations::new("/tmp/test-repo");
     let result = ops.fetch_and_rebase("main");
@@ -23,6 +25,7 @@ fn test_fetch_and_rebase_integration() {
 }
 
 #[test]
+#[ignore = "GitOperations is a placeholder - has_conflicts always returns false"]
 fn test_has_conflicts_integration() {
     let ops = GitOperations::new("/tmp/test-repo");
     assert!(!ops.has_conflicts());

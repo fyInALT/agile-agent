@@ -26,6 +26,28 @@ fn test_kanban_element_effort_accessor() {
 }
 
 #[test]
+fn test_set_effort() {
+    let mut task = KanbanElement::new_task("Task");
+    assert!(task.effort().is_none());
+
+    task.set_effort(5);
+    assert_eq!(task.effort(), Some(5));
+
+    task.set_effort(8);
+    assert_eq!(task.effort(), Some(8)); // Updated
+}
+
+#[test]
+fn test_clear_effort() {
+    let mut task = KanbanElement::new_task("Task");
+    task.set_effort(5);
+    assert_eq!(task.effort(), Some(5));
+
+    task.clear_effort();
+    assert_eq!(task.effort(), None);
+}
+
+#[test]
 fn test_kanban_element_keywords_accessor() {
     let task = KanbanElement::new_task("Task");
     assert!(task.keywords().is_empty()); // Default is empty
@@ -252,4 +274,54 @@ fn test_remove_reference_that_does_not_exist() {
 
     task.remove_reference(&ElementId::new(ElementType::Task, 999)); // Does not exist
     assert_eq!(task.base().references.len(), 1);
+}
+
+#[test]
+fn test_block_sets_reason_and_status() {
+    let mut task = KanbanElement::new_task("Task");
+    assert_eq!(task.status(), Status::Plan);
+    assert!(task.base().blocked_reason.is_none());
+
+    // Block requires being in Backlog first
+    task.transition(Status::Backlog).unwrap();
+    task.block("Waiting on external API").unwrap();
+
+    assert_eq!(task.status(), Status::Blocked);
+    assert_eq!(task.base().blocked_reason.as_ref().unwrap(), "Waiting on external API");
+}
+
+#[test]
+fn test_block_from_invalid_status_fails() {
+    let mut task = KanbanElement::new_task("Task");
+    // Plan cannot go directly to Blocked
+    let result = task.block("Some reason");
+    assert!(result.is_err());
+    assert_eq!(task.status(), Status::Plan);
+}
+
+#[test]
+fn test_unblock_clears_reason_and_sets_backlog() {
+    let mut task = KanbanElement::new_task("Task");
+
+    // Setup: get to Blocked
+    task.transition(Status::Backlog).unwrap();
+    task.block("Waiting on external API").unwrap();
+    assert_eq!(task.status(), Status::Blocked);
+    assert!(task.base().blocked_reason.is_some());
+
+    task.unblock().unwrap();
+
+    assert_eq!(task.status(), Status::Backlog);
+    assert!(task.base().blocked_reason.is_none());
+}
+
+#[test]
+fn test_unblock_from_invalid_status_fails() {
+    let mut task = KanbanElement::new_task("Task");
+    task.transition(Status::Backlog).unwrap();
+
+    // Can't unblock if not blocked
+    let result = task.unblock();
+    assert!(result.is_err());
+    assert_eq!(task.status(), Status::Backlog);
 }
