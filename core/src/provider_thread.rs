@@ -252,6 +252,22 @@ impl ProviderThreadHandle {
             timeout_ms: self.elapsed().as_millis() as u64,
         }
     }
+
+    /// Take the thread handle for external storage
+    ///
+    /// Returns the JoinHandle if the thread is still running.
+    /// After calling this, stop() will return AlreadyStopped.
+    pub fn into_thread_handle(self) -> Option<JoinHandle<()>> {
+        self.handle
+    }
+
+    /// Split into components for AgentSlot storage
+    ///
+    /// Returns the event receiver and thread handle separately.
+    /// This is useful for storing in AgentSlot which has separate fields.
+    pub fn into_parts(self) -> (Receiver<ProviderEvent>, Option<JoinHandle<()>>) {
+        (self.event_rx, self.handle)
+    }
 }
 
 /// Extract a readable message from panic payload

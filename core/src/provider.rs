@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
-use std::thread;
+use std::sync::mpsc::{channel, Sender};
+use std::thread::{self, Builder, JoinHandle};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::logging;
 use crate::mock_provider;
 use crate::probe;
+use crate::provider_thread::ProviderThreadHandle;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::McpInvocation;
 use crate::tool_calls::McpToolCallStatus;
@@ -179,6 +180,90 @@ pub fn start_provider(
     }
 }
 
+/// Start a provider with full thread lifecycle management
+///
+/// Returns a ProviderThreadHandle that includes:
+/// - JoinHandle for thread lifecycle
+/// - Event receiver for collecting provider events
+/// - Graceful shutdown capability
+///
+/// Use this for multi-agent scenarios where thread management is required.
+pub fn start_provider_with_handle(
+    provider: ProviderKind,
+    prompt: String,
+    cwd: PathBuf,
+    session_handle: Option<SessionHandle>,
+    thread_name: String,
+) -> Result<ProviderThreadHandle> {
+    let (keepalive_tx, event_rx) = channel();
+    let thread_event_tx = keepalive_tx.clone();
+
+    logging::debug_event(
+        "provider.start_threaded",
+        "starting provider thread with handle",
+        serde_json::json!({
+            "provider": provider.label(),
+            "thread_name": thread_name,
+            "cwd": cwd.display().to_string(),
+            "session_handle": format!("{:?}", session_handle),
+        }),
+    );
+
+    let handle: JoinHandle<()> = Builder::new()
+        .name(thread_name.clone())
+        .spawn(move || {
+            run_provider_internal(provider, prompt, cwd, session_handle, thread_event_tx);
+        })?;
+
+    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+}
+
+/// Internal provider runner for threaded execution
+fn run_provider_internal(
+    provider: ProviderKind,
+    prompt: String,
+    cwd: PathBuf,
+    session_handle: Option<SessionHandle>,
+    event_tx: Sender<ProviderEvent>,
+) {
+    match provider {
+        ProviderKind::Mock => {
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                thread::sleep(Duration::from_millis(60));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+        }
+        ProviderKind::Claude => {
+            // Claude provider spawns its own thread internally
+            // We call it from here, errors are sent by provider or we log
+            if let Err(e) = crate::providers::claude::start(prompt, cwd, session_handle, event_tx) {
+                // Provider couldn't start - log error, event_tx was consumed
+                logging::warn_event(
+                    "provider.claude.start_failed",
+                    "Claude provider failed to start",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+            }
+            // Note: Claude spawns its own thread, this outer thread exits quickly
+            // The actual events come from Claude's internal thread
+        }
+        ProviderKind::Codex => {
+            // Codex provider spawns its own thread internally
+            if let Err(e) = crate::providers::codex::start(prompt, cwd, session_handle, event_tx) {
+                logging::warn_event(
+                    "provider.codex.start_failed",
+                    "Codex provider failed to start",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+            }
+        }
+    }
+}
+
 fn start_mock_provider(prompt: String, event_tx: Sender<ProviderEvent>) -> Result<()> {
     thread::Builder::new()
         .name("agent-mock-provider".to_string())
@@ -258,5 +343,58 @@ mod tests {
             "mock provider should emit at least one assistant chunk"
         );
         assert!(saw_finished, "mock provider should emit a finished event");
+    }
+
+    #[test]
+    fn start_provider_with_handle_returns_thread_handle() {
+        use super::start_provider_with_handle;
+
+        let mut handle = start_provider_with_handle(
+            ProviderKind::Mock,
+            "hello".to_string(),
+            ".".into(),
+            None,
+            "test-mock-thread".to_string(),
+        )
+        .expect("start provider with handle");
+
+        // Handle should have event receiver
+        let rx = handle.event_receiver();
+
+        let mut saw_chunk = false;
+        let mut saw_finished = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+
+        while std::time::Instant::now() < deadline {
+            let Ok(event) = rx.recv_timeout(Duration::from_millis(250)) else {
+                continue;
+            };
+            match event {
+                ProviderEvent::AssistantChunk(_) => saw_chunk = true,
+                ProviderEvent::Finished => {
+                    saw_finished = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_chunk, "threaded mock provider should emit chunks");
+        assert!(saw_finished, "threaded mock provider should emit finished");
+
+        // Give thread time to finish completely
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Thread should finish gracefully
+        let result = handle.stop(Duration::from_millis(500));
+        assert!(
+            matches!(
+                result,
+                crate::provider_thread::ThreadStopResult::GracefulStop { .. }
+                    | crate::provider_thread::ThreadStopResult::AlreadyStopped
+            ),
+            "thread should finish gracefully or already be stopped, got: {:?}",
+            result
+        );
     }
 }

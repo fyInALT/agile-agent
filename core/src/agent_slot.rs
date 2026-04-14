@@ -347,6 +347,13 @@ impl AgentSlot {
         self.last_activity = Instant::now();
     }
 
+    /// Set only the thread handle (event_rx managed separately by EventAggregator)
+    pub fn set_thread_handle(&mut self, thread_handle: JoinHandle<()>) {
+        self.thread_handle = Some(thread_handle);
+        self.status = AgentSlotStatus::starting();
+        self.last_activity = Instant::now();
+    }
+
     /// Clear provider thread components (after join)
     pub fn clear_provider_thread(&mut self) {
         self.event_rx = None;

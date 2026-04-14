@@ -395,34 +395,44 @@ impl TuiState {
 
         let pool = self.agent_pool.as_mut()?;
         let focused = pool.focused_slot_mut()?;
-
-        // Create event channel
-        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let agent_id = focused.agent_id().clone();
 
         // Get session handle if available
         let session_handle = focused.session_handle().cloned();
 
-        // Start provider thread
+        // Start provider thread with handle capture
         let cwd = self.session.app.cwd.clone();
-        if let Err(e) = agent_core::provider::start_provider(
+        let thread_name = format!("agent-{}-provider", agent_id.as_str());
+
+        let thread_handle = agent_core::provider::start_provider_with_handle(
             provider,
             prompt,
             cwd,
             session_handle,
-            event_tx,
-        ) {
-            self.app_mut().push_error_message(format!("Failed to start provider: {}", e));
-            return None;
+            thread_name,
+        );
+
+        match thread_handle {
+            Ok(handle) => {
+                // Split into components: event_rx for EventAggregator, handle for AgentSlot
+                let (event_rx, join_handle) = handle.into_parts();
+
+                // Store thread handle in AgentSlot (event_rx managed by EventAggregator)
+                if let Some(jh) = join_handle {
+                    focused.set_thread_handle(jh);
+                }
+
+                // Transition to responding status
+                let _ = focused.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+
+                // Return event_rx for EventAggregator registration
+                Some(event_rx)
+            }
+            Err(e) => {
+                self.app_mut().push_error_message(format!("Failed to start provider: {}", e));
+                None
+            }
         }
-
-        // Update agent slot status
-        let _ = focused.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
-
-        // Note: We don't store the thread handle in AgentSlot here
-        // because start_provider() creates its own thread internally
-        // For full integration, we'd need to refactor start_provider to return the handle
-
-        Some(event_rx)
     }
 
     /// Register an event receiver with the event aggregator
