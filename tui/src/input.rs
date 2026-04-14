@@ -22,6 +22,11 @@ pub enum InputOutcome {
     SkillDown,
     ToggleSelectedSkill,
     OpenTranscript,
+    FocusNextAgent,
+    FocusPreviousAgent,
+    FocusAgent(usize),
+    SpawnAgent,
+    StopFocusedAgent,
     Quit,
 }
 
@@ -73,9 +78,78 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::OpenTranscript,
+        // Agent focus switching (Ctrl+1-9 for direct selection)
+        KeyEvent {
+            code: KeyCode::Char('1'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(0),
+        KeyEvent {
+            code: KeyCode::Char('2'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(1),
+        KeyEvent {
+            code: KeyCode::Char('3'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(2),
+        KeyEvent {
+            code: KeyCode::Char('4'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(3),
+        KeyEvent {
+            code: KeyCode::Char('5'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(4),
+        KeyEvent {
+            code: KeyCode::Char('6'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(5),
+        KeyEvent {
+            code: KeyCode::Char('7'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(6),
+        KeyEvent {
+            code: KeyCode::Char('8'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(7),
+        KeyEvent {
+            code: KeyCode::Char('9'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::FocusAgent(8),
+        // Tab for next agent, Shift+Tab for previous (when idle)
         KeyEvent {
             code: KeyCode::Tab, ..
-        } if state.app().status == AppStatus::Idle => InputOutcome::ToggleProvider,
+        } if state.app().status == AppStatus::Idle => InputOutcome::FocusNextAgent,
+        KeyEvent {
+            code: KeyCode::BackTab, ..
+        } if state.app().status == AppStatus::Idle => InputOutcome::FocusPreviousAgent,
+        // Ctrl+N to spawn new agent
+        KeyEvent {
+            code: KeyCode::Char('n'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
+            InputOutcome::SpawnAgent
+        }
+        // Ctrl+X to stop focused agent
+        KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
+            InputOutcome::StopFocusedAgent
+        }
+        KeyEvent {
+            code: KeyCode::Tab, ..
+        } => InputOutcome::ToggleProvider,
         KeyEvent {
             code: KeyCode::Char('p'),
             modifiers,

@@ -108,6 +108,11 @@ impl ShellHarness {
             InputOutcome::ScrollTranscriptDown(rows) => self.state.scroll_transcript_down(rows),
             InputOutcome::ScrollTranscriptHome => self.state.scroll_transcript_home(),
             InputOutcome::ScrollTranscriptEnd => self.state.scroll_transcript_end(),
+            InputOutcome::FocusNextAgent => {}
+            InputOutcome::FocusPreviousAgent => {}
+            InputOutcome::FocusAgent(_) => {}
+            InputOutcome::SpawnAgent => {}
+            InputOutcome::StopFocusedAgent => {}
             InputOutcome::Submit(text) => {
                 self.state.app_mut().push_user_message(text);
             }

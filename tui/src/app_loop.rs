@@ -116,6 +116,26 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
                         }
                         InputOutcome::OpenTranscript => state.open_transcript_overlay(),
+                        InputOutcome::FocusNextAgent => {
+                            // In single-agent mode, this switches provider
+                            // In multi-agent mode, this would focus next agent
+                            state.app_mut().push_status_message("focus next (multi-agent: coming soon)");
+                        }
+                        InputOutcome::FocusPreviousAgent => {
+                            state.app_mut().push_status_message("focus previous (multi-agent: coming soon)");
+                        }
+                        InputOutcome::FocusAgent(index) => {
+                            state.app_mut().push_status_message(format!(
+                                "focus agent {} (multi-agent: coming soon)",
+                                index + 1
+                            ));
+                        }
+                        InputOutcome::SpawnAgent => {
+                            state.app_mut().push_status_message("spawn agent (multi-agent: coming soon)");
+                        }
+                        InputOutcome::StopFocusedAgent => {
+                            state.app_mut().push_status_message("stop agent (multi-agent: coming soon)");
+                        }
                         InputOutcome::Quit => state.app_mut().request_quit(),
                         InputOutcome::Submit(user_input) => {
                             if let Some(command_result) = parse_local_command(&user_input) {

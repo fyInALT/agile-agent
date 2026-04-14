@@ -119,6 +119,11 @@ impl AgentSlotStatus {
         )
     }
 
+    /// Check if agent is idle
+    pub fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
     /// Check if this is a terminal status (Stopped)
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopped { .. })
