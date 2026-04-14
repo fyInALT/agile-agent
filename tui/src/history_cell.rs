@@ -915,6 +915,11 @@ fn render_generic_tool_call_lines(
     width: usize,
     mode: ToolRenderMode,
 ) -> Vec<Line<'static>> {
+    // Special handling for Edit tool with diff-style rendering
+    if name == "Edit" {
+        return render_edit_tool_lines(input_preview, output_preview, success, started, width, mode);
+    }
+
     let mut lines = Vec::new();
     let bullet_style = if started {
         Style::default().fg(Color::Blue)
@@ -1430,4 +1435,279 @@ fn ellipsis_line(omitted: usize) -> Line<'static> {
                 .add_modifier(Modifier::DIM),
         ),
     ])
+}
+
+/// Renders Edit tool calls with codex-style diff display.
+fn render_edit_tool_lines(
+    input_preview: Option<&str>,
+    output_preview: Option<&str>,
+    success: bool,
+    started: bool,
+    width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
+    use crate::diff_render::render_unified_diff_lines;
+
+    let mut lines = Vec::new();
+
+    let bullet_style = if started {
+        Style::default().fg(Color::Blue)
+    } else if success {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+
+    // Parse Edit tool input to extract file path and compute diff
+    let edit_input = parse_edit_input(input_preview);
+    let (added, removed) = compute_edit_stats(&edit_input);
+
+    // Header line: "• Edited path (+X -Y)" or "• Editing path" when in progress
+    let header_prefix = if started { "Editing" } else { "Edited" };
+    if let Some(path) = &edit_input.file_path {
+        let stats = if started {
+            String::new()
+        } else {
+            format!(" (+{} -{})", added, removed)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(header_prefix.to_string(), bullet_style.add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(path.clone(), Style::default().fg(Color::Cyan)),
+            Span::styled(stats, Style::default().add_modifier(Modifier::DIM)),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(header_prefix.to_string(), bullet_style.add_modifier(Modifier::BOLD)),
+        ]));
+    }
+
+    // Render diff lines using unified diff format
+    if !started {
+        if let Some(diff_text) = build_edit_diff_text(&edit_input) {
+            let diff_lines = render_unified_diff_lines(
+                &diff_text,
+                DETAIL_INITIAL_PREFIX,
+                DETAIL_CONTINUATION_PREFIX,
+            );
+            let truncated = match mode {
+                ToolRenderMode::Preview => truncate_lines_middle(diff_lines, GENERIC_TOOL_PREVIEW_MAX_LINES),
+                ToolRenderMode::Full => diff_lines,
+            };
+            lines.extend(truncated);
+        }
+    }
+
+    // Show output preview if present and not a success message
+    if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
+        // Skip common success messages like "String replaced" or "File updated successfully"
+        let is_success_message = output.trim() == "String replaced."
+            || output.trim() == "The file was edited successfully."
+            || output.contains("successfully edited");
+        if !is_success_message {
+            lines.extend(render_prefixed_tool_output(
+                output,
+                width,
+                DETAIL_INITIAL_PREFIX,
+                DETAIL_CONTINUATION_PREFIX,
+                mode,
+            ));
+        }
+    }
+
+    lines
+}
+
+/// Builds a unified diff text from Edit tool input for rendering.
+fn build_edit_diff_text(edit_input: &EditInput) -> Option<String> {
+    let old = edit_input.old_string.as_ref()?;
+    let new = edit_input.new_string.as_ref()?;
+
+    // Create a unified diff patch using diffy
+    let patch = diffy::create_patch(old, new);
+
+    // Format as unified diff text
+    Some(patch.to_string())
+}
+
+/// Computes added/removed line counts from Edit tool input.
+fn compute_edit_stats(edit_input: &EditInput) -> (usize, usize) {
+    let Some(old) = &edit_input.old_string else {
+        return (0, 0);
+    };
+    let Some(new) = &edit_input.new_string else {
+        return (0, 0);
+    };
+
+    let patch = diffy::create_patch(old, new);
+
+    let added = patch
+        .hunks()
+        .iter()
+        .flat_map(|hunk| hunk.lines())
+        .filter(|line| matches!(line, diffy::Line::Insert(_)))
+        .count();
+
+    let removed = patch
+        .hunks()
+        .iter()
+        .flat_map(|hunk| hunk.lines())
+        .filter(|line| matches!(line, diffy::Line::Delete(_)))
+        .count();
+
+    (added, removed)
+}
+
+/// Parsed Edit tool input.
+#[derive(Debug, Clone, Default)]
+struct EditInput {
+    file_path: Option<String>,
+    old_string: Option<String>,
+    new_string: Option<String>,
+}
+
+fn parse_edit_input(input_preview: Option<&str>) -> EditInput {
+    let Some(input) = input_preview else {
+        return EditInput::default();
+    };
+
+    // Try to parse as JSON
+    let parsed: serde_json::Value = match serde_json::from_str(input) {
+        Ok(value) => value,
+        Err(_) => return EditInput::default(),
+    };
+    EditInput {
+        file_path: parsed.get("file_path").and_then(|v| v.as_str()).map(String::from),
+        old_string: parsed.get("old_string").and_then(|v| v.as_str()).map(String::from),
+        new_string: parsed.get("new_string").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
+#[cfg(test)]
+mod edit_tool_tests {
+    use super::*;
+
+    fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn renders_edit_tool_with_file_path_and_diff_stats() {
+        let input = serde_json::json!({
+            "file_path": "src/main.rs",
+            "old_string": "fn old() {}\n",
+            "new_string": "fn new() {}\n"
+        });
+        let input_preview = Some(serde_json::to_string(&input).unwrap());
+        let lines = render_edit_tool_lines(
+            input_preview.as_deref(),
+            None,
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Edited")));
+        assert!(rendered.iter().any(|line| line.contains("src/main.rs")));
+        assert!(rendered.iter().any(|line| line.contains("(+1 -1)")));
+    }
+
+    #[test]
+    fn renders_edit_tool_in_progress_without_stats() {
+        let input = serde_json::json!({
+            "file_path": "src/main.rs",
+            "old_string": "old",
+            "new_string": "new"
+        });
+        let input_preview = Some(serde_json::to_string(&input).unwrap());
+        let lines = render_edit_tool_lines(
+            input_preview.as_deref(),
+            None,
+            true,
+            true,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        assert!(rendered.iter().any(|line| line.contains("Editing")));
+        assert!(rendered.iter().any(|line| line.contains("src/main.rs")));
+        assert!(!rendered.iter().any(|line| line.contains("(+") || line.contains("(-")));
+    }
+
+    #[test]
+    fn renders_edit_diff_with_line_numbers() {
+        let input = serde_json::json!({
+            "file_path": "src/main.rs",
+            "old_string": "line 1\nline 2\nline 3\n",
+            "new_string": "line 1\nmodified line\nline 3\n"
+        });
+        let input_preview = Some(serde_json::to_string(&input).unwrap());
+        let lines = render_edit_tool_lines(
+            input_preview.as_deref(),
+            None,
+            true,
+            false,
+            80,
+            ToolRenderMode::Full,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should show line numbers
+        assert!(rendered.iter().any(|line| line.contains("1") && line.contains("line 1")));
+        // Should show removed line with '-' marker
+        assert!(rendered.iter().any(|line| line.contains("-") && line.contains("line 2")));
+        // Should show added line with '+' marker
+        assert!(rendered.iter().any(|line| line.contains("+") && line.contains("modified line")));
+    }
+
+    #[test]
+    fn skips_common_success_messages() {
+        let input = serde_json::json!({
+            "file_path": "src/main.rs",
+            "old_string": "old",
+            "new_string": "new"
+        });
+        let input_preview = Some(serde_json::to_string(&input).unwrap());
+        let lines = render_edit_tool_lines(
+            input_preview.as_deref(),
+            Some("String replaced."),
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should not show "String replaced." message
+        assert!(!rendered.iter().any(|line| line.contains("String replaced")));
+    }
+
+    #[test]
+    fn handles_missing_input_gracefully() {
+        let lines = render_edit_tool_lines(
+            None,
+            None,
+            true,
+            false,
+            80,
+            ToolRenderMode::Preview,
+        );
+        let rendered = lines_to_strings(&lines);
+
+        // Should still show header
+        assert!(rendered.iter().any(|line| line.contains("Edited")));
+    }
 }
