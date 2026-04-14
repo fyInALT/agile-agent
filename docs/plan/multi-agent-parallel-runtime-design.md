@@ -1834,7 +1834,935 @@ pub enum ViewMode {
 7. **Broadcast efficiency**: Should broadcast mail be deduplicated?
 8. **View persistence**: Should TUI view mode persist across sessions?
 
-## 15. References
+## 15. Detailed TUI Implementation Analysis
+
+### 15.1 Current TUI Component Breakdown
+
+Based on code review of existing implementation:
+
+#### TuiState Structure (ui_state.rs)
+
+```rust
+pub struct TuiState {
+    pub session: RuntimeSession,          // Agent runtime + app state
+    pub composer: TextArea,                // Multi-line input editor
+    pub composer_state: TextAreaState,     // Composer scroll state
+    pub transcript_overlay: Option<TranscriptOverlayState>,
+    pub composer_width: u16,               // Cached width for wrap
+    pub transcript_viewport_height: u16,   // Transcript area height
+    pub transcript_scroll_offset: usize,   // Current scroll position
+    pub transcript_max_scroll: usize,      // Maximum scroll offset
+    pub transcript_follow_tail: bool,      // Auto-scroll to bottom
+    pub transcript_rendered_lines: Vec<String>,  // Rendered cache
+    pub transcript_last_cell_range: Option<(usize, usize)>,  // Cell index range
+    pub busy_started_at: Option<Instant>,  // Busy duration tracking
+}
+```
+
+**Key Observations**:
+- State is tightly coupled to single RuntimeSession
+- Transcript scroll state is separate from overlay scroll state
+- `transcript_rendered_lines` is a cache for optimization
+- Composer width is cached to avoid recomputing visual lines
+
+#### Render Pipeline (render.rs)
+
+```rust
+pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
+    // 1. Sync busy state
+    state.sync_busy_started_at();
+    
+    // 2. Calculate layout
+    let composer_height = state.composer.desired_height(frame.area().width, 8);
+    let working_height = if state.is_busy() { 1 } else { 0 };
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),                    // Transcript
+            Constraint::Length(working_height),    // Working line
+            Constraint::Length(composer_height),   // Composer
+            Constraint::Length(1),                 // Footer
+        ])
+        .split(frame.area());
+    
+    // 3. Render transcript (build_cells every frame)
+    render_transcript(frame, state, areas[0]);
+    
+    // 4. Render working line if busy
+    if state.is_busy() {
+        render_working_line(frame, state, areas[1]);
+    }
+    
+    // 5. Render composer with cursor
+    render_composer(frame, state, areas[2]);
+    
+    // 6. Render footer
+    render_footer(frame, state, areas[3]);
+    
+    // 7. Render overlays (skill browser, transcript overlay)
+    if state.app().skill_browser_open {
+        render_skill_browser(frame, state);
+    }
+    if state.is_overlay_open() {
+        render_transcript_overlay(frame, state);
+    }
+}
+```
+
+**Critical Analysis**:
+- `render_transcript` calls `build_cells` every frame - expensive for long transcripts
+- Working line uses `Instant::now()` for spinner animation
+- Layout calculation happens every frame
+- Overlay rendering clears entire frame area
+
+#### Transcript Cell Building (transcript/cells.rs)
+
+```rust
+pub fn build_cells(entries: &[TranscriptEntry], width: u16) -> Vec<TranscriptCell> {
+    // Complex logic:
+    // 1. Loop through entries
+    // 2. Detect exploring_exec_group (adjacent ExecCommands with allow_exploring_group)
+    // 3. Coalesce exploring commands into single cell
+    // 4. Handle each entry type differently (User, Assistant, Exec, Patch, GenericTool)
+    // 5. Apply width-based wrapping
+}
+```
+
+**Key Complexity**:
+- Exploring exec grouping logic depends on transcript order
+- Each entry type has custom rendering (history_cell_for_entry)
+- Two modes: Preview (truncated) vs Full (overlay)
+- Width affects line wrapping in cells
+
+#### Input Handling (input.rs)
+
+```rust
+pub enum InputOutcome {
+    None,
+    Submit(String),
+    ToggleProvider,
+    ScrollTranscriptUp(usize),
+    ScrollTranscriptDown(usize),
+    ScrollTranscriptHome,
+    ScrollTranscriptEnd,
+    OpenSkills,
+    CloseSkills,
+    SkillUp,
+    SkillDown,
+    ToggleSelectedSkill,
+    OpenTranscript,
+    Quit,
+}
+```
+
+**Key Observations**:
+- InputOutcome is centralized enum
+- Overlay and skill browser intercept input
+- `Tab` toggles provider (creates new agent)
+- Empty composer enables transcript scroll via Up/Down
+- `Enter` blocked during Responding status
+
+### 15.2 Multi-Agent TUI Challenges
+
+#### Challenge 1: Transcript Rendering Performance
+
+**Problem**: Current implementation rebuilds cells every frame:
+
+```rust
+fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    let lines = cells::flatten_cells(&cells::build_cells(&state.app().transcript, area.width));
+    // ... scroll calculation
+    let transcript = Paragraph::new(lines).scroll(...);
+    frame.render_widget(transcript, area);
+}
+```
+
+For multi-agent:
+- N agents × build_cells per frame = N× performance hit
+- Each transcript can be thousands of entries
+- 80ms poll interval means ~12 frames per second
+- Split/Dashboard views render multiple transcripts simultaneously
+
+**Solution: Incremental Cell Cache**
+
+```rust
+pub struct TranscriptCellCache {
+    /// Cached cells for each agent
+    per_agent: HashMap<AgentId, CachedTranscript>,
+    
+    /// Global invalidation timestamp
+    last_invalidation: Instant,
+}
+
+pub struct CachedTranscript {
+    /// Pre-built cells
+    cells: Vec<TranscriptCell>,
+    
+    /// Flattened lines
+    lines: Vec<Line<'static>>,
+    
+    /// Last transcript entry count
+    entry_count: usize,
+    
+    /// Last rendered width
+    rendered_width: u16,
+    
+    /// Dirty flag for incremental update
+    dirty: bool,
+}
+
+impl TranscriptCellCache {
+    /// Update cache incrementally
+    pub fn update(&mut self, agent_id: &AgentId, entries: &[TranscriptEntry], width: u16) {
+        let cached = self.per_agent.get_mut(agent_id);
+        
+        match cached {
+            Some(c) if c.rendered_width == width && c.entry_count == entries.len() && !c.dirty => {
+                // No change, use cached
+                return;
+            }
+            Some(c) if c.rendered_width == width => {
+                // Same width, just append new cells
+                let new_entries = &entries[c.entry_count..];
+                let new_cells = build_cells_for_new_entries(new_entries, width);
+                c.cells.extend(new_cells);
+                c.lines = flatten_cells(&c.cells);
+                c.entry_count = entries.len();
+            }
+            Some(c) => {
+                // Width changed or dirty, rebuild
+                c.cells = build_cells(entries, width);
+                c.lines = flatten_cells(&c.cells);
+                c.rendered_width = width;
+                c.entry_count = entries.len();
+                c.dirty = false;
+            }
+            None => {
+                // New agent, build fresh
+                let cells = build_cells(entries, width);
+                let lines = flatten_cells(&cells);
+                self.per_agent.insert(agent_id.clone(), CachedTranscript {
+                    cells,
+                    lines,
+                    entry_count: entries.len(),
+                    rendered_width: width,
+                    dirty: false,
+                });
+            }
+        }
+    }
+    
+    /// Mark specific agent as dirty (when entry modified, not just appended)
+    pub fn mark_dirty(&mut self, agent_id: &AgentId) {
+        if let Some(c) = self.per_agent.get_mut(agent_id) {
+            c.dirty = true;
+        }
+    }
+    
+    /// Get cached lines for agent
+    pub fn lines_for(&self, agent_id: &AgentId) -> &[Line<'static>] {
+        self.per_agent.get(agent_id).map(|c| &c.lines).unwrap_or_default()
+    }
+}
+```
+
+#### Challenge 2: Scroll State Per-Agent
+
+**Problem**: Current scroll state is global:
+
+```rust
+pub struct TuiState {
+    pub transcript_scroll_offset: usize,
+    pub transcript_max_scroll: usize,
+    pub transcript_follow_tail: bool,
+}
+```
+
+When switching focus between agents, scroll state is lost.
+
+**Solution: Per-Agent Scroll State**
+
+```rust
+pub struct AgentScrollState {
+    pub scroll_offset: usize,
+    pub max_scroll: usize,
+    pub follow_tail: bool,
+    pub viewport_height: u16,
+}
+
+pub struct MultiAgentScrollManager {
+    /// Per-agent scroll states
+    states: HashMap<AgentId, AgentScrollState>,
+    
+    /// Currently focused agent
+    focused: AgentId,
+    
+    /// Get state for focused agent
+    pub fn focused_state(&mut self) -> &mut AgentScrollState {
+        self.states.entry(self.focused.clone()).or_default()
+    }
+    
+    /// Switch focus, preserving previous agent's state
+    pub fn switch_focus(&mut self, new_focused: AgentId) {
+        self.focused = new_focused;
+    }
+}
+```
+
+#### Challenge 3: Composer State Per-Agent vs Shared
+
+**Problem**: Current composer is shared:
+
+```rust
+pub struct TuiState {
+    pub composer: TextArea,
+    pub composer_state: TextAreaState,
+}
+```
+
+When switching agents, composer content is lost or carries over incorrectly.
+
+**Design Decision: Two Options**
+
+**Option A: Per-Agent Composer**
+
+```rust
+pub struct AgentComposerState {
+    composer: TextArea,
+    state: TextAreaState,
+}
+
+pub struct MultiAgentComposerManager {
+    /// Per-agent composers
+    composers: HashMap<AgentId, AgentComposerState>,
+    
+    /// Current focused agent
+    focused: AgentId,
+    
+    /// Get focused composer
+    pub fn focused_composer(&mut self) -> &mut TextArea {
+        &mut self.composers.entry(self.focused.clone())
+            .or_insert_with(|| AgentComposerState {
+                composer: TextArea::new(),
+                state: TextAreaState::default(),
+            })
+            .composer
+    }
+}
+```
+
+**Pros**: Each agent maintains its own pending input
+**Cons**: Memory overhead, confusion when switching agents
+
+**Option B: Shared Composer with Submit Dispatch**
+
+```rust
+pub struct SharedComposerState {
+    composer: TextArea,
+    state: TextAreaState,
+    
+    /// Submit to focused agent only
+    pub fn submit_to(&self, agent_id: &AgentId) -> String {
+        // Composer content goes to specific agent
+    }
+}
+```
+
+**Pros**: Simple UX, single input location
+**Cons**: Cannot prepare inputs for multiple agents
+
+**Recommendation**: Option A for power users, Option B as default with opt-in.
+
+#### Challenge 4: Input Handling with Multiple Overlays
+
+**Problem**: Current overlay priority is fixed:
+
+```rust
+if state.app().skill_browser_open {
+    // skill browser intercepts
+}
+if state.is_overlay_open() {
+    // overlay intercepts
+}
+// Normal input handling
+```
+
+With multi-agent, we have additional overlays:
+- Agent browser (select which agent to focus)
+- Mail view (read/send mail)
+- Task matrix (assign tasks)
+
+**Solution: Overlay Stack**
+
+```rust
+pub enum OverlayLayer {
+    /// Full-screen overlay (blocks all input)
+    FullScreen(FullScreenOverlay),
+    
+    /// Modal overlay (blocks most input, Esc to close)
+    Modal(ModalOverlay),
+    
+    /// Inline overlay (allows some input pass-through)
+    Inline(InlineOverlay),
+}
+
+pub enum FullScreenOverlay {
+    TranscriptFull { agent_id: AgentId },
+}
+
+pub enum ModalOverlay {
+    AgentBrowser,
+    MailView,
+    TaskMatrix,
+    SkillBrowser,
+}
+
+pub struct OverlayStack {
+    layers: Vec<OverlayLayer>,
+    
+    /// Push new overlay
+    pub fn push(&mut self, layer: OverlayLayer);
+    
+    /// Pop top overlay
+    pub fn pop(&mut self) -> Option<OverlayLayer>;
+    
+    /// Get top overlay for input handling
+    pub fn top(&self) -> Option<&OverlayLayer>;
+    
+    /// Check if specific overlay type is active
+    pub fn has_modal(&self, modal_type: &ModalOverlay) -> bool;
+}
+
+impl OverlayStack {
+    /// Handle key event, returns true if consumed
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<OverlayAction> {
+        match self.top()? {
+            OverlayLayer::FullScreen(fs) => fs.handle_key(key),
+            OverlayLayer::Modal(m) => m.handle_key(key),
+            OverlayLayer::Inline(i) => i.handle_key(key),
+        }
+    }
+}
+```
+
+#### Challenge 5: Exploring Exec Group Per-Agent
+
+**Problem**: Current exploring exec grouping depends on transcript sequence:
+
+```rust
+fn exploring_exec_group_cell(entries: &[TranscriptEntry], start: usize, width: u16) 
+    -> Option<(usize, TranscriptCell)> 
+{
+    // Coalesces adjacent exploring exec calls
+}
+```
+
+This logic assumes single-agent transcript ordering.
+
+**Solution: Per-Agent Transcript Processing**
+
+```rust
+pub struct ExploringGroupProcessor {
+    /// Track exploring state per agent
+    per_agent: HashMap<AgentId, ExploringState>,
+}
+
+pub struct ExploringState {
+    /// Currently collecting exploring calls
+    current_group: Vec<ExploringExecCall>,
+    
+    /// Index in transcript
+    current_index: usize,
+}
+
+impl ExploringGroupProcessor {
+    /// Process entries for specific agent
+    pub fn process_entries(&mut self, agent_id: &AgentId, entries: &[TranscriptEntry], width: u16) 
+        -> Vec<TranscriptCell> 
+    {
+        // Per-agent group building
+    }
+}
+```
+
+#### Challenge 6: Event Loop Responsiveness
+
+**Problem**: Current loop waits on single provider channel:
+
+```rust
+if let Some(rx) = provider_rx.as_ref() {
+    while let Ok(event) = rx.try_recv() {
+        // Process events
+    }
+}
+```
+
+Multi-agent needs to poll multiple channels without blocking TUI.
+
+**Solution: Non-blocking Multi-Channel Poll**
+
+```rust
+pub fn run_multi_agent(terminal: &mut AppTerminal, resume_last: bool) -> Result<()> {
+    let session = MultiAgentSession::bootstrap(...)?;
+    let mut state = MultiAgentTuiState::from_session(session);
+    
+    loop {
+        // 1. Render frame (always happens)
+        terminal.draw(|frame| render_multi_agent(frame, &mut state))?;
+        
+        if state.should_quit() {
+            break;
+        }
+        
+        // 2. Poll agent events (timeout-based)
+        let events = state.poll_agent_events(Duration::from_millis(20));
+        
+        // 3. Process each event
+        for event in events {
+            state.process_agent_event(event)?;
+        }
+        
+        // 4. Poll terminal input (non-blocking)
+        if event::poll(Duration::from_millis(20))? {
+            match event::read()? {
+                Event::Key(key) => handle_input(&mut state, key)?,
+                Event::Paste(text) => handle_paste(&mut state, &text),
+                Event::Resize(_, _) => {}
+                _ => {}
+            }
+        }
+        
+        // 5. Periodic persistence (every N frames)
+        if state.frame_count % 10 == 0 {
+            state.persist_if_changed()?;
+        }
+        
+        state.frame_count += 1;
+    }
+    
+    state.shutdown()?;
+    Ok(())
+}
+```
+
+**Key Changes**:
+- Two polling phases (agent events + terminal input)
+- Short timeout (20ms) for responsiveness
+- Persistence throttled (every 10 frames)
+- Frame counting for timing decisions
+
+### 15.3 Proposed Multi-Agent TUI State
+
+```rust
+pub struct MultiAgentTuiState {
+    /// Multi-agent session (owns AgentPool)
+    session: MultiAgentSession,
+    
+    /// View mode (Focused, Split, Dashboard, Mail, TaskMatrix)
+    view_mode: ViewMode,
+    
+    /// Focused agent index (for Focused/Dashboard modes)
+    focused_index: usize,
+    
+    /// Per-agent scroll states
+    scroll_manager: AgentScrollManager,
+    
+    /// Transcript cell cache
+    transcript_cache: TranscriptCellCache,
+    
+    /// Overlay stack
+    overlay_stack: OverlayStack,
+    
+    /// Composer manager (per-agent or shared)
+    composer_manager: ComposerManager,
+    
+    /// Frame counter for throttling
+    frame_count: usize,
+    
+    /// Last render timestamp (for FPS tracking)
+    last_render: Instant,
+    
+    /// Should quit flag
+    should_quit: bool,
+}
+
+impl MultiAgentTuiState {
+    /// Poll events from all active agents
+    pub fn poll_agent_events(&mut self, timeout: Duration) -> Vec<AgentEvent> {
+        self.session.poll_events(timeout)
+    }
+    
+    /// Process single agent event
+    pub fn process_agent_event(&mut self, event: AgentEvent) -> Result<()> {
+        match event {
+            AgentEvent::FromAgent { agent_id, event } => {
+                self.handle_provider_event(&agent_id, event)?;
+            }
+            AgentEvent::StatusChanged { agent_id, new_status, .. } => {
+                self.handle_status_change(&agent_id, new_status)?;
+            }
+            AgentEvent::TaskCompleted { agent_id, task_id, result } => {
+                self.handle_task_completed(&agent_id, &task_id, result)?;
+            }
+            AgentEvent::MailReceived { mail } => {
+                self.handle_mail_received(mail)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    
+    /// Handle provider event for specific agent
+    fn handle_provider_event(&mut self, agent_id: &AgentId, event: ProviderEvent) -> Result<()> {
+        // Update agent transcript
+        // Mark transcript cache dirty for this agent
+        self.transcript_cache.mark_dirty(agent_id);
+        
+        match event {
+            ProviderEvent::AssistantChunk(chunk) => {
+                self.session.append_to_agent(agent_id, chunk)?;
+            }
+            ProviderEvent::Finished => {
+                self.session.finish_agent_response(agent_id)?;
+            }
+            // ... other events
+        }
+        Ok(())
+    }
+    
+    /// Get transcript lines for rendering
+    pub fn transcript_lines_for(&self, agent_id: &AgentId, width: u16) -> &[Line<'static>] {
+        self.transcript_cache.lines_for(agent_id)
+    }
+}
+```
+
+### 15.4 Rendering Strategy Per View Mode
+
+#### Focused View Rendering
+
+```rust
+fn render_focused_view(frame: &mut Frame, state: &mut MultiAgentTuiState, area: Rect) {
+    let focused_agent = state.focused_agent();
+    let width = area.width;
+    
+    // Update cache if needed
+    state.transcript_cache.update(
+        &focused_agent.agent_id,
+        &focused_agent.transcript,
+        width,
+    );
+    
+    // Get cached lines
+    let lines = state.transcript_cache.lines_for(&focused_agent.agent_id);
+    
+    // Update scroll state
+    let scroll = state.scroll_manager.focused_state();
+    scroll.max_scroll = lines.len().saturating_sub(area.height as usize);
+    if scroll.follow_tail {
+        scroll.scroll_offset = scroll.max_scroll;
+    }
+    
+    // Render transcript
+    let transcript = Paragraph::new(lines.to_vec())
+        .scroll((scroll.scroll_offset as u16, 0));
+    frame.render_widget(transcript, area);
+}
+```
+
+#### Split View Rendering
+
+```rust
+fn render_split_view(frame: &mut Frame, state: &mut MultiAgentTuiState, area: Rect) {
+    let [left_area, right_area] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+    
+    let left_agent = state.agent_at(state.split_left);
+    let right_agent = state.agent_at(state.split_right);
+    
+    // Update caches in parallel (conceptually)
+    state.transcript_cache.update(&left_agent.agent_id, &left_agent.transcript, left_area.width);
+    state.transcript_cache.update(&right_agent.agent_id, &right_agent.transcript, right_area.width);
+    
+    // Render both transcripts
+    render_agent_transcript(frame, state, left_agent, left_area);
+    render_agent_transcript(frame, state, right_agent, right_area);
+}
+```
+
+#### Dashboard View Rendering
+
+```rust
+fn render_dashboard_view(frame: &mut Frame, state: &mut MultiAgentTuiState, area: Rect) {
+    // Dashboard doesn't render full transcripts, just status cards
+    let statuses = state.all_agent_statuses();
+    
+    let card_height = 6u16;
+    let cards_per_row = (area.width / 30).max(1);
+    
+    let rows = (statuses.len() / cards_per_row as usize).max(1);
+    
+    for (index, status) in statuses.iter().enumerate() {
+        let row = index / cards_per_row as usize;
+        let col = index % cards_per_row as usize;
+        
+        let card_area = Rect::new(
+            area.x + (col * 30) as u16,
+            area.y + (row * card_height) as u16,
+            30,
+            card_height,
+        );
+        
+        render_agent_status_card(frame, status, card_area);
+    }
+}
+```
+
+### 15.5 Key Binding Design for Multi-Agent
+
+```rust
+pub fn handle_multi_agent_input(state: &mut MultiAgentTuiState, key: KeyEvent) -> Result<InputResult> {
+    // First check overlay stack
+    if let Some(action) = state.overlay_stack.handle_key(key) {
+        return Ok(InputResult::OverlayAction(action));
+    }
+    
+    // View mode specific handling
+    match state.view_mode {
+        ViewMode::Focused => handle_focused_input(state, key),
+        ViewMode::Split => handle_split_input(state, key),
+        ViewMode::Dashboard => handle_dashboard_input(state, key),
+        ViewMode::Mail => handle_mail_input(state, key),
+        ViewMode::TaskMatrix => handle_task_matrix_input(state, key),
+    }
+}
+
+fn handle_focused_input(state: &mut MultiAgentTuiState, key: KeyEvent) -> Result<InputResult> {
+    match key {
+        // Agent switching
+        KeyEvent { code: KeyCode::Tab, .. } => {
+            state.cycle_focus_next();
+            Ok(InputResult::FocusChanged)
+        }
+        KeyEvent { code: KeyCode::BackTab, .. } => {
+            state.cycle_focus_prev();
+            Ok(InputResult::FocusChanged)
+        }
+        
+        // Direct agent focus (Ctrl+1-9)
+        KeyEvent { code: KeyCode::Char(n), modifiers: KeyModifiers::CONTROL } 
+            if n >= '1' && n <= '9' => {
+            let index = (n as usize) - '1' as usize;
+            if index < state.agent_count() {
+                state.set_focus(index);
+                Ok(InputResult::FocusChanged)
+            } else {
+                Ok(InputResult::None)
+            }
+        }
+        
+        // Open agent browser
+        KeyEvent { code: KeyCode::Char('a'), modifiers: KeyModifiers::NONE } 
+            if state.composer_empty() => {
+            state.overlay_stack.push(OverlayLayer::Modal(ModalOverlay::AgentBrowser));
+            Ok(InputResult::OverlayOpened)
+        }
+        
+        // Open mail view
+        KeyEvent { code: KeyCode::Char('m'), modifiers: KeyModifiers::NONE } 
+            if state.composer_empty() => {
+            state.overlay_stack.push(OverlayLayer::Modal(ModalOverlay::MailView));
+            Ok(InputResult::OverlayOpened)
+        }
+        
+        // Open task matrix
+        KeyEvent { code: KeyCode::Char('t'), modifiers: KeyModifiers::NONE } 
+            if state.composer_empty() => {
+            state.overlay_stack.push(OverlayLayer::Modal(ModalOverlay::TaskMatrix));
+            Ok(InputResult::OverlayOpened)
+        }
+        
+        // Switch view mode
+        KeyEvent { code: KeyCode::Char('v'), modifiers: KeyModifiers::CONTROL } => {
+            state.cycle_view_mode();
+            Ok(InputResult::ViewModeChanged)
+        }
+        
+        // Submit to focused agent
+        KeyEvent { code: KeyCode::Enter, .. } => {
+            if state.focused_agent().status.is_idle() {
+                let prompt = state.take_composer_submission();
+                state.submit_to_focused(prompt)?;
+                Ok(InputResult::Submitted)
+            } else {
+                Ok(InputResult::None)
+            }
+        }
+        
+        // Scroll (when composer empty)
+        KeyEvent { code: KeyCode::Up, .. } if state.composer_empty() => {
+            state.scroll_manager.focused_state().scroll_up(3);
+            Ok(InputResult::Scrolled)
+        }
+        
+        // Default composer input
+        _ => {
+            state.handle_composer_input(key);
+            Ok(InputResult::ComposerChanged)
+        }
+    }
+}
+
+pub enum InputResult {
+    None,
+    FocusChanged,
+    ViewModeChanged,
+    OverlayOpened,
+    OverlayAction(OverlayAction),
+    Submitted,
+    Scrolled,
+    ComposerChanged,
+}
+```
+
+### 15.6 Performance Optimization Strategies
+
+#### Strategy 1: Lazy Cell Building
+
+Only rebuild cells when:
+- Transcript entries appended (incremental)
+- Width changed (full rebuild)
+- Entry modified mid-transcript (mark dirty)
+
+#### Strategy 2: Render Throttling
+
+```rust
+pub struct RenderThrottle {
+    last_render: Instant,
+    min_interval: Duration,  // e.g., 50ms = 20 FPS max
+    
+    pub fn should_render(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.last_render) >= self.min_interval {
+            self.last_render = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+```
+
+#### Strategy 3: Differential Rendering
+
+For dashboard/split views, only render changed portions:
+
+```rust
+pub struct DifferentialRenderState {
+    /// Last rendered status hashes per agent
+    last_status_hash: HashMap<AgentId, u64>,
+    
+    /// Check if agent card needs re-render
+    pub fn needs_render(&mut self, agent_id: &AgentId, status: &AgentStatusSnapshot) -> bool {
+        let hash = status.hash();
+        let changed = self.last_status_hash.get(agent_id) != Some(&hash);
+        if changed {
+            self.last_status_hash.insert(agent_id.clone(), hash);
+        }
+        changed
+    }
+}
+```
+
+#### Strategy 4: Background Cell Building
+
+For long transcripts, build cells in background thread:
+
+```rust
+pub struct BackgroundCellBuilder {
+    /// Channel for cell building requests
+    request_tx: mpsc::Sender<CellBuildRequest>,
+    
+    /// Channel for completed cells
+    result_rx: mpsc::Receiver<CellBuildResult>,
+}
+
+pub struct CellBuildRequest {
+    agent_id: AgentId,
+    entries: Vec<TranscriptEntry>,
+    width: u16,
+}
+
+pub struct CellBuildResult {
+    agent_id: AgentId,
+    cells: Vec<TranscriptCell>,
+    lines: Vec<Line<'static>>,
+}
+
+impl BackgroundCellBuilder {
+    pub fn request_build(&self, agent_id: AgentId, entries: Vec<TranscriptEntry>, width: u16) {
+        self.request_tx.send(CellBuildRequest { agent_id, entries, width });
+    }
+    
+    pub fn poll_results(&mut self) -> Vec<CellBuildResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.result_rx.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+}
+```
+
+### 15.7 Potential Issues and Mitigations
+
+| Issue | Impact | Mitigation |
+|-------|--------|------------|
+| Long transcript causes slow render | UI lag, missed input | Background cell building, cache |
+| Multiple agents streaming simultaneously | Event backlog | Event throttling, priority queue |
+| Overlay conflicts (multiple open) | Input confusion | Overlay stack with priority |
+| Focus switching loses scroll/composer state | User frustration | Per-agent state persistence |
+| Width change forces full rebuild | Performance hit | Width change debouncing |
+| Exploring exec group cross-agent | Rendering wrong | Per-agent group tracking |
+| Split view double render | CPU usage | Differential rendering |
+| Many agents in dashboard | Layout overflow | Pagination, scroll |
+| Real-time status updates | Flicker, distraction | Batched status updates |
+| Mail while agent busy | Delivery timing | Mail queue with injection point |
+
+### 15.8 Testing Strategy for Multi-Agent TUI
+
+#### Unit Tests
+
+| Test | Description |
+|------|-------------|
+| `scroll_state_per_agent` | Verify scroll preserved when switching focus |
+| `transcript_cache_incremental` | Verify cache updates only on changes |
+| `overlay_stack_priority` | Verify overlay input interception order |
+| `composer_per_agent` | Verify composer content per-agent |
+| `view_mode_switching` | Verify state preservation across modes |
+
+#### Integration Tests
+
+| Test | Description |
+|------|-------------|
+| `multi_agent_render_focused` | Verify focused view with multiple agents |
+| `multi_agent_render_split` | Verify split view layout |
+| `multi_agent_render_dashboard` | Verify dashboard status cards |
+| `input_routing` | Verify input goes to correct agent |
+| `event_processing` | Verify events update correct transcript |
+
+#### Performance Tests
+
+| Test | Description |
+|------|-------------|
+| `render_time_with_long_transcripts` | Measure render time for 1000+ entries |
+| `event_processing_throughput` | Measure events processed per second |
+| `memory_usage_many_agents` | Measure memory with 10+ agents |
+| `fps_under_load` | Measure FPS with all agents streaming |
+
+## 16. References
 
 - `agent_runtime.rs`: Current single-agent runtime
 - `runtime_session.rs`: Current session model
