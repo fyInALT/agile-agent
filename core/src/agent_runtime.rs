@@ -19,7 +19,7 @@ use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::workplace_store::WorkplaceStore;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AgentId(String);
 
