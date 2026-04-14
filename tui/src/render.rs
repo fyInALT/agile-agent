@@ -100,6 +100,31 @@ fn render_focused_view(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 /// Render split view - two agents side by side
 fn render_split_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let statuses = state.agent_statuses();
+
+    // Edge case: If fewer than 2 agents, fall back to focused view with warning
+    if statuses.len() < 2 {
+        // Render a warning message
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(frame.area());
+
+        render_split_status_bar(frame, state, areas[0]);
+
+        let warning = Paragraph::new("Split view requires at least 2 agents.\nPress Ctrl+N to spawn more agents.")
+            .style(Style::default().fg(Color::Yellow));
+
+        frame.render_widget(warning, areas[1]);
+
+        render_split_footer(frame, state, areas[2]);
+        return;
+    }
+
     let composer_height = state.composer.desired_height(frame.area().width, 8);
 
     // Calculate split ratio
@@ -128,20 +153,15 @@ fn render_split_view(frame: &mut Frame<'_>, state: &mut TuiState) {
         ])
         .split(areas[1]);
 
-    // Get agent statuses for left/right
-    let statuses = state.agent_statuses();
-    let left_idx = state.view_state.split.left_agent_index.min(statuses.len().saturating_sub(1));
-    let right_idx = state.view_state.split.right_agent_index.min(statuses.len().saturating_sub(1));
+    // Agent indices (clamped to valid range, guaranteed >= 2 agents now)
+    let left_idx = state.view_state.split.left_agent_index.min(statuses.len() - 1);
+    let right_idx = state.view_state.split.right_agent_index.min(statuses.len() - 1);
 
     // Render left agent transcript
-    if statuses.len() > left_idx {
-        render_agent_panel(frame, state, left_idx, transcript_areas[0], state.view_state.split.focused_side == 0);
-    }
+    render_agent_panel(frame, state, left_idx, transcript_areas[0], state.view_state.split.focused_side == 0);
 
     // Render right agent transcript
-    if statuses.len() > right_idx {
-        render_agent_panel(frame, state, right_idx, transcript_areas[1], state.view_state.split.focused_side == 1);
-    }
+    render_agent_panel(frame, state, right_idx, transcript_areas[1], state.view_state.split.focused_side == 1);
 
     // Render composer (for focused side)
     render_composer(frame, state, areas[2]);
