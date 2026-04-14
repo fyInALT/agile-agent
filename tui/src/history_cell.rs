@@ -929,31 +929,78 @@ fn render_generic_tool_call_lines(
     } else {
         Style::default().fg(Color::Red)
     };
-    let header_text = if started { "Calling" } else { "Called" };
+
+    // Check if this is a git command
+    let git_label = input_preview
+        .filter(|v| !v.trim().is_empty())
+        .and_then(|input| detect_git_command(input));
+
+    let (header_text, header_style) = if let Some(ref git) = git_label {
+        let prefix = if started { "Calling" } else { "Called" };
+        (prefix, git.style)
+    } else {
+        let prefix = if started { "Calling" } else { "Called" };
+        (prefix, bullet_style)
+    };
+
     let invocation = format_tool_invocation(name, input_preview);
     let inline_invocation =
         !invocation.is_empty() && invocation.len() + header_text.len() + 3 <= width.max(1);
 
+    // Build display line with git-specific label if detected
     if inline_invocation {
         lines.push(Line::from(vec![
-            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled("• ", header_style.add_modifier(Modifier::BOLD)),
             Span::styled(
                 header_text.to_string(),
-                bullet_style.add_modifier(Modifier::BOLD),
+                header_style.add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::raw(invocation.clone()),
+            if let Some(ref git) = git_label {
+                // Show git-specific label with detail if available
+                if let Some(ref detail) = git.detail {
+                    Span::styled(
+                        format!("{} ({})", git.label, detail),
+                        header_style,
+                    )
+                } else {
+                    Span::styled(git.label, header_style)
+                }
+            } else {
+                Span::raw(invocation.clone())
+            },
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled("• ", header_style.add_modifier(Modifier::BOLD)),
             Span::styled(
                 header_text.to_string(),
-                bullet_style.add_modifier(Modifier::BOLD),
+                header_style.add_modifier(Modifier::BOLD),
             ),
         ]));
 
-        if !invocation.is_empty() {
+        // Show git-specific label or invocation on next line
+        if let Some(ref git) = git_label {
+            if let Some(ref detail) = git.detail {
+                lines.extend(render_prefixed_text_block(
+                    &format!("{} ({})", git.label, detail),
+                    width,
+                    DETAIL_INITIAL_PREFIX,
+                    DETAIL_CONTINUATION_PREFIX,
+                    git.style,
+                    ToolRenderMode::Full,
+                ));
+            } else {
+                lines.extend(render_prefixed_text_block(
+                    git.label,
+                    width,
+                    DETAIL_INITIAL_PREFIX,
+                    DETAIL_CONTINUATION_PREFIX,
+                    git.style,
+                    ToolRenderMode::Full,
+                ));
+            }
+        } else if !invocation.is_empty() {
             lines.extend(render_prefixed_text_block(
                 &invocation,
                 width,
@@ -1276,6 +1323,241 @@ struct PatchDiffEntry {
     sign: char,
     content: String,
     style: Style,
+}
+
+/// Represents a detected git command with a display-friendly name and style
+struct GitCommandLabel {
+    label: &'static str,
+    style: Style,
+    detail: Option<String>,
+}
+
+/// Detect git commands and return a formatted label for display
+///
+/// Returns a GitCommandLabel with:
+/// - label: A short display name like "Git Diff" or "Git Commit"
+/// - style: Color styling for the label
+/// - detail: Optional additional context (e.g., file paths, branch names)
+fn detect_git_command(input: &str) -> Option<GitCommandLabel> {
+    let trimmed = input.trim();
+
+    // git diff commands
+    if trimmed == "git diff" {
+        return Some(GitCommandLabel {
+            label: "Git Diff",
+            style: Style::default().fg(Color::Red),
+            detail: None,
+        });
+    }
+    if trimmed == "git diff --staged" || trimmed == "git diff --cached" {
+        return Some(GitCommandLabel {
+            label: "Git Diff (Staged)",
+            style: Style::default().fg(Color::Green),
+            detail: None,
+        });
+    }
+    if trimmed.starts_with("git diff --stat") {
+        let detail = trimmed.strip_prefix("git diff --stat").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Diff",
+            style: Style::default().fg(Color::Red),
+            detail,
+        });
+    }
+    if trimmed.starts_with("git diff") {
+        let detail = trimmed.strip_prefix("git diff").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Diff",
+            style: Style::default().fg(Color::Red),
+            detail,
+        });
+    }
+
+    // git status
+    if trimmed == "git status" || trimmed == "git status --porcelain" {
+        return Some(GitCommandLabel {
+            label: "Git Status",
+            style: Style::default().fg(Color::Yellow),
+            detail: None,
+        });
+    }
+
+    // git log
+    if trimmed.starts_with("git log") {
+        let detail = trimmed.strip_prefix("git log").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Log",
+            style: Style::default().fg(Color::Cyan),
+            detail,
+        });
+    }
+
+    // git commit
+    if trimmed.starts_with("git commit") {
+        let detail = trimmed.strip_prefix("git commit").map(|s| {
+            let s = s.trim();
+            if s.starts_with("-m ") {
+                s.strip_prefix("-m ").map(|msg| {
+                    let msg = msg.trim();
+                    if msg.starts_with('"') && msg.ends_with('"') {
+                        msg[1..msg.len()-1].to_string()
+                    } else {
+                        msg.to_string()
+                    }
+                }).unwrap_or_else(|| s.to_string())
+            } else {
+                s.to_string()
+            }
+        }).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Commit",
+            style: Style::default().fg(Color::Green),
+            detail,
+        });
+    }
+
+    // git add
+    if trimmed.starts_with("git add ") {
+        let detail = trimmed.strip_prefix("git add").map(|s| s.trim().to_string());
+        return Some(GitCommandLabel {
+            label: "Git Add",
+            style: Style::default().fg(Color::Green),
+            detail,
+        });
+    }
+    if trimmed == "git add" {
+        return Some(GitCommandLabel {
+            label: "Git Add",
+            style: Style::default().fg(Color::Green),
+            detail: Some("all".to_string()),
+        });
+    }
+
+    // git branch
+    if trimmed == "git branch" || trimmed.starts_with("git branch ") {
+        return Some(GitCommandLabel {
+            label: "Git Branch",
+            style: Style::default().fg(Color::Magenta),
+            detail: None,
+        });
+    }
+
+    // git checkout
+    if trimmed.starts_with("git checkout") {
+        let detail = trimmed.strip_prefix("git checkout").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Checkout",
+            style: Style::default().fg(Color::Blue),
+            detail,
+        });
+    }
+
+    // git push
+    if trimmed.starts_with("git push") {
+        let detail = trimmed.strip_prefix("git push").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Push",
+            style: Style::default().fg(Color::Green),
+            detail,
+        });
+    }
+
+    // git pull
+    if trimmed.starts_with("git pull") {
+        let detail = trimmed.strip_prefix("git pull").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Pull",
+            style: Style::default().fg(Color::Yellow),
+            detail,
+        });
+    }
+
+    // git fetch
+    if trimmed.starts_with("git fetch") {
+        let detail = trimmed.strip_prefix("git fetch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Fetch",
+            style: Style::default().fg(Color::Cyan),
+            detail,
+        });
+    }
+
+    // git stash
+    if trimmed.starts_with("git stash") {
+        return Some(GitCommandLabel {
+            label: "Git Stash",
+            style: Style::default().fg(Color::Yellow),
+            detail: None,
+        });
+    }
+
+    // git merge
+    if trimmed.starts_with("git merge") {
+        let detail = trimmed.strip_prefix("git merge").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Merge",
+            style: Style::default().fg(Color::Magenta),
+            detail,
+        });
+    }
+
+    // git rebase
+    if trimmed.starts_with("git rebase") {
+        let detail = trimmed.strip_prefix("git rebase").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Rebase",
+            style: Style::default().fg(Color::Cyan),
+            detail,
+        });
+    }
+
+    // git clone
+    if trimmed.starts_with("git clone") {
+        let detail = trimmed.strip_prefix("git clone").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        return Some(GitCommandLabel {
+            label: "Git Clone",
+            style: Style::default().fg(Color::Green),
+            detail,
+        });
+    }
+
+    // git show
+    if trimmed.starts_with("git show") {
+        return Some(GitCommandLabel {
+            label: "Git Show",
+            style: Style::default().fg(Color::Cyan),
+            detail: None,
+        });
+    }
+
+    // git remote
+    if trimmed.starts_with("git remote") {
+        return Some(GitCommandLabel {
+            label: "Git Remote",
+            style: Style::default().fg(Color::Yellow),
+            detail: None,
+        });
+    }
+
+    // git config
+    if trimmed.starts_with("git config") {
+        return Some(GitCommandLabel {
+            label: "Git Config",
+            style: Style::default().fg(Color::Blue),
+            detail: None,
+        });
+    }
+
+    // git reset
+    if trimmed.starts_with("git reset") {
+        return Some(GitCommandLabel {
+            label: "Git Reset",
+            style: Style::default().fg(Color::Red),
+            detail: None,
+        });
+    }
+
+    None
 }
 
 fn format_tool_invocation(name: &str, input_preview: Option<&str>) -> String {
