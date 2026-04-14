@@ -31,6 +31,7 @@ use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::confirmation_overlay::ConfirmationOverlay;
+use crate::view_mode::TuiViewState;
 
 /// Per-agent transcript view state
 ///
@@ -81,6 +82,8 @@ pub struct TuiState {
     pub event_aggregator: EventAggregator,
     /// Mailbox for cross-agent communication
     pub mailbox: AgentMailbox,
+    /// View state for different TUI modes
+    pub view_state: TuiViewState,
     /// Provider selection overlay (for agent creation)
     pub provider_overlay: Option<ProviderSelectionOverlay>,
     /// Confirmation overlay (for agent stop)
@@ -110,6 +113,7 @@ impl TuiState {
             agent_pool: None,
             event_aggregator: EventAggregator::new(),
             mailbox: AgentMailbox::new(),
+            view_state: TuiViewState::new(),
             provider_overlay: None,
             confirmation_overlay: None,
         }

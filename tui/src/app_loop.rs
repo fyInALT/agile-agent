@@ -231,6 +231,30 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             let codename = state.focused_agent_codename().to_string();
                             state.open_stop_confirmation(&codename);
                         }
+                        InputOutcome::SwitchViewMode(n) => {
+                            state.view_state.switch_by_number(n);
+                            let label = state.view_state.mode.label();
+                            state.app_mut().push_status_message(format!(
+                                "switched to {} view",
+                                label
+                            ));
+                        }
+                        InputOutcome::NextViewMode => {
+                            state.view_state.next_mode();
+                            let label = state.view_state.mode.label();
+                            state.app_mut().push_status_message(format!(
+                                "switched to {} view",
+                                label
+                            ));
+                        }
+                        InputOutcome::PrevViewMode => {
+                            state.view_state.prev_mode();
+                            let label = state.view_state.mode.label();
+                            state.app_mut().push_status_message(format!(
+                                "switched to {} view",
+                                label
+                            ));
+                        }
                         InputOutcome::Quit => {
     state.app_mut().request_quit();
     // Sync quit flag to workplace immediately for loop exit

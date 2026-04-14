@@ -28,6 +28,12 @@ pub enum InputOutcome {
     SpawnAgent,
     StopFocusedAgent,
     Quit,
+    /// Switch to specific view mode (1-5)
+    SwitchViewMode(u8),
+    /// Cycle to next view mode
+    NextViewMode,
+    /// Cycle to previous view mode
+    PrevViewMode,
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -78,6 +84,38 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::OpenTranscript,
+        // View mode switching (Ctrl+V 1-5)
+        KeyEvent {
+            code: KeyCode::Char('1'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(1),
+        KeyEvent {
+            code: KeyCode::Char('2'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(2),
+        KeyEvent {
+            code: KeyCode::Char('3'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(3),
+        KeyEvent {
+            code: KeyCode::Char('4'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(4),
+        KeyEvent {
+            code: KeyCode::Char('5'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(5),
+        // Alt+V to cycle view modes
+        KeyEvent {
+            code: KeyCode::Char('v'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::NextViewMode,
         // Agent focus switching (Ctrl+1-9 for direct selection)
         KeyEvent {
             code: KeyCode::Char('1'),

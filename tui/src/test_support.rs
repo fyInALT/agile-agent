@@ -155,6 +155,15 @@ impl ShellHarness {
                 self.state.app_mut().push_user_message(text);
             }
             InputOutcome::Quit => self.state.app_mut().request_quit(),
+            InputOutcome::SwitchViewMode(n) => {
+                self.state.view_state.switch_by_number(n);
+            }
+            InputOutcome::NextViewMode => {
+                self.state.view_state.next_mode();
+            }
+            InputOutcome::PrevViewMode => {
+                self.state.view_state.prev_mode();
+            }
         }
     }
 }

@@ -23,6 +23,7 @@ mod text_formatting;
 mod tool_output;
 mod transcript;
 mod ui_state;
+mod view_mode;
 
 #[cfg(test)]
 mod shell_tests;
