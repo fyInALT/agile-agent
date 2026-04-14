@@ -23,6 +23,13 @@ pub enum OverlayCommand {
 }
 
 impl TranscriptOverlayState {
+    pub fn pinned_to_bottom() -> Self {
+        Self {
+            scroll_offset: usize::MAX,
+            ..Self::default()
+        }
+    }
+
     pub fn set_max_scroll(&mut self, max_scroll: usize) {
         self.max_scroll = max_scroll;
         if self.scroll_offset != usize::MAX && self.scroll_offset > self.max_scroll {

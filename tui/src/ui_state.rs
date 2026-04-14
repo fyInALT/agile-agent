@@ -581,7 +581,7 @@ impl TuiState {
 
     pub fn open_transcript_overlay(&mut self) {
         if self.transcript_overlay.is_none() {
-            self.transcript_overlay = Some(TranscriptOverlayState::default());
+            self.transcript_overlay = Some(TranscriptOverlayState::pinned_to_bottom());
         }
     }
 
@@ -939,6 +939,25 @@ mod tests {
                 && *status == McpToolCallStatus::Completed
                 && !is_error
         ));
+    }
+
+    #[test]
+    fn transcript_overlay_opens_pinned_to_bottom() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.open_transcript_overlay();
+
+        assert_eq!(
+            state
+                .transcript_overlay
+                .as_ref()
+                .expect("overlay")
+                .scroll_offset,
+            usize::MAX
+        );
     }
 
     #[test]
