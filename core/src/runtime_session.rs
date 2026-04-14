@@ -7,7 +7,6 @@ use crate::agent_runtime::AgentBootstrapKind;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::LoopPhase;
-use crate::backlog::BacklogState;
 use crate::backlog_store;
 use crate::logging;
 use crate::provider::ProviderKind;

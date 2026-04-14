@@ -159,7 +159,7 @@ mod tests {
             ProviderKind::Mock,
             5,
         );
-        let agent_id = session.spawn_default_agent().expect("spawn");
+        let _agent_id = session.spawn_default_agent().expect("spawn");
         assert_eq!(session.agents.active_count(), 1);
         assert!(session.focused_agent_id().is_some());
     }
