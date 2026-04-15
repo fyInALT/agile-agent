@@ -1,12 +1,12 @@
 //! TUI View Mode System
 //!
 //! Provides different view modes for multi-agent workflow:
-//! - Focused: Single agent transcript (default)
+//! - Overview: Multi-agent overview and coordination (default)
+//! - Focused: Single agent transcript
 //! - Split: Two agents side by side
 //! - Dashboard: All agents in compact cards
 //! - Mail: Cross-agent communication focus
 //! - TaskMatrix: Task assignment grid
-//! - Overview: Multi-agent overview and coordination
 
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +14,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewMode {
-    /// Single agent transcript view (default)
+    /// Multi-agent overview and coordination (default)
     #[default]
+    Overview,
+    /// Single agent transcript view
     Focused,
     /// Two agents side by side
     Split,
@@ -25,8 +27,6 @@ pub enum ViewMode {
     Mail,
     /// Task assignment grid
     TaskMatrix,
-    /// Multi-agent overview and coordination
-    Overview,
 }
 
 impl ViewMode {
@@ -70,24 +70,24 @@ impl ViewMode {
     /// Cycle to next mode
     pub fn next(self) -> Self {
         match self {
+            Self::Overview => Self::Focused,
             Self::Focused => Self::Split,
             Self::Split => Self::Dashboard,
             Self::Dashboard => Self::Mail,
             Self::Mail => Self::TaskMatrix,
             Self::TaskMatrix => Self::Overview,
-            Self::Overview => Self::Focused,
         }
     }
 
     /// Cycle to previous mode
     pub fn prev(self) -> Self {
         match self {
+            Self::Overview => Self::TaskMatrix,
             Self::Focused => Self::Overview,
             Self::Split => Self::Focused,
             Self::Dashboard => Self::Split,
             Self::Mail => Self::Dashboard,
             Self::TaskMatrix => Self::Mail,
-            Self::Overview => Self::TaskMatrix,
         }
     }
 
@@ -762,11 +762,12 @@ mod tests {
     #[test]
     fn tui_view_state_switch() {
         let mut state = TuiViewState::new();
+        // Default is now Overview
+        assert_eq!(state.mode, ViewMode::Overview);
+        state.switch_to(ViewMode::Focused);
         assert_eq!(state.mode, ViewMode::Focused);
-        state.switch_to(ViewMode::Split);
-        assert_eq!(state.mode, ViewMode::Split);
         state.next_mode();
-        assert_eq!(state.mode, ViewMode::Dashboard);
+        assert_eq!(state.mode, ViewMode::Split);
         state.switch_by_number(4);
         assert_eq!(state.mode, ViewMode::Mail);
     }

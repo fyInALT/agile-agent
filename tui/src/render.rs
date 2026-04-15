@@ -260,20 +260,42 @@ fn render_overview_view(frame: &mut Frame<'_>, state: &mut TuiState) {
     let agent_list_height = state.view_state.overview.agent_list_rows as u16;
     let composer_height = state.composer.desired_height(frame.area().width, 8);
 
+    // Layout: Agent list | Separator | Scroll log | Separator | Composer | Footer
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(agent_list_height), // Agent status list
+            Constraint::Length(1),                 // Separator line
             Constraint::Min(1),                    // Scroll log area
+            Constraint::Length(1),                 // Separator line
             Constraint::Length(composer_height),   // Composer
             Constraint::Length(1),                 // Footer
         ])
         .split(frame.area());
 
     render_overview_agent_list(frame, state, areas[0]);
-    render_overview_scroll_log(frame, state, areas[1]);
-    render_composer(frame, state, areas[2]);
-    render_overview_footer(frame, state, areas[3]);
+    render_overview_separator(frame, areas[1]);
+    render_overview_scroll_log(frame, state, areas[2]);
+    render_overview_separator(frame, areas[3]);
+    render_composer(frame, state, areas[4]);
+    render_overview_footer(frame, state, areas[5]);
+}
+
+/// Render separator line for Overview mode
+fn render_overview_separator(frame: &mut Frame<'_>, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // Create a line of ─ characters
+    let separator: String = "─".repeat(area.width as usize);
+    let line = Line::from(Span::styled(
+        separator,
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let paragraph = Paragraph::new(vec![line]);
+    frame.render_widget(paragraph, area);
 }
 
 /// Render agent status list for Overview mode
