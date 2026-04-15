@@ -1239,20 +1239,94 @@ fn generate_overview_log_message(
             message_type: OverviewMessageType::Progress,
             content: format!("Searching: {}", query),
         }),
-        ProviderEvent::AssistantChunk(chunk) => {
-            let summary = chunk.split_whitespace().collect::<Vec<_>>().join(" ");
-            if summary.is_empty() {
-                None
-            } else {
-                Some(OverviewLogMessage {
-                    timestamp,
-                    agent: codename,
-                    message_type: OverviewMessageType::Progress,
-                    content: summary,
-                })
-            }
-        }
         _ => None,
+    }
+}
+
+fn latest_assistant_summary_for_agent(
+    state: &TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+) -> Option<String> {
+    let text = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(agent_id))
+        .and_then(|slot| {
+            slot.transcript().iter().rev().find_map(|entry| match entry {
+                TranscriptEntry::Assistant(text) if !text.trim().is_empty() => Some(text.as_str()),
+                _ => None,
+            })
+        })?;
+
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(truncate_overview_log_text(&normalized, 160))
+    }
+}
+
+fn truncate_overview_log_text(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+
+    let truncated: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{truncated}…")
+}
+
+fn push_overview_assistant_summary(
+    state: &mut TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+) {
+    let Some(content) = latest_assistant_summary_for_agent(state, agent_id) else {
+        return;
+    };
+    let agent = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(agent_id))
+        .map(|slot| slot.codename().as_str().to_string())
+        .unwrap_or_else(|| agent_id.as_str().to_string());
+
+    state
+        .view_state
+        .overview
+        .push_log_message(crate::overview_state::OverviewLogMessage {
+            timestamp: current_time_as_u32(),
+            agent,
+            message_type: crate::overview_state::OverviewMessageType::Progress,
+            content,
+        });
+}
+
+fn append_agent_transcript_chunk(
+    state: &mut TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+    chunk: String,
+    kind: crate::ui_state::StreamTextKind,
+) {
+    let Some(pool) = state.agent_pool.as_mut() else {
+        return;
+    };
+    let Some(slot) = pool.get_slot_mut_by_id(agent_id) else {
+        return;
+    };
+
+    match (slot.transcript_mut().last_mut(), kind) {
+        (Some(TranscriptEntry::Assistant(text)), crate::ui_state::StreamTextKind::Assistant) => {
+            text.push_str(&chunk);
+        }
+        (Some(TranscriptEntry::Thinking(text)), crate::ui_state::StreamTextKind::Thinking) => {
+            text.push_str(&chunk);
+        }
+        (_, crate::ui_state::StreamTextKind::Assistant) => {
+            slot.append_transcript(TranscriptEntry::Assistant(chunk));
+        }
+        (_, crate::ui_state::StreamTextKind::Thinking) => {
+            slot.append_transcript(TranscriptEntry::Thinking(chunk));
+        }
     }
 }
 
@@ -1280,18 +1354,26 @@ fn handle_agent_provider_event(
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.append_active_assistant_chunk(&chunk);
             }
-            if let Some(pool) = state.agent_pool.as_mut()
-                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-            {
-                slot.append_transcript(TranscriptEntry::Assistant(chunk));
-            }
+            append_agent_transcript_chunk(
+                state,
+                &agent_id,
+                chunk,
+                crate::ui_state::StreamTextKind::Assistant,
+            );
         }
         ProviderEvent::ThinkingChunk(chunk) => {
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.append_active_thinking_chunk(&chunk);
             }
+            append_agent_transcript_chunk(
+                state,
+                &agent_id,
+                chunk,
+                crate::ui_state::StreamTextKind::Thinking,
+            );
         }
         ProviderEvent::Finished => {
+            push_overview_assistant_summary(state, &agent_id);
             if let Some(pool) = state.agent_pool.as_mut()
                 && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
                 && slot.status().is_active()
@@ -1333,6 +1415,18 @@ fn handle_agent_thread_finished(
     agent_id: agent_core::agent_runtime::AgentId,
     outcome: agent_core::agent_slot::ThreadOutcome,
 ) {
+    let should_flush_summary = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(&agent_id))
+        .is_some_and(|slot| {
+            slot.status().is_active()
+                && matches!(outcome, agent_core::agent_slot::ThreadOutcome::NormalExit)
+        });
+    if should_flush_summary {
+        push_overview_assistant_summary(state, &agent_id);
+    }
+
     if let Some(pool) = state.agent_pool.as_mut()
         && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
     {
@@ -1364,6 +1458,15 @@ fn handle_agent_channel_disconnect(
     state: &mut TuiState,
     agent_id: agent_core::agent_runtime::AgentId,
 ) {
+    let should_flush_summary = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(&agent_id))
+        .is_some_and(|slot| slot.status().is_active());
+    if should_flush_summary {
+        push_overview_assistant_summary(state, &agent_id);
+    }
+
     if let Some(pool) = state.agent_pool.as_mut()
         && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
     {
@@ -1637,13 +1740,26 @@ mod tests {
 
         state.ensure_overview_agent();
         let overview_id = state.focused_agent_id().expect("overview id");
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&overview_id)
+        {
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::starting())
+                .expect("set starting");
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now())
+                .expect("set responding");
+        }
 
         handle_agent_provider_event(
             &mut state,
-            overview_id,
+            overview_id.clone(),
             agent_core::provider::ProviderEvent::AssistantChunk(
                 "Overview reply content".to_string(),
             ),
+        );
+        handle_agent_provider_event(
+            &mut state,
+            overview_id,
+            agent_core::provider::ProviderEvent::Finished,
         );
 
         assert!(state
@@ -1652,6 +1768,62 @@ mod tests {
             .log_buffer
             .iter()
             .any(|msg| msg.content.contains("Overview reply content")));
+    }
+
+    #[test]
+    fn overview_logs_completed_assistant_message_once_instead_of_per_chunk() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.ensure_overview_agent();
+        let overview_id = state.focused_agent_id().expect("overview id");
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&overview_id)
+        {
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::starting())
+                .expect("set starting");
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now())
+                .expect("set responding");
+        }
+
+        handle_agent_provider_event(
+            &mut state,
+            overview_id.clone(),
+            agent_core::provider::ProviderEvent::AssistantChunk("I".to_string()),
+        );
+        handle_agent_provider_event(
+            &mut state,
+            overview_id.clone(),
+            agent_core::provider::ProviderEvent::AssistantChunk("’m".to_string()),
+        );
+        handle_agent_provider_event(
+            &mut state,
+            overview_id.clone(),
+            agent_core::provider::ProviderEvent::AssistantChunk(" loading".to_string()),
+        );
+
+        assert_eq!(
+            state.view_state.overview.log_buffer.len(),
+            0,
+            "stream deltas should not appear as standalone overview log entries"
+        );
+
+        handle_agent_provider_event(
+            &mut state,
+            overview_id,
+            agent_core::provider::ProviderEvent::Finished,
+        );
+
+        let assistant_logs: Vec<_> = state
+            .view_state
+            .overview
+            .log_buffer
+            .iter()
+            .filter(|msg| msg.content.contains("I’m loading"))
+            .collect();
+        assert_eq!(assistant_logs.len(), 1);
     }
 
     #[test]
