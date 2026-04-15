@@ -31,6 +31,10 @@ pub enum RunMode {
     AgentStop,
     AgentStatus,
     WorkplaceCurrent,
+    DecisionList,
+    DecisionShow,
+    DecisionRespond,
+    DecisionHistory,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +71,10 @@ impl RunMode {
             Self::AgentStop => "agent-stop",
             Self::AgentStatus => "agent-status",
             Self::WorkplaceCurrent => "workplace-current",
+            Self::DecisionList => "decision-list",
+            Self::DecisionShow => "decision-show",
+            Self::DecisionRespond => "decision-respond",
+            Self::DecisionHistory => "decision-history",
         }
     }
 }
