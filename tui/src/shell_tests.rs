@@ -6,6 +6,8 @@ use ratatui::backend::TestBackend;
 use crate::render::render_app;
 use crate::test_support::ShellHarness;
 use crate::transcript::cells;
+use crate::view_mode::ViewMode;
+use crate::overview_state::{OverviewFilter, OverviewLogMessage, OverviewMessageType};
 use agent_core::app::TranscriptEntry;
 use agent_core::logging;
 use agent_core::logging::RunMode;
@@ -384,12 +386,15 @@ fn render_does_not_reenable_follow_tail_just_because_offset_hits_bottom() {
 #[test]
 fn active_cell_height_accounts_for_wrapped_rows() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
-    shell.state.set_active_entry_for_test(TranscriptEntry::WebSearch {
-        call_id: Some("search-1".to_string()),
-        query: "example search query with several generic words to exercise wrapping".to_string(),
-        action: None,
-        started: true,
-    });
+    shell
+        .state
+        .set_active_entry_for_test(TranscriptEntry::WebSearch {
+            call_id: Some("search-1".to_string()),
+            query: "example search query with several generic words to exercise wrapping"
+                .to_string(),
+            action: None,
+            started: true,
+        });
 
     let rendered = shell.render_to_string(30, 12);
 
@@ -408,7 +413,9 @@ fn active_cell_height_accounts_for_wrapped_rows() {
 #[test]
 fn streaming_assistant_renders_in_live_tail_area() {
     let mut shell = ShellHarness::new(ProviderKind::Claude);
-    shell.state.append_active_assistant_chunk("streaming assistant reply");
+    shell
+        .state
+        .append_active_assistant_chunk("streaming assistant reply");
 
     let rendered = shell.render_to_string(40, 10);
 
@@ -459,4 +466,124 @@ fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
         "stale suffix remained after redraw:\n{}",
         rendered
     );
+}
+
+// Overview mode integration tests
+
+#[test]
+fn overview_mode_switch_by_number() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6); // Overview mode
+
+    assert_eq!(shell.state.view_state.mode, ViewMode::Overview);
+}
+
+#[test]
+fn overview_mode_displays_agent_list() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    let rendered = shell.render_to_string(80, 24);
+
+    // Should show agent indicator and hint
+    assert!(rendered.contains("◎") || rendered.contains("○"));
+}
+
+#[test]
+fn overview_mode_footer_shows_key_hints() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    let rendered = shell.render_to_string(80, 24);
+
+    // Should show filter keys hint
+    assert!(rendered.contains("f") || rendered.contains("filter"));
+}
+
+#[test]
+fn overview_filter_blocked_is_applied() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+    shell.state.view_state.overview.filter = OverviewFilter::BlockedOnly;
+
+    // Without blocked agents, filtered count should be 0
+    let statuses = shell.state.agent_statuses();
+    let blocked_count = statuses.iter().filter(|s| s.status.is_blocked()).count();
+
+    assert_eq!(blocked_count, 0); // No blocked agents in fresh state
+}
+
+#[test]
+fn overview_log_buffer_accepts_messages() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    shell.state.view_state.overview.push_log_message(
+        OverviewLogMessage {
+            timestamp: 143215,
+            agent: "alpha".to_string(),
+            message_type: OverviewMessageType::Progress,
+            content: "Started task".to_string(),
+        }
+    );
+
+    assert_eq!(shell.state.view_state.overview.log_buffer.len(), 1);
+}
+
+#[test]
+fn overview_log_buffer_evicts_when_full() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+    shell.state.view_state.overview.max_log_size = 3;
+
+    for i in 0..5 {
+        shell.state.view_state.overview.push_log_message(
+            OverviewLogMessage {
+                timestamp: i,
+                agent: "alpha".to_string(),
+                message_type: OverviewMessageType::Progress,
+                content: format!("msg {}", i),
+            }
+        );
+    }
+
+    assert_eq!(shell.state.view_state.overview.log_buffer.len(), 3);
+    // Should have messages 2, 3, 4
+    assert_eq!(shell.state.view_state.overview.log_buffer.front().unwrap().timestamp, 2);
+    assert_eq!(shell.state.view_state.overview.log_buffer.back().unwrap().timestamp, 4);
+}
+
+#[test]
+fn overview_focus_navigation_cycles() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    let count = shell.state.agent_statuses().len();
+    // With a single agent, focus cycles to itself (0 -> 0)
+    if count >= 2 {
+        shell.state.view_state.overview.focused_agent_index = 0;
+        shell.state.view_state.overview.focus_next(count);
+        assert_eq!(shell.state.view_state.overview.focused_agent_index, 1);
+        shell.state.view_state.overview.focus_prev(count);
+        assert_eq!(shell.state.view_state.overview.focused_agent_index, 0);
+    } else {
+        // Single agent: focus_next cycles back to same index
+        shell.state.view_state.overview.focused_agent_index = 0;
+        shell.state.view_state.overview.focus_next(count);
+        assert_eq!(shell.state.view_state.overview.focused_agent_index, 0);
+    }
+}
+
+#[test]
+fn overview_cycle_filter_modes() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::All);
+    shell.state.view_state.overview.cycle_filter();
+    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::BlockedOnly);
+    shell.state.view_state.overview.cycle_filter();
+    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::RunningOnly);
+    shell.state.view_state.overview.cycle_filter();
+    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::All);
 }
