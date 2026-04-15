@@ -248,6 +248,9 @@ impl PersistedAgentStatus {
             AgentSlotStatus::Error { message } => Self::Error {
                 message: message.clone(),
             },
+            AgentSlotStatus::BlockedForDecision { blocked_state } => Self::Blocked {
+                reason: blocked_state.reason().description(),
+            },
             AgentSlotStatus::Starting
             | AgentSlotStatus::Responding { .. }
             | AgentSlotStatus::ToolExecuting { .. }
