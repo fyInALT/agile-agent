@@ -1,8 +1,6 @@
 //! Decision agent lifecycle management
 
-use crate::context::RunningContextCache;
 use crate::output::DecisionRecord;
-use crate::types::{ActionType, DecisionEngineType, SituationType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -357,7 +355,7 @@ impl DecisionAgentState {
         self.last_activity = Utc::now();
     }
 
-    pub fn destroy(&mut self, trigger: DestructionTrigger) {
+    pub fn destroy(&mut self, _trigger: DestructionTrigger) {
         // Archive all task contexts
         for ctx in self.task_contexts.values_mut() {
             if !ctx.is_complete() {

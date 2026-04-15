@@ -4,11 +4,9 @@
 //! and health monitoring for the decision agent.
 
 use crate::error::DecisionError;
-use crate::lifecycle::{AgentId, DecisionAgentState};
-use crate::types::UrgencyLevel;
+use crate::lifecycle::AgentId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Recovery level for tiered escalation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

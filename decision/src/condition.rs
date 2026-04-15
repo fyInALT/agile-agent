@@ -116,19 +116,19 @@ impl Condition {
                 context.project_rules.contains_keyword(keyword)
             }
 
-            Condition::ReflectionRounds { min, max } => {
+            Condition::ReflectionRounds { min: _, max: _ } => {
                 // Try to extract from situation metadata if available
                 // For now, return false as we don't have reflection_rounds in context
                 // This could be enhanced by checking situation-specific data
                 false
             }
 
-            Condition::ConfidenceBelow { threshold } => {
+            Condition::ConfidenceBelow { threshold: _ } => {
                 // Would need confidence from situation or context
                 false
             }
 
-            Condition::TimeSinceLastAction { min_seconds, max_seconds } => {
+            Condition::TimeSinceLastAction { min_seconds: _, max_seconds: _ } => {
                 // Would need timestamp tracking
                 false
             }
