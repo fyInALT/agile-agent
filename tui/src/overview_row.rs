@@ -17,9 +17,17 @@ pub struct OverviewAgentRow {
 
 impl OverviewAgentRow {
     /// Format agent status snapshot into display row
-    pub fn from_snapshot(snapshot: &AgentStatusSnapshot, focused: bool) -> Self {
-        let indicator = Self::status_indicator(&snapshot.status);
-        let status_label = Self::short_status_label(&snapshot.status);
+    pub fn from_snapshot(snapshot: &AgentStatusSnapshot, focused: bool, is_overview_agent: bool) -> Self {
+        let indicator = if is_overview_agent {
+            "◎" // Overview Agent always uses ◎
+        } else {
+            Self::status_indicator(&snapshot.status)
+        };
+        let status_label = if is_overview_agent {
+            "ovw" // Overview Agent uses 'ovw' label
+        } else {
+            Self::short_status_label(&snapshot.status)
+        };
         let task_desc = Self::task_description(snapshot);
         let elapsed = Self::elapsed_time(&snapshot.status);
 
@@ -188,7 +196,7 @@ mod tests {
     #[test]
     fn row_format_idle_agent() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         assert!(row.full.contains("○"));
         assert!(row.full.contains("alpha"));
         assert!(row.full.contains("idle"));
@@ -197,24 +205,41 @@ mod tests {
     #[test]
     fn row_format_blocked_agent() {
         let snapshot = make_snapshot(AgentSlotStatus::blocked("API design not confirmed"));
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         assert!(row.full.contains("🔶"));
         assert!(row.full.contains("blk"));
         assert!(row.full.contains("API design not confirmed"));
     }
 
     #[test]
+    fn row_format_overview_agent() {
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, true);
+        assert!(row.full.contains("◎"));
+        assert!(row.full.contains("alpha"));
+        assert!(row.full.contains("ovw"));
+    }
+
+    #[test]
     fn row_truncate_preserves_indicator() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         row.truncate_to(5);
         assert!(row.truncated.starts_with("○"));
     }
 
     #[test]
+    fn row_truncate_preserves_overview_indicator() {
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, true);
+        row.truncate_to(5);
+        assert!(row.truncated.starts_with("◎"));
+    }
+
+    #[test]
     fn row_truncate_preserves_name_prefix() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         row.truncate_to(4);
         assert!(row.truncated.contains("al")); // "alpha" prefix
     }
@@ -222,7 +247,7 @@ mod tests {
     #[test]
     fn row_truncate_minimum_width() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         row.truncate_to(2);
         assert!(row.unicode_width <= 2);
     }

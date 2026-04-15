@@ -20,6 +20,7 @@ use crate::transcript::cells;
 use crate::ui_state::TuiState;
 use crate::view_mode::ViewMode;
 use agent_core::agent_pool::AgentStatusSnapshot;
+use agent_core::agent_role::AgentRole;
 use agent_core::app::TranscriptEntry;
 
 pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
@@ -37,7 +38,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         ViewMode::Dashboard => render_dashboard_view(frame, state),
         ViewMode::Mail => render_mail_view(frame, state),
         ViewMode::TaskMatrix => render_task_matrix_view(frame, state),
-        ViewMode::Overview => render_dashboard_view(frame, state), // Placeholder: will be implemented in later task
+        ViewMode::Overview => render_overview_view(frame, state),
     }
 
     // Overlay rendering (applies to all modes)
@@ -252,6 +253,205 @@ fn render_task_matrix_view(frame: &mut Frame<'_>, state: &mut TuiState) {
     render_task_matrix_status_bar(frame, state, areas[0]);
     render_task_matrix_grid(frame, state, areas[1]);
     render_task_matrix_footer(frame, state, areas[2]);
+}
+
+/// Render Overview view - multi-agent coordination with agent list + scroll log
+fn render_overview_view(frame: &mut Frame<'_>, state: &mut TuiState) {
+    let agent_list_height = state.view_state.overview.agent_list_rows as u16;
+    let composer_height = state.composer.desired_height(frame.area().width, 8);
+
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(agent_list_height), // Agent status list
+            Constraint::Min(1),                    // Scroll log area
+            Constraint::Length(composer_height),   // Composer
+            Constraint::Length(1),                 // Footer
+        ])
+        .split(frame.area());
+
+    render_overview_agent_list(frame, state, areas[0]);
+    render_overview_scroll_log(frame, state, areas[1]);
+    render_composer(frame, state, areas[2]);
+    render_overview_footer(frame, state, areas[3]);
+}
+
+/// Render agent status list for Overview mode
+fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default());
+
+    let statuses = state.agent_statuses();
+    let focused_index = state.view_state.overview.focused_agent_index;
+    let filter = state.view_state.overview.filter;
+
+    // Apply filter
+    let filtered: Vec<(usize, &AgentStatusSnapshot)> = statuses
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| match filter {
+            crate::overview_state::OverviewFilter::All => true,
+            crate::overview_state::OverviewFilter::BlockedOnly => s.status.is_blocked(),
+            crate::overview_state::OverviewFilter::RunningOnly => s.status.is_active(),
+        })
+        .collect();
+
+    // Build lines for each agent row
+    let mut lines = Vec::new();
+    let max_width = area.width as usize;
+
+    // Check if we have an OVERVIEW agent (ProductOwner role)
+    let overview_agent = filtered.iter().find(|(_, s)| s.role == AgentRole::ProductOwner);
+
+    // Render Overview agent first if present
+    if let Some((_, overview_snapshot)) = overview_agent {
+        let mut row =
+            crate::overview_row::OverviewAgentRow::from_snapshot(overview_snapshot, false, true);
+        row.truncate_to(max_width);
+
+        lines.push(Line::from(Span::styled(
+            row.truncated,
+            Style::default().fg(Color::White),
+        )));
+    }
+
+    // Then render other agents
+    for (row_idx, (_, snapshot)) in filtered.iter().enumerate() {
+        // Skip Overview agent (already rendered)
+        if snapshot.role == AgentRole::ProductOwner {
+            continue;
+        }
+
+        // Adjust focus index calculation to account for Overview agent at top
+        let adjusted_focus_index = if overview_agent.is_some() {
+            focused_index.saturating_sub(1)
+        } else {
+            focused_index
+        };
+        let is_focused = row_idx == adjusted_focus_index;
+        let mut row =
+            crate::overview_row::OverviewAgentRow::from_snapshot(snapshot, is_focused, false);
+        row.truncate_to(max_width);
+
+        let style = if is_focused {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        lines.push(Line::from(Span::styled(row.truncated, style)));
+
+        // Stop when we've filled the list area
+        if lines.len() >= area.height as usize {
+            break;
+        }
+    }
+
+    // Fill remaining rows with empty lines
+    while lines.len() < area.height as usize {
+        lines.push(Line::from(""));
+    }
+
+    // If no agents, show hint
+    if filtered.is_empty() {
+        lines[0] = Line::from(Span::styled(
+            "◎ OVERVIEW idle Coordinating Agent work",
+            Style::default().fg(Color::White),
+        ));
+        if area.height > 1 {
+            lines[area.height as usize - 1] = Line::from(Span::styled(
+                "Hint: Press Ctrl+N to create a new Agent",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render scroll log for Overview mode
+fn render_overview_scroll_log(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default());
+
+    let log_buffer = &state.view_state.overview.log_buffer;
+    let scroll_offset = state.view_state.overview.log_scroll_offset;
+
+    // Build log lines
+    let mut lines = Vec::new();
+    for msg in log_buffer.iter().skip(scroll_offset) {
+        let timestamp_str = format_time_from_u32(msg.timestamp);
+        let indicator = msg.message_type.indicator();
+
+        let color = match msg.message_type {
+            crate::overview_state::OverviewMessageType::Blocked => Color::Yellow,
+            crate::overview_state::OverviewMessageType::Complete => Color::Green,
+            crate::overview_state::OverviewMessageType::Quick => Color::Cyan,
+            _ => Color::Gray,
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("[{}]", timestamp_str), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(indicator, Style::default().fg(color)),
+            Span::raw(" "),
+            Span::styled(&msg.agent, Style::default().fg(Color::White)),
+            Span::raw(": "),
+            Span::styled(&msg.content, Style::default().fg(Color::Gray)),
+        ]));
+
+        if lines.len() >= area.height as usize {
+            break;
+        }
+    }
+
+    // If no messages, show placeholder
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No activity yet. Agents will report progress here.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    state.transcript_viewport_height = area.height;
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render footer for Overview mode
+fn render_overview_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    fill_background(frame, area, Style::default().bg(Color::Rgb(28, 31, 38)));
+
+    let filter_label = match state.view_state.overview.filter {
+        crate::overview_state::OverviewFilter::All => "all",
+        crate::overview_state::OverviewFilter::BlockedOnly => "blocked",
+        crate::overview_state::OverviewFilter::RunningOnly => "running",
+    };
+
+    let hint = format!(
+        "Overview | filter:{} | Tab:focus | f/r/a:filter | PageUp/Down:page | Ctrl+N:spawn | Ctrl+X:stop",
+        filter_label
+    );
+
+    let line = Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
+}
+
+/// Format time from u32 (HHMMSS packed format) to HH:MM:SS string
+fn format_time_from_u32(time: u32) -> String {
+    let hours = time / 10000;
+    let mins = (time % 10000) / 100;
+    let secs = time % 100;
+    format!("{:02}:{:02}:{:02}", hours, mins, secs)
 }
 
 /// Render the agent status bar showing all agent indicators
