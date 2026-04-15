@@ -36,6 +36,9 @@ pub mod lifecycle;
 // Sprint 7: Error Recovery
 pub mod recovery;
 
+// Sprint 8: Observability and Integration
+pub mod metrics;
+
 // Re-export core types
 pub use error::*;
 pub use types::*;
@@ -86,3 +89,6 @@ pub use lifecycle::*;
 
 // Re-export Sprint 7 types
 pub use recovery::*;
+
+// Re-export Sprint 8 types
+pub use metrics::*;
