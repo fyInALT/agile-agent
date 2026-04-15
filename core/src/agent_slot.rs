@@ -13,9 +13,10 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::logging;
 use crate::provider::{ProviderEvent, SessionHandle};
+use agent_decision::{BlockedState, BlockingReason, DecisionAgentCreationPolicy};
 
 /// Status of an agent slot in the multi-agent runtime
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum AgentSlotStatus {
     /// Agent is idle, waiting for task assignment
     Idle,
@@ -33,9 +34,35 @@ pub enum AgentSlotStatus {
     Stopped { reason: String },
     /// Agent encountered an error
     Error { message: String },
-    /// Agent is blocked, waiting for human intervention
+    /// Agent is blocked with simple reason (backward compatible)
     Blocked { reason: String },
+    /// Agent is blocked with rich BlockedState from decision layer
+    BlockedForDecision { blocked_state: BlockedState },
 }
+
+impl PartialEq for AgentSlotStatus {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Idle, Self::Idle) => true,
+            (Self::Starting, Self::Starting) => true,
+            (Self::Responding { started_at: a }, Self::Responding { started_at: b }) => a == b,
+            (Self::ToolExecuting { tool_name: a }, Self::ToolExecuting { tool_name: b }) => a == b,
+            (Self::Finishing, Self::Finishing) => true,
+            (Self::Stopping, Self::Stopping) => true,
+            (Self::Stopped { reason: a }, Self::Stopped { reason: b }) => a == b,
+            (Self::Error { message: a }, Self::Error { message: b }) => a == b,
+            (Self::Blocked { reason: a }, Self::Blocked { reason: b }) => a == b,
+            // BlockedForDecision compares by reason_type only
+            (
+                Self::BlockedForDecision { blocked_state: a },
+                Self::BlockedForDecision { blocked_state: b }
+            ) => a.reason().reason_type() == b.reason().reason_type(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AgentSlotStatus {}
 
 impl AgentSlotStatus {
     /// Create a new Idle status
@@ -93,39 +120,49 @@ impl AgentSlotStatus {
         }
     }
 
+    /// Create a new BlockedForDecision status with rich BlockedState
+    pub fn blocked_for_decision(blocked_state: BlockedState) -> Self {
+        Self::BlockedForDecision { blocked_state }
+    }
+
     /// Check if agent can transition to a new status
     pub fn can_transition_to(&self, target: &AgentSlotStatus) -> bool {
         match (self, target) {
-            // Idle can go to Starting, Blocked, or Stopped (user can stop idle agent)
+            // Idle can go to Starting, Blocked, BlockedForDecision, or Stopped
             (Self::Idle, Self::Starting) => true,
             (Self::Idle, Self::Blocked { .. }) => true,
+            (Self::Idle, Self::BlockedForDecision { .. }) => true,
             (Self::Idle, Self::Stopped { .. }) => true,
-            // Starting can go to Idle (fast startup exit), Responding, Stopping, Blocked, or Error
+            // Starting can go to Idle, Responding, Stopping, Blocked, BlockedForDecision, or Error
             (Self::Starting, Self::Idle) => true,
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Stopping) => true,
             (Self::Starting, Self::Blocked { .. }) => true,
+            (Self::Starting, Self::BlockedForDecision { .. }) => true,
             (Self::Starting, Self::Error { .. }) => true,
-            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, or Error
+            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, BlockedForDecision, or Error
             (Self::Responding { .. }, Self::Idle) => true,
             (Self::Responding { .. }, Self::ToolExecuting { .. }) => true,
             (Self::Responding { .. }, Self::Finishing) => true,
             (Self::Responding { .. }, Self::Stopping) => true,
             (Self::Responding { .. }, Self::Blocked { .. }) => true,
+            (Self::Responding { .. }, Self::BlockedForDecision { .. }) => true,
             (Self::Responding { .. }, Self::Error { .. }) => true,
-            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/Error
+            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/BlockedForDecision/Error
             (Self::ToolExecuting { .. }, Self::Idle) => true,
             (Self::ToolExecuting { .. }, Self::Responding { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Finishing) => true,
             (Self::ToolExecuting { .. }, Self::Stopping) => true,
             (Self::ToolExecuting { .. }, Self::Blocked { .. }) => true,
+            (Self::ToolExecuting { .. }, Self::BlockedForDecision { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Error { .. }) => true,
-            // Finishing can go to Idle, Stopping, Blocked, or Error
+            // Finishing can go to Idle, Stopping, Blocked, BlockedForDecision, or Error
             (Self::Finishing, Self::Idle) => true,
             (Self::Finishing, Self::Stopping) => true,
             (Self::Finishing, Self::Blocked { .. }) => true,
+            (Self::Finishing, Self::BlockedForDecision { .. }) => true,
             (Self::Finishing, Self::Error { .. }) => true,
-            // Stopping can go to Stopped (after thread join) or Error (if join fails)
+            // Stopping can go to Stopped or Error
             (Self::Stopping, Self::Stopped { .. }) => true,
             (Self::Stopping, Self::Error { .. }) => true,
             // Stopped can go to Starting (restart)
@@ -133,10 +170,14 @@ impl AgentSlotStatus {
             // Error can go to Idle (recovery) or Stopped
             (Self::Error { .. }, Self::Idle) => true,
             (Self::Error { .. }, Self::Stopped { .. }) => true,
-            // Blocked can go to Idle (user resolved), Responding (user provided input), or Stopped
+            // Blocked can go to Idle, Responding, or Stopped
             (Self::Blocked { .. }, Self::Idle) => true,
             (Self::Blocked { .. }, Self::Responding { .. }) => true,
             (Self::Blocked { .. }, Self::Stopped { .. }) => true,
+            // BlockedForDecision can go to Idle, Responding, or Stopped
+            (Self::BlockedForDecision { .. }, Self::Idle) => true,
+            (Self::BlockedForDecision { .. }, Self::Responding { .. }) => true,
+            (Self::BlockedForDecision { .. }, Self::Stopped { .. }) => true,
             // Same status is always valid
             (a, b) if a == b => true,
             // All other transitions are invalid
@@ -169,7 +210,34 @@ impl AgentSlotStatus {
 
     /// Check if agent is blocked
     pub fn is_blocked(&self) -> bool {
-        matches!(self, Self::Blocked { .. })
+        matches!(self, Self::Blocked { .. } | Self::BlockedForDecision { .. })
+    }
+
+    /// Check if agent is blocked for human decision
+    pub fn is_blocked_for_human(&self) -> bool {
+        match self {
+            Self::Blocked { reason } => reason.contains("human"),
+            Self::BlockedForDecision { blocked_state } => {
+                blocked_state.reason().reason_type() == "human_decision"
+            }
+            _ => false,
+        }
+    }
+
+    /// Get blocking reason if blocked
+    pub fn blocking_reason(&self) -> Option<&dyn BlockingReason> {
+        match self {
+            Self::BlockedForDecision { blocked_state } => Some(blocked_state.reason()),
+            _ => None,
+        }
+    }
+
+    /// Get elapsed time since blocked
+    pub fn blocked_elapsed(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::BlockedForDecision { blocked_state } => Some(blocked_state.elapsed()),
+            _ => None,
+        }
     }
 
     /// Get a human-readable label for the status
@@ -184,6 +252,9 @@ impl AgentSlotStatus {
             Self::Stopped { reason } => format!("stopped:{}", reason),
             Self::Error { message } => format!("error:{}", message),
             Self::Blocked { reason } => format!("blocked:{}", reason),
+            Self::BlockedForDecision { blocked_state } => {
+                format!("blocked:{}", blocked_state.reason().reason_type())
+            }
         }
     }
 }
@@ -250,6 +321,8 @@ pub struct AgentSlot {
     thread_handle: Option<JoinHandle<()>>,
     /// Last activity timestamp
     last_activity: Instant,
+    /// Decision agent creation policy
+    decision_policy: DecisionAgentCreationPolicy,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -265,6 +338,7 @@ impl std::fmt::Debug for AgentSlot {
             .field("assigned_task_id", &self.assigned_task_id)
             .field("has_provider_thread", &self.has_provider_thread())
             .field("last_activity", &self.last_activity)
+            .field("decision_policy", &self.decision_policy)
             .finish()
     }
 }
@@ -284,6 +358,7 @@ impl AgentSlot {
             event_rx: None,
             thread_handle: None,
             last_activity: Instant::now(),
+            decision_policy: DecisionAgentCreationPolicy::default(),
         }
     }
 
@@ -306,6 +381,7 @@ impl AgentSlot {
             event_rx: None,
             thread_handle: None,
             last_activity: Instant::now(),
+            decision_policy: DecisionAgentCreationPolicy::default(),
         }
     }
 
@@ -329,6 +405,7 @@ impl AgentSlot {
             event_rx: Some(event_rx),
             thread_handle: Some(thread_handle),
             last_activity: Instant::now(),
+            decision_policy: DecisionAgentCreationPolicy::default(),
         }
     }
 
@@ -353,6 +430,7 @@ impl AgentSlot {
             event_rx: Some(event_rx),
             thread_handle: Some(thread_handle),
             last_activity: Instant::now(),
+            decision_policy: DecisionAgentCreationPolicy::default(),
         }
     }
 
@@ -379,6 +457,31 @@ impl AgentSlot {
             event_rx: None,
             thread_handle: None,
             last_activity: Instant::now(),
+            decision_policy: DecisionAgentCreationPolicy::default(),
+        }
+    }
+
+    /// Create a new agent slot with decision policy
+    pub fn with_decision_policy(
+        agent_id: AgentId,
+        codename: AgentCodename,
+        provider_type: ProviderType,
+        role: AgentRole,
+        decision_policy: DecisionAgentCreationPolicy,
+    ) -> Self {
+        Self {
+            agent_id,
+            codename,
+            provider_type,
+            role,
+            status: AgentSlotStatus::idle(),
+            session_handle: None,
+            transcript: Vec::new(),
+            assigned_task_id: None,
+            event_rx: None,
+            thread_handle: None,
+            last_activity: Instant::now(),
+            decision_policy,
         }
     }
 
@@ -408,6 +511,22 @@ impl AgentSlot {
             serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_role": self.role.label(), "new_role": role.label()}));
         self.role = role;
         self.last_activity = Instant::now();
+    }
+
+    /// Get the decision agent creation policy
+    pub fn decision_policy(&self) -> DecisionAgentCreationPolicy {
+        self.decision_policy
+    }
+
+    /// Set the decision agent creation policy
+    pub fn set_decision_policy(&mut self, policy: DecisionAgentCreationPolicy) {
+        self.decision_policy = policy;
+        self.last_activity = Instant::now();
+    }
+
+    /// Check if decision agent should be created eagerly
+    pub fn should_create_decision_agent_eagerly(&self) -> bool {
+        self.decision_policy.is_eager()
     }
 
     /// Get the current status
