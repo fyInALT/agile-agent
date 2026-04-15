@@ -6,6 +6,7 @@
 //! - Dashboard: All agents in compact cards
 //! - Mail: Cross-agent communication focus
 //! - TaskMatrix: Task assignment grid
+//! - Overview: Multi-agent overview and coordination
 
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,8 @@ pub enum ViewMode {
     Mail,
     /// Task assignment grid
     TaskMatrix,
+    /// Multi-agent overview and coordination
+    Overview,
 }
 
 impl ViewMode {
@@ -35,6 +38,7 @@ impl ViewMode {
             Self::Dashboard => "Dashboard",
             Self::Mail => "Mail",
             Self::TaskMatrix => "Tasks",
+            Self::Overview => "Overview",
         }
     }
 
@@ -46,10 +50,11 @@ impl ViewMode {
             Self::Dashboard => "Ctrl+V 3",
             Self::Mail => "Ctrl+V 4",
             Self::TaskMatrix => "Ctrl+V 5",
+            Self::Overview => "Ctrl+V 6",
         }
     }
 
-    /// Get mode from number key (1-5)
+    /// Get mode from number key (1-6)
     pub fn from_number(n: u8) -> Option<Self> {
         match n {
             1 => Some(Self::Focused),
@@ -57,6 +62,7 @@ impl ViewMode {
             3 => Some(Self::Dashboard),
             4 => Some(Self::Mail),
             5 => Some(Self::TaskMatrix),
+            6 => Some(Self::Overview),
             _ => None,
         }
     }
@@ -68,24 +74,26 @@ impl ViewMode {
             Self::Split => Self::Dashboard,
             Self::Dashboard => Self::Mail,
             Self::Mail => Self::TaskMatrix,
-            Self::TaskMatrix => Self::Focused,
+            Self::TaskMatrix => Self::Overview,
+            Self::Overview => Self::Focused,
         }
     }
 
     /// Cycle to previous mode
     pub fn prev(self) -> Self {
         match self {
-            Self::Focused => Self::TaskMatrix,
+            Self::Focused => Self::Overview,
             Self::Split => Self::Focused,
             Self::Dashboard => Self::Split,
             Self::Mail => Self::Dashboard,
             Self::TaskMatrix => Self::Mail,
+            Self::Overview => Self::TaskMatrix,
         }
     }
 
     /// Check if this mode shows multiple agents
     pub fn shows_multiple_agents(self) -> bool {
-        matches!(self, Self::Split | Self::Dashboard | Self::TaskMatrix)
+        matches!(self, Self::Split | Self::Dashboard | Self::TaskMatrix | Self::Overview)
     }
 
     /// Check if this mode focuses on mail
@@ -549,14 +557,16 @@ mod tests {
     fn view_mode_from_number() {
         assert_eq!(ViewMode::from_number(1), Some(ViewMode::Focused));
         assert_eq!(ViewMode::from_number(3), Some(ViewMode::Dashboard));
-        assert_eq!(ViewMode::from_number(6), None);
+        assert_eq!(ViewMode::from_number(6), Some(ViewMode::Overview));
+        assert_eq!(ViewMode::from_number(7), None);
     }
 
     #[test]
     fn view_mode_cycle() {
         assert_eq!(ViewMode::Focused.next(), ViewMode::Split);
-        assert_eq!(ViewMode::TaskMatrix.next(), ViewMode::Focused);
-        assert_eq!(ViewMode::Focused.prev(), ViewMode::TaskMatrix);
+        assert_eq!(ViewMode::TaskMatrix.next(), ViewMode::Overview);
+        assert_eq!(ViewMode::Overview.next(), ViewMode::Focused);
+        assert_eq!(ViewMode::Focused.prev(), ViewMode::Overview);
     }
 
     #[test]
@@ -752,5 +762,33 @@ mod tests {
         assert_eq!(state.mode, ViewMode::Dashboard);
         state.switch_by_number(4);
         assert_eq!(state.mode, ViewMode::Mail);
+    }
+
+    #[test]
+    fn view_mode_overview_label() {
+        assert_eq!(ViewMode::Overview.label(), "Overview");
+    }
+
+    #[test]
+    fn view_mode_overview_key_hint() {
+        assert_eq!(ViewMode::Overview.key_hint(), "Ctrl+V 6");
+    }
+
+    #[test]
+    fn view_mode_overview_from_number() {
+        assert_eq!(ViewMode::from_number(6), Some(ViewMode::Overview));
+    }
+
+    #[test]
+    fn view_mode_overview_cycle() {
+        // TaskMatrix -> Overview -> Focused
+        assert_eq!(ViewMode::TaskMatrix.next(), ViewMode::Overview);
+        assert_eq!(ViewMode::Overview.next(), ViewMode::Focused);
+        assert_eq!(ViewMode::Overview.prev(), ViewMode::TaskMatrix);
+    }
+
+    #[test]
+    fn view_mode_overview_shows_multiple() {
+        assert!(ViewMode::Overview.shows_multiple_agents());
     }
 }

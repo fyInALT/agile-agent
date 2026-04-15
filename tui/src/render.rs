@@ -37,6 +37,7 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         ViewMode::Dashboard => render_dashboard_view(frame, state),
         ViewMode::Mail => render_mail_view(frame, state),
         ViewMode::TaskMatrix => render_task_matrix_view(frame, state),
+        ViewMode::Overview => render_dashboard_view(frame, state), // Placeholder: will be implemented in later task
     }
 
     // Overlay rendering (applies to all modes)
@@ -117,8 +118,10 @@ fn render_split_view(frame: &mut Frame<'_>, state: &mut TuiState) {
 
         render_split_status_bar(frame, state, areas[0]);
 
-        let warning = Paragraph::new("Split view requires at least 2 agents.\nPress Ctrl+N to spawn more agents.")
-            .style(Style::default().fg(Color::Yellow));
+        let warning = Paragraph::new(
+            "Split view requires at least 2 agents.\nPress Ctrl+N to spawn more agents.",
+        )
+        .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(warning, areas[1]);
 
@@ -155,14 +158,34 @@ fn render_split_view(frame: &mut Frame<'_>, state: &mut TuiState) {
         .split(areas[1]);
 
     // Agent indices (clamped to valid range, guaranteed >= 2 agents now)
-    let left_idx = state.view_state.split.left_agent_index.min(statuses.len() - 1);
-    let right_idx = state.view_state.split.right_agent_index.min(statuses.len() - 1);
+    let left_idx = state
+        .view_state
+        .split
+        .left_agent_index
+        .min(statuses.len() - 1);
+    let right_idx = state
+        .view_state
+        .split
+        .right_agent_index
+        .min(statuses.len() - 1);
 
     // Render left agent transcript
-    render_agent_panel(frame, state, left_idx, transcript_areas[0], state.view_state.split.focused_side == 0);
+    render_agent_panel(
+        frame,
+        state,
+        left_idx,
+        transcript_areas[0],
+        state.view_state.split.focused_side == 0,
+    );
 
     // Render right agent transcript
-    render_agent_panel(frame, state, right_idx, transcript_areas[1], state.view_state.split.focused_side == 1);
+    render_agent_panel(
+        frame,
+        state,
+        right_idx,
+        transcript_areas[1],
+        state.view_state.split.focused_side == 1,
+    );
 
     // Render composer (for focused side)
     render_composer(frame, state, areas[2]);
@@ -189,15 +212,19 @@ fn render_dashboard_view(frame: &mut Frame<'_>, state: &mut TuiState) {
 
 /// Render mail view - cross-agent communication focus
 fn render_mail_view(frame: &mut Frame<'_>, state: &mut TuiState) {
-    let composer_height = if state.view_state.mail.composing { 5 } else { 1 };
+    let composer_height = if state.view_state.mail.composing {
+        5
+    } else {
+        1
+    };
 
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Status bar
-            Constraint::Min(1),    // Mail list
+            Constraint::Length(1),               // Status bar
+            Constraint::Min(1),                  // Mail list
             Constraint::Length(composer_height), // Composer or hint
-            Constraint::Length(1), // Footer
+            Constraint::Length(1),               // Footer
         ])
         .split(frame.area());
 
@@ -240,7 +267,11 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     if state.is_multi_agent_mode() {
         // Show all agents from AgentPool
         let statuses = state.agent_statuses();
-        let focused_index = state.agent_pool.as_ref().map(|p| p.focused_slot_index()).unwrap_or(0);
+        let focused_index = state
+            .agent_pool
+            .as_ref()
+            .map(|p| p.focused_slot_index())
+            .unwrap_or(0);
 
         // Build spans for each agent using owned strings
         for (i, status) in statuses.iter().enumerate() {
@@ -277,7 +308,9 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
             // Codename (highlight if focused) - use owned string
             let codename = status.codename.as_str().to_string();
             let codename_style = if is_focused {
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -291,7 +324,10 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
                 agent_core::agent_runtime::ProviderType::Mock => "mock",
                 agent_core::agent_runtime::ProviderType::Opencode => "opencode",
             };
-            spans.push(Span::styled(provider_label, Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(
+                provider_label,
+                Style::default().fg(Color::Cyan),
+            ));
             spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
 
             // Separator between agents
@@ -299,17 +335,18 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
         }
 
         // Remove trailing separator
-        if spans.len() > 2 && spans.last().map(|s| s.content.as_ref() == "  ").unwrap_or(false) {
+        if spans.len() > 2
+            && spans
+                .last()
+                .map(|s| s.content.as_ref() == "  ")
+                .unwrap_or(false)
+        {
             spans.pop();
         }
     } else {
         // Single-agent mode: show traditional status bar
         let provider = state.app().selected_provider.label();
-        let status = if state.is_busy() {
-            "●"
-        } else {
-            "○"
-        };
+        let status = if state.is_busy() { "●" } else { "○" };
         let status_color = if state.is_busy() {
             Color::Green
         } else {
@@ -318,7 +355,12 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
 
         spans.push(Span::styled(status, Style::default().fg(status_color)));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled("alpha", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            "alpha",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::raw(" "));
         spans.push(Span::styled("[", Style::default().fg(Color::Gray)));
         spans.push(Span::styled(provider, Style::default().fg(Color::Cyan)));
@@ -368,7 +410,11 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     } else {
         " Ctrl+V:switch Ctrl+N:spawn"
     };
-    let total_len: usize = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
+    let total_len: usize = spans
+        .iter()
+        .map(|s| s.content.as_ref().len())
+        .sum::<usize>()
+        + hint.len();
     if total_len <= area.width as usize {
         let padding = area.width as usize - total_len;
         spans.push(Span::raw(" ".repeat(padding)));
@@ -384,7 +430,10 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
 fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     use crate::provider_overlay::ProviderSelectionOverlay;
 
-    let overlay = state.provider_overlay.as_ref().expect("overlay should be open");
+    let overlay = state
+        .provider_overlay
+        .as_ref()
+        .expect("overlay should be open");
     let area = centered_rect(50, 40, frame.area());
 
     frame.render_widget(Clear, area);
@@ -404,7 +453,10 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         let selected = index == overlay.selected_index;
         let marker = if selected { ">" } else { " " };
         let style = if selected {
-            Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -428,9 +480,10 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
 /// Render confirmation overlay for agent stop
 fn render_confirmation_overlay(frame: &mut Frame<'_>, state: &TuiState) {
-    
-
-    let overlay = state.confirmation_overlay.as_ref().expect("overlay should be open");
+    let overlay = state
+        .confirmation_overlay
+        .as_ref()
+        .expect("overlay should be open");
     let area = centered_rect(40, 30, frame.area());
 
     frame.render_widget(Clear, area);
@@ -449,7 +502,9 @@ fn render_confirmation_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     // Action description
     lines.push(Line::from(Span::styled(
         overlay.action.clone(),
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )));
 
     lines.push(Line::from(""));
@@ -519,25 +574,23 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
                 .get(state.transcript_scroll_offset)
                 .map(|line| line.as_str())
                 != Some(anchor.as_str())
+        {
+            if let Some(index) =
+                find_closest_matching_line(&rendered_lines, &anchor, state.transcript_scroll_offset)
             {
-                if let Some(index) = find_closest_matching_line(
-                    &rendered_lines,
-                    &anchor,
-                    state.transcript_scroll_offset,
-                ) {
-                    state.transcript_scroll_offset = index;
-                } else if let (Some((old_start, old_len)), Some((new_start, new_len))) = (
-                    state.transcript_last_cell_range,
-                    last_cell_range(&transcript_cells),
-                ) {
-                    let old_offset = state.transcript_scroll_offset;
-                    if old_offset >= old_start && old_offset < old_start + old_len {
-                        let relative = old_offset - old_start;
-                        state.transcript_scroll_offset =
-                            new_start + relative.min(new_len.saturating_sub(1));
-                    }
+                state.transcript_scroll_offset = index;
+            } else if let (Some((old_start, old_len)), Some((new_start, new_len))) = (
+                state.transcript_last_cell_range,
+                last_cell_range(&transcript_cells),
+            ) {
+                let old_offset = state.transcript_scroll_offset;
+                if old_offset >= old_start && old_offset < old_start + old_len {
+                    let relative = old_offset - old_start;
+                    state.transcript_scroll_offset =
+                        new_start + relative.min(new_len.saturating_sub(1));
                 }
             }
+        }
 
         if state.transcript_scroll_offset > max_scroll {
             state.transcript_scroll_offset = max_scroll;
@@ -676,13 +729,14 @@ fn render_transcript_overlay(frame: &mut Frame<'_>, state: &mut TuiState) {
 }
 
 fn build_transcript_overlay_lines(state: &mut TuiState, width: u16) -> Vec<Line<'static>> {
-    let mut lines = cells::flatten_cells(&cells::build_overlay_cells(&state.app().transcript, width));
+    let mut lines =
+        cells::flatten_cells(&cells::build_overlay_cells(&state.app().transcript, width));
     let active_key = state.active_cell_transcript_key();
-    let active_lines = state.active_cell_transcript_lines(width).unwrap_or_default();
+    let active_lines = state
+        .active_cell_transcript_lines(width)
+        .unwrap_or_default();
     let overlay = state.transcript_overlay.as_mut().expect("overlay exists");
-    overlay.sync_live_tail(width, active_key.map(|key| key.revision), || {
-        active_lines
-    });
+    overlay.sync_live_tail(width, active_key.map(|key| key.revision), || active_lines);
     if !lines.is_empty()
         && !overlay.live_tail_lines().is_empty()
         && !active_key.is_some_and(|key| key.is_stream_continuation)
@@ -767,22 +821,54 @@ fn render_split_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     let mut spans = Vec::new();
 
     // View mode indicator
-    spans.push(Span::styled("Split View", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(
+        "Split View",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ));
     spans.push(Span::raw(": "));
 
     let statuses = state.agent_statuses();
-    let left_idx = state.view_state.split.left_agent_index.min(statuses.len().saturating_sub(1));
-    let right_idx = state.view_state.split.right_agent_index.min(statuses.len().saturating_sub(1));
+    let left_idx = state
+        .view_state
+        .split
+        .left_agent_index
+        .min(statuses.len().saturating_sub(1));
+    let right_idx = state
+        .view_state
+        .split
+        .right_agent_index
+        .min(statuses.len().saturating_sub(1));
 
     if statuses.len() > left_idx {
         let left = &statuses[left_idx];
-        let left_indicator = if left.status.is_active() { "●" } else if left.status.is_idle() { "○" } else { "◌" };
-        let left_color = if state.view_state.split.focused_side == 0 { Color::White } else { Color::Gray };
-        spans.push(Span::styled(left_indicator, Style::default().fg(Color::Green)));
+        let left_indicator = if left.status.is_active() {
+            "●"
+        } else if left.status.is_idle() {
+            "○"
+        } else {
+            "◌"
+        };
+        let left_color = if state.view_state.split.focused_side == 0 {
+            Color::White
+        } else {
+            Color::Gray
+        };
+        spans.push(Span::styled(
+            left_indicator,
+            Style::default().fg(Color::Green),
+        ));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(left.codename.as_str(), Style::default().fg(left_color)));
+        spans.push(Span::styled(
+            left.codename.as_str(),
+            Style::default().fg(left_color),
+        ));
         spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
-        spans.push(Span::styled(left.provider_type.label(), Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled(
+            left.provider_type.label(),
+            Style::default().fg(Color::Cyan),
+        ));
         spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
     }
 
@@ -790,19 +876,42 @@ fn render_split_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
 
     if statuses.len() > right_idx {
         let right = &statuses[right_idx];
-        let right_indicator = if right.status.is_active() { "●" } else if right.status.is_idle() { "○" } else { "◌" };
-        let right_color = if state.view_state.split.focused_side == 1 { Color::White } else { Color::Gray };
-        spans.push(Span::styled(right_indicator, Style::default().fg(Color::Green)));
+        let right_indicator = if right.status.is_active() {
+            "●"
+        } else if right.status.is_idle() {
+            "○"
+        } else {
+            "◌"
+        };
+        let right_color = if state.view_state.split.focused_side == 1 {
+            Color::White
+        } else {
+            Color::Gray
+        };
+        spans.push(Span::styled(
+            right_indicator,
+            Style::default().fg(Color::Green),
+        ));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(right.codename.as_str(), Style::default().fg(right_color)));
+        spans.push(Span::styled(
+            right.codename.as_str(),
+            Style::default().fg(right_color),
+        ));
         spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
-        spans.push(Span::styled(right.provider_type.label(), Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled(
+            right.provider_type.label(),
+            Style::default().fg(Color::Cyan),
+        ));
         spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
     }
 
     // Right-aligned hint
     let hint = " ←→ select  s swap  e equal";
-    let total_len: usize = spans.iter().map(|s| s.content.as_ref().len()).sum::<usize>() + hint.len();
+    let total_len: usize = spans
+        .iter()
+        .map(|s| s.content.as_ref().len())
+        .sum::<usize>()
+        + hint.len();
     if total_len <= area.width as usize {
         spans.push(Span::raw(" ".repeat(area.width as usize - total_len)));
     }
@@ -811,7 +920,13 @@ fn render_split_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_agent_panel(frame: &mut Frame<'_>, state: &mut TuiState, agent_idx: usize, area: Rect, is_focused: bool) {
+fn render_agent_panel(
+    frame: &mut Frame<'_>,
+    state: &mut TuiState,
+    agent_idx: usize,
+    area: Rect,
+    is_focused: bool,
+) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -837,8 +952,7 @@ fn render_agent_panel(frame: &mut Frame<'_>, state: &mut TuiState, agent_idx: us
         } else {
             // Slot not found
             frame.render_widget(
-                Paragraph::new("Agent slot not found")
-                    .style(Style::default().fg(Color::Red)),
+                Paragraph::new("Agent slot not found").style(Style::default().fg(Color::Red)),
                 inner_area,
             );
             return;
@@ -877,10 +991,7 @@ fn render_agent_panel(frame: &mut Frame<'_>, state: &mut TuiState, agent_idx: us
         lines.len().saturating_sub(inner_area.height as usize)
     };
 
-    let transcript = Paragraph::new(lines).scroll((
-        scroll_offset.min(u16::MAX as usize) as u16,
-        0,
-    ));
+    let transcript = Paragraph::new(lines).scroll((scroll_offset.min(u16::MAX as usize) as u16, 0));
     frame.render_widget(transcript, inner_area);
 }
 
@@ -905,9 +1016,17 @@ fn render_dashboard_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Re
     fill_background(frame, area, Style::default().bg(Color::DarkGray));
 
     let spans = vec![
-        Span::styled("Agent Dashboard", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Agent Dashboard",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
-        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            state.view_state.mode.key_hint(),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -935,7 +1054,10 @@ fn render_dashboard_cards(frame: &mut Frame<'_>, state: &mut TuiState, area: Rec
     let visible_rows = (area.height / card_height) as usize;
 
     // Ensure selected card is visible
-    state.view_state.dashboard.ensure_selected_visible(cards_per_row, visible_rows);
+    state
+        .view_state
+        .dashboard
+        .ensure_selected_visible(cards_per_row, visible_rows);
     let scroll_offset = state.view_state.dashboard.scroll_offset;
 
     // Render each agent as a card
@@ -960,11 +1082,21 @@ fn render_dashboard_cards(frame: &mut Frame<'_>, state: &mut TuiState, area: Rec
             break;
         }
 
-        render_agent_card(frame, status, card_area, state.view_state.dashboard.selected_card_index == i);
+        render_agent_card(
+            frame,
+            status,
+            card_area,
+            state.view_state.dashboard.selected_card_index == i,
+        );
     }
 }
 
-fn render_agent_card(frame: &mut Frame<'_>, status: &AgentStatusSnapshot, area: Rect, is_selected: bool) {
+fn render_agent_card(
+    frame: &mut Frame<'_>,
+    status: &AgentStatusSnapshot,
+    area: Rect,
+    is_selected: bool,
+) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -975,8 +1107,18 @@ fn render_agent_card(frame: &mut Frame<'_>, status: &AgentStatusSnapshot, area: 
         Style::default().fg(Color::DarkGray)
     };
 
-    let indicator = if status.status.is_active() { "●" } else if status.status.is_idle() { "○" } else { "◌" };
-    let status_color = if status.status.is_active() { Color::Green } else { Color::Gray };
+    let indicator = if status.status.is_active() {
+        "●"
+    } else if status.status.is_idle() {
+        "○"
+    } else {
+        "◌"
+    };
+    let status_color = if status.status.is_active() {
+        Color::Green
+    } else {
+        Color::Gray
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -990,16 +1132,25 @@ fn render_agent_card(frame: &mut Frame<'_>, status: &AgentStatusSnapshot, area: 
         Line::from(vec![
             Span::styled(indicator, Style::default().fg(status_color)),
             Span::raw(" "),
-            Span::styled(status.codename.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                status.codename.as_str(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled(status.provider_type.label(), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                status.provider_type.label(),
+                Style::default().fg(Color::Cyan),
+            ),
             Span::styled("]", Style::default().fg(Color::DarkGray)),
         ]),
-        Line::from(vec![
-            Span::styled(status.status.label(), Style::default().fg(status_color)),
-        ]),
+        Line::from(vec![Span::styled(
+            status.status.label(),
+            Style::default().fg(status_color),
+        )]),
     ];
 
     frame.render_widget(Paragraph::new(lines), inner);
@@ -1012,9 +1163,15 @@ fn render_dashboard_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     fill_background(frame, area, Style::default().bg(Color::DarkGray));
 
     let spans = vec![
-        Span::styled("n new  x stop  1-9 select", Style::default().fg(Color::Gray)),
+        Span::styled(
+            "n new  x stop  1-9 select",
+            Style::default().fg(Color::Gray),
+        ),
         Span::raw("  "),
-        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            state.view_state.mode.key_hint(),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1034,7 +1191,12 @@ fn render_mail_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     let action_required = state.focused_action_required_count();
 
     let mut spans = vec![
-        Span::styled("Mail", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Mail",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
     ];
 
@@ -1050,11 +1212,17 @@ fn render_mail_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
             ));
         }
     } else {
-        spans.push(Span::styled("No unread mail", Style::default().fg(Color::Gray)));
+        spans.push(Span::styled(
+            "No unread mail",
+            Style::default().fg(Color::Gray),
+        ));
     }
 
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        state.view_state.mode.key_hint(),
+        Style::default().fg(Color::DarkGray),
+    ));
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -1067,8 +1235,7 @@ fn render_mail_list(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let focused_id = state.focused_agent_id();
     if focused_id.is_none() {
         frame.render_widget(
-            Paragraph::new("No agent selected")
-                .style(Style::default().fg(Color::Gray)),
+            Paragraph::new("No agent selected").style(Style::default().fg(Color::Gray)),
             area,
         );
         return;
@@ -1077,8 +1244,7 @@ fn render_mail_list(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let inbox = state.mailbox.inbox_for(&focused_id.unwrap());
     if inbox.is_none() || inbox.unwrap().is_empty() {
         frame.render_widget(
-            Paragraph::new("Inbox is empty")
-                .style(Style::default().fg(Color::Gray)),
+            Paragraph::new("Inbox is empty").style(Style::default().fg(Color::Gray)),
             area,
         );
         return;
@@ -1089,25 +1255,41 @@ fn render_mail_list(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.view_state.mail.clamp_selection(mails.len());
     let selected_idx = state.view_state.mail.selected_mail_index;
 
-    let lines: Vec<Line> = mails.iter().enumerate().map(|(i, mail)| {
-        let is_selected = i == selected_idx;
-        let is_unread = !mail.is_read();
-        let is_action = mail.requires_action;
+    let lines: Vec<Line> = mails
+        .iter()
+        .enumerate()
+        .map(|(i, mail)| {
+            let is_selected = i == selected_idx;
+            let is_unread = !mail.is_read();
+            let is_action = mail.requires_action;
 
-        let indicator = if is_action { "[!] " } else if is_unread { "● " } else { "○ " };
-        let color = if is_action { Color::Red } else if is_unread { Color::Yellow } else { Color::Gray };
+            let indicator = if is_action {
+                "[!] "
+            } else if is_unread {
+                "● "
+            } else {
+                "○ "
+            };
+            let color = if is_action {
+                Color::Red
+            } else if is_unread {
+                Color::Yellow
+            } else {
+                Color::Gray
+            };
 
-        let style = if is_selected {
-            Style::default().fg(color).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(color)
-        };
+            let style = if is_selected {
+                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(color)
+            };
 
-        Line::from(vec![
-            Span::styled(indicator, style),
-            Span::styled(mail.subject.label(), style),
-        ])
-    }).collect();
+            Line::from(vec![
+                Span::styled(indicator, style),
+                Span::styled(mail.subject.label(), style),
+            ])
+        })
+        .collect();
 
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -1122,7 +1304,12 @@ fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect)
         frame.render_widget(
             Paragraph::new("Compose: (resize window for fields)")
                 .style(Style::default().fg(Color::Gray)),
-            Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: 1 },
+            Rect {
+                x: area.x + 1,
+                y: area.y + 1,
+                width: area.width.saturating_sub(2),
+                height: 1,
+            },
         );
         return;
     }
@@ -1144,7 +1331,10 @@ fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect)
     // Render three fields: To, Subject, Body
     let fields = [
         (ComposeField::To, &state.view_state.mail.compose_to),
-        (ComposeField::Subject, &state.view_state.mail.compose_subject),
+        (
+            ComposeField::Subject,
+            &state.view_state.mail.compose_subject,
+        ),
         (ComposeField::Body, &state.view_state.mail.compose_body),
     ];
 
@@ -1160,7 +1350,9 @@ fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect)
 
         let is_focused = *field == focused;
         let style = if is_focused {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -1175,7 +1367,12 @@ fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect)
 
         frame.render_widget(
             Paragraph::new(format!("{}: {}", label, display_content)).style(style),
-            Rect { x: field_area.x, y: field_area.y, width: field_area.width, height: 1 },
+            Rect {
+                x: field_area.x,
+                y: field_area.y,
+                width: field_area.width,
+                height: 1,
+            },
         );
     }
 
@@ -1183,13 +1380,24 @@ fn render_mail_composer(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect)
     frame.render_widget(
         Paragraph::new("Tab next field  Enter send  Esc cancel")
             .style(Style::default().fg(Color::DarkGray)),
-        Rect { x: inner.x, y: inner.y + 3, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 3,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Set cursor position for focused field
-    let cursor_x = inner.x + focused.label().len() as u16 + 2 + state.view_state.mail.focused_content().len() as u16;
+    let cursor_x = inner.x
+        + focused.label().len() as u16
+        + 2
+        + state.view_state.mail.focused_content().len() as u16;
     let cursor_y = inner.y + focused as u16;
-    frame.set_cursor_position((cursor_x.min(inner.x + inner.width.saturating_sub(1)), cursor_y));
+    frame.set_cursor_position((
+        cursor_x.min(inner.x + inner.width.saturating_sub(1)),
+        cursor_y,
+    ));
 }
 
 fn render_mail_hint(frame: &mut Frame<'_>, _state: &TuiState, area: Rect) {
@@ -1213,7 +1421,10 @@ fn render_mail_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     let spans = vec![
         Span::styled("↑↓ select  Enter view", Style::default().fg(Color::Gray)),
         Span::raw("  "),
-        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            state.view_state.mode.key_hint(),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1230,9 +1441,17 @@ fn render_task_matrix_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: 
     fill_background(frame, area, Style::default().bg(Color::DarkGray));
 
     let spans = vec![
-        Span::styled("Task Matrix", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Task Matrix",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
-        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            state.view_state.mode.key_hint(),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1248,8 +1467,10 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
 
     if kanban.is_none() {
         frame.render_widget(
-            Paragraph::new("Kanban not initialized. Start a multi-agent session to use task matrix.")
-                .style(Style::default().fg(Color::Gray)),
+            Paragraph::new(
+                "Kanban not initialized. Start a multi-agent session to use task matrix.",
+            )
+            .style(Style::default().fg(Color::Gray)),
             area,
         );
         return;
@@ -1284,12 +1505,18 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
         height: 1,
     };
 
-    let header_spans: Vec<Span> = columns.iter().enumerate().map(|(i, col)| {
-        Span::styled(
-            format!("  {:width$}", col, width = column_width as usize - 2),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )
-    }).collect();
+    let header_spans: Vec<Span> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            Span::styled(
+                format!("  {:width$}", col, width = column_width as usize - 2),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect();
     frame.render_widget(Paragraph::new(Line::from(header_spans)), header_area);
 
     // Render task rows
@@ -1298,10 +1525,22 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
 
     // Group tasks by status
     use agent_kanban::domain::Status;
-    let todo_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Todo || t.status() == Status::Ready).collect();
-    let in_progress_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::InProgress).collect();
-    let done_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Done).collect();
-    let verified_tasks: Vec<_> = tasks.iter().filter(|t| t.status() == Status::Verified).collect();
+    let todo_tasks: Vec<_> = tasks
+        .iter()
+        .filter(|t| t.status() == Status::Todo || t.status() == Status::Ready)
+        .collect();
+    let in_progress_tasks: Vec<_> = tasks
+        .iter()
+        .filter(|t| t.status() == Status::InProgress)
+        .collect();
+    let done_tasks: Vec<_> = tasks
+        .iter()
+        .filter(|t| t.status() == Status::Done)
+        .collect();
+    let verified_tasks: Vec<_> = tasks
+        .iter()
+        .filter(|t| t.status() == Status::Verified)
+        .collect();
 
     // Render rows
     for row_idx in 0..max_rows as usize {
@@ -1323,7 +1562,10 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
             (in_progress_task, Color::Green),
             (done_task, Color::Cyan),
             (verified_task, Color::Blue),
-        ].iter().enumerate().map(|(col_idx, (task, color))| {
+        ]
+        .iter()
+        .enumerate()
+        .map(|(col_idx, (task, color))| {
             let task_text = if let Some(t) = task {
                 // Truncate title to fit column
                 let title = t.title();
@@ -1337,7 +1579,8 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
                 format!("  {:width$}", "", width = column_width as usize - 2)
             };
             Span::styled(task_text, Style::default().fg(*color))
-        }).collect();
+        })
+        .collect();
 
         frame.render_widget(Paragraph::new(Line::from(task_spans)), row_area);
     }
@@ -1352,7 +1595,10 @@ fn render_task_matrix_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect
     let spans = vec![
         Span::styled("↑↓←→ navigate  a assign", Style::default().fg(Color::Gray)),
         Span::raw("  "),
-        Span::styled(state.view_state.mode.key_hint(), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            state.view_state.mode.key_hint(),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1438,9 +1684,12 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
 }
 
 /// Render resume overlay for shutdown snapshot restore
-pub fn render_resume_overlay(frame: &mut Frame<'_>, overlay: &crate::resume_overlay::ResumeOverlay) {
-    use ratatui::widgets::BorderType;
+pub fn render_resume_overlay(
+    frame: &mut Frame<'_>,
+    overlay: &crate::resume_overlay::ResumeOverlay,
+) {
     use ratatui::style::Stylize;
+    use ratatui::widgets::BorderType;
 
     let area = centered_rect(60, 50, frame.area());
     frame.render_widget(Clear, area);
@@ -1451,7 +1700,10 @@ pub fn render_resume_overlay(frame: &mut Frame<'_>, overlay: &crate::resume_over
     // Build content
     let mut lines = vec![
         Line::from(""),
-        Line::from(format!("Previous session had {} active agents.", overlay.agents_count())),
+        Line::from(format!(
+            "Previous session had {} active agents.",
+            overlay.agents_count()
+        )),
         Line::from(""),
     ];
 
@@ -1464,7 +1716,9 @@ pub fn render_resume_overlay(frame: &mut Frame<'_>, overlay: &crate::resume_over
         } else {
             "idle"
         };
-        let task_text = agent.assigned_task_id.as_ref()
+        let task_text = agent
+            .assigned_task_id
+            .as_ref()
             .map(|t| format!(" (task: {})", t))
             .unwrap_or_default();
         lines.push(Line::from(format!(
