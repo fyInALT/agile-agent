@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use crate::agent_role::AgentRole;
-use crate::agent_runtime::{AgentId, AgentCodename, ProviderType, WorkplaceId};
+use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
 use crate::provider::ProviderKind;
@@ -207,7 +207,11 @@ impl AgentPool {
     /// Switch focus to a different agent by index
     pub fn focus_agent_by_index(&mut self, index: usize) -> Result<(), String> {
         if index >= self.slots.len() {
-            return Err(format!("Invalid focus index {} (only {} agents)", index, self.slots.len()));
+            return Err(format!(
+                "Invalid focus index {} (only {} agents)",
+                index,
+                self.slots.len()
+            ));
         }
         self.focused_slot = index;
         Ok(())
@@ -321,7 +325,10 @@ impl AgentPool {
         // Update backlog based on result
         match result {
             TaskCompletionResult::Success => {
-                backlog.complete_task(task_id.as_str(), Some("Task completed successfully".to_string()));
+                backlog.complete_task(
+                    task_id.as_str(),
+                    Some("Task completed successfully".to_string()),
+                );
             }
             TaskCompletionResult::Failure { error } => {
                 backlog.fail_task(task_id.as_str(), error);
@@ -336,7 +343,9 @@ impl AgentPool {
 
     /// Find an idle agent that can accept a task
     pub fn find_idle_agent(&self) -> Option<&AgentSlot> {
-        self.slots.iter().find(|s| *s.status() == AgentSlotStatus::Idle)
+        self.slots
+            .iter()
+            .find(|s| *s.status() == AgentSlotStatus::Idle)
     }
 
     /// Find an idle agent and return its ID for assignment
@@ -350,10 +359,7 @@ impl AgentPool {
     /// Auto-assign a ready task to an available idle agent
     ///
     /// Returns the assigned agent ID if successful.
-    pub fn auto_assign_task(
-        &mut self,
-        backlog: &mut BacklogState,
-    ) -> Option<(AgentId, TaskId)> {
+    pub fn auto_assign_task(&mut self, backlog: &mut BacklogState) -> Option<(AgentId, TaskId)> {
         // Find an idle agent
         let agent_id = self.find_idle_agent_id()?;
 
@@ -669,11 +675,8 @@ mod tests {
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task with backlog validation
-        let result = pool.assign_task_with_backlog(
-            &agent_id,
-            TaskId::new("task-001"),
-            &mut backlog,
-        );
+        let result =
+            pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog);
         assert!(result.is_ok());
 
         // Agent should have task assigned
@@ -701,11 +704,8 @@ mod tests {
             result_summary: None,
         });
 
-        let result = pool.assign_task_with_backlog(
-            &agent_id,
-            TaskId::new("task-001"),
-            &mut backlog,
-        );
+        let result =
+            pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog);
         assert!(result.is_err());
     }
 
@@ -716,14 +716,12 @@ mod tests {
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task
-        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Complete task successfully
-        let completed_task = pool.complete_task_with_backlog(
-            &agent_id,
-            TaskCompletionResult::Success,
-            &mut backlog,
-        );
+        let completed_task =
+            pool.complete_task_with_backlog(&agent_id, TaskCompletionResult::Success, &mut backlog);
         assert!(completed_task.is_ok());
 
         // Task should be Done in backlog
@@ -742,12 +740,15 @@ mod tests {
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task
-        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Complete task with failure
         let completed_task = pool.complete_task_with_backlog(
             &agent_id,
-            TaskCompletionResult::Failure { error: "test error".to_string() },
+            TaskCompletionResult::Failure {
+                error: "test error".to_string(),
+            },
             &mut backlog,
         );
         assert!(completed_task.is_ok());
@@ -875,12 +876,16 @@ mod tests {
         });
 
         // Assign task to agent
-        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         let snapshot = pool.task_queue_snapshot(&backlog);
         assert_eq!(snapshot.agent_assignments.len(), 1);
         assert_eq!(snapshot.agent_assignments[0].task_id.as_str(), "task-001");
-        assert_eq!(snapshot.agent_assignments[0].task_status, crate::backlog::TaskStatus::Running);
+        assert_eq!(
+            snapshot.agent_assignments[0].task_status,
+            crate::backlog::TaskStatus::Running
+        );
         assert_eq!(snapshot.running_tasks, 1);
     }
 
@@ -904,7 +909,8 @@ mod tests {
         });
 
         // Assign task to agent2 (agent status stays Idle)
-        pool.assign_task_with_backlog(&agent2, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent2, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Now mark agent2 as starting (not idle)
         pool.get_slot_mut_by_id(&agent2)
@@ -934,7 +940,8 @@ mod tests {
             result_summary: None,
         });
 
-        pool.assign_task_with_backlog(&agent1, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent1, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         let assignments = pool.agents_with_assignments(&backlog);
         assert_eq!(assignments.len(), 1);

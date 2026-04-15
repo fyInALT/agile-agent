@@ -85,9 +85,15 @@ impl MigrationResult {
             MigrationStatus::Completed => format!(
                 "Migrated {} files to agent {}",
                 self.migrated_files.len(),
-                self.agent_id.as_ref().map(|a| a.as_str()).unwrap_or("unknown")
+                self.agent_id
+                    .as_ref()
+                    .map(|a| a.as_str())
+                    .unwrap_or("unknown")
             ),
-            MigrationStatus::Failed => format!("Migration failed: {}", self.error.clone().unwrap_or_default()),
+            MigrationStatus::Failed => format!(
+                "Migration failed: {}",
+                self.error.clone().unwrap_or_default()
+            ),
             MigrationStatus::RolledBack => "Migration rolled back to original".to_string(),
             MigrationStatus::InProgress => "Migration in progress".to_string(),
         }
@@ -140,11 +146,7 @@ impl LegacyDetector {
             .iter()
             .filter_map(|file| {
                 let path = workplace_path.join(file);
-                if path.exists() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.exists() { Some(path) } else { None }
             })
             .collect()
     }
@@ -183,7 +185,8 @@ impl DataMigrator {
 
     /// Check if migration is needed
     pub fn needs_migration(&self, workplace_path: &Path) -> bool {
-        self.detector.has_legacy_data(workplace_path) && !self.detector.is_already_migrated(workplace_path)
+        self.detector.has_legacy_data(workplace_path)
+            && !self.detector.is_already_migrated(workplace_path)
     }
 
     /// Run migration
@@ -329,8 +332,15 @@ impl DataMigrator {
 
         MigrationPreview {
             needs_migration: self.needs_migration(workplace_path),
-            legacy_files: legacy_files.iter().map(|p| p.display().to_string()).collect(),
-            target_directory: workplace_path.join("agents").join(self.default_agent_id.as_str()).display().to_string(),
+            legacy_files: legacy_files
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
+            target_directory: workplace_path
+                .join("agents")
+                .join(self.default_agent_id.as_str())
+                .display()
+                .to_string(),
         }
     }
 }

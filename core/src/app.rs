@@ -13,8 +13,8 @@ use crate::skills::SkillRegistry;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::McpInvocation;
 use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::PatchChange;
 use crate::tool_calls::WebSearchAction;
 use crate::verification;
 
@@ -234,13 +234,14 @@ impl AppState {
         // Find the matching started tool call and update it
         for entry in self.transcript.iter_mut().rev() {
             if let TranscriptEntry::ExecCommand {
-                    call_id: existing_call_id,
-                    source: existing_source,
-                    allow_exploring_group,
-                    input_preview: existing_input_preview,
-                    status: ExecCommandStatus::InProgress,
-                    ..
-                } = entry {
+                call_id: existing_call_id,
+                source: existing_source,
+                allow_exploring_group,
+                input_preview: existing_input_preview,
+                status: ExecCommandStatus::InProgress,
+                ..
+            } = entry
+            {
                 let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
                 let matches_name = existing_call_id.is_none();
                 if matches_call_id || matches_name {
@@ -376,11 +377,7 @@ impl AppState {
         self.status = AppStatus::Idle;
     }
 
-    pub fn push_patch_apply_started(
-        &mut self,
-        call_id: Option<String>,
-        changes: Vec<PatchChange>,
-    ) {
+    pub fn push_patch_apply_started(&mut self, call_id: Option<String>, changes: Vec<PatchChange>) {
         self.transcript.push(TranscriptEntry::PatchApply {
             call_id,
             changes,
@@ -821,9 +818,10 @@ impl AppState {
             });
 
         if let Some(todo_id) = task_todo_id
-            && let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
-                todo.status = TodoStatus::Done;
-            }
+            && let Some(todo) = self.backlog.find_todo_mut(&todo_id)
+        {
+            todo.status = TodoStatus::Done;
+        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }
@@ -847,9 +845,10 @@ impl AppState {
 
         if let Some(todo_id) = task_todo_id
             && let Some(todo) = self.backlog.find_todo_mut(&todo_id)
-                && todo.status == TodoStatus::InProgress {
-                    todo.status = TodoStatus::Ready;
-                }
+            && todo.status == TodoStatus::InProgress
+        {
+            todo.status = TodoStatus::Ready;
+        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }
@@ -872,9 +871,10 @@ impl AppState {
             });
 
         if let Some(todo_id) = task_todo_id
-            && let Some(todo) = self.backlog.find_todo_mut(&todo_id) {
-                todo.status = TodoStatus::Blocked;
-            }
+            && let Some(todo) = self.backlog.find_todo_mut(&todo_id)
+        {
+            todo.status = TodoStatus::Blocked;
+        }
         self.active_task_had_error = false;
         self.continuation_attempts = 0;
     }
@@ -1224,19 +1224,13 @@ mod tests {
     #[test]
     fn web_search_and_media_events_use_dedicated_transcript_entries() {
         let mut state = AppState::new(ProviderKind::Mock);
-        state.push_web_search_started(
-            Some("search-1".to_string()),
-            "ratatui stylize".to_string(),
-        );
+        state.push_web_search_started(Some("search-1".to_string()), "ratatui stylize".to_string());
         state.push_web_search_finished(
             Some("search-1".to_string()),
             "ratatui stylize".to_string(),
             Some(crate::tool_calls::WebSearchAction::Other),
         );
-        state.push_view_image(
-            Some("image-view-1".to_string()),
-            "example.png".to_string(),
-        );
+        state.push_view_image(Some("image-view-1".to_string()), "example.png".to_string());
         state.push_image_generation(
             Some("image-gen-1".to_string()),
             Some("A tiny blue square".to_string()),
@@ -1290,10 +1284,7 @@ mod tests {
             })),
         };
 
-        state.push_mcp_tool_call_started(
-            Some("mcp-1".to_string()),
-            invocation.clone(),
-        );
+        state.push_mcp_tool_call_started(Some("mcp-1".to_string()), invocation.clone());
         state.push_mcp_tool_call_finished(
             Some("mcp-1".to_string()),
             invocation.clone(),

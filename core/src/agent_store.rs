@@ -399,8 +399,12 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         let store = AgentStore::new(workplace);
-        store.save_meta(&meta("agent_001", "2026-04-12T00:00:00Z")).expect("save 1");
-        store.save_meta(&meta("agent_002", "2026-04-12T01:00:00Z")).expect("save 2");
+        store
+            .save_meta(&meta("agent_001", "2026-04-12T00:00:00Z"))
+            .expect("save 1");
+        store
+            .save_meta(&meta("agent_002", "2026-04-12T01:00:00Z"))
+            .expect("save 2");
 
         let ids = store.list_agent_ids().expect("list agent ids");
 

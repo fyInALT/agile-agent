@@ -345,7 +345,9 @@ fn render_exec_transcript_lines(
     } else if !matches!(status, ExecCommandStatus::InProgress) {
         lines.push(Line::from(Span::styled(
             "(no output)",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )));
     }
 
@@ -956,7 +958,14 @@ fn render_generic_tool_call_lines(
 ) -> Vec<Line<'static>> {
     // Special handling for Edit tool with diff-style rendering
     if name == "Edit" {
-        return render_edit_tool_lines(input_preview, output_preview, success, started, width, mode);
+        return render_edit_tool_lines(
+            input_preview,
+            output_preview,
+            success,
+            started,
+            width,
+            mode,
+        );
     }
 
     // All git commands use the same color to distinguish from other commands
@@ -1003,10 +1012,7 @@ fn render_generic_tool_call_lines(
             if let Some(ref git) = git_label {
                 // Show git-specific label with detail if available
                 if let Some(ref detail) = git.detail {
-                    Span::styled(
-                        format!("{} ({})", git.label, detail),
-                        header_style,
-                    )
+                    Span::styled(format!("{} ({})", git.label, detail), header_style)
                 } else {
                     Span::styled(git.label, header_style)
                 }
@@ -1387,46 +1393,206 @@ struct GitPattern {
 
 /// Table of git commands for detection
 const GIT_PATTERNS: &[GitPattern] = &[
-    GitPattern { subcommand: "diff", label: "Git Diff", show_args_as_detail: true },
-    GitPattern { subcommand: "status", label: "Git Status", show_args_as_detail: false },
-    GitPattern { subcommand: "log", label: "Git Log", show_args_as_detail: true },
-    GitPattern { subcommand: "commit", label: "Git Commit", show_args_as_detail: true },
-    GitPattern { subcommand: "add", label: "Git Add", show_args_as_detail: true },
-    GitPattern { subcommand: "branch", label: "Git Branch", show_args_as_detail: false },
-    GitPattern { subcommand: "checkout", label: "Git Checkout", show_args_as_detail: true },
-    GitPattern { subcommand: "push", label: "Git Push", show_args_as_detail: true },
-    GitPattern { subcommand: "pull", label: "Git Pull", show_args_as_detail: true },
-    GitPattern { subcommand: "fetch", label: "Git Fetch", show_args_as_detail: true },
-    GitPattern { subcommand: "stash", label: "Git Stash", show_args_as_detail: false },
-    GitPattern { subcommand: "merge", label: "Git Merge", show_args_as_detail: true },
-    GitPattern { subcommand: "rebase", label: "Git Rebase", show_args_as_detail: true },
-    GitPattern { subcommand: "clone", label: "Git Clone", show_args_as_detail: true },
-    GitPattern { subcommand: "show", label: "Git Show", show_args_as_detail: false },
-    GitPattern { subcommand: "remote", label: "Git Remote", show_args_as_detail: false },
-    GitPattern { subcommand: "config", label: "Git Config", show_args_as_detail: false },
-    GitPattern { subcommand: "reset", label: "Git Reset", show_args_as_detail: true },
-    GitPattern { subcommand: "init", label: "Git Init", show_args_as_detail: true },
-    GitPattern { subcommand: "rm", label: "Git RM", show_args_as_detail: true },
-    GitPattern { subcommand: "mv", label: "Git MV", show_args_as_detail: true },
-    GitPattern { subcommand: "restore", label: "Git Restore", show_args_as_detail: true },
-    GitPattern { subcommand: "switch", label: "Git Switch", show_args_as_detail: true },
-    GitPattern { subcommand: "clean", label: "Git Clean", show_args_as_detail: true },
-    GitPattern { subcommand: "bisect", label: "Git Bisect", show_args_as_detail: false },
-    GitPattern { subcommand: "cherry-pick", label: "Git Cherry-Pick", show_args_as_detail: true },
-    GitPattern { subcommand: "revert", label: "Git Revert", show_args_as_detail: true },
-    GitPattern { subcommand: "tag", label: "Git Tag", show_args_as_detail: true },
-    GitPattern { subcommand: "describe", label: "Git Describe", show_args_as_detail: false },
-    GitPattern { subcommand: "reflog", label: "Git Reflog", show_args_as_detail: false },
-    GitPattern { subcommand: "worktree", label: "Git Worktree", show_args_as_detail: true },
-    GitPattern { subcommand: "grep", label: "Git Grep", show_args_as_detail: true },
-    GitPattern { subcommand: "archive", label: "Git Archive", show_args_as_detail: true },
-    GitPattern { subcommand: "bundle", label: "Git Bundle", show_args_as_detail: false },
-    GitPattern { subcommand: "fsck", label: "Git FSCK", show_args_as_detail: false },
-    GitPattern { subcommand: "gc", label: "Git GC", show_args_as_detail: false },
-    GitPattern { subcommand: "prune", label: "Git Prune", show_args_as_detail: false },
-    GitPattern { subcommand: "submodule", label: "Git Submodule", show_args_as_detail: true },
-    GitPattern { subcommand: "notes", label: "Git Notes", show_args_as_detail: false },
-    GitPattern { subcommand: "patch-id", label: "Git Patch-ID", show_args_as_detail: false },
+    GitPattern {
+        subcommand: "diff",
+        label: "Git Diff",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "status",
+        label: "Git Status",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "log",
+        label: "Git Log",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "commit",
+        label: "Git Commit",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "add",
+        label: "Git Add",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "branch",
+        label: "Git Branch",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "checkout",
+        label: "Git Checkout",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "push",
+        label: "Git Push",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "pull",
+        label: "Git Pull",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "fetch",
+        label: "Git Fetch",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "stash",
+        label: "Git Stash",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "merge",
+        label: "Git Merge",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "rebase",
+        label: "Git Rebase",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "clone",
+        label: "Git Clone",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "show",
+        label: "Git Show",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "remote",
+        label: "Git Remote",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "config",
+        label: "Git Config",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "reset",
+        label: "Git Reset",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "init",
+        label: "Git Init",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "rm",
+        label: "Git RM",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "mv",
+        label: "Git MV",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "restore",
+        label: "Git Restore",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "switch",
+        label: "Git Switch",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "clean",
+        label: "Git Clean",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "bisect",
+        label: "Git Bisect",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "cherry-pick",
+        label: "Git Cherry-Pick",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "revert",
+        label: "Git Revert",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "tag",
+        label: "Git Tag",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "describe",
+        label: "Git Describe",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "reflog",
+        label: "Git Reflog",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "worktree",
+        label: "Git Worktree",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "grep",
+        label: "Git Grep",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "archive",
+        label: "Git Archive",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "bundle",
+        label: "Git Bundle",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "fsck",
+        label: "Git FSCK",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "gc",
+        label: "Git GC",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "prune",
+        label: "Git Prune",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "submodule",
+        label: "Git Submodule",
+        show_args_as_detail: true,
+    },
+    GitPattern {
+        subcommand: "notes",
+        label: "Git Notes",
+        show_args_as_detail: false,
+    },
+    GitPattern {
+        subcommand: "patch-id",
+        label: "Git Patch-ID",
+        show_args_as_detail: false,
+    },
 ];
 
 /// Detect git commands and return a formatted label for display
@@ -1506,7 +1672,11 @@ fn extract_command_from_input(input_preview: Option<&str>) -> Option<String> {
     Some(input.to_string())
 }
 
-fn format_tool_invocation(name: &str, input_preview: Option<&str>, display_command: Option<&str>) -> String {
+fn format_tool_invocation(
+    name: &str,
+    input_preview: Option<&str>,
+    display_command: Option<&str>,
+) -> String {
     // Use the extracted display_command if available, otherwise use input_preview
     let display = display_command.unwrap_or_else(|| input_preview.unwrap_or(""));
     match display.trim().is_empty() {
@@ -1701,7 +1871,10 @@ fn render_edit_tool_lines(
         };
         lines.push(Line::from(vec![
             Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
-            Span::styled(header_prefix.to_string(), bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                header_prefix.to_string(),
+                bullet_style.add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
             Span::styled(path.clone(), Style::default().fg(Color::Cyan)),
             Span::styled(stats, Style::default().add_modifier(Modifier::DIM)),
@@ -1709,16 +1882,18 @@ fn render_edit_tool_lines(
     } else {
         lines.push(Line::from(vec![
             Span::styled("• ", bullet_style.add_modifier(Modifier::BOLD)),
-            Span::styled(header_prefix.to_string(), bullet_style.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                header_prefix.to_string(),
+                bullet_style.add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
 
     // Render full diff lines (no truncation) with background colors
-    if !started
-        && let Some(diff_text) = build_edit_diff_text(&edit_input) {
-            let diff_lines = render_edit_diff_with_background(&diff_text);
-            lines.extend(diff_lines);
-        }
+    if !started && let Some(diff_text) = build_edit_diff_text(&edit_input) {
+        let diff_lines = render_edit_diff_with_background(&diff_text);
+        lines.extend(diff_lines);
+    }
 
     // Show output preview if present and not a success message
     if let Some(output) = output_preview.filter(|value| !value.trim().is_empty()) {
@@ -1734,7 +1909,10 @@ fn render_edit_tool_lines(
                         DETAIL_CONTINUATION_PREFIX,
                         Style::default().add_modifier(Modifier::DIM),
                     ),
-                    Span::styled(line.to_string(), Style::default().add_modifier(Modifier::DIM)),
+                    Span::styled(
+                        line.to_string(),
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
                 ]));
             }
         }
@@ -1878,7 +2056,9 @@ fn render_edit_diff_line(
     let sign_style = if has_bg {
         Style::default().fg(fg_for_sign).bg(bg_color)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
 
     Line::from(vec![
@@ -1967,9 +2147,18 @@ fn parse_edit_input(input_preview: Option<&str>) -> EditInput {
         Err(_) => return EditInput::default(),
     };
     EditInput {
-        file_path: parsed.get("file_path").and_then(|v| v.as_str()).map(String::from),
-        old_string: parsed.get("old_string").and_then(|v| v.as_str()).map(String::from),
-        new_string: parsed.get("new_string").and_then(|v| v.as_str()).map(String::from),
+        file_path: parsed
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        old_string: parsed
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        new_string: parsed
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .map(String::from),
     }
 }
 
@@ -2032,7 +2221,11 @@ mod edit_tool_tests {
 
         assert!(rendered.iter().any(|line| line.contains("Editing")));
         assert!(rendered.iter().any(|line| line.contains("src/main.rs")));
-        assert!(!rendered.iter().any(|line| line.contains("(+") || line.contains("(-")));
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("(+") || line.contains("(-"))
+        );
     }
 
     #[test]
@@ -2054,11 +2247,23 @@ mod edit_tool_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show line numbers
-        assert!(rendered.iter().any(|line| line.contains("1") && line.contains("line 1")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("1") && line.contains("line 1"))
+        );
         // Should show removed line with '-' marker
-        assert!(rendered.iter().any(|line| line.contains("-") && line.contains("line 2")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("-") && line.contains("line 2"))
+        );
         // Should show added line with '+' marker
-        assert!(rendered.iter().any(|line| line.contains("+") && line.contains("modified line")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("+") && line.contains("modified line"))
+        );
     }
 
     #[test]
@@ -2085,14 +2290,7 @@ mod edit_tool_tests {
 
     #[test]
     fn handles_missing_input_gracefully() {
-        let lines = render_edit_tool_lines(
-            None,
-            None,
-            true,
-            false,
-            80,
-            ToolRenderMode::Preview,
-        );
+        let lines = render_edit_tool_lines(None, None, true, false, 80, ToolRenderMode::Preview);
         let rendered = lines_to_strings(&lines);
 
         // Should still show header
@@ -2252,7 +2450,11 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show "Git Diff" label instead of full command
-        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Diff")),
+            "Expected 'Git Diff' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2268,7 +2470,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Commit")), "Expected 'Git Commit' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Commit")),
+            "Expected 'Git Commit' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2284,7 +2490,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Status")), "Expected 'Git Status' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Status")),
+            "Expected 'Git Status' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2300,7 +2510,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Add")), "Expected 'Git Add' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Add")),
+            "Expected 'Git Add' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2316,7 +2530,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Branch")), "Expected 'Git Branch' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Branch")),
+            "Expected 'Git Branch' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2332,7 +2550,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Push")), "Expected 'Git Push' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Push")),
+            "Expected 'Git Push' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2349,7 +2571,13 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show tool name in parentheses
-        assert!(rendered.iter().any(|line| line.contains("some_tool(file.txt)")), "Expected 'some_tool(file.txt)' in: {:?}", rendered);
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("some_tool(file.txt)")),
+            "Expected 'some_tool(file.txt)' in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2366,7 +2594,11 @@ mod git_detection_tests {
 
         // Find the line with the Git Diff label
         for line in &lines {
-            let line_str = line.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+            let line_str = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>();
             if line_str.contains("Git Diff") {
                 // All spans should use magenta color (or style)
                 for span in &line.spans {
@@ -2473,36 +2705,44 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show friendly label instead of raw command
-        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Diff")),
+            "Expected 'Git Diff' in: {:?}",
+            rendered
+        );
         // Should not show the raw command
-        assert!(!rendered.iter().any(|line| line.contains("git diff --stat")), "Should not contain raw command: {:?}", rendered);
+        assert!(
+            !rendered.iter().any(|line| line.contains("git diff --stat")),
+            "Should not contain raw command: {:?}",
+            rendered
+        );
     }
 
     #[test]
     fn render_exec_header_shows_git_label_for_git_status() {
-        let lines = render_exec_header_lines(
-            "Ran",
-            "git status",
-            Style::default().fg(Color::Green),
-            80,
-        );
+        let lines =
+            render_exec_header_lines("Ran", "git status", Style::default().fg(Color::Green), 80);
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Status")), "Expected 'Git Status' in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Status")),
+            "Expected 'Git Status' in: {:?}",
+            rendered
+        );
     }
 
     #[test]
     fn render_exec_header_shows_non_git_command() {
-        let lines = render_exec_header_lines(
-            "Ran",
-            "cargo build",
-            Style::default().fg(Color::Green),
-            80,
-        );
+        let lines =
+            render_exec_header_lines("Ran", "cargo build", Style::default().fg(Color::Green), 80);
         let rendered = lines_to_strings(&lines);
 
         // Non-git commands should show the raw command
-        assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("cargo build")),
+            "Expected 'cargo build' in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2519,9 +2759,17 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Transcript should show git-friendly label
-        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' in transcript: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Diff")),
+            "Expected 'Git Diff' in transcript: {:?}",
+            rendered
+        );
         // Should not show raw command
-        assert!(!rendered.iter().any(|line| line.contains("git diff")), "Should not contain raw command in transcript: {:?}", rendered);
+        assert!(
+            !rendered.iter().any(|line| line.contains("git diff")),
+            "Should not contain raw command in transcript: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2538,7 +2786,11 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Non-git commands should show raw command
-        assert!(rendered.iter().any(|line| line.contains("cargo build")), "Expected 'cargo build' in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("cargo build")),
+            "Expected 'cargo build' in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2581,14 +2833,23 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show git-friendly label
-        assert!(rendered.iter().any(|line| line.contains("Git Diff")), "Expected 'Git Diff' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Diff")),
+            "Expected 'Git Diff' label in: {:?}",
+            rendered
+        );
         // Should NOT show the raw JSON
-        assert!(!rendered.iter().any(|line| line.contains("command")), "Should not contain 'command' in: {:?}", rendered);
+        assert!(
+            !rendered.iter().any(|line| line.contains("command")),
+            "Should not contain 'command' in: {:?}",
+            rendered
+        );
     }
 
     #[test]
     fn render_generic_tool_call_extracts_git_commit_from_json() {
-        let json_input = r#"{"command":"git commit -m \"fix: update\"","description":"Commit changes"}"#;
+        let json_input =
+            r#"{"command":"git commit -m \"fix: update\"","description":"Commit changes"}"#;
         let lines = render_generic_tool_call_lines(
             "Bash",
             Some(json_input),
@@ -2600,7 +2861,11 @@ mod git_detection_tests {
         );
         let rendered = lines_to_strings(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("Git Commit")), "Expected 'Git Commit' label in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("Git Commit")),
+            "Expected 'Git Commit' label in: {:?}",
+            rendered
+        );
     }
 
     #[test]
@@ -2618,7 +2883,15 @@ mod git_detection_tests {
         let rendered = lines_to_strings(&lines);
 
         // Should show the command, not the JSON
-        assert!(rendered.iter().any(|line| line.contains("npm install")), "Expected 'npm install' in: {:?}", rendered);
-        assert!(!rendered.iter().any(|line| line.contains("command")), "Should not contain 'command' in: {:?}", rendered);
+        assert!(
+            rendered.iter().any(|line| line.contains("npm install")),
+            "Expected 'npm install' in: {:?}",
+            rendered
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("command")),
+            "Should not contain 'command' in: {:?}",
+            rendered
+        );
     }
 }

@@ -173,7 +173,8 @@ fn load_recent_session_from_root(root: &Path) -> Result<PersistedSession> {
 
     let session_json = fs::read_to_string(&pointer.session_path)
         .with_context(|| format!("failed to read {}", pointer.session_path))?;
-    let session = serde_json::from_str(&session_json).context("failed to parse persisted session")?;
+    let session =
+        serde_json::from_str(&session_json).context("failed to parse persisted session")?;
     logging::debug_event(
         "storage.read",
         "loaded recent session",

@@ -212,7 +212,8 @@ fn test_sprint_active_field_serialization() {
     // Default sprint should have active = false
     assert!(!json.contains("\"active\":true") || json.contains("\"active\":false"));
 
-    let sprint_active = KanbanElement::new_sprint_with_dates("Sprint 2", "Goal", "2024-01-01", "2024-01-14");
+    let sprint_active =
+        KanbanElement::new_sprint_with_dates("Sprint 2", "Goal", "2024-01-01", "2024-01-14");
     // Sprint with dates should be active
     match sprint_active {
         KanbanElement::Sprint(s) => assert!(s.active),

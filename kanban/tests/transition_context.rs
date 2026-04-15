@@ -1,9 +1,9 @@
 //! Tests for element-context-aware transition rules
 
-use agent_kanban::transition::{TransitionRegistry, TransitionRule, BuiltinTransitionRule};
-use agent_kanban::types::StatusType;
+use agent_kanban::elements::{SprintElement, TaskElement};
 use agent_kanban::traits::KanbanElementTrait;
-use agent_kanban::elements::{TaskElement, SprintElement};
+use agent_kanban::transition::{BuiltinTransitionRule, TransitionRegistry, TransitionRule};
+use agent_kanban::types::StatusType;
 
 /// Custom transition rule that only allows Tasks to go to in_progress
 struct TaskOnlyInProgressRule {
@@ -69,8 +69,16 @@ mod element_context_tests {
         let sprint = SprintElement::new("Sprint 1", "Goal");
 
         // Registry should check element context
-        assert!(registry.can_transition_for(&StatusType::new("todo"), &StatusType::new("in_progress"), &task));
-        assert!(!registry.can_transition_for(&StatusType::new("todo"), &StatusType::new("in_progress"), &sprint));
+        assert!(registry.can_transition_for(
+            &StatusType::new("todo"),
+            &StatusType::new("in_progress"),
+            &task
+        ));
+        assert!(!registry.can_transition_for(
+            &StatusType::new("todo"),
+            &StatusType::new("in_progress"),
+            &sprint
+        ));
     }
 
     #[test]

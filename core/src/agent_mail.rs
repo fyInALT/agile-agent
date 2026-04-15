@@ -23,8 +23,8 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use crate::agent_runtime::AgentId;
 use crate::agent_slot::TaskId;
@@ -96,7 +96,9 @@ impl MailSubject {
         match self {
             Self::TaskHelpRequest { task_id } => format!("Help: {}", task_id.as_str()),
             Self::TaskCompleted { task_id } => format!("Done: {}", task_id.as_str()),
-            Self::TaskBlocked { task_id, reason } => format!("Blocked: {} - {}", task_id.as_str(), reason),
+            Self::TaskBlocked { task_id, reason } => {
+                format!("Blocked: {} - {}", task_id.as_str(), reason)
+            }
             Self::InfoRequest { query } => format!("Info: {}", query),
             Self::InfoResponse { to_mail_id } => format!("Reply to {}", to_mail_id.as_str()),
             Self::CoordinationRequest { action } => format!("Coord: {:?}", action),
@@ -165,12 +167,7 @@ pub struct AgentMail {
 
 impl AgentMail {
     /// Create a new mail message
-    pub fn new(
-        from: AgentId,
-        to: MailTarget,
-        subject: MailSubject,
-        body: MailBody,
-    ) -> Self {
+    pub fn new(from: AgentId, to: MailTarget, subject: MailSubject, body: MailBody) -> Self {
         Self {
             mail_id: MailId::new(),
             from,
@@ -208,8 +205,14 @@ impl AgentMail {
 
     /// Format mail for display in prompt
     pub fn format_for_prompt(&self) -> String {
-        let action_marker = if self.requires_action { "[ACTION REQUIRED] " } else { "" };
-        let deadline_text = self.deadline.as_ref()
+        let action_marker = if self.requires_action {
+            "[ACTION REQUIRED] "
+        } else {
+            ""
+        };
+        let deadline_text = self
+            .deadline
+            .as_ref()
             .map(|d| format!(" (deadline: {})", d))
             .unwrap_or_default();
 
@@ -222,17 +225,32 @@ impl AgentMail {
         };
 
         let subject_text = match &self.subject {
-            MailSubject::TaskHelpRequest { task_id } => format!("Help requested for {}", task_id.as_str()),
-            MailSubject::TaskCompleted { task_id } => format!("Task {} completed", task_id.as_str()),
-            MailSubject::TaskBlocked { task_id, reason } => format!("Task {} blocked: {}", task_id.as_str(), reason),
+            MailSubject::TaskHelpRequest { task_id } => {
+                format!("Help requested for {}", task_id.as_str())
+            }
+            MailSubject::TaskCompleted { task_id } => {
+                format!("Task {} completed", task_id.as_str())
+            }
+            MailSubject::TaskBlocked { task_id, reason } => {
+                format!("Task {} blocked: {}", task_id.as_str(), reason)
+            }
             MailSubject::InfoRequest { query } => query.clone(),
-            MailSubject::InfoResponse { to_mail_id } => format!("Response to {}", to_mail_id.as_str()),
+            MailSubject::InfoResponse { to_mail_id } => {
+                format!("Response to {}", to_mail_id.as_str())
+            }
             MailSubject::CoordinationRequest { action } => format!("Coordination: {:?}", action),
             MailSubject::StatusUpdate { new_status } => format!("Status: {}", new_status),
             MailSubject::Custom { label } => label.clone(),
         };
 
-        format!("{}From {}: {}{}\n  {}", action_marker, self.from.as_str(), subject_text, deadline_text, body_text)
+        format!(
+            "{}From {}: {}{}\n  {}",
+            action_marker,
+            self.from.as_str(),
+            subject_text,
+            deadline_text,
+            body_text
+        )
     }
 }
 
@@ -289,7 +307,9 @@ impl AgentMailbox {
         let mail = AgentMail::new(
             chat.from.clone(),
             MailTarget::Direct(chat.to.clone()),
-            MailSubject::Custom { label: "Chat".to_string() },
+            MailSubject::Custom {
+                label: "Chat".to_string(),
+            },
             MailBody::Text(chat.message),
         );
         self.deliver_to_inbox(mail);
@@ -308,22 +328,35 @@ impl AgentMailbox {
 
     /// Get unread count for agent
     pub fn unread_count(&self, agent_id: &AgentId) -> usize {
-        self.inbox.get(agent_id)
+        self.inbox
+            .get(agent_id)
             .map(|inbox| inbox.iter().filter(|m| !m.is_read()).count())
             .unwrap_or(0)
     }
 
     /// Get action-required count for agent
     pub fn action_required_count(&self, agent_id: &AgentId) -> usize {
-        self.inbox.get(agent_id)
-            .map(|inbox| inbox.iter().filter(|m| m.requires_action && !m.is_read()).count())
+        self.inbox
+            .get(agent_id)
+            .map(|inbox| {
+                inbox
+                    .iter()
+                    .filter(|m| m.requires_action && !m.is_read())
+                    .count()
+            })
             .unwrap_or(0)
     }
 
     /// Get mail requiring action for agent (returns references)
     pub fn action_required(&self, agent_id: &AgentId) -> Vec<&AgentMail> {
-        self.inbox.get(agent_id)
-            .map(|inbox| inbox.iter().filter(|m| m.requires_action && !m.is_read()).collect())
+        self.inbox
+            .get(agent_id)
+            .map(|inbox| {
+                inbox
+                    .iter()
+                    .filter(|m| m.requires_action && !m.is_read())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -381,7 +414,10 @@ impl AgentMailbox {
             }
         };
 
-        self.inbox.entry(recipient_id.clone()).or_default().push(mail.clone());
+        self.inbox
+            .entry(recipient_id.clone())
+            .or_default()
+            .push(mail.clone());
         self.history.push(mail);
         Some(recipient_id)
     }
@@ -389,7 +425,10 @@ impl AgentMailbox {
     /// Deliver broadcast mail to all provided agent IDs
     pub fn deliver_broadcast(&mut self, mail: AgentMail, agent_ids: &[AgentId]) {
         for agent_id in agent_ids {
-            self.inbox.entry(agent_id.clone()).or_default().push(mail.clone());
+            self.inbox
+                .entry(agent_id.clone())
+                .or_default()
+                .push(mail.clone());
         }
         self.history.push(mail);
     }
@@ -403,7 +442,8 @@ impl AgentMailbox {
 
     /// Get total unread count across all agents
     pub fn total_unread(&self) -> usize {
-        self.inbox.values()
+        self.inbox
+            .values()
             .map(|inbox| inbox.iter().filter(|m| !m.is_read()).count())
             .sum()
     }
@@ -436,7 +476,10 @@ impl AgentMailbox {
         while let Some(mail) = self.pending_delivery.pop() {
             let delivered_at = Utc::now().to_rfc3339();
             for agent_id in agent_ids {
-                self.inbox.entry(agent_id.clone()).or_default().push(mail.clone());
+                self.inbox
+                    .entry(agent_id.clone())
+                    .or_default()
+                    .push(mail.clone());
                 events.push(MailDeliveryEvent {
                     mail: mail.clone(),
                     target: agent_id.clone(),
@@ -505,7 +548,9 @@ mod tests {
 
     #[test]
     fn mail_subject_task_help_request() {
-        let subject = MailSubject::TaskHelpRequest { task_id: make_task_id("task-1") };
+        let subject = MailSubject::TaskHelpRequest {
+            task_id: make_task_id("task-1"),
+        };
         assert!(matches!(subject, MailSubject::TaskHelpRequest { .. }));
     }
 
@@ -520,7 +565,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(make_agent_id("recipient")),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         assert!(!mail.is_read());
@@ -532,9 +579,12 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(make_agent_id("recipient")),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
-        ).with_action_required();
+        )
+        .with_action_required();
         assert!(mail.requires_action);
     }
 
@@ -543,7 +593,9 @@ mod tests {
         let mut mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(make_agent_id("recipient")),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         assert!(!mail.is_read());
@@ -556,9 +608,12 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("alpha"),
             MailTarget::Direct(make_agent_id("bravo")),
-            MailSubject::TaskHelpRequest { task_id: make_task_id("task-1") },
+            MailSubject::TaskHelpRequest {
+                task_id: make_task_id("task-1"),
+            },
             MailBody::Text("Need help with task-1".to_string()),
-        ).with_action_required();
+        )
+        .with_action_required();
 
         let formatted = mail.format_for_prompt();
         assert!(formatted.contains("[ACTION REQUIRED]"));
@@ -588,7 +643,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(make_agent_id("recipient")),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         mailbox.send_mail(mail);
@@ -602,7 +659,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         mailbox.send_mail(mail);
@@ -620,7 +679,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         let mail_id = mail.mail_id.clone();
@@ -653,14 +714,19 @@ mod tests {
         let mail1 = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test1".to_string() },
+            MailSubject::Custom {
+                label: "Test1".to_string(),
+            },
             MailBody::Text("Message1".to_string()),
-        ).with_action_required();
+        )
+        .with_action_required();
 
         let mail2 = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test2".to_string() },
+            MailSubject::Custom {
+                label: "Test2".to_string(),
+            },
             MailBody::Text("Message2".to_string()),
         );
 
@@ -682,14 +748,18 @@ mod tests {
         mailbox.send_mail(AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(agent1.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("To agent1".to_string()),
         ));
 
         mailbox.send_mail(AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(agent2.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("To agent2".to_string()),
         ));
 
@@ -704,7 +774,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Broadcast".to_string() },
+            MailSubject::Custom {
+                label: "Broadcast".to_string(),
+            },
             MailBody::Text("To all".to_string()),
         );
         mailbox.send_mail(mail);
@@ -723,7 +795,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Broadcast".to_string() },
+            MailSubject::Custom {
+                label: "Broadcast".to_string(),
+            },
             MailBody::Text("To all".to_string()),
         );
 
@@ -742,13 +816,17 @@ mod tests {
         let mail1 = AgentMail::new(
             make_agent_id("sender1"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test1".to_string() },
+            MailSubject::Custom {
+                label: "Test1".to_string(),
+            },
             MailBody::Text("Message1".to_string()),
         );
         let mail2 = AgentMail::new(
             make_agent_id("sender2"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test2".to_string() },
+            MailSubject::Custom {
+                label: "Test2".to_string(),
+            },
             MailBody::Text("Message2".to_string()),
         );
 
@@ -794,7 +872,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Announcement".to_string() },
+            MailSubject::Custom {
+                label: "Announcement".to_string(),
+            },
             MailBody::Text("Hello everyone!".to_string()),
         );
         mailbox.send_mail(mail);
@@ -821,16 +901,21 @@ mod tests {
         let normal_mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Normal".to_string() },
+            MailSubject::Custom {
+                label: "Normal".to_string(),
+            },
             MailBody::Text("Just info".to_string()),
         );
         // Send action-required mail
         let action_mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::TaskHelpRequest { task_id: make_task_id("task-1") },
+            MailSubject::TaskHelpRequest {
+                task_id: make_task_id("task-1"),
+            },
             MailBody::Text("Need help".to_string()),
-        ).with_action_required();
+        )
+        .with_action_required();
 
         mailbox.send_mail(normal_mail);
         mailbox.send_mail(action_mail);
@@ -851,13 +936,17 @@ mod tests {
         let mail1 = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Broadcast1".to_string() },
+            MailSubject::Custom {
+                label: "Broadcast1".to_string(),
+            },
             MailBody::Text("Message1".to_string()),
         );
         let mail2 = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Broadcast2".to_string() },
+            MailSubject::Custom {
+                label: "Broadcast2".to_string(),
+            },
             MailBody::Text("Message2".to_string()),
         );
 
@@ -881,7 +970,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Test message".to_string()),
         );
         mailbox.restore_pending(&[mail.clone()]);
@@ -903,7 +994,9 @@ mod tests {
         let mail = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Test".to_string()),
         );
         mailbox.restore_pending(&[mail.clone()]);
@@ -920,7 +1013,9 @@ mod tests {
         let mail1 = AgentMail::new(
             make_agent_id("sender"),
             MailTarget::Direct(recipient.clone()),
-            MailSubject::Custom { label: "Test1".to_string() },
+            MailSubject::Custom {
+                label: "Test1".to_string(),
+            },
             MailBody::Text("Message1".to_string()),
         );
         mailbox.send_mail(mail1);

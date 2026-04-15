@@ -270,7 +270,9 @@ mod tests {
     fn mode_transition_happened() {
         let none = ModeTransition::None;
         let transitioned = ModeTransition::SingleToMulti;
-        let invalid = ModeTransition::Invalid { reason: "test".to_string() };
+        let invalid = ModeTransition::Invalid {
+            reason: "test".to_string(),
+        };
 
         assert!(!none.happened());
         assert!(transitioned.happened());

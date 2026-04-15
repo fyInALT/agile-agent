@@ -229,7 +229,11 @@ fn print_agent_list(all: bool) -> Result<()> {
             meta.agent_id.as_str(),
             meta.codename.as_str(),
             meta.provider_type.label(),
-            if all { format!(" {} ", meta.status.label()) } else { "".to_string() },
+            if all {
+                format!(" {} ", meta.status.label())
+            } else {
+                "".to_string()
+            },
             meta.updated_at
         );
     }
@@ -245,7 +249,10 @@ fn spawn_agent(provider: String) -> Result<()> {
         "codex" => ProviderKind::Codex,
         "mock" => ProviderKind::Mock,
         _ => {
-            eprintln!("unknown provider: {}. Available: claude, codex, mock", provider);
+            eprintln!(
+                "unknown provider: {}. Available: claude, codex, mock",
+                provider
+            );
             return Err(anyhow::anyhow!("unknown provider: {}", provider));
         }
     };

@@ -71,12 +71,17 @@ impl RunMode {
     }
 }
 
-pub fn init_for_workplace(workplace: &WorkplaceStore, run_mode: RunMode) -> Result<InitializedLogger> {
+pub fn init_for_workplace(
+    workplace: &WorkplaceStore,
+    run_mode: RunMode,
+) -> Result<InitializedLogger> {
     let logs_dir = workplace.path().join("logs");
     fs::create_dir_all(&logs_dir)
         .with_context(|| format!("failed to create {}", logs_dir.display()))?;
 
-    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S%.3fZ").to_string();
+    let timestamp = chrono::Utc::now()
+        .format("%Y-%m-%dT%H-%M-%S%.3fZ")
+        .to_string();
     let sequence = LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let run_id = format!("run-{timestamp}-{}-{sequence}", process::id());
     let log_path = logs_dir.join(format!(
@@ -183,7 +188,11 @@ mod tests {
         workplace.ensure().expect("ensure");
 
         let initialized = init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
-        debug_event("test.bootstrap", "hello logger", serde_json::json!({ "scope": "unit" }));
+        debug_event(
+            "test.bootstrap",
+            "hello logger",
+            serde_json::json!({ "scope": "unit" }),
+        );
 
         let log_path = current_log_path().expect("log path");
         assert_eq!(log_path, initialized.log_path);
@@ -191,7 +200,9 @@ mod tests {
 
         let latest_path = workplace.path().join("logs/latest-path.txt");
         assert_eq!(
-            fs::read_to_string(&latest_path).expect("latest pointer").trim(),
+            fs::read_to_string(&latest_path)
+                .expect("latest pointer")
+                .trim(),
             log_path.display().to_string()
         );
 

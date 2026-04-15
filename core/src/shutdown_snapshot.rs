@@ -101,7 +101,13 @@ impl ShutdownSnapshot {
         backlog: BacklogState,
         pending_mail: Vec<AgentMail>,
     ) -> Self {
-        Self::new(workplace_id, agents, backlog, pending_mail, ShutdownReason::Interrupted)
+        Self::new(
+            workplace_id,
+            agents,
+            backlog,
+            pending_mail,
+            ShutdownReason::Interrupted,
+        )
     }
 
     /// Check if any agents were active at shutdown
@@ -137,7 +143,11 @@ impl AgentShutdownSnapshot {
     }
 
     /// Create snapshot for active agent
-    pub fn active(meta: AgentMeta, assigned_task_id: Option<String>, thread_state: ProviderThreadSnapshot) -> Self {
+    pub fn active(
+        meta: AgentMeta,
+        assigned_task_id: Option<String>,
+        thread_state: ProviderThreadSnapshot,
+    ) -> Self {
         Self {
             meta,
             assigned_task_id,
@@ -220,7 +230,10 @@ mod tests {
         let active = AgentShutdownSnapshot::active(
             test_meta("agent_002"),
             Some("task-1".to_string()),
-            super::ProviderThreadSnapshot::waiting_for_response(Some("prompt".to_string()), "2026-04-14T00:00:00Z".to_string()),
+            super::ProviderThreadSnapshot::waiting_for_response(
+                Some("prompt".to_string()),
+                "2026-04-14T00:00:00Z".to_string(),
+            ),
         );
 
         let snapshot = ShutdownSnapshot::new(
@@ -241,7 +254,10 @@ mod tests {
         let active = AgentShutdownSnapshot::active(
             test_meta("agent_001"),
             None,
-            super::ProviderThreadSnapshot::waiting_for_response(None, "2026-04-14T00:00:00Z".to_string()),
+            super::ProviderThreadSnapshot::waiting_for_response(
+                None,
+                "2026-04-14T00:00:00Z".to_string(),
+            ),
         );
 
         assert!(active.needs_resume());
@@ -280,7 +296,9 @@ mod tests {
         let mail = AgentMail::new(
             AgentId::new("sender"),
             MailTarget::Broadcast,
-            MailSubject::Custom { label: "Announcement".to_string() },
+            MailSubject::Custom {
+                label: "Announcement".to_string(),
+            },
             MailBody::Text("Hello all".to_string()),
         );
 

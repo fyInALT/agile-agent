@@ -3,8 +3,8 @@
 //! Thread-safe registries using RwLock for concurrent registration and retrieval.
 
 use crate::domain::ElementId;
-use crate::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
-use crate::types::{StatusType, ElementTypeIdentifier};
+use crate::traits::{KanbanElementTrait, KanbanElementTypeTrait, KanbanStatus};
+use crate::types::{ElementTypeIdentifier, StatusType};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -89,7 +89,10 @@ impl ElementTypeRegistry {
     /// Register an element type implementation (thread-safe)
     pub fn register(&self, element_type: Box<dyn KanbanElementTypeTrait>) {
         let key = element_type.element_type().name().to_string();
-        self.element_types.write().unwrap().insert(key, element_type);
+        self.element_types
+            .write()
+            .unwrap()
+            .insert(key, element_type);
     }
 
     /// Get an element type by identifier (thread-safe)
@@ -113,7 +116,10 @@ impl ElementTypeRegistry {
 
     /// Check if an element type is registered
     pub fn contains(&self, type_: &ElementTypeIdentifier) -> bool {
-        self.element_types.read().unwrap().contains_key(type_.name())
+        self.element_types
+            .read()
+            .unwrap()
+            .contains_key(type_.name())
     }
 
     /// List all registered element type identifiers

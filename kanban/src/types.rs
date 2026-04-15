@@ -19,9 +19,7 @@ pub struct StatusType {
 impl StatusType {
     /// Create a new StatusType from a name
     pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-        }
+        Self { name: name.into() }
     }
 
     /// Get the status name
@@ -77,9 +75,7 @@ pub struct ElementTypeIdentifier {
 impl ElementTypeIdentifier {
     /// Create a new ElementTypeIdentifier from a name
     pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-        }
+        Self { name: name.into() }
     }
 
     /// Get the element type name

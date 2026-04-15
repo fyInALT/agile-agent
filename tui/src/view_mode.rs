@@ -93,7 +93,10 @@ impl ViewMode {
 
     /// Check if this mode shows multiple agents
     pub fn shows_multiple_agents(self) -> bool {
-        matches!(self, Self::Split | Self::Dashboard | Self::TaskMatrix | Self::Overview)
+        matches!(
+            self,
+            Self::Split | Self::Dashboard | Self::TaskMatrix | Self::Overview
+        )
     }
 
     /// Check if this mode focuses on mail

@@ -2,7 +2,7 @@
 //!
 //! TDD: Tests for extensible status transition rules
 
-use agent_kanban::transition::{TransitionRule, TransitionRegistry, BuiltinTransitionRule};
+use agent_kanban::transition::{BuiltinTransitionRule, TransitionRegistry, TransitionRule};
 use agent_kanban::types::StatusType;
 
 mod transition_rule_tests {
@@ -10,10 +10,7 @@ mod transition_rule_tests {
 
     #[test]
     fn test_builtin_transition_rule_plan_to_backlog() {
-        let rule = BuiltinTransitionRule::new(
-            StatusType::new("plan"),
-            StatusType::new("backlog"),
-        );
+        let rule = BuiltinTransitionRule::new(StatusType::new("plan"), StatusType::new("backlog"));
         assert_eq!(rule.from_status().name(), "plan");
         assert_eq!(rule.to_status().name(), "backlog");
     }
@@ -67,7 +64,10 @@ mod transition_rule_tests {
         for _ in 0..10 {
             let registry_clone = registry.clone();
             handles.push(thread::spawn(move || {
-                assert!(registry_clone.can_transition(&StatusType::new("plan"), &StatusType::new("backlog")));
+                assert!(
+                    registry_clone
+                        .can_transition(&StatusType::new("plan"), &StatusType::new("backlog"))
+                );
             }));
         }
 

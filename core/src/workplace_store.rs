@@ -228,8 +228,7 @@ impl WorkplaceStore {
         let path = self.shutdown_snapshot_path();
         let payload = serde_json::to_string_pretty(snapshot)
             .context("failed to serialize shutdown snapshot")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "workplace.shutdown.save",
             "saved shutdown snapshot",

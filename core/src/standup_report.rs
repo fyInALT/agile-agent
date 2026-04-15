@@ -2,12 +2,12 @@
 //!
 //! Provides daily standup report generation for Scrum-style coordination.
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::agent_pool::{AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot};
-use crate::backlog::{BacklogState, TaskItem, TaskStatus};
 use crate::agent_role::AgentRole;
+use crate::backlog::{BacklogState, TaskItem, TaskStatus};
 
 /// Daily standup report for a workplace
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,11 +97,7 @@ impl DailyStandupReport {
 
         // Generate per-agent entries
         for assignment in &snapshot.agent_assignments {
-            let entry = Self::build_agent_entry(
-                assignment,
-                backlog,
-                yesterday_tasks,
-            );
+            let entry = Self::build_agent_entry(assignment, backlog, yesterday_tasks);
             report.agent_entries.push(entry);
         }
 
@@ -124,21 +120,25 @@ impl DailyStandupReport {
         let current_task = backlog.find_task(assignment.task_id.as_str());
 
         // Build today's planned task
-        let today_planned = current_task.map(|t| {
-            vec![TaskSummary {
-                id: t.id.clone(),
-                title: t.objective.clone(),
-                status: t.status,
-                status_change: None,
-            }]
-        }).unwrap_or_default();
+        let today_planned = current_task
+            .map(|t| {
+                vec![TaskSummary {
+                    id: t.id.clone(),
+                    title: t.objective.clone(),
+                    status: t.status,
+                    status_change: None,
+                }]
+            })
+            .unwrap_or_default();
 
         // Build yesterday's completed from history (if provided)
         let yesterday_completed = yesterday_tasks
             .map(|history| {
                 history
                     .iter()
-                    .filter(|h| h.agent_codename == assignment.codename.as_str() && h.was_completed())
+                    .filter(|h| {
+                        h.agent_codename == assignment.codename.as_str() && h.was_completed()
+                    })
                     .map(|h| TaskSummary {
                         id: h.task_id.clone(),
                         title: h.task_title.clone(),
@@ -155,7 +155,11 @@ impl DailyStandupReport {
         // Determine blockers
         let blockers = if assignment.task_status == TaskStatus::Blocked {
             current_task
-                .map(|t| t.result_summary.clone().unwrap_or_else(|| "Blocked".to_string()))
+                .map(|t| {
+                    t.result_summary
+                        .clone()
+                        .unwrap_or_else(|| "Blocked".to_string())
+                })
                 .map(|b| vec![b])
                 .unwrap_or_default()
         } else {
@@ -188,10 +192,19 @@ impl DailyStandupReport {
 
     /// Collect workplace-level blockers
     fn collect_workplace_blockers(backlog: &BacklogState) -> Vec<String> {
-        backlog.tasks
+        backlog
+            .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Blocked)
-            .map(|t| format!("{}: {}", t.id, t.result_summary.clone().unwrap_or_else(|| "Blocked".to_string())))
+            .map(|t| {
+                format!(
+                    "{}: {}",
+                    t.id,
+                    t.result_summary
+                        .clone()
+                        .unwrap_or_else(|| "Blocked".to_string())
+                )
+            })
             .collect()
     }
 
@@ -200,7 +213,10 @@ impl DailyStandupReport {
         let mut output = String::new();
 
         // Header
-        output.push_str(&format!("Daily Standup - {}\n\n", self.date.format("%Y-%m-%d")));
+        output.push_str(&format!(
+            "Daily Standup - {}\n\n",
+            self.date.format("%Y-%m-%d")
+        ));
 
         // Per-agent entries
         for entry in &self.agent_entries {
@@ -211,7 +227,8 @@ impl DailyStandupReport {
                 output.push_str("- Yesterday: none\n");
             } else {
                 output.push_str("- Yesterday: ");
-                let items = entry.yesterday_completed
+                let items = entry
+                    .yesterday_completed
                     .iter()
                     .map(|t| {
                         if let Some(change) = &t.status_change {
@@ -231,7 +248,8 @@ impl DailyStandupReport {
                 output.push_str("- Today: none\n");
             } else {
                 output.push_str("- Today: ");
-                let items = entry.today_planned
+                let items = entry
+                    .today_planned
                     .iter()
                     .map(|t| format!("{} ({:?})", t.id, t.status))
                     .collect::<Vec<_>>()
@@ -282,7 +300,10 @@ impl DailyStandupReport {
 
     /// Get agents with blockers
     pub fn blocked_agents(&self) -> Vec<&AgentStandupEntry> {
-        self.agent_entries.iter().filter(|e| !e.blockers.is_empty()).collect()
+        self.agent_entries
+            .iter()
+            .filter(|e| !e.blockers.is_empty())
+            .collect()
     }
 }
 
@@ -370,7 +391,11 @@ impl StandupHelper {
 
     /// Generate blockers list from backlog
     pub fn list_blockers(backlog: &BacklogState) -> Vec<&TaskItem> {
-        backlog.tasks.iter().filter(|t| t.status == TaskStatus::Blocked).collect()
+        backlog
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Blocked)
+            .collect()
     }
 
     /// Generate standup from agent status snapshot
@@ -395,25 +420,30 @@ impl StandupHelper {
         backlog: &BacklogState,
     ) -> AgentStandupEntry {
         // Find current task if assigned
-        let current_task = status.assigned_task_id
+        let current_task = status
+            .assigned_task_id
             .as_ref()
             .and_then(|tid| backlog.find_task(tid.as_str()));
 
         // Today's planned task
-        let today_planned = current_task.map(|t| {
-            vec![TaskSummary {
-                id: t.id.clone(),
-                title: t.objective.clone(),
-                status: t.status,
-                status_change: None,
-            }]
-        }).unwrap_or_default();
+        let today_planned = current_task
+            .map(|t| {
+                vec![TaskSummary {
+                    id: t.id.clone(),
+                    title: t.objective.clone(),
+                    status: t.status,
+                    status_change: None,
+                }]
+            })
+            .unwrap_or_default();
 
         // Blockers
         let blockers = current_task
             .filter(|t| t.status == TaskStatus::Blocked)
             .map(|t| {
-                t.result_summary.clone().unwrap_or_else(|| "Blocked".to_string())
+                t.result_summary
+                    .clone()
+                    .unwrap_or_else(|| "Blocked".to_string())
             })
             .map(|b| vec![b])
             .unwrap_or_default();
@@ -432,9 +462,7 @@ impl StandupHelper {
         entries: &[AgentStandupEntry],
         statuses: &[AgentStatusSnapshot],
     ) -> StandupSummary {
-        let running_count = statuses.iter()
-            .filter(|s| s.status.is_active())
-            .count();
+        let running_count = statuses.iter().filter(|s| s.status.is_active()).count();
 
         StandupSummary {
             total_agents: entries.len(),
@@ -451,7 +479,7 @@ impl StandupHelper {
 mod tests {
     use super::*;
     use crate::agent_pool::AgentTaskAssignment;
-    use crate::backlog::{TaskStatus, TaskItem};
+    use crate::backlog::{TaskItem, TaskStatus};
 
     fn make_test_task(id: &str, objective: &str, status: TaskStatus) -> TaskItem {
         TaskItem {
@@ -583,8 +611,16 @@ mod tests {
     #[test]
     fn standup_helper_list_blockers() {
         let mut backlog = BacklogState::default();
-        backlog.push_task(make_test_task("task-001", "Running task", TaskStatus::Running));
-        backlog.push_task(make_test_task("task-002", "Blocked task", TaskStatus::Blocked));
+        backlog.push_task(make_test_task(
+            "task-001",
+            "Running task",
+            TaskStatus::Running,
+        ));
+        backlog.push_task(make_test_task(
+            "task-002",
+            "Blocked task",
+            TaskStatus::Blocked,
+        ));
         backlog.push_task(make_test_task("task-003", "Done task", TaskStatus::Done));
 
         let blockers = StandupHelper::list_blockers(&backlog);

@@ -35,15 +35,36 @@ impl KanbanElementRepository for MockRepository {
     }
 
     fn list_by_type(&self, type_: ElementType) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.element_type() == type_).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.element_type() == type_)
+            .cloned()
+            .collect())
     }
 
     fn list_by_status(&self, status: Status) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.status() == status).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.status() == status)
+            .cloned()
+            .collect())
     }
 
     fn list_by_assignee(&self, assignee: &str) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.assignee().map(|a| a == assignee).unwrap_or(false)).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.assignee().map(|a| a == assignee).unwrap_or(false))
+            .cloned()
+            .collect())
     }
 
     fn list_by_parent(&self, _parent: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
@@ -51,7 +72,14 @@ impl KanbanElementRepository for MockRepository {
     }
 
     fn list_by_sprint(&self, sprint_id: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.parent().map(|p| p == sprint_id).unwrap_or(false)).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.parent().map(|p| p == sprint_id).unwrap_or(false))
+            .cloned()
+            .collect())
     }
 
     fn list_blocked(&self) -> Result<Vec<KanbanElement>, KanbanError> {
@@ -69,7 +97,10 @@ impl KanbanElementRepository for MockRepository {
     }
 
     fn delete(&self, id: &ElementId) -> Result<(), KanbanError> {
-        self.elements.write().unwrap().retain(|e| e.id() != Some(id));
+        self.elements
+            .write()
+            .unwrap()
+            .retain(|e| e.id() != Some(id));
         Ok(())
     }
 
@@ -98,7 +129,9 @@ mod service_with_registry_tests {
         let id = created.id().unwrap().clone();
 
         // Valid transition via registry
-        let updated = service.update_status(&id, Status::Backlog, "agent").unwrap();
+        let updated = service
+            .update_status(&id, Status::Backlog, "agent")
+            .unwrap();
         assert_eq!(updated.status(), Status::Backlog);
     }
 
@@ -134,7 +167,9 @@ mod service_with_registry_tests {
         let id = created.id().unwrap().clone();
 
         // Valid transition using StatusType
-        let updated = service.update_status_with_type(&id, StatusType::new("backlog"), "agent").unwrap();
+        let updated = service
+            .update_status_with_type(&id, StatusType::new("backlog"), "agent")
+            .unwrap();
         assert_eq!(updated.status(), Status::Backlog);
     }
 
@@ -151,7 +186,9 @@ mod service_with_registry_tests {
         let id = created.id().unwrap().clone();
 
         // Valid transition via enum (Plan -> Backlog)
-        let updated = service.update_status(&id, Status::Backlog, "agent").unwrap();
+        let updated = service
+            .update_status(&id, Status::Backlog, "agent")
+            .unwrap();
         assert_eq!(updated.status(), Status::Backlog);
 
         // Invalid transition via enum (Plan -> Done)

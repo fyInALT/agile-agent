@@ -78,7 +78,8 @@ mod tests {
     use super::MarkdownStreamCollector;
 
     fn lines_to_strings(lines: &[ratatui::text::Line<'static>]) -> Vec<String> {
-        lines.iter()
+        lines
+            .iter()
             .map(|line| {
                 line.spans
                     .iter()

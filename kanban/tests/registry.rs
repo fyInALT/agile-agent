@@ -2,9 +2,9 @@
 //!
 //! TDD: These tests define the expected registry API before implementation
 
-use agent_kanban::registry::{StatusRegistry, ElementTypeRegistry, ElementRegistry};
-use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
-use agent_kanban::types::{StatusType, ElementTypeIdentifier};
+use agent_kanban::registry::{ElementRegistry, ElementTypeRegistry, StatusRegistry};
+use agent_kanban::traits::{KanbanElementTrait, KanbanElementTypeTrait, KanbanStatus};
+use agent_kanban::types::{ElementTypeIdentifier, StatusType};
 use std::sync::Arc;
 use std::thread;
 

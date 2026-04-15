@@ -19,7 +19,11 @@ fn run_loop_creates_workplace_log_with_launch_event() {
     let latest_path = harness.workplace().path().join("logs/latest-path.txt");
     assert!(latest_path.exists(), "missing {}", latest_path.display());
 
-    let log_path = PathBuf::from(fs::read_to_string(&latest_path).expect("latest path").trim());
+    let log_path = PathBuf::from(
+        fs::read_to_string(&latest_path)
+            .expect("latest path")
+            .trim(),
+    );
     assert!(log_path.exists(), "missing {}", log_path.display());
 
     let contents = fs::read_to_string(&log_path).expect("log contents");

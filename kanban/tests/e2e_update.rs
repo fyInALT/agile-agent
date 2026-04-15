@@ -170,7 +170,9 @@ fn test_update_element_no_changes() {
     collector.clear();
 
     // Call with no changes
-    let updated = service.update_element(&id, None, None, None, None, None).unwrap();
+    let updated = service
+        .update_element(&id, None, None, None, None, None)
+        .unwrap();
 
     assert_eq!(updated.title(), "Task");
     // No events should be published

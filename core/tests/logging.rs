@@ -14,7 +14,11 @@ fn init_creates_workplace_log_file_and_latest_pointer() {
     workplace.ensure().expect("ensure");
 
     let initialized = init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
-    debug_event("test.bootstrap", "hello logger", serde_json::json!({ "scope": "unit" }));
+    debug_event(
+        "test.bootstrap",
+        "hello logger",
+        serde_json::json!({ "scope": "unit" }),
+    );
 
     let log_path = current_log_path().expect("log path");
     assert_eq!(log_path, initialized.log_path);
@@ -22,7 +26,9 @@ fn init_creates_workplace_log_file_and_latest_pointer() {
 
     let latest_path = workplace.path().join("logs/latest-path.txt");
     assert_eq!(
-        fs::read_to_string(&latest_path).expect("latest pointer").trim(),
+        fs::read_to_string(&latest_path)
+            .expect("latest pointer")
+            .trim(),
         log_path.display().to_string()
     );
 

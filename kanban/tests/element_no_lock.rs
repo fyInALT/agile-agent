@@ -1,9 +1,9 @@
 //! Tests for elements without RwLock overhead
 
-use agent_kanban::elements::{SprintElement, TaskElement, IssueElement};
+use agent_kanban::domain::{ElementId, ElementType, Priority};
+use agent_kanban::elements::{IssueElement, SprintElement, TaskElement};
 use agent_kanban::traits::KanbanElementTrait;
 use agent_kanban::types::StatusType;
-use agent_kanban::domain::{ElementId, ElementType, Priority};
 
 /// Test that elements can be created and accessed without panic from unwrap
 mod no_lock_panic_tests {

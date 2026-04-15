@@ -159,9 +159,9 @@ impl TransitionRegistry {
     /// Check if a transition is valid (thread-safe)
     pub fn can_transition(&self, from: &StatusType, to: &StatusType) -> bool {
         let rules = self.rules.read().unwrap();
-        rules.iter().any(|r| {
-            r.from_status().name() == from.name() && r.to_status().name() == to.name()
-        })
+        rules
+            .iter()
+            .any(|r| r.from_status().name() == from.name() && r.to_status().name() == to.name())
     }
 
     /// Check if a transition is valid for specific element (thread-safe)

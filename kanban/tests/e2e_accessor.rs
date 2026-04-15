@@ -302,7 +302,10 @@ fn test_block_sets_reason_and_status() {
     task.block("Waiting on external API").unwrap();
 
     assert_eq!(task.status(), Status::Blocked);
-    assert_eq!(task.base().blocked_reason.as_ref().unwrap(), "Waiting on external API");
+    assert_eq!(
+        task.base().blocked_reason.as_ref().unwrap(),
+        "Waiting on external API"
+    );
 }
 
 #[test]

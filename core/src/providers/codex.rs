@@ -24,9 +24,9 @@ use crate::provider::SessionHandle;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::McpInvocation;
 use crate::tool_calls::McpToolCallStatus;
+use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchChangeKind;
-use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::WebSearchAction;
 
 pub fn start(
@@ -564,9 +564,10 @@ fn handle_notification(
                 streamed_agent_message_ids.insert(item_id.to_string());
             }
             if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
-                && !delta.is_empty() {
-                    let _ = event_tx.send(ProviderEvent::AssistantChunk(delta.to_string()));
-                }
+                && !delta.is_empty()
+            {
+                let _ = event_tx.send(ProviderEvent::AssistantChunk(delta.to_string()));
+            }
         }
         "item/started" | "item/completed" => {
             let item = params.get("item").unwrap_or(&params);
@@ -653,9 +654,7 @@ fn parse_item_event(
                 .get("exitCode")
                 .and_then(|value| value.as_i64())
                 .and_then(|value| i32::try_from(value).ok());
-            let duration_ms = item
-                .get("durationMs")
-                .and_then(|value| value.as_u64());
+            let duration_ms = item.get("durationMs").and_then(|value| value.as_u64());
             let source = item
                 .get("source")
                 .and_then(|value| value.as_str())
@@ -724,18 +723,16 @@ fn parse_item_event(
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
         }],
-        ("item/started", "mcpToolCall") => parse_mcp_invocation(item).map_or_else(
-            Vec::new,
-            |invocation| {
+        ("item/started", "mcpToolCall") => {
+            parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 vec![ProviderEvent::McpToolCallStarted {
                     call_id: item_id,
                     invocation,
                 }]
-            },
-        ),
-        ("item/completed", "mcpToolCall") => parse_mcp_invocation(item).map_or_else(
-            Vec::new,
-            |invocation| {
+            })
+        }
+        ("item/completed", "mcpToolCall") => {
+            parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 let (result_blocks, error, is_error) = parse_mcp_tool_call_result(item);
                 vec![ProviderEvent::McpToolCallFinished {
                     call_id: item_id,
@@ -745,8 +742,8 @@ fn parse_item_event(
                     status: parse_mcp_tool_call_status(item),
                     is_error,
                 }]
-            },
-        ),
+            })
+        }
         (_, "userMessage") => Vec::new(),
         ("item/completed", "agentMessage") => item
             .get("text")
@@ -804,8 +801,13 @@ fn parse_exec_command_status(
     match item
         .get("status")
         .and_then(|value| value.as_str())
-        .unwrap_or_else(|| if exit_code.unwrap_or(0) == 0 { "completed" } else { "failed" })
-    {
+        .unwrap_or_else(|| {
+            if exit_code.unwrap_or(0) == 0 {
+                "completed"
+            } else {
+                "failed"
+            }
+        }) {
         "declined" => ExecCommandStatus::Declined,
         "failed" => ExecCommandStatus::Failed,
         "inProgress" => ExecCommandStatus::InProgress,
@@ -815,8 +817,14 @@ fn parse_exec_command_status(
 
 fn parse_mcp_invocation(item: &serde_json::Value) -> Option<McpInvocation> {
     Some(McpInvocation {
-        server: item.get("server").and_then(|value| value.as_str())?.to_string(),
-        tool: item.get("tool").and_then(|value| value.as_str())?.to_string(),
+        server: item
+            .get("server")
+            .and_then(|value| value.as_str())?
+            .to_string(),
+        tool: item
+            .get("tool")
+            .and_then(|value| value.as_str())?
+            .to_string(),
         arguments: item.get("arguments").cloned(),
     })
 }
@@ -975,9 +983,10 @@ fn parse_content_blocks(
                 }
                 "thinking" => {
                     if let Some(thinking) = block.get("thinking").and_then(|value| value.as_str())
-                        && !thinking.is_empty() {
-                            events.push(ProviderEvent::ThinkingChunk(thinking.to_string()));
-                        }
+                        && !thinking.is_empty()
+                    {
+                        events.push(ProviderEvent::ThinkingChunk(thinking.to_string()));
+                    }
                 }
                 "tool_use" => {
                     events.push(ProviderEvent::GenericToolCallStarted {
@@ -1035,8 +1044,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::mpsc;
 
-    use crate::logging;
-    use crate::logging::RunMode;
     use super::JsonRpcMessage;
     use super::JsonRpcRequest;
     use super::ProviderEvent;
@@ -1046,6 +1053,8 @@ mod tests {
     use super::resolve_codex_executable_from;
     use super::thread_id_from_result;
     use super::wait_for_response;
+    use crate::logging;
+    use crate::logging::RunMode;
     use crate::provider::SessionHandle;
     use crate::workplace_store::WorkplaceStore;
 
@@ -1525,8 +1534,8 @@ mod tests {
         let mut stdin = Vec::new();
         let (tx, _rx) = mpsc::channel();
 
-        let response = wait_for_response(&mut stdout_lines, &mut stdin, 2, &tx, None)
-            .expect("response");
+        let response =
+            wait_for_response(&mut stdout_lines, &mut stdin, 2, &tx, None).expect("response");
         assert_eq!(
             thread_id_from_result(response.result.as_ref()),
             Some("thr-123".to_string())
@@ -1544,8 +1553,7 @@ mod tests {
                 == Some("provider.codex.notification")
         }));
         assert!(entries.iter().any(|entry| {
-            entry.get("event").and_then(|value| value.as_str())
-                == Some("provider.codex.response")
+            entry.get("event").and_then(|value| value.as_str()) == Some("provider.codex.response")
         }));
     }
 }

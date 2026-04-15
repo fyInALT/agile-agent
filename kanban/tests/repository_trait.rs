@@ -31,15 +31,36 @@ impl KanbanElementRepository for MockRepository {
     }
 
     fn list_by_type(&self, type_: ElementType) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.element_type() == type_).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.element_type() == type_)
+            .cloned()
+            .collect())
     }
 
     fn list_by_status(&self, status: Status) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.status() == status).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.status() == status)
+            .cloned()
+            .collect())
     }
 
     fn list_by_assignee(&self, assignee: &str) -> Result<Vec<KanbanElement>, KanbanError> {
-        Ok(self.elements.read().unwrap().iter().filter(|e| e.assignee().map(|a| a == assignee).unwrap_or(false)).cloned().collect())
+        Ok(self
+            .elements
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|e| e.assignee().map(|a| a == assignee).unwrap_or(false))
+            .cloned()
+            .collect())
     }
 
     fn list_by_parent(&self, _parent: &ElementId) -> Result<Vec<KanbanElement>, KanbanError> {
@@ -65,7 +86,10 @@ impl KanbanElementRepository for MockRepository {
     }
 
     fn delete(&self, id: &ElementId) -> Result<(), KanbanError> {
-        self.elements.write().unwrap().retain(|e| e.id() != Some(id));
+        self.elements
+            .write()
+            .unwrap()
+            .retain(|e| e.id() != Some(id));
         Ok(())
     }
 
@@ -95,11 +119,15 @@ mod repository_trait_tests {
         repo.save(story).unwrap();
 
         // List using trait-based type identifier
-        let tasks = repo.list_by_type_identifier(&ElementTypeIdentifier::new("task")).unwrap();
+        let tasks = repo
+            .list_by_type_identifier(&ElementTypeIdentifier::new("task"))
+            .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title(), "Task 1");
 
-        let stories = repo.list_by_type_identifier(&ElementTypeIdentifier::new("story")).unwrap();
+        let stories = repo
+            .list_by_type_identifier(&ElementTypeIdentifier::new("story"))
+            .unwrap();
         assert_eq!(stories.len(), 1);
     }
 
@@ -123,7 +151,9 @@ mod repository_trait_tests {
         assert_eq!(plan_items.len(), 1);
         assert_eq!(plan_items[0].title(), "Task 1");
 
-        let backlog_items = repo.list_by_status_type(&StatusType::new("backlog")).unwrap();
+        let backlog_items = repo
+            .list_by_status_type(&StatusType::new("backlog"))
+            .unwrap();
         assert_eq!(backlog_items.len(), 1);
     }
 
@@ -131,10 +161,14 @@ mod repository_trait_tests {
     fn test_new_id_for_type() {
         let repo = MockRepository::new();
 
-        let id1 = repo.new_id_for_type(&ElementTypeIdentifier::new("task")).unwrap();
+        let id1 = repo
+            .new_id_for_type(&ElementTypeIdentifier::new("task"))
+            .unwrap();
         assert_eq!(id1.as_str(), "task-001");
 
-        let id2 = repo.new_id_for_type(&ElementTypeIdentifier::new("story")).unwrap();
+        let id2 = repo
+            .new_id_for_type(&ElementTypeIdentifier::new("story"))
+            .unwrap();
         assert_eq!(id2.as_str(), "story-001");
 
         // Unknown type should return an error (no silent fallback)

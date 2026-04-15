@@ -142,7 +142,10 @@ impl OverviewViewState {
 
     /// Get verbosity for specific agent
     pub fn verbosity_for(&self, agent: &str) -> OutputVerbosity {
-        self.agent_verbosity.get(agent).copied().unwrap_or(self.global_verbosity)
+        self.agent_verbosity
+            .get(agent)
+            .copied()
+            .unwrap_or(self.global_verbosity)
     }
 
     /// Set verbosity for specific agent
@@ -171,7 +174,8 @@ impl OverviewViewState {
     /// Focus previous agent in filtered list
     pub fn focus_prev(&mut self, filtered_count: usize) {
         if filtered_count > 0 {
-            self.focused_agent_index = (self.focused_agent_index + filtered_count - 1) % filtered_count;
+            self.focused_agent_index =
+                (self.focused_agent_index + filtered_count - 1) % filtered_count;
         }
     }
 

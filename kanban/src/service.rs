@@ -19,7 +19,10 @@ pub struct KanbanService<R: KanbanElementRepository> {
 impl<R: KanbanElementRepository> std::fmt::Debug for KanbanService<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KanbanService")
-            .field("has_transition_registry", &self.transition_registry.is_some())
+            .field(
+                "has_transition_registry",
+                &self.transition_registry.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -174,13 +177,9 @@ impl<R: KanbanElementRepository> KanbanService<R> {
         changed_by: &str,
     ) -> Result<KanbanElement, KanbanError> {
         // Convert to enum-based Status for now (backward compatibility)
-        let new_status: Status = new_status_type
-            .clone()
-            .try_into()
-            .map_err(|_| KanbanError::ConversionError(format!(
-                "unknown status type: {}",
-                new_status_type.name()
-            )))?;
+        let new_status: Status = new_status_type.clone().try_into().map_err(|_| {
+            KanbanError::ConversionError(format!("unknown status type: {}", new_status_type.name()))
+        })?;
         self.update_status(id, new_status, changed_by)
     }
 

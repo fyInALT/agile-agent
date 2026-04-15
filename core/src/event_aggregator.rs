@@ -65,10 +65,7 @@ pub enum AgentEvent {
         result: TaskCompletionResult,
     },
     /// Agent encountered an error
-    AgentError {
-        agent_id: AgentId,
-        error: String,
-    },
+    AgentError { agent_id: AgentId, error: String },
     /// Agent thread finished
     ThreadFinished {
         agent_id: AgentId,
@@ -99,12 +96,24 @@ impl AgentEvent {
         old_status: AgentSlotStatus,
         new_status: AgentSlotStatus,
     ) -> Self {
-        Self::StatusChanged { agent_id, old_status, new_status }
+        Self::StatusChanged {
+            agent_id,
+            old_status,
+            new_status,
+        }
     }
 
     /// Create a TaskCompleted event
-    pub fn task_completed(agent_id: AgentId, task_id: TaskId, result: TaskCompletionResult) -> Self {
-        Self::TaskCompleted { agent_id, task_id, result }
+    pub fn task_completed(
+        agent_id: AgentId,
+        task_id: TaskId,
+        result: TaskCompletionResult,
+    ) -> Self {
+        Self::TaskCompleted {
+            agent_id,
+            task_id,
+            result,
+        }
     }
 
     /// Create an AgentError event
@@ -239,7 +248,9 @@ impl EventAggregator {
 
             let next_result = self.poll_all();
             result.events.extend(next_result.events);
-            result.disconnected_channels.extend(next_result.disconnected_channels);
+            result
+                .disconnected_channels
+                .extend(next_result.disconnected_channels);
 
             if result.has_events() {
                 break;
@@ -345,7 +356,11 @@ mod tests {
         // Don't send anything, channel is empty
         drop(tx); // Disconnect sender
         let result = aggregator.poll_all();
-        assert!(result.disconnected_channels.contains(&AgentId::new("agent_001")));
+        assert!(
+            result
+                .disconnected_channels
+                .contains(&AgentId::new("agent_001"))
+        );
     }
 
     #[test]
@@ -355,8 +370,10 @@ mod tests {
         let agent_id = AgentId::new("agent_001");
         aggregator.add_receiver(agent_id.clone(), rx);
 
-        tx.send(ProviderEvent::AssistantChunk("Hello".to_string())).unwrap();
-        tx.send(ProviderEvent::Status("Running".to_string())).unwrap();
+        tx.send(ProviderEvent::AssistantChunk("Hello".to_string()))
+            .unwrap();
+        tx.send(ProviderEvent::Status("Running".to_string()))
+            .unwrap();
         drop(tx); // Disconnect after sending
 
         let result = aggregator.poll_all();
@@ -374,8 +391,10 @@ mod tests {
         aggregator.add_receiver(agent1.clone(), rx1);
         aggregator.add_receiver(agent2.clone(), rx2);
 
-        tx1.send(ProviderEvent::AssistantChunk("From agent 1".to_string())).unwrap();
-        tx2.send(ProviderEvent::ThinkingChunk("From agent 2".to_string())).unwrap();
+        tx1.send(ProviderEvent::AssistantChunk("From agent 1".to_string()))
+            .unwrap();
+        tx2.send(ProviderEvent::ThinkingChunk("From agent 2".to_string()))
+            .unwrap();
         drop(tx1);
         drop(tx2);
 
@@ -390,7 +409,10 @@ mod tests {
     #[test]
     fn poll_result_has_events() {
         let result = PollResult {
-            events: vec![AgentEvent::error(AgentId::new("agent_001"), "test".to_string())],
+            events: vec![AgentEvent::error(
+                AgentId::new("agent_001"),
+                "test".to_string(),
+            )],
             empty_channels: vec![],
             disconnected_channels: vec![],
         };
@@ -410,14 +432,18 @@ mod tests {
     #[test]
     fn agent_event_agent_id() {
         let agent_id = AgentId::new("agent_001");
-        let event = AgentEvent::from_provider(agent_id.clone(), ProviderEvent::Status("test".to_string()));
+        let event =
+            AgentEvent::from_provider(agent_id.clone(), ProviderEvent::Status("test".to_string()));
         assert_eq!(event.agent_id(), &agent_id);
     }
 
     #[test]
     fn agent_event_from_provider() {
         let agent_id = AgentId::new("agent_001");
-        let event = AgentEvent::from_provider(agent_id.clone(), ProviderEvent::AssistantChunk("test".to_string()));
+        let event = AgentEvent::from_provider(
+            agent_id.clone(),
+            ProviderEvent::AssistantChunk("test".to_string()),
+        );
         assert!(matches!(event, AgentEvent::FromProvider { .. }));
     }
 
@@ -455,7 +481,11 @@ mod tests {
         drop(tx); // Disconnect without sending
 
         let result = aggregator.poll_with_timeout(Duration::from_millis(50));
-        assert!(result.disconnected_channels.contains(&AgentId::new("agent_001")));
+        assert!(
+            result
+                .disconnected_channels
+                .contains(&AgentId::new("agent_001"))
+        );
     }
 
     #[test]
@@ -491,8 +521,10 @@ mod tests {
         aggregator.add_receiver(agent1.clone(), rx1);
         aggregator.add_receiver(agent2.clone(), rx2);
 
-        tx1.send(ProviderEvent::Status("agent 1".to_string())).unwrap();
-        tx2.send(ProviderEvent::Status("agent 2".to_string())).unwrap();
+        tx1.send(ProviderEvent::Status("agent 1".to_string()))
+            .unwrap();
+        tx2.send(ProviderEvent::Status("agent 2".to_string()))
+            .unwrap();
 
         // Poll only agent1
         let result = aggregator.poll_agents(&[agent1.clone()]);

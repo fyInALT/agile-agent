@@ -37,11 +37,7 @@ pub(crate) struct AdaptiveChunkingPolicy {
 }
 
 impl AdaptiveChunkingPolicy {
-    pub(crate) fn decide(
-        &mut self,
-        snapshot: QueueSnapshot,
-        now: Instant,
-    ) -> ChunkingDecision {
+    pub(crate) fn decide(&mut self, snapshot: QueueSnapshot, now: Instant) -> ChunkingDecision {
         if snapshot.queued_lines == 0 {
             self.mode = ChunkingMode::Smooth;
             self.below_exit_threshold_since = None;
@@ -102,9 +98,7 @@ fn should_enter_catch_up(snapshot: QueueSnapshot) -> bool {
 
 fn should_exit_catch_up(snapshot: QueueSnapshot) -> bool {
     snapshot.queued_lines <= EXIT_QUEUE_DEPTH_LINES
-        && snapshot
-            .oldest_age
-            .is_none_or(|age| age <= EXIT_OLDEST_AGE)
+        && snapshot.oldest_age.is_none_or(|age| age <= EXIT_OLDEST_AGE)
 }
 
 fn is_severe_backlog(snapshot: QueueSnapshot) -> bool {

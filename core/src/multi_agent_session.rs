@@ -14,8 +14,8 @@ use crate::agent_runtime::{AgentId, WorkplaceId};
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::event_aggregator::{AgentEvent, EventAggregator, PollResult};
 use crate::provider::{ProviderEvent, ProviderKind};
-use crate::shutdown_snapshot::ShutdownSnapshot;
 use crate::shared_state::SharedWorkplaceState;
+use crate::shutdown_snapshot::ShutdownSnapshot;
 use crate::skills::SkillRegistry;
 use crate::workplace_store::WorkplaceStore;
 
@@ -73,18 +73,17 @@ impl MultiAgentSession {
         let workplace = WorkplaceStore::for_cwd(&cwd)?;
         workplace.ensure()?;
 
-        if resume_snapshot
-            && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
-                crate::logging::debug_event(
-                    "multi_agent.bootstrap.restore",
-                    "restoring from shutdown snapshot",
-                    serde_json::json!({
-                        "agents_count": snapshot.agents.len(),
-                        "reason": snapshot.shutdown_reason,
-                    }),
-                );
-                return Self::restore_from_snapshot(cwd, snapshot, default_provider, max_agents);
-            }
+        if resume_snapshot && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+            crate::logging::debug_event(
+                "multi_agent.bootstrap.restore",
+                "restoring from shutdown snapshot",
+                serde_json::json!({
+                    "agents_count": snapshot.agents.len(),
+                    "reason": snapshot.shutdown_reason,
+                }),
+            );
+            return Self::restore_from_snapshot(cwd, snapshot, default_provider, max_agents);
+        }
 
         // Create fresh session with one agent
         let workplace_id = workplace.workplace_id().clone();
@@ -118,10 +117,8 @@ impl MultiAgentSession {
         let workplace_id = workplace.workplace_id().clone();
 
         let skills = SkillRegistry::discover(&cwd);
-        let mut workplace_state = SharedWorkplaceState::with_backlog(
-            workplace_id.clone(),
-            snapshot.backlog.clone(),
-        );
+        let mut workplace_state =
+            SharedWorkplaceState::with_backlog(workplace_id.clone(), snapshot.backlog.clone());
         workplace_state.skills = skills;
 
         let mut agents = AgentPool::new(workplace_id.clone(), max_agents);
@@ -129,7 +126,10 @@ impl MultiAgentSession {
         // Restore all agents from snapshot
         for agent_snapshot in &snapshot.agents {
             // Get provider from agent meta, fall back to default if not convertible
-            let provider = agent_snapshot.meta.provider_type.to_provider_kind()
+            let provider = agent_snapshot
+                .meta
+                .provider_type
+                .to_provider_kind()
                 .unwrap_or(default_provider);
 
             match agents.spawn_agent(provider) {
@@ -168,7 +168,9 @@ impl MultiAgentSession {
                         // Set status based on was_active
                         if agent_snapshot.was_active {
                             // Agent was interrupted, mark as stopped
-                            let _ = slot.transition_to(AgentSlotStatus::stopped("interrupted during execution"));
+                            let _ = slot.transition_to(AgentSlotStatus::stopped(
+                                "interrupted during execution",
+                            ));
                         }
                     }
                 }
@@ -341,13 +343,21 @@ impl MultiAgentSession {
                 self.process_provider_event(&agent_id, event)?;
                 Ok(true)
             }
-            AgentEvent::StatusChanged { agent_id, new_status, .. } => {
+            AgentEvent::StatusChanged {
+                agent_id,
+                new_status,
+                ..
+            } => {
                 if let Some(slot) = self.agents.get_slot_mut_by_id(&agent_id) {
                     slot.transition_to(new_status)?;
                 }
                 Ok(true)
             }
-            AgentEvent::TaskCompleted { agent_id, task_id, result } => {
+            AgentEvent::TaskCompleted {
+                agent_id,
+                task_id,
+                result,
+            } => {
                 self.complete_task(&agent_id, &task_id, result)?;
                 Ok(true)
             }
@@ -365,8 +375,14 @@ impl MultiAgentSession {
     }
 
     /// Process a provider event for a specific agent
-    fn process_provider_event(&mut self, agent_id: &AgentId, event: ProviderEvent) -> Result<(), String> {
-        let slot = self.agents.get_slot_mut_by_id(agent_id)
+    fn process_provider_event(
+        &mut self,
+        agent_id: &AgentId,
+        event: ProviderEvent,
+    ) -> Result<(), String> {
+        let slot = self
+            .agents
+            .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found", agent_id.as_str()))?;
 
         match event {
@@ -401,14 +417,26 @@ impl MultiAgentSession {
     }
 
     /// Complete a task for an agent
-    fn complete_task(&mut self, agent_id: &AgentId, _task_id: &TaskId, result: TaskCompletionResult) -> Result<(), String> {
-        self.agents.complete_task_with_backlog(agent_id, result, &mut self.workplace.backlog)?;
+    fn complete_task(
+        &mut self,
+        agent_id: &AgentId,
+        _task_id: &TaskId,
+        result: TaskCompletionResult,
+    ) -> Result<(), String> {
+        self.agents
+            .complete_task_with_backlog(agent_id, result, &mut self.workplace.backlog)?;
         Ok(())
     }
 
     /// Handle thread finished event
-    fn handle_thread_finished(&mut self, agent_id: &AgentId, outcome: crate::agent_slot::ThreadOutcome) -> Result<(), String> {
-        let slot = self.agents.get_slot_mut_by_id(agent_id)
+    fn handle_thread_finished(
+        &mut self,
+        agent_id: &AgentId,
+        outcome: crate::agent_slot::ThreadOutcome,
+    ) -> Result<(), String> {
+        let slot = self
+            .agents
+            .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found", agent_id.as_str()))?;
 
         slot.clear_provider_thread();
@@ -528,7 +556,8 @@ mod tests {
             ProviderKind::Mock,
             false, // No resume
             10,
-        ).expect("bootstrap");
+        )
+        .expect("bootstrap");
 
         assert_eq!(session.agents.active_count(), 1);
         assert!(session.agents.focused_slot().is_some());
@@ -536,9 +565,9 @@ mod tests {
 
     #[test]
     fn restore_from_snapshot_restores_all_agents() {
+        use crate::agent_runtime::{AgentCodename, AgentId, AgentMeta, AgentStatus, ProviderType};
+        use crate::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownReason, ShutdownSnapshot};
         use tempfile::TempDir;
-        use crate::shutdown_snapshot::{ShutdownSnapshot, AgentShutdownSnapshot, ShutdownReason};
-        use crate::agent_runtime::{AgentId, AgentCodename, AgentMeta, AgentStatus, ProviderType};
 
         let temp = TempDir::new().expect("tempdir");
 
@@ -594,7 +623,8 @@ mod tests {
             snapshot,
             ProviderKind::Mock,
             10,
-        ).expect("restore");
+        )
+        .expect("restore");
 
         // Should have restored both agents
         assert_eq!(session.agents.active_count(), 2);

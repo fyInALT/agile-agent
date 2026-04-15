@@ -392,12 +392,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OverviewFilterBlocked => {
                             state.view_state.overview.filter =
                                 crate::overview_state::OverviewFilter::BlockedOnly;
-                            state.app_mut().push_status_message("showing blocked agents only");
+                            state
+                                .app_mut()
+                                .push_status_message("showing blocked agents only");
                         }
                         InputOutcome::OverviewFilterRunning => {
                             state.view_state.overview.filter =
                                 crate::overview_state::OverviewFilter::RunningOnly;
-                            state.app_mut().push_status_message("showing running agents only");
+                            state
+                                .app_mut()
+                                .push_status_message("showing running agents only");
                         }
                         InputOutcome::OverviewFilterAll => {
                             state.view_state.overview.filter =
@@ -633,7 +637,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     agent_core::event_aggregator::AgentEvent::FromProvider { agent_id, event } => {
                         // Generate scroll log message for Overview mode
                         if state.view_state.mode == crate::view_mode::ViewMode::Overview {
-                            if let Some(msg) = generate_overview_log_message(&event, &agent_id, &state) {
+                            if let Some(msg) =
+                                generate_overview_log_message(&event, &agent_id, &state)
+                            {
                                 state.view_state.overview.push_log_message(msg);
                             }
                         }

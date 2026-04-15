@@ -1,9 +1,11 @@
 //! Tests for concrete KanbanElementTrait implementations
 
-use agent_kanban::elements::{SprintElement, StoryElement, TaskElement, IdeaElement, IssueElement, TipsElement};
+use agent_kanban::domain::ElementId;
+use agent_kanban::elements::{
+    IdeaElement, IssueElement, SprintElement, StoryElement, TaskElement, TipsElement,
+};
 use agent_kanban::traits::KanbanElementTrait;
 use agent_kanban::types::StatusType;
-use agent_kanban::domain::ElementId;
 
 mod sprint_element_tests {
     use super::*;

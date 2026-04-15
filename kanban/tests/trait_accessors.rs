@@ -1,9 +1,9 @@
 //! Tests for extended KanbanElementTrait accessors
 
-use agent_kanban::elements::{SprintElement, StoryElement, TaskElement, IssueElement, TipsElement};
+use agent_kanban::domain::{ElementId, ElementType, Priority};
+use agent_kanban::elements::{IssueElement, SprintElement, StoryElement, TaskElement, TipsElement};
 use agent_kanban::traits::KanbanElementTrait;
 use agent_kanban::types::StatusType;
-use agent_kanban::domain::{ElementId, ElementType, Priority};
 
 mod trait_accessor_tests {
     use super::*;
@@ -117,12 +117,7 @@ mod sprint_specific_tests {
 
     #[test]
     fn test_sprint_dates() {
-        let sprint = SprintElement::new_with_dates(
-            "Sprint 1",
-            "Goal",
-            "2024-01-01",
-            "2024-01-14"
-        );
+        let sprint = SprintElement::new_with_dates("Sprint 1", "Goal", "2024-01-01", "2024-01-14");
         assert_eq!(sprint.start_date(), Some("2024-01-01".to_string()));
         assert_eq!(sprint.end_date(), Some("2024-01-14".to_string()));
     }

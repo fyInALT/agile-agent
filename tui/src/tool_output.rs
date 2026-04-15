@@ -280,13 +280,11 @@ fn looks_like_git_add(input_preview: Option<&str>, _output: &str) -> bool {
 }
 
 fn looks_like_git_commit(input_preview: Option<&str>, output: &str) -> bool {
-    input_preview.is_some_and(|input| input.contains("git commit"))
-        && !output.is_empty()
+    input_preview.is_some_and(|input| input.contains("git commit")) && !output.is_empty()
 }
 
 fn looks_like_git_branch(input_preview: Option<&str>, output: &str) -> bool {
-    input_preview.is_some_and(|input| input.contains("git branch"))
-        || output.starts_with("* ")
+    input_preview.is_some_and(|input| input.contains("git branch")) || output.starts_with("* ")
 }
 
 fn looks_like_git_log(input_preview: Option<&str>, output: &str) -> bool {
@@ -402,7 +400,11 @@ fn render_git_log_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec
     }
 }
 
-fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
+fn render_git_diff_stat_block(
+    output: &str,
+    _width: usize,
+    mode: ToolRenderMode,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut file_lines = Vec::new();
     let mut summary_line = String::new();
@@ -419,7 +421,10 @@ fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode)
                 let path = path_part.trim().to_string();
                 file_lines.push(path);
             }
-        } else if trimmed.contains("changed,") || trimmed.contains("insertion") || trimmed.contains("deletion") {
+        } else if trimmed.contains("changed,")
+            || trimmed.contains("insertion")
+            || trimmed.contains("deletion")
+        {
             // Summary line like "2 files changed, 180 insertions(+), 21 deletions(-)"
             summary_line = trimmed.to_string();
         }
@@ -429,7 +434,11 @@ fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode)
     for (i, path) in file_lines.iter().enumerate() {
         lines.push(Line::from(vec![
             Span::styled(
-                if i == 0 { TOOL_OUTPUT_INITIAL_PREFIX } else { "    " },
+                if i == 0 {
+                    TOOL_OUTPUT_INITIAL_PREFIX
+                } else {
+                    "    "
+                },
                 Style::default().add_modifier(Modifier::DIM),
             ),
             Span::styled(path.clone(), Style::default().fg(Color::Cyan)),
@@ -439,10 +448,7 @@ fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode)
     // Render summary line if we have one
     if !summary_line.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(
-                "  ",
-                Style::default().add_modifier(Modifier::DIM),
-            ),
+            Span::styled("  ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(summary_line, Style::default().fg(Color::White)),
         ]));
     }
@@ -455,10 +461,16 @@ fn render_git_diff_stat_block(output: &str, _width: usize, mode: ToolRenderMode)
 
 fn render_git_add_block(output: &str, width: usize, mode: ToolRenderMode) -> Vec<Line<'static>> {
     // git add doesn't produce output on success, but we can show staged files
-    let lines = output.lines().filter(|l| !l.trim().is_empty()).collect::<Vec<_>>();
+    let lines = output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>();
     if lines.is_empty() {
         return vec![Line::from(vec![
-            Span::styled(TOOL_OUTPUT_INITIAL_PREFIX, Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(
+                TOOL_OUTPUT_INITIAL_PREFIX,
+                Style::default().add_modifier(Modifier::DIM),
+            ),
             Span::styled("staged", Style::default().fg(Color::Green)),
         ])];
     }
@@ -892,16 +904,22 @@ mod tests {
             Some(0),
             Some(150),
             80,
-            ToolRenderMode::Full,  // Use Full mode to see all output
+            ToolRenderMode::Full, // Use Full mode to see all output
         );
         let rendered = lines_to_strings(&lines);
 
         eprintln!("Rendered lines: {:?}", rendered);
 
         // Should show the file path
-        assert!(rendered.iter().any(|line| line.contains("history_cell.rs")), "Expected to find history_cell.rs in output");
+        assert!(
+            rendered.iter().any(|line| line.contains("history_cell.rs")),
+            "Expected to find history_cell.rs in output"
+        );
         // Should show summary line
-        assert!(rendered.iter().any(|line| line.contains("1 file changed")), "Expected to find summary in output");
+        assert!(
+            rendered.iter().any(|line| line.contains("1 file changed")),
+            "Expected to find summary in output"
+        );
     }
 
     #[test]
@@ -909,7 +927,7 @@ mod tests {
         let lines = render_tool_call_lines(
             "exec_command",
             Some("git add src/main.rs"),
-            Some(""),  // git add has no output on success
+            Some(""), // git add has no output on success
             true,
             false,
             Some(0),
@@ -929,8 +947,9 @@ mod tests {
         let lines = render_tool_call_lines(
             "exec_command",
             Some("git commit -m \"fix: update deps\""),
-            Some("[main abc1234] fix: update deps\n 1 file changed, 10 insertions(+), 5 deletions(-)")
-,
+            Some(
+                "[main abc1234] fix: update deps\n 1 file changed, 10 insertions(+), 5 deletions(-)",
+            ),
             true,
             false,
             Some(0),

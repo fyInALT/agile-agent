@@ -211,10 +211,12 @@ impl ShellHarness {
             }
             InputOutcome::MailComposeSend(_, _, _) => {}
             InputOutcome::OverviewFilterBlocked => {
-                self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::BlockedOnly;
+                self.state.view_state.overview.filter =
+                    crate::overview_state::OverviewFilter::BlockedOnly;
             }
             InputOutcome::OverviewFilterRunning => {
-                self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::RunningOnly;
+                self.state.view_state.overview.filter =
+                    crate::overview_state::OverviewFilter::RunningOnly;
             }
             InputOutcome::OverviewFilterAll => {
                 self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::All;

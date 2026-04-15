@@ -626,7 +626,9 @@ mod dependency_tests {
             .unwrap();
         let task_id = task.id().unwrap().clone();
 
-        let tips = service.append_tip(&task_id, "agent-1", "This is a helpful tip").unwrap();
+        let tips = service
+            .append_tip(&task_id, "agent-1", "This is a helpful tip")
+            .unwrap();
         assert_eq!(tips.element_type(), ElementType::Tips);
         assert_eq!(tips.title(), "This is a helpful tip");
     }

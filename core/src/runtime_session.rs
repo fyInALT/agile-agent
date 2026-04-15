@@ -10,11 +10,11 @@ use crate::app::LoopPhase;
 use crate::backlog_store;
 use crate::logging;
 use crate::provider::ProviderKind;
+use crate::session_store;
+use crate::shared_state::SharedWorkplaceState;
 use crate::shutdown_snapshot::AgentShutdownSnapshot;
 use crate::shutdown_snapshot::ShutdownReason;
 use crate::shutdown_snapshot::ShutdownSnapshot;
-use crate::session_store;
-use crate::shared_state::SharedWorkplaceState;
 use crate::skills::SkillRegistry;
 
 #[derive(Debug)]
@@ -32,18 +32,17 @@ impl RuntimeSession {
     ) -> Result<Self> {
         // Check for shutdown snapshot first (higher priority than agent snapshot)
         let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
-        if resume_snapshot
-            && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
-                logging::debug_event(
-                    "session.bootstrap.shutdown_snapshot",
-                    "found shutdown snapshot, restoring",
-                    serde_json::json!({
-                        "agents_count": snapshot.agents.len(),
-                        "reason": snapshot.shutdown_reason,
-                    }),
-                );
-                return Self::restore_from_snapshot(launch_cwd, snapshot, default_provider);
-            }
+        if resume_snapshot && let Ok(Some(snapshot)) = workplace.load_shutdown_snapshot() {
+            logging::debug_event(
+                "session.bootstrap.shutdown_snapshot",
+                "found shutdown snapshot, restoring",
+                serde_json::json!({
+                    "agents_count": snapshot.agents.len(),
+                    "reason": snapshot.shutdown_reason,
+                }),
+            );
+            return Self::restore_from_snapshot(launch_cwd, snapshot, default_provider);
+        }
 
         let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, default_provider)?;
         let workplace_id = bootstrap.runtime.meta().workplace_id.clone();
@@ -214,7 +213,10 @@ impl RuntimeSession {
 
     /// Check if the current agent state indicates an interrupted session
     pub fn was_interrupted(&self) -> bool {
-        matches!(self.app.loop_phase, LoopPhase::Executing | LoopPhase::Planning | LoopPhase::Verifying)
+        matches!(
+            self.app.loop_phase,
+            LoopPhase::Executing | LoopPhase::Planning | LoopPhase::Verifying
+        )
     }
 
     /// Create shutdown snapshot for current session
@@ -248,7 +250,9 @@ impl RuntimeSession {
 
         // Create and save shutdown snapshot
         let snapshot = self.create_shutdown_snapshot(reason);
-        self.agent_runtime.workplace().save_shutdown_snapshot(&snapshot)?;
+        self.agent_runtime
+            .workplace()
+            .save_shutdown_snapshot(&snapshot)?;
 
         // Mark agent as stopped
         self.agent_runtime.mark_stopped();
@@ -288,18 +292,23 @@ impl RuntimeSession {
         default_provider: ProviderKind,
     ) -> Result<Self> {
         // Use first agent's meta if available, otherwise create new
-        let (agent_meta, was_active, assigned_task_id) = if let Some(first_agent) = snapshot.agents.first() {
-            (first_agent.meta.clone(), first_agent.was_active, first_agent.assigned_task_id.clone())
-        } else {
-            // No agent in snapshot, create default
-            let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
-            workplace.ensure()?;
-            let store = crate::agent_store::AgentStore::new(workplace.clone());
-            let index = store.next_agent_index()?;
-            let runtime = AgentRuntime::new(&workplace, index, default_provider);
-            runtime.persist()?;
-            (runtime.meta().clone(), false, None)
-        };
+        let (agent_meta, was_active, assigned_task_id) =
+            if let Some(first_agent) = snapshot.agents.first() {
+                (
+                    first_agent.meta.clone(),
+                    first_agent.was_active,
+                    first_agent.assigned_task_id.clone(),
+                )
+            } else {
+                // No agent in snapshot, create default
+                let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
+                workplace.ensure()?;
+                let store = crate::agent_store::AgentStore::new(workplace.clone());
+                let index = store.next_agent_index()?;
+                let runtime = AgentRuntime::new(&workplace, index, default_provider);
+                runtime.persist()?;
+                (runtime.meta().clone(), false, None)
+            };
 
         let workplace = crate::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
         workplace.ensure()?;
@@ -308,10 +317,8 @@ impl RuntimeSession {
         let backlog = snapshot.backlog.clone();
         let skills = SkillRegistry::discover(&launch_cwd);
 
-        let mut workplace_state = SharedWorkplaceState::with_backlog(
-            agent_runtime.meta().workplace_id.clone(),
-            backlog,
-        );
+        let mut workplace_state =
+            SharedWorkplaceState::with_backlog(agent_runtime.meta().workplace_id.clone(), backlog);
         workplace_state.skills = skills;
 
         let mut app = AppState::new(default_provider);
@@ -458,8 +465,8 @@ fn announce_bootstrap_kind(app: &mut AppState, kind: &AgentBootstrapKind, runtim
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimeSession;
     use super::LoopPhase;
+    use super::RuntimeSession;
     use super::ShutdownReason;
     use crate::app::TranscriptEntry;
     use crate::logging;
@@ -546,47 +553,47 @@ mod tests {
     #[test]
     fn bootstrap_restores_agent_state_on_restart() {
         let temp = TempDir::new().expect("tempdir");
-        let mut first =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap first");
+        let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap first");
         first.app.input = "draft input".to_string();
         first.app.active_task_id = Some("task-restore-1".to_string());
         first.mark_stopped_and_persist().expect("persist first");
 
-        let restored =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap restored");
+        let restored = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap restored");
 
         assert_eq!(restored.app.input, "draft input");
-        assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
+        assert_eq!(
+            restored.app.active_task_id.as_deref(),
+            Some("task-restore-1")
+        );
     }
 
     #[test]
     fn mark_interrupted_perserves_interrupted_flag() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
         session.app.loop_phase = LoopPhase::Executing;
-        session.mark_interrupted_and_persist().expect("interrupted persist");
+        session
+            .mark_interrupted_and_persist()
+            .expect("interrupted persist");
 
-        let restored =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap restored");
+        let restored = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap restored");
 
         // Check that warnings include interrupted message
-        let has_interrupted_warning = restored.app.transcript.iter().any(|entry| {
-            matches!(entry, TranscriptEntry::Error(text) if text.contains("interrupted"))
-        });
+        let has_interrupted_warning = restored.app.transcript.iter().any(
+            |entry| matches!(entry, TranscriptEntry::Error(text) if text.contains("interrupted")),
+        );
         assert!(has_interrupted_warning);
     }
 
     #[test]
     fn was_interrupted_detects_active_phases() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
 
         // Idle is not interrupted
         session.app.loop_phase = LoopPhase::Idle;
@@ -604,9 +611,8 @@ mod tests {
     #[test]
     fn graceful_shutdown_creates_snapshot() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
 
         let snapshot = session
             .graceful_shutdown(ShutdownReason::UserQuit)
@@ -620,11 +626,12 @@ mod tests {
     #[test]
     fn graceful_shutdown_saves_snapshot_file() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
 
-        session.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+        session
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
 
         // Snapshot file should exist
         assert!(session.agent_runtime.workplace().has_shutdown_snapshot());
@@ -633,9 +640,8 @@ mod tests {
     #[test]
     fn graceful_shutdown_marks_active_agent_in_snapshot() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
         session.app.loop_phase = LoopPhase::Executing;
 
         let snapshot = session
@@ -649,28 +655,33 @@ mod tests {
     #[test]
     fn restore_from_snapshot_recovers_session() {
         let temp = TempDir::new().expect("tempdir");
-        let mut first =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap first");
+        let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap first");
         first.app.input = "draft input".to_string();
         first.app.active_task_id = Some("task-restore-1".to_string());
-        let snapshot = first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+        let snapshot = first
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
 
         let restored =
             RuntimeSession::restore_from_snapshot(temp.path().into(), snapshot, ProviderKind::Mock)
                 .expect("restore");
 
         assert_eq!(restored.app.input, "draft input");
-        assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
+        assert_eq!(
+            restored.app.active_task_id.as_deref(),
+            Some("task-restore-1")
+        );
     }
 
     #[test]
     fn restore_from_snapshot_clears_snapshot_file() {
         let temp = TempDir::new().expect("tempdir");
-        let mut session =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap");
-        let snapshot = session.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+        let mut session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let snapshot = session
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
 
         // Snapshot file exists before restore
         assert!(session.agent_runtime.workplace().has_shutdown_snapshot());
@@ -679,24 +690,24 @@ mod tests {
             .expect("restore");
 
         // Snapshot file should be cleared after restore
-        let workplace = crate::workplace_store::WorkplaceStore::for_cwd(temp.path())
-            .expect("workplace");
+        let workplace =
+            crate::workplace_store::WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         assert!(!workplace.has_shutdown_snapshot());
     }
 
     #[test]
     fn bootstrap_with_resume_snapshot_uses_shutdown_snapshot() {
         let temp = TempDir::new().expect("tempdir");
-        let mut first =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap first");
+        let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap first");
         first.app.input = "saved input".to_string();
-        first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+        first
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
 
         // Bootstrap with resume_snapshot=true should restore from shutdown snapshot
-        let restored =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, true)
-                .expect("bootstrap with resume");
+        let restored = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, true)
+            .expect("bootstrap with resume");
 
         // Should have restored state from snapshot
         assert_eq!(restored.app.input, "saved input");
@@ -705,16 +716,16 @@ mod tests {
     #[test]
     fn bootstrap_without_resume_snapshot_ignores_shutdown_snapshot() {
         let temp = TempDir::new().expect("tempdir");
-        let mut first =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap first");
+        let mut first = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap first");
         first.app.input = "saved input".to_string();
-        first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
+        first
+            .graceful_shutdown(ShutdownReason::UserQuit)
+            .expect("shutdown");
 
         // Bootstrap without resume_snapshot should start fresh (but restore agent from files)
-        let fresh =
-            RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
-                .expect("bootstrap fresh");
+        let fresh = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap fresh");
 
         // Should not have the shutdown snapshot state
         // (but may have agent state from files depending on implementation)

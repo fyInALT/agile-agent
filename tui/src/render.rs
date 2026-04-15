@@ -303,7 +303,9 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
     let max_width = area.width as usize;
 
     // Check if we have an OVERVIEW agent (ProductOwner role)
-    let overview_agent = filtered.iter().find(|(_, s)| s.role == AgentRole::ProductOwner);
+    let overview_agent = filtered
+        .iter()
+        .find(|(_, s)| s.role == AgentRole::ProductOwner);
 
     // Render Overview agent first if present
     if let Some((_, overview_snapshot)) = overview_agent {
@@ -336,7 +338,9 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
         row.truncate_to(max_width);
 
         let style = if is_focused {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -396,7 +400,10 @@ fn render_overview_scroll_log(frame: &mut Frame<'_>, state: &mut TuiState, area:
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("[{}]", timestamp_str), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("[{}]", timestamp_str),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(" "),
             Span::styled(indicator, Style::default().fg(color)),
             Span::raw(" "),

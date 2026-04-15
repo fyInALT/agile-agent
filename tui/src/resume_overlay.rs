@@ -6,8 +6,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 
-use agent_core::shutdown_snapshot::ShutdownSnapshot;
 use agent_core::shutdown_snapshot::ShutdownReason;
+use agent_core::shutdown_snapshot::ShutdownSnapshot;
 
 /// Resume session overlay state
 #[derive(Debug, Clone)]
@@ -68,7 +68,11 @@ impl ResumeOverlay {
         Self {
             snapshot,
             selected_index: 0,
-            options: vec![ResumeOption::Resume, ResumeOption::Fresh, ResumeOption::Clean],
+            options: vec![
+                ResumeOption::Resume,
+                ResumeOption::Fresh,
+                ResumeOption::Clean,
+            ],
         }
     }
 
@@ -148,9 +152,11 @@ impl ResumeOption {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_core::agent_runtime::{AgentMeta, AgentId, AgentCodename, WorkplaceId, ProviderType, AgentStatus};
-    use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
+    use agent_core::agent_runtime::{
+        AgentCodename, AgentId, AgentMeta, AgentStatus, ProviderType, WorkplaceId,
+    };
     use agent_core::backlog::BacklogState;
+    use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
 
     fn make_meta() -> AgentMeta {
         AgentMeta {
@@ -168,16 +174,14 @@ mod tests {
     fn make_snapshot() -> ShutdownSnapshot {
         ShutdownSnapshot::new(
             "test".to_string(),
-            vec![
-                AgentShutdownSnapshot {
-                    meta: make_meta(),
-                    assigned_task_id: Some("task-1".to_string()),
-                    was_active: true,
-                    had_error: false,
-                    provider_thread_state: None,
-                    captured_at: "2026-04-14T10:00:00Z".to_string(),
-                },
-            ],
+            vec![AgentShutdownSnapshot {
+                meta: make_meta(),
+                assigned_task_id: Some("task-1".to_string()),
+                was_active: true,
+                had_error: false,
+                provider_thread_state: None,
+                captured_at: "2026-04-14T10:00:00Z".to_string(),
+            }],
             BacklogState::default(),
             vec![], // no pending mail
             ShutdownReason::UserQuit,

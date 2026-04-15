@@ -2,16 +2,16 @@
 //!
 //! Tests concurrent execution, shutdown/restore, persistence, and coordination.
 
+use agent_core::agent_mail::{AgentMail, AgentMailbox, MailBody, MailSubject, MailTarget};
 use agent_core::agent_pool::{AgentPool, AgentStatusSnapshot, TaskQueueSnapshot};
-use agent_core::agent_slot::{AgentSlotStatus, TaskId};
-use agent_core::agent_runtime::{AgentId, AgentCodename, WorkplaceId, ProviderType};
 use agent_core::agent_role::AgentRole;
-use agent_core::agent_mail::{AgentMail, MailSubject, MailBody, MailTarget, AgentMailbox};
+use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
+use agent_core::agent_slot::{AgentSlotStatus, TaskId};
 use agent_core::backlog::{BacklogState, TaskItem, TaskStatus};
-use agent_core::standup_report::StandupHelper;
-use agent_core::sprint_planning::{SprintPlanningSession, SprintPlanningHelper};
 use agent_core::blocker_escalation::{BlockerEscalationTracker, BlockerHelper};
-use agent_core::runtime_mode::{RuntimeMode, ModeHelper, ModeTransition};
+use agent_core::runtime_mode::{ModeHelper, ModeTransition, RuntimeMode};
+use agent_core::sprint_planning::{SprintPlanningHelper, SprintPlanningSession};
+use agent_core::standup_report::StandupHelper;
 
 /// Test 2-agent concurrent execution
 #[test]
@@ -86,7 +86,9 @@ fn mail_delivery_between_agents() {
     let mail = AgentMail::new(
         AgentId::new("agent-001"),
         MailTarget::Direct(AgentId::new("agent-002")),
-        MailSubject::TaskHelpRequest { task_id: TaskId::new("task-001") },
+        MailSubject::TaskHelpRequest {
+            task_id: TaskId::new("task-001"),
+        },
         MailBody::Text("Need help with this task".to_string()),
     );
 
@@ -111,7 +113,9 @@ fn mail_broadcast() {
     let mail = AgentMail::new(
         AgentId::new("agent-001"),
         MailTarget::Broadcast,
-        MailSubject::StatusUpdate { new_status: "completed".to_string() },
+        MailSubject::StatusUpdate {
+            new_status: "completed".to_string(),
+        },
         MailBody::Text("Task completed".to_string()),
     );
 
@@ -140,7 +144,10 @@ fn sprint_planning_session_flow() {
 
     // Advance phases
     session.advance_phase(); // Selecting -> Estimating
-    assert_eq!(session.status, agent_core::sprint_planning::PlanningStatus::Estimating);
+    assert_eq!(
+        session.status,
+        agent_core::sprint_planning::PlanningStatus::Estimating
+    );
 
     session.advance_phase(); // Estimating -> DefiningGoal
     session.advance_phase(); // DefiningGoal -> Committing
@@ -216,16 +223,14 @@ fn blocker_escalation_detection() {
         result_summary: Some("Waiting on dependency".to_string()),
     });
 
-    let statuses = vec![
-        AgentStatusSnapshot {
-            agent_id: AgentId::new("agent-001"),
-            codename: AgentCodename::new("alpha"),
-            provider_type: ProviderType::Claude,
-            role: AgentRole::Developer,
-            status: AgentSlotStatus::idle(),
-            assigned_task_id: Some(TaskId::new("task-001")),
-        },
-    ];
+    let statuses = vec![AgentStatusSnapshot {
+        agent_id: AgentId::new("agent-001"),
+        codename: AgentCodename::new("alpha"),
+        provider_type: ProviderType::Claude,
+        role: AgentRole::Developer,
+        status: AgentSlotStatus::idle(),
+        assigned_task_id: Some(TaskId::new("task-001")),
+    }];
 
     let escalations = tracker.detect_blocked_agents(&statuses, &backlog);
 
@@ -251,24 +256,19 @@ fn blocker_escalation_resolution() {
         result_summary: Some("Waiting".to_string()),
     });
 
-    let statuses = vec![
-        AgentStatusSnapshot {
-            agent_id: AgentId::new("agent-001"),
-            codename: AgentCodename::new("alpha"),
-            provider_type: ProviderType::Claude,
-            role: AgentRole::Developer,
-            status: AgentSlotStatus::idle(),
-            assigned_task_id: Some(TaskId::new("task-001")),
-        },
-    ];
+    let statuses = vec![AgentStatusSnapshot {
+        agent_id: AgentId::new("agent-001"),
+        codename: AgentCodename::new("alpha"),
+        provider_type: ProviderType::Claude,
+        role: AgentRole::Developer,
+        status: AgentSlotStatus::idle(),
+        assigned_task_id: Some(TaskId::new("task-001")),
+    }];
 
     tracker.detect_blocked_agents(&statuses, &backlog);
 
     // Resolve the escalation
-    let resolved = tracker.resolve_escalation(
-        "task-001",
-        AgentId::new("scrum-master".to_string())
-    );
+    let resolved = tracker.resolve_escalation("task-001", AgentId::new("scrum-master".to_string()));
 
     assert!(resolved);
     assert_eq!(tracker.active_escalations().len(), 0);
@@ -403,15 +403,19 @@ fn concurrent_task_assignment() {
         }
     }
 
-    let running_count = backlog.tasks.iter().filter(|t| t.status == TaskStatus::Running).count();
+    let running_count = backlog
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Running)
+        .count();
     assert_eq!(running_count, 3);
 }
 
 /// Test shutdown/restore cycle for agent state
 #[test]
 fn shutdown_restore_cycle() {
-    use agent_core::shutdown_snapshot::{ShutdownSnapshot, ShutdownReason, AgentShutdownSnapshot};
     use agent_core::agent_runtime::AgentMeta;
+    use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownReason, ShutdownSnapshot};
 
     // Create agent snapshot
     let agent_snapshot = AgentShutdownSnapshot {
@@ -604,13 +608,15 @@ fn daily_standup_persistence_cycle() {
     use agent_core::standup_report::DailyStandupReport;
 
     let mut report = DailyStandupReport::new();
-    report.agent_entries.push(agent_core::standup_report::AgentStandupEntry {
-        codename: "alpha".to_string(),
-        role: AgentRole::Developer,
-        yesterday_completed: vec![],
-        today_planned: vec![],
-        blockers: vec!["Database lock".to_string()],
-    });
+    report
+        .agent_entries
+        .push(agent_core::standup_report::AgentStandupEntry {
+            codename: "alpha".to_string(),
+            role: AgentRole::Developer,
+            yesterday_completed: vec![],
+            today_planned: vec![],
+            blockers: vec!["Database lock".to_string()],
+        });
 
     // Serialize report
     let json = serde_json::to_string(&report).unwrap();

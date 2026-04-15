@@ -2,7 +2,9 @@
 //!
 //! Factory pattern for creating elements based on element type identifiers.
 
-use crate::elements::{SprintElement, StoryElement, TaskElement, IdeaElement, IssueElement, TipsElement};
+use crate::elements::{
+    IdeaElement, IssueElement, SprintElement, StoryElement, TaskElement, TipsElement,
+};
 use crate::registry::ElementTypeRegistry;
 use crate::serde::ElementSerde;
 use crate::traits::KanbanElementTrait;
@@ -49,7 +51,11 @@ impl ElementFactory {
     }
 
     /// Create an element with just a title
-    pub fn create(&self, type_: &ElementTypeIdentifier, title: &str) -> Option<Box<dyn KanbanElementTrait>> {
+    pub fn create(
+        &self,
+        type_: &ElementTypeIdentifier,
+        title: &str,
+    ) -> Option<Box<dyn KanbanElementTrait>> {
         match type_.name() {
             "sprint" => Some(Box::new(SprintElement::new(title, ""))),
             "story" => Some(Box::new(StoryElement::new(title, ""))),
@@ -179,7 +185,8 @@ impl ElementFactory {
             }
             "tips" => {
                 // Tips needs target_task and agent_id - use defaults for now
-                let target_task = crate::domain::ElementId::new(crate::domain::ElementType::Task, 0);
+                let target_task =
+                    crate::domain::ElementId::new(crate::domain::ElementType::Task, 0);
                 let mut element = TipsElement::new(&serde.title, target_task, "unknown");
                 if let Some(id_str) = &serde.id {
                     if let Ok(id) = crate::domain::ElementId::parse(id_str) {

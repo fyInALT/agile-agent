@@ -3,10 +3,10 @@
 //! Provides blocker detection and escalation for Scrum-style coordination.
 //! Helps ScrumMaster role agents identify and resolve blockers.
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::agent_mail::{AgentMail, MailSubject, MailBody, MailTarget, MailId};
+use crate::agent_mail::{AgentMail, MailBody, MailId, MailSubject, MailTarget};
 use crate::agent_pool::AgentStatusSnapshot;
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::AgentId;
@@ -64,11 +64,7 @@ impl Default for EscalationStatus {
 
 impl BlockerEscalation {
     /// Create a new blocker escalation record
-    pub fn new(
-        task_id: String,
-        blocked_agent_id: AgentId,
-        reason: String,
-    ) -> Self {
+    pub fn new(task_id: String, blocked_agent_id: AgentId, reason: String) -> Self {
         Self {
             escalation_id: format!("escalation-{}", Utc::now().timestamp_millis()),
             task_id,
@@ -117,7 +113,9 @@ impl BlockerEscalation {
     pub fn is_active(&self) -> bool {
         matches!(
             self.status,
-            EscalationStatus::Detected | EscalationStatus::Escalated | EscalationStatus::Acknowledged
+            EscalationStatus::Detected
+                | EscalationStatus::Escalated
+                | EscalationStatus::Acknowledged
         )
     }
 
@@ -182,9 +180,15 @@ impl BlockerEscalationTracker {
                 if let Some(task) = backlog.find_task(task_id.as_str()) {
                     if task.status == TaskStatus::Blocked {
                         // Check if we already have an escalation for this task
-                        if !self.escalations.iter().any(|e| e.task_id == task_id.as_str() && e.is_active()) {
+                        if !self
+                            .escalations
+                            .iter()
+                            .any(|e| e.task_id == task_id.as_str() && e.is_active())
+                        {
                             // Create new escalation
-                            let reason = task.result_summary.clone()
+                            let reason = task
+                                .result_summary
+                                .clone()
                                 .unwrap_or_else(|| "Unknown blocker".to_string());
 
                             let escalation = BlockerEscalation::new(
@@ -222,17 +226,26 @@ impl BlockerEscalationTracker {
 
     /// Get all resolved escalations
     pub fn resolved_escalations(&self) -> Vec<&BlockerEscalation> {
-        self.escalations.iter().filter(|e| e.is_resolved()).collect()
+        self.escalations
+            .iter()
+            .filter(|e| e.is_resolved())
+            .collect()
     }
 
     /// Get escalation by task ID
     pub fn get_escalation_for_task(&self, task_id: &str) -> Option<&BlockerEscalation> {
-        self.escalations.iter().find(|e| e.task_id == task_id && e.is_active())
+        self.escalations
+            .iter()
+            .find(|e| e.task_id == task_id && e.is_active())
     }
 
     /// Mark escalation as resolved by task ID
     pub fn resolve_escalation(&mut self, task_id: &str, resolved_by: AgentId) -> bool {
-        if let Some(escalation) = self.escalations.iter_mut().find(|e| e.task_id == task_id && e.is_active()) {
+        if let Some(escalation) = self
+            .escalations
+            .iter_mut()
+            .find(|e| e.task_id == task_id && e.is_active())
+        {
             escalation.resolve(resolved_by);
             true
         } else {
@@ -242,7 +255,9 @@ impl BlockerEscalationTracker {
 
     /// Calculate average resolution time (in minutes)
     pub fn average_resolution_time(&self) -> Option<u64> {
-        let resolved: Vec<_> = self.escalations.iter()
+        let resolved: Vec<_> = self
+            .escalations
+            .iter()
             .filter(|e| e.resolution_time_minutes.is_some())
             .collect();
 
@@ -250,7 +265,8 @@ impl BlockerEscalationTracker {
             return None;
         }
 
-        let total = resolved.iter()
+        let total = resolved
+            .iter()
             .map(|e| e.resolution_time_minutes.unwrap())
             .sum::<u64>();
 
@@ -321,7 +337,7 @@ impl BlockerHelper {
         .with_action_required()
         .with_deadline(
             // Set deadline as 1 hour from now
-            (Utc::now() + Duration::hours(1)).to_rfc3339()
+            (Utc::now() + Duration::hours(1)).to_rfc3339(),
         )
     }
 
@@ -332,7 +348,8 @@ impl BlockerHelper {
 
     /// Check if agent is blocked based on status
     pub fn is_agent_blocked(status: &AgentStatusSnapshot, backlog: &BacklogState) -> bool {
-        status.assigned_task_id
+        status
+            .assigned_task_id
             .as_ref()
             .and_then(|tid| backlog.find_task(tid.as_str()))
             .map(|t| t.status == TaskStatus::Blocked)
@@ -390,9 +407,13 @@ mod tests {
         }
     }
 
-    fn make_test_agent_status(id: &str, role: AgentRole, task_id: Option<&str>) -> AgentStatusSnapshot {
-        use crate::agent_slot::{AgentSlotStatus, TaskId};
+    fn make_test_agent_status(
+        id: &str,
+        role: AgentRole,
+        task_id: Option<&str>,
+    ) -> AgentStatusSnapshot {
         use crate::agent_runtime::{AgentCodename, ProviderType};
+        use crate::agent_slot::{AgentSlotStatus, TaskId};
 
         AgentStatusSnapshot {
             agent_id: AgentId::new(id.to_string()),
@@ -541,9 +562,11 @@ mod tests {
 
         backlog.push_task(make_test_task("task-001", TaskStatus::Blocked));
 
-        let statuses = vec![
-            make_test_agent_status("agent-1", AgentRole::Developer, Some("task-001")),
-        ];
+        let statuses = vec![make_test_agent_status(
+            "agent-1",
+            AgentRole::Developer,
+            Some("task-001"),
+        )];
 
         // First detection
         tracker.detect_blocked_agents(&statuses, &backlog);
@@ -561,17 +584,17 @@ mod tests {
 
         backlog.push_task(make_test_task("task-001", TaskStatus::Blocked));
 
-        let statuses = vec![
-            make_test_agent_status("agent-1", AgentRole::Developer, Some("task-001")),
-        ];
+        let statuses = vec![make_test_agent_status(
+            "agent-1",
+            AgentRole::Developer,
+            Some("task-001"),
+        )];
 
         tracker.detect_blocked_agents(&statuses, &backlog);
 
         // Resolve the escalation
-        let resolved = tracker.resolve_escalation(
-            "task-001",
-            AgentId::new("scrum-master".to_string())
-        );
+        let resolved =
+            tracker.resolve_escalation("task-001", AgentId::new("scrum-master".to_string()));
 
         assert!(resolved);
         assert_eq!(tracker.active_escalations().len(), 0);
@@ -610,7 +633,7 @@ mod tests {
 
         let mail = BlockerHelper::create_escalation_mail(
             &escalation,
-            &AgentId::new("scrum-master".to_string())
+            &AgentId::new("scrum-master".to_string()),
         );
 
         assert!(mail.requires_action);
@@ -636,8 +659,10 @@ mod tests {
         backlog.push_task(make_test_task("task-001", TaskStatus::Blocked));
         backlog.push_task(make_test_task("task-002", TaskStatus::Running));
 
-        let blocked_status = make_test_agent_status("agent-1", AgentRole::Developer, Some("task-001"));
-        let running_status = make_test_agent_status("agent-2", AgentRole::Developer, Some("task-002"));
+        let blocked_status =
+            make_test_agent_status("agent-1", AgentRole::Developer, Some("task-001"));
+        let running_status =
+            make_test_agent_status("agent-2", AgentRole::Developer, Some("task-002"));
 
         assert!(BlockerHelper::is_agent_blocked(&blocked_status, &backlog));
         assert!(!BlockerHelper::is_agent_blocked(&running_status, &backlog));

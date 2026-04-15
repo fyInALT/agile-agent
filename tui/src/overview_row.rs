@@ -17,7 +17,11 @@ pub struct OverviewAgentRow {
 
 impl OverviewAgentRow {
     /// Format agent status snapshot into display row
-    pub fn from_snapshot(snapshot: &AgentStatusSnapshot, focused: bool, is_overview_agent: bool) -> Self {
+    pub fn from_snapshot(
+        snapshot: &AgentStatusSnapshot,
+        focused: bool,
+        is_overview_agent: bool,
+    ) -> Self {
         let indicator = if is_overview_agent {
             "◎" // Overview Agent always uses ◎
         } else {
@@ -179,8 +183,8 @@ fn unicode_width_str(s: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
     use agent_core::agent_role::AgentRole;
+    use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
 
     fn make_snapshot(status: AgentSlotStatus) -> AgentStatusSnapshot {
         AgentStatusSnapshot {

@@ -66,7 +66,7 @@
 //! - Thread should detect recv errors and exit cleanly
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -204,7 +204,9 @@ impl ProviderThreadHandle {
         match result_rx.recv_timeout(timeout) {
             Ok(Ok(())) => {
                 let elapsed_ms = self.elapsed().as_millis() as u64;
-                ThreadStopResult::GracefulStop { duration_ms: elapsed_ms }
+                ThreadStopResult::GracefulStop {
+                    duration_ms: elapsed_ms,
+                }
             }
             Ok(Err(panic_payload)) => {
                 let error = extract_panic_message(panic_payload);
@@ -322,7 +324,12 @@ impl ProviderThreadBuilder {
 
         let handle = builder.spawn(f)?;
 
-        Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+        Ok(ProviderThreadHandle::new(
+            handle,
+            event_rx,
+            keepalive_tx,
+            thread_name,
+        ))
     }
 }
 
@@ -351,13 +358,16 @@ pub fn start_provider_threaded(
         }),
     );
 
-    let handle = Builder::new()
-        .name(thread_name.clone())
-        .spawn(move || {
-            run_provider_in_thread(provider, prompt, cwd, session_handle, thread_event_tx);
-        })?;
+    let handle = Builder::new().name(thread_name.clone()).spawn(move || {
+        run_provider_in_thread(provider, prompt, cwd, session_handle, thread_event_tx);
+    })?;
 
-    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+    Ok(ProviderThreadHandle::new(
+        handle,
+        event_rx,
+        keepalive_tx,
+        thread_name,
+    ))
 }
 
 /// Run provider logic in thread context
@@ -380,7 +390,10 @@ fn run_provider_in_thread(
         }),
     );
 
-    let _ = event_tx.send(ProviderEvent::Status(format!("{} thread started", provider.label())));
+    let _ = event_tx.send(ProviderEvent::Status(format!(
+        "{} thread started",
+        provider.label()
+    )));
     let _ = event_tx.send(ProviderEvent::Finished);
 }
 
@@ -394,13 +407,16 @@ pub fn start_mock_provider_threaded(
     let (keepalive_tx, event_rx) = channel();
     let thread_event_tx = keepalive_tx.clone();
 
-    let handle = Builder::new()
-        .name(thread_name.clone())
-        .spawn(move || {
-            run_mock_provider(prompt, thread_event_tx);
-        })?;
+    let handle = Builder::new().name(thread_name.clone()).spawn(move || {
+        run_mock_provider(prompt, thread_event_tx);
+    })?;
 
-    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+    Ok(ProviderThreadHandle::new(
+        handle,
+        event_rx,
+        keepalive_tx,
+        thread_name,
+    ))
 }
 
 /// Run mock provider logic
@@ -426,8 +442,8 @@ fn run_mock_provider(prompt: String, event_tx: Sender<ProviderEvent>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     fn make_handle_with_thread() -> (ProviderThreadHandle, Arc<AtomicBool>) {
@@ -444,7 +460,10 @@ mod tests {
             })
             .unwrap();
 
-        (ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "test-thread".to_string()), running)
+        (
+            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "test-thread".to_string()),
+            running,
+        )
     }
 
     fn make_quick_thread() -> ProviderThreadHandle {
@@ -540,7 +559,9 @@ mod tests {
 
     #[test]
     fn stop_result_panicked() {
-        let result = ThreadStopResult::Panicked { error: "test error".to_string() };
+        let result = ThreadStopResult::Panicked {
+            error: "test error".to_string(),
+        };
         assert!(matches!(result, ThreadStopResult::Panicked { .. }));
     }
 
@@ -552,7 +573,8 @@ mod tests {
 
     #[test]
     fn mock_provider_threaded_creates_running_thread() {
-        let handle = start_mock_provider_threaded("test prompt".to_string(), "mock-thread".to_string());
+        let handle =
+            start_mock_provider_threaded("test prompt".to_string(), "mock-thread".to_string());
         assert!(handle.is_ok());
         let handle = handle.unwrap();
         assert!(handle.is_running());
@@ -561,7 +583,8 @@ mod tests {
 
     #[test]
     fn mock_provider_threaded_sends_events() {
-        let handle = start_mock_provider_threaded("test".to_string(), "mock-events".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("test".to_string(), "mock-events".to_string()).unwrap();
         let receiver = handle.event_receiver();
 
         // Wait briefly for mock provider to start sending events
@@ -576,7 +599,7 @@ mod tests {
                 Ok(ProviderEvent::Status(_)) => received_status = true,
                 Ok(ProviderEvent::AssistantChunk(_)) => received_chunk = true,
                 Ok(ProviderEvent::Finished) => {} // Finished is expected but not checked
-                Ok(_) => {} // Other events are fine
+                Ok(_) => {}                       // Other events are fine
                 Err(_) => break,
             }
         }
@@ -587,7 +610,8 @@ mod tests {
 
     #[test]
     fn mock_provider_thread_completes_gracefully() {
-        let mut handle = start_mock_provider_threaded("short".to_string(), "mock-complete".to_string()).unwrap();
+        let mut handle =
+            start_mock_provider_threaded("short".to_string(), "mock-complete".to_string()).unwrap();
 
         // Wait for mock provider to finish (it sends chunks then Finished)
         std::thread::sleep(Duration::from_millis(500));
@@ -600,7 +624,8 @@ mod tests {
 
     #[test]
     fn mock_provider_thread_name_matches() {
-        let handle = start_mock_provider_threaded("test".to_string(), "custom-mock".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("test".to_string(), "custom-mock".to_string()).unwrap();
         assert_eq!(handle.thread_name(), "custom-mock");
     }
 
@@ -621,7 +646,8 @@ mod tests {
             cwd.clone(),
             None,
             "owned-test".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // The thread owns its own cwd copy - original cwd still exists
         // because temp_dir is still in scope
@@ -635,7 +661,8 @@ mod tests {
     /// Test: Provider thread sends events through channel, not direct mutation
     #[test]
     fn provider_thread_communicates_via_channel_only() {
-        let handle = start_mock_provider_threaded("test".to_string(), "channel-test".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("test".to_string(), "channel-test".to_string()).unwrap();
         let receiver = handle.event_receiver();
 
         // The thread cannot mutate anything - it only sends events
@@ -657,13 +684,17 @@ mod tests {
         // Mock provider sends: status + chunks + finished
         assert!(event_count > 0, "events should be received via channel");
         // Last event should be Finished
-        assert!(matches!(last_event, Some(ProviderEvent::Finished)), "last event should be Finished");
+        assert!(
+            matches!(last_event, Some(ProviderEvent::Finished)),
+            "last event should be Finished"
+        );
     }
 
     /// Test: ProviderThreadHandle does not expose mutable references to shared state
     #[test]
     fn handle_has_no_shared_state_accessors() {
-        let handle = start_mock_provider_threaded("test".to_string(), "state-test".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("test".to_string(), "state-test".to_string()).unwrap();
 
         // Verify handle provides only read-only access to its internals
         // thread_name() returns &str (read-only)
@@ -699,7 +730,8 @@ mod tests {
             cwd.clone(),
             None,
             "cwd-test".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // The cwd is an owned PathBuf, not a reference to shared state
         // Each thread gets its own copy
@@ -718,7 +750,8 @@ mod tests {
     fn channel_is_only_cross_thread_communication() {
         // Verify that ProviderThreadHandle doesn't hold any mutable reference
         // to shared state - only the channel receiver
-        let handle = start_mock_provider_threaded("test".to_string(), "comm-test".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("test".to_string(), "comm-test".to_string()).unwrap();
 
         // The handle can only receive events, not send commands to the thread
         // The thread has the sender and only sends events out
@@ -750,7 +783,9 @@ mod tests {
     /// Test: Thread detects channel disconnect on shutdown
     #[test]
     fn thread_detects_channel_disconnect() {
-        let mut handle = start_mock_provider_threaded("disconnect".to_string(), "disconnect-test".to_string()).unwrap();
+        let mut handle =
+            start_mock_provider_threaded("disconnect".to_string(), "disconnect-test".to_string())
+                .unwrap();
 
         // Wait for thread to finish naturally
         std::thread::sleep(Duration::from_millis(200));
@@ -777,12 +812,8 @@ mod tests {
             })
             .unwrap();
 
-        let mut thread_handle = ProviderThreadHandle::new(
-            handle,
-            event_rx,
-            keepalive_tx,
-            "slow-thread".to_string(),
-        );
+        let mut thread_handle =
+            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "slow-thread".to_string());
 
         // Stop with short timeout (100ms)
         let result = thread_handle.stop(Duration::from_millis(100));
@@ -803,12 +834,8 @@ mod tests {
             })
             .unwrap();
 
-        let mut thread_handle = ProviderThreadHandle::new(
-            handle,
-            event_rx,
-            keepalive_tx,
-            "panic-thread".to_string(),
-        );
+        let mut thread_handle =
+            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "panic-thread".to_string());
 
         // Give thread time to panic
         std::thread::sleep(Duration::from_millis(50));
@@ -822,7 +849,8 @@ mod tests {
     /// Test: Dropping keepalive sender doesn't immediately stop thread
     #[test]
     fn dropping_sender_signals_but_not_force_stops() {
-        let mut handle = start_mock_provider_threaded("test".to_string(), "signal-test".to_string()).unwrap();
+        let mut handle =
+            start_mock_provider_threaded("test".to_string(), "signal-test".to_string()).unwrap();
 
         // Thread is running and sending events
         std::thread::sleep(Duration::from_millis(50));
@@ -837,7 +865,9 @@ mod tests {
     /// Test: stop_with_timeout uses milliseconds parameter
     #[test]
     fn stop_with_timeout_uses_ms_parameter() {
-        let mut handle = start_mock_provider_threaded("test".to_string(), "timeout-ms-test".to_string()).unwrap();
+        let mut handle =
+            start_mock_provider_threaded("test".to_string(), "timeout-ms-test".to_string())
+                .unwrap();
 
         std::thread::sleep(Duration::from_millis(100));
 
@@ -860,12 +890,8 @@ mod tests {
             })
             .unwrap();
 
-        let mut thread_handle = ProviderThreadHandle::new(
-            handle,
-            event_rx,
-            keepalive_tx,
-            "abandon-test".to_string(),
-        );
+        let mut thread_handle =
+            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "abandon-test".to_string());
 
         // Abandon should return immediately
         let start = Instant::now();
@@ -882,8 +908,12 @@ mod tests {
     /// Test: Two providers run simultaneously without blocking
     #[test]
     fn two_providers_run_concurrently() {
-        let handle1 = start_mock_provider_threaded("provider1".to_string(), "agent-alpha".to_string()).unwrap();
-        let handle2 = start_mock_provider_threaded("provider2".to_string(), "agent-bravo".to_string()).unwrap();
+        let handle1 =
+            start_mock_provider_threaded("provider1".to_string(), "agent-alpha".to_string())
+                .unwrap();
+        let handle2 =
+            start_mock_provider_threaded("provider2".to_string(), "agent-bravo".to_string())
+                .unwrap();
 
         // Both should be running
         assert!(handle1.is_running());
@@ -929,18 +959,26 @@ mod tests {
     fn concurrent_providers_dont_block() {
         // Start first provider
         let start_time = Instant::now();
-        let handle1 = start_mock_provider_threaded("slow".to_string(), "slow-provider".to_string()).unwrap();
+        let handle1 =
+            start_mock_provider_threaded("slow".to_string(), "slow-provider".to_string()).unwrap();
         let spawn_time1 = start_time.elapsed();
 
         // Start second provider immediately
         let start_time2 = Instant::now();
-        let handle2 = start_mock_provider_threaded("fast".to_string(), "fast-provider".to_string()).unwrap();
+        let handle2 =
+            start_mock_provider_threaded("fast".to_string(), "fast-provider".to_string()).unwrap();
         let spawn_time2 = start_time2.elapsed();
 
         // Both spawns should be fast (< 50ms each)
         // If blocking, spawn_time2 would be much larger
-        assert!(spawn_time1 < Duration::from_millis(50), "spawn should be non-blocking");
-        assert!(spawn_time2 < Duration::from_millis(50), "spawn should be non-blocking");
+        assert!(
+            spawn_time1 < Duration::from_millis(50),
+            "spawn should be non-blocking"
+        );
+        assert!(
+            spawn_time2 < Duration::from_millis(50),
+            "spawn should be non-blocking"
+        );
 
         // Wait and verify both sent events
         std::thread::sleep(Duration::from_millis(200));
@@ -962,8 +1000,12 @@ mod tests {
     /// Test: Events arrive in correct channels (no cross-talk)
     #[test]
     fn events_arrive_in_correct_channels() {
-        let handle1 = start_mock_provider_threaded("unique-alpha".to_string(), "channel-alpha".to_string()).unwrap();
-        let handle2 = start_mock_provider_threaded("unique-bravo".to_string(), "channel-bravo".to_string()).unwrap();
+        let handle1 =
+            start_mock_provider_threaded("unique-alpha".to_string(), "channel-alpha".to_string())
+                .unwrap();
+        let handle2 =
+            start_mock_provider_threaded("unique-bravo".to_string(), "channel-bravo".to_string())
+                .unwrap();
 
         std::thread::sleep(Duration::from_millis(200));
 
@@ -993,7 +1035,10 @@ mod tests {
         // Verify events from channel 1 contain "alpha" context
         // and events from channel 2 contain "bravo" context (or are distinct)
         // Mock provider generates chunks based on prompt
-        assert!(!events1.is_empty() || !events2.is_empty(), "should receive some chunks");
+        assert!(
+            !events1.is_empty() || !events2.is_empty(),
+            "should receive some chunks"
+        );
 
         // Clean up
         let mut h1 = handle1;
@@ -1008,10 +1053,8 @@ mod tests {
         let num_providers = 5;
         let handles: Vec<_> = (0..num_providers)
             .map(|i| {
-                start_mock_provider_threaded(
-                    format!("stress-{}", i),
-                    format!("stress-agent-{}", i),
-                ).unwrap()
+                start_mock_provider_threaded(format!("stress-{}", i), format!("stress-agent-{}", i))
+                    .unwrap()
             })
             .collect();
 
@@ -1046,7 +1089,9 @@ mod tests {
     /// Test: Event ordering is preserved per-channel
     #[test]
     fn event_ordering_preserved_per_channel() {
-        let handle = start_mock_provider_threaded("ordering-test".to_string(), "ordering-agent".to_string()).unwrap();
+        let handle =
+            start_mock_provider_threaded("ordering-test".to_string(), "ordering-agent".to_string())
+                .unwrap();
 
         std::thread::sleep(Duration::from_millis(200));
 
@@ -1071,7 +1116,9 @@ mod tests {
             );
 
             // Should have chunks in middle
-            let has_chunks = events.iter().any(|e| matches!(e, ProviderEvent::AssistantChunk(_)));
+            let has_chunks = events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::AssistantChunk(_)));
             assert!(has_chunks, "should have chunks");
 
             // Last should be Finished

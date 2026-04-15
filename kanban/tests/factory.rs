@@ -28,7 +28,11 @@ mod element_factory_tests {
     #[test]
     fn test_element_factory_create_story() {
         let factory = ElementFactory::new();
-        let story = factory.create_with_content(&ElementTypeIdentifier::new("story"), "Story Title", "Story content");
+        let story = factory.create_with_content(
+            &ElementTypeIdentifier::new("story"),
+            "Story Title",
+            "Story content",
+        );
         assert!(story.is_some());
         let story = story.unwrap();
         assert_eq!(story.title(), "Story Title");

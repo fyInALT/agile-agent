@@ -2,7 +2,9 @@
 //!
 //! TDD: These tests define the expected API before implementation
 
-use agent_kanban::types::{ElementTypeIdentifier, StatusType, builtin_statuses, builtin_element_types};
+use agent_kanban::types::{
+    ElementTypeIdentifier, StatusType, builtin_element_types, builtin_statuses,
+};
 use std::collections::HashSet;
 
 mod status_type_tests {

@@ -3,11 +3,11 @@ use crossterm::event::KeyModifiers;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
+use crate::overview_state::{OverviewFilter, OverviewLogMessage, OverviewMessageType};
 use crate::render::render_app;
 use crate::test_support::ShellHarness;
 use crate::transcript::cells;
 use crate::view_mode::ViewMode;
-use crate::overview_state::{OverviewFilter, OverviewLogMessage, OverviewMessageType};
 use agent_core::app::TranscriptEntry;
 use agent_core::logging;
 use agent_core::logging::RunMode;
@@ -518,14 +518,16 @@ fn overview_log_buffer_accepts_messages() {
     let mut shell = ShellHarness::new(ProviderKind::Mock);
     shell.state.view_state.switch_by_number(6);
 
-    shell.state.view_state.overview.push_log_message(
-        OverviewLogMessage {
+    shell
+        .state
+        .view_state
+        .overview
+        .push_log_message(OverviewLogMessage {
             timestamp: 143215,
             agent: "alpha".to_string(),
             message_type: OverviewMessageType::Progress,
             content: "Started task".to_string(),
-        }
-    );
+        });
 
     assert_eq!(shell.state.view_state.overview.log_buffer.len(), 1);
 }
@@ -537,20 +539,42 @@ fn overview_log_buffer_evicts_when_full() {
     shell.state.view_state.overview.max_log_size = 3;
 
     for i in 0..5 {
-        shell.state.view_state.overview.push_log_message(
-            OverviewLogMessage {
+        shell
+            .state
+            .view_state
+            .overview
+            .push_log_message(OverviewLogMessage {
                 timestamp: i,
                 agent: "alpha".to_string(),
                 message_type: OverviewMessageType::Progress,
                 content: format!("msg {}", i),
-            }
-        );
+            });
     }
 
     assert_eq!(shell.state.view_state.overview.log_buffer.len(), 3);
     // Should have messages 2, 3, 4
-    assert_eq!(shell.state.view_state.overview.log_buffer.front().unwrap().timestamp, 2);
-    assert_eq!(shell.state.view_state.overview.log_buffer.back().unwrap().timestamp, 4);
+    assert_eq!(
+        shell
+            .state
+            .view_state
+            .overview
+            .log_buffer
+            .front()
+            .unwrap()
+            .timestamp,
+        2
+    );
+    assert_eq!(
+        shell
+            .state
+            .view_state
+            .overview
+            .log_buffer
+            .back()
+            .unwrap()
+            .timestamp,
+        4
+    );
 }
 
 #[test]
@@ -581,9 +605,15 @@ fn overview_cycle_filter_modes() {
 
     assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::All);
     shell.state.view_state.overview.cycle_filter();
-    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::BlockedOnly);
+    assert_eq!(
+        shell.state.view_state.overview.filter,
+        OverviewFilter::BlockedOnly
+    );
     shell.state.view_state.overview.cycle_filter();
-    assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::RunningOnly);
+    assert_eq!(
+        shell.state.view_state.overview.filter,
+        OverviewFilter::RunningOnly
+    );
     shell.state.view_state.overview.cycle_filter();
     assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::All);
 }

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{Sender, channel};
 use std::thread::{self, Builder, JoinHandle};
 use std::time::Duration;
 
@@ -14,8 +14,8 @@ use crate::provider_thread::ProviderThreadHandle;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::McpInvocation;
 use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::PatchChange;
 use crate::tool_calls::WebSearchAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,13 +209,16 @@ pub fn start_provider_with_handle(
         }),
     );
 
-    let handle: JoinHandle<()> = Builder::new()
-        .name(thread_name.clone())
-        .spawn(move || {
-            run_provider_internal(provider, prompt, cwd, session_handle, thread_event_tx);
-        })?;
+    let handle: JoinHandle<()> = Builder::new().name(thread_name.clone()).spawn(move || {
+        run_provider_internal(provider, prompt, cwd, session_handle, thread_event_tx);
+    })?;
 
-    Ok(ProviderThreadHandle::new(handle, event_rx, keepalive_tx, thread_name))
+    Ok(ProviderThreadHandle::new(
+        handle,
+        event_rx,
+        keepalive_tx,
+        thread_name,
+    ))
 }
 
 /// Internal provider runner for threaded execution

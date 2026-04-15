@@ -99,43 +99,47 @@ impl BacklogState {
     /// Mark task as running (assigned to agent)
     pub fn start_task(&mut self, task_id: &str) -> bool {
         if let Some(task) = self.find_task_mut(task_id)
-            && task.status == TaskStatus::Ready {
-                task.status = TaskStatus::Running;
-                return true;
-            }
+            && task.status == TaskStatus::Ready
+        {
+            task.status = TaskStatus::Running;
+            return true;
+        }
         false
     }
 
     /// Mark task as done (completed successfully)
     pub fn complete_task(&mut self, task_id: &str, summary: Option<String>) -> bool {
         if let Some(task) = self.find_task_mut(task_id)
-            && (task.status == TaskStatus::Running || task.status == TaskStatus::Verifying) {
-                task.status = TaskStatus::Done;
-                task.result_summary = summary;
-                return true;
-            }
+            && (task.status == TaskStatus::Running || task.status == TaskStatus::Verifying)
+        {
+            task.status = TaskStatus::Done;
+            task.result_summary = summary;
+            return true;
+        }
         false
     }
 
     /// Mark task as failed
     pub fn fail_task(&mut self, task_id: &str, error: String) -> bool {
         if let Some(task) = self.find_task_mut(task_id)
-            && task.status == TaskStatus::Running {
-                task.status = TaskStatus::Failed;
-                task.result_summary = Some(error);
-                return true;
-            }
+            && task.status == TaskStatus::Running
+        {
+            task.status = TaskStatus::Failed;
+            task.result_summary = Some(error);
+            return true;
+        }
         false
     }
 
     /// Mark task as blocked
     pub fn block_task(&mut self, task_id: &str, reason: String) -> bool {
         if let Some(task) = self.find_task_mut(task_id)
-            && task.status == TaskStatus::Running {
-                task.status = TaskStatus::Blocked;
-                task.result_summary = Some(reason);
-                return true;
-            }
+            && task.status == TaskStatus::Running
+        {
+            task.status = TaskStatus::Blocked;
+            task.result_summary = Some(reason);
+            return true;
+        }
         false
     }
 
@@ -213,7 +217,10 @@ impl ThreadSafeBacklog {
     ///
     /// Polls for lock acquisition until timeout expires.
     /// Returns None if lock cannot be acquired within timeout.
-    pub fn read_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
+    pub fn read_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
         let deadline = Instant::now() + timeout;
 
         // Poll for lock acquisition
@@ -238,7 +245,10 @@ impl ThreadSafeBacklog {
     }
 
     /// Acquire write lock with timeout (same as read for Mutex)
-    pub fn write_with_timeout(&self, timeout: Duration) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
+    pub fn write_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Option<std::sync::MutexGuard<'_, BacklogState>> {
         self.read_with_timeout(timeout)
     }
 
@@ -388,7 +398,10 @@ mod tests {
 
         let result = backlog.start_task("task-1");
         assert!(result);
-        assert_eq!(backlog.find_task("task-1").unwrap().status, TaskStatus::Running);
+        assert_eq!(
+            backlog.find_task("task-1").unwrap().status,
+            TaskStatus::Running
+        );
     }
 
     #[test]
@@ -409,7 +422,10 @@ mod tests {
         assert!(result);
         let task = backlog.find_task("task-1").unwrap();
         assert_eq!(task.status, TaskStatus::Done);
-        assert_eq!(task.result_summary, Some("completed successfully".to_string()));
+        assert_eq!(
+            task.result_summary,
+            Some("completed successfully".to_string())
+        );
     }
 
     #[test]
@@ -488,7 +504,9 @@ mod tests {
     #[test]
     fn thread_safe_backlog_empty_creates_default_state() {
         let safe_backlog = ThreadSafeBacklog::empty();
-        let guard = safe_backlog.read_with_timeout(Duration::from_millis(100)).unwrap();
+        let guard = safe_backlog
+            .read_with_timeout(Duration::from_millis(100))
+            .unwrap();
         assert!(guard.todos.is_empty());
         assert!(guard.tasks.is_empty());
     }
@@ -500,7 +518,9 @@ mod tests {
             state.push_task(task("task-1", TaskStatus::Ready));
         });
 
-        let guard = safe_backlog.read_with_timeout(Duration::from_millis(100)).unwrap();
+        let guard = safe_backlog
+            .read_with_timeout(Duration::from_millis(100))
+            .unwrap();
         assert_eq!(guard.tasks.len(), 1);
     }
 
@@ -538,7 +558,9 @@ mod tests {
         });
 
         // Original should still have only 1 task
-        let guard = safe_backlog.read_with_timeout(Duration::from_millis(100)).unwrap();
+        let guard = safe_backlog
+            .read_with_timeout(Duration::from_millis(100))
+            .unwrap();
         assert_eq!(guard.tasks.len(), 1);
 
         // Clone should have 2 tasks

@@ -21,10 +21,7 @@ use crate::workplace_store::WorkplaceStore;
 #[derive(Debug, Clone)]
 pub enum PersistenceOp {
     /// Save agent metadata
-    SaveMeta {
-        agent_id: AgentId,
-        meta: AgentMeta,
-    },
+    SaveMeta { agent_id: AgentId, meta: AgentMeta },
     /// Save agent transcript
     SaveTranscript {
         agent_id: AgentId,
@@ -133,15 +130,14 @@ impl AgentPersistenceCoordinator {
 
         // Drain all ops and partition into matching vs non-matching
         let all_ops: Vec<PersistenceOp> = self.pending_ops.drain(..).collect();
-        let (matching, non_matching): (Vec<_>, Vec<_>) = all_ops.into_iter().partition(|op| {
-            match op {
+        let (matching, non_matching): (Vec<_>, Vec<_>) =
+            all_ops.into_iter().partition(|op| match op {
                 PersistenceOp::SaveMeta { agent_id: id, .. } => id == agent_id,
                 PersistenceOp::SaveTranscript { agent_id: id, .. } => id == agent_id,
                 PersistenceOp::SaveState { agent_id: id, .. } => id == agent_id,
                 PersistenceOp::SaveMessages { agent_id: id, .. } => id == agent_id,
                 PersistenceOp::SaveMemory { agent_id: id, .. } => id == agent_id,
-            }
-        });
+            });
 
         // Re-queue non-matching ops
         for op in non_matching {
@@ -161,21 +157,16 @@ impl AgentPersistenceCoordinator {
     /// Execute a single persistence operation
     fn execute_op(&self, op: &PersistenceOp) -> Result<PathBuf> {
         match op {
-            PersistenceOp::SaveMeta { agent_id, meta } => {
-                self.save_meta(agent_id, meta)
-            }
-            PersistenceOp::SaveTranscript { agent_id, transcript } => {
-                self.save_transcript(agent_id, transcript)
-            }
-            PersistenceOp::SaveState { agent_id, state } => {
-                self.save_state(agent_id, state)
-            }
+            PersistenceOp::SaveMeta { agent_id, meta } => self.save_meta(agent_id, meta),
+            PersistenceOp::SaveTranscript {
+                agent_id,
+                transcript,
+            } => self.save_transcript(agent_id, transcript),
+            PersistenceOp::SaveState { agent_id, state } => self.save_state(agent_id, state),
             PersistenceOp::SaveMessages { agent_id, messages } => {
                 self.save_messages(agent_id, messages)
             }
-            PersistenceOp::SaveMemory { agent_id, memory } => {
-                self.save_memory(agent_id, memory)
-            }
+            PersistenceOp::SaveMemory { agent_id, memory } => self.save_memory(agent_id, memory),
         }
     }
 
@@ -325,8 +316,14 @@ mod tests {
         let agent_id = AgentId::new("agent_001");
 
         coord.queue_batch(vec![
-            PersistenceOp::SaveMeta { agent_id: agent_id.clone(), meta: make_test_meta(&agent_id) },
-            PersistenceOp::SaveState { agent_id: agent_id.clone(), state: make_test_state() },
+            PersistenceOp::SaveMeta {
+                agent_id: agent_id.clone(),
+                meta: make_test_meta(&agent_id),
+            },
+            PersistenceOp::SaveState {
+                agent_id: agent_id.clone(),
+                state: make_test_state(),
+            },
         ]);
 
         assert_eq!(coord.pending_count(), 2);

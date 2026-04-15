@@ -3,7 +3,7 @@
 //! Extensible traits replacing fixed enums, following Decision Layer pattern.
 
 use crate::serde::ElementSerde;
-use crate::types::{StatusType, ElementTypeIdentifier};
+use crate::types::{ElementTypeIdentifier, StatusType};
 
 /// KanbanStatus trait - extensible status implementation
 ///
@@ -125,7 +125,10 @@ pub trait KanbanElementTrait: Send + Sync + 'static {
             self.assignee(),
             self.blocked_reason(),
             self.tags(),
-            self.dependencies().iter().map(|d| d.as_str().to_string()).collect(),
+            self.dependencies()
+                .iter()
+                .map(|d| d.as_str().to_string())
+                .collect(),
             self.parent().map(|p| p.as_str().to_string()),
         )
     }

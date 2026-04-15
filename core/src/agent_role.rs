@@ -108,7 +108,11 @@ mod tests {
 
     #[test]
     fn role_default_skills() {
-        assert!(AgentRole::ProductOwner.default_skills().contains(&"requirements"));
+        assert!(
+            AgentRole::ProductOwner
+                .default_skills()
+                .contains(&"requirements")
+        );
         assert!(AgentRole::ScrumMaster.default_skills().contains(&"process"));
         assert!(AgentRole::Developer.default_skills().contains(&"coding"));
     }
@@ -117,7 +121,11 @@ mod tests {
     fn role_prompt_prefixes() {
         assert!(AgentRole::ProductOwner.prompt_prefix().contains("backlog"));
         assert!(AgentRole::ScrumMaster.prompt_prefix().contains("blocker"));
-        assert!(AgentRole::Developer.prompt_prefix().contains("implementation"));
+        assert!(
+            AgentRole::Developer
+                .prompt_prefix()
+                .contains("implementation")
+        );
     }
 
     #[test]

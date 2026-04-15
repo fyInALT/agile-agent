@@ -349,10 +349,14 @@ fn test_full_append_tip_workflow() {
     collector.clear();
 
     // Append multiple tips
-    let tip1 = service.append_tip(&task_id, "agent-1", "First tip content").unwrap();
+    let tip1 = service
+        .append_tip(&task_id, "agent-1", "First tip content")
+        .unwrap();
     let tip1_id = tip1.id().unwrap().clone();
 
-    let tip2 = service.append_tip(&task_id, "agent-2", "Second tip content").unwrap();
+    let tip2 = service
+        .append_tip(&task_id, "agent-2", "Second tip content")
+        .unwrap();
     let tip2_id = tip2.id().unwrap().clone();
 
     // Verify tip was created correctly

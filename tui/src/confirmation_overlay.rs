@@ -79,7 +79,11 @@ impl ConfirmationOverlay {
                     Some(ConfirmationCommand::Cancel)
                 }
             }
-            KeyCode::Char('c') if key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('c')
+                if key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 Some(ConfirmationCommand::Cancel)
             }
             KeyCode::Char('y') => Some(ConfirmationCommand::Confirm),
@@ -91,10 +95,10 @@ impl ConfirmationOverlay {
 
 #[cfg(test)]
 mod tests {
-    use super::ConfirmationOverlay;
     use super::ConfirmationCommand;
-    use crossterm::event::KeyEvent;
+    use super::ConfirmationOverlay;
     use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
 
     #[test]
     fn new_overlay_defaults_to_cancel() {
@@ -123,7 +127,10 @@ mod tests {
     fn enter_on_confirm_returns_confirm() {
         let mut overlay = ConfirmationOverlay::for_stop_agent("alpha");
         overlay.selected_index = 0;
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ConfirmationCommand::Confirm));
     }
 
@@ -131,28 +138,40 @@ mod tests {
     fn enter_on_cancel_returns_cancel() {
         let mut overlay = ConfirmationOverlay::for_stop_agent("alpha");
         overlay.selected_index = 1;
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ConfirmationCommand::Cancel));
     }
 
     #[test]
     fn y_key_confirms() {
         let mut overlay = ConfirmationOverlay::for_stop_agent("alpha");
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Char('y'), crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Char('y'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ConfirmationCommand::Confirm));
     }
 
     #[test]
     fn n_key_cancels() {
         let mut overlay = ConfirmationOverlay::for_stop_agent("alpha");
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Char('n'), crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Char('n'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ConfirmationCommand::Cancel));
     }
 
     #[test]
     fn esc_cancels() {
         let mut overlay = ConfirmationOverlay::for_stop_agent("alpha");
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ConfirmationCommand::Cancel));
     }
 }

@@ -327,18 +327,17 @@ fn consume_provider_until_finished(
                     query,
                     action,
                 } => state.push_web_search_finished(call_id, query, action),
-                ProviderEvent::ViewImage { call_id, path } => {
-                    state.push_view_image(call_id, path)
-                }
+                ProviderEvent::ViewImage { call_id, path } => state.push_view_image(call_id, path),
                 ProviderEvent::ImageGenerationFinished {
                     call_id,
                     revised_prompt,
                     result,
                     saved_path,
                 } => state.push_image_generation(call_id, revised_prompt, result, saved_path),
-                ProviderEvent::McpToolCallStarted { call_id, invocation } => {
-                    state.push_mcp_tool_call_started(call_id, invocation)
-                }
+                ProviderEvent::McpToolCallStarted {
+                    call_id,
+                    invocation,
+                } => state.push_mcp_tool_call_started(call_id, invocation),
                 ProviderEvent::McpToolCallFinished {
                     call_id,
                     invocation,
@@ -461,8 +460,11 @@ mod tests {
         workplace.ensure().expect("ensure");
         logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
 
-        let mut state =
-            AppState::with_skills(ProviderKind::Mock, temp.path().into(), SkillRegistry::default());
+        let mut state = AppState::with_skills(
+            ProviderKind::Mock,
+            temp.path().into(),
+            SkillRegistry::default(),
+        );
         state
             .backlog
             .push_todo(ready_todo("todo-1", "write summary", 1));

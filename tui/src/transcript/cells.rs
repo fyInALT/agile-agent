@@ -247,11 +247,7 @@ mod tests {
 
         assert!(rendered.iter().any(|line| line.contains("Ran")));
         // git commands show friendly label instead of raw command
-        assert!(
-            rendered
-                .iter()
-                .any(|line| line.contains("Git Diff"))
-        );
+        assert!(rendered.iter().any(|line| line.contains("Git Diff")));
         assert!(
             rendered
                 .iter()
@@ -853,7 +849,10 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_overlay_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line.contains("$ ls -la")), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line.contains("$ ls -la")),
+            "{rendered:?}"
+        );
         assert!(
             rendered.iter().any(|line| line.contains("$ cat foo.txt")),
             "{rendered:?}"
@@ -1008,7 +1007,10 @@ mod tests {
                 .any(|line| line.contains("Running printf hello")),
             "{committed:?}"
         );
-        assert!(active.iter().any(|line| line == "• Running printf hello"), "{active:?}");
+        assert!(
+            active.iter().any(|line| line == "• Running printf hello"),
+            "{active:?}"
+        );
     }
 
     #[test]
@@ -1019,7 +1021,11 @@ mod tests {
 
         let rendered = lines_to_strings(&flatten_cells(&build_live_tail_cells(&entries, 80)));
 
-        assert!(rendered.iter().any(|line| line.contains("streaming assistant response")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("streaming assistant response"))
+        );
     }
 
     #[test]

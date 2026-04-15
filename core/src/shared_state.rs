@@ -34,12 +34,12 @@
 
 use std::sync::Arc;
 
-use crate::backlog::BacklogState;
 use crate::agent_runtime::WorkplaceId;
+use crate::backlog::BacklogState;
 use crate::skills::SkillRegistry;
-use agent_kanban::service::KanbanService;
-use agent_kanban::file_repository::FileKanbanRepository;
 use agent_kanban::events::KanbanEventBus;
+use agent_kanban::file_repository::FileKanbanRepository;
+use agent_kanban::service::KanbanService;
 
 /// Loop control flags shared across agents
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,7 +200,10 @@ impl SharedWorkplaceState {
     }
 
     /// Create with kanban service from workplace path
-    pub fn with_kanban(workplace_id: WorkplaceId, workplace_path: impl Into<std::path::PathBuf>) -> Self {
+    pub fn with_kanban(
+        workplace_id: WorkplaceId,
+        workplace_path: impl Into<std::path::PathBuf>,
+    ) -> Self {
         let kanban = Self::create_kanban_service(&workplace_path.into());
         Self {
             workplace_id,
@@ -228,7 +231,9 @@ impl SharedWorkplaceState {
     }
 
     /// Create KanbanService from workplace path
-    fn create_kanban_service(workplace_path: &std::path::Path) -> Option<Arc<KanbanService<FileKanbanRepository>>> {
+    fn create_kanban_service(
+        workplace_path: &std::path::Path,
+    ) -> Option<Arc<KanbanService<FileKanbanRepository>>> {
         let repo = FileKanbanRepository::from_workplace(workplace_path).ok()?;
         let event_bus = Arc::new(KanbanEventBus::new());
         Some(Arc::new(KanbanService::new(Arc::new(repo), event_bus)))
@@ -468,10 +473,7 @@ mod tests {
     fn shared_workplace_with_kanban() {
         use tempfile::TempDir;
         let temp = TempDir::new().unwrap();
-        let state = SharedWorkplaceState::with_kanban(
-            WorkplaceId::new("wp-001"),
-            temp.path(),
-        );
+        let state = SharedWorkplaceState::with_kanban(WorkplaceId::new("wp-001"), temp.path());
         assert!(state.kanban.is_some());
         // Kanban service is initialized
         let kanban = state.kanban().unwrap();
@@ -493,10 +495,7 @@ mod tests {
         use tempfile::TempDir;
         let temp1 = TempDir::new().unwrap();
         let temp2 = TempDir::new().unwrap();
-        let mut state = SharedWorkplaceState::with_kanban(
-            WorkplaceId::new("wp-001"),
-            temp1.path(),
-        );
+        let mut state = SharedWorkplaceState::with_kanban(WorkplaceId::new("wp-001"), temp1.path());
         // Kanban already initialized, second call should not replace
         state.initialize_kanban(temp2.path());
         // Original kanban path is still used
@@ -505,13 +504,10 @@ mod tests {
 
     #[test]
     fn shared_workplace_kanban_create_task() {
+        use agent_kanban::domain::{ElementType, KanbanElement};
         use tempfile::TempDir;
-        use agent_kanban::domain::{KanbanElement, ElementType};
         let temp = TempDir::new().unwrap();
-        let state = SharedWorkplaceState::with_kanban(
-            WorkplaceId::new("wp-001"),
-            temp.path(),
-        );
+        let state = SharedWorkplaceState::with_kanban(WorkplaceId::new("wp-001"), temp.path());
         let kanban = state.kanban().unwrap();
         let task = KanbanElement::new_task("Test Task");
         let created = kanban.create_element(task).unwrap();
@@ -523,14 +519,27 @@ mod tests {
     fn shared_workplace_clone_preserves_kanban() {
         use tempfile::TempDir;
         let temp = TempDir::new().unwrap();
-        let state = SharedWorkplaceState::with_kanban(
-            WorkplaceId::new("wp-001"),
-            temp.path(),
-        );
+        let state = SharedWorkplaceState::with_kanban(WorkplaceId::new("wp-001"), temp.path());
         let cloned = state.clone();
         assert!(cloned.kanban.is_some());
         // Both share the same Arc
-        assert!(state.kanban.as_ref().unwrap().list_elements().unwrap().is_empty());
-        assert!(cloned.kanban.as_ref().unwrap().list_elements().unwrap().is_empty());
+        assert!(
+            state
+                .kanban
+                .as_ref()
+                .unwrap()
+                .list_elements()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            cloned
+                .kanban
+                .as_ref()
+                .unwrap()
+                .list_elements()
+                .unwrap()
+                .is_empty()
+        );
     }
 }

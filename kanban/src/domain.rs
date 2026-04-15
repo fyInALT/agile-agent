@@ -1,7 +1,7 @@
 //! Core domain types for the kanban system
 
 use crate::error::KanbanError;
-use crate::types::{StatusType, ElementTypeIdentifier};
+use crate::types::{ElementTypeIdentifier, StatusType};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::convert::TryFrom;
 use std::fmt;
@@ -105,7 +105,7 @@ impl TryFrom<StatusType> for Status {
             "verified" => Ok(Status::Verified),
             _ => Err(KanbanTransitionError {
                 from: Status::Plan, // dummy value, not used in error
-                to: Status::Plan,  // dummy value, not used in error
+                to: Status::Plan,   // dummy value, not used in error
             }),
         }
     }

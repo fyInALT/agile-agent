@@ -7,8 +7,8 @@ use crate::app::AppState;
 use crate::app::TranscriptEntry;
 use crate::tool_calls::ExecCommandStatus;
 use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchChange;
 use crate::tool_calls::PatchApplyStatus;
+use crate::tool_calls::PatchChange;
 use crate::tool_calls::WebSearchAction;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,7 +190,10 @@ fn map_entry(
                     .map(|value| value.to_string())
                     .as_deref()
                     .unwrap_or(""),
-                duration_ms.map(|value| value.to_string()).as_deref().unwrap_or(""),
+                duration_ms
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or(""),
             ),
             created_at: captured_at,
         },
@@ -423,12 +426,7 @@ fn map_entry(
 fn summarize_patch_changes(changes: &[PatchChange]) -> String {
     changes
         .iter()
-        .map(|change| {
-            format!(
-                "{} (+{} -{})",
-                change.path, change.added, change.removed
-            )
-        })
+        .map(|change| format!("{} (+{} -{})", change.path, change.added, change.removed))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -453,9 +451,9 @@ fn exec_command_status_label(status: ExecCommandStatus) -> &'static str {
 
 fn summarize_web_search_action(action: &Option<WebSearchAction>) -> String {
     match action {
-        Some(WebSearchAction::Search { query, queries }) => {
-            query.clone().or_else(|| queries.as_ref().and_then(|items| items.first().cloned()))
-        }
+        Some(WebSearchAction::Search { query, queries }) => query
+            .clone()
+            .or_else(|| queries.as_ref().and_then(|items| items.first().cloned())),
         Some(WebSearchAction::OpenPage { url }) => url.clone(),
         Some(WebSearchAction::FindInPage { url, pattern }) => {
             match (pattern.as_deref(), url.as_deref()) {

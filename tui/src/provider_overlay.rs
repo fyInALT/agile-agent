@@ -78,7 +78,11 @@ impl ProviderSelectionOverlay {
                 None
             }
             KeyCode::Enter => Some(ProviderSelectionCommand::Select(self.selected_provider())),
-            KeyCode::Char('c') if key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('c')
+                if key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 Some(ProviderSelectionCommand::Close)
             }
             _ => None,
@@ -97,11 +101,11 @@ impl ProviderSelectionOverlay {
 
 #[cfg(test)]
 mod tests {
-    use super::ProviderSelectionOverlay;
     use super::ProviderSelectionCommand;
+    use super::ProviderSelectionOverlay;
     use agent_core::provider::ProviderKind;
-    use crossterm::event::KeyEvent;
     use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
 
     #[test]
     fn new_overlay_has_first_provider_selected() {
@@ -137,14 +141,23 @@ mod tests {
     fn enter_returns_selected_provider() {
         let mut overlay = ProviderSelectionOverlay::new();
         overlay.selected_index = 1;
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
-        assert_eq!(result, Some(ProviderSelectionCommand::Select(ProviderKind::Codex)));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert_eq!(
+            result,
+            Some(ProviderSelectionCommand::Select(ProviderKind::Codex))
+        );
     }
 
     #[test]
     fn esc_closes_overlay() {
         let mut overlay = ProviderSelectionOverlay::new();
-        let result = overlay.handle_key_event(KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE));
+        let result = overlay.handle_key_event(KeyEvent::new(
+            KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(result, Some(ProviderSelectionCommand::Close));
     }
 }

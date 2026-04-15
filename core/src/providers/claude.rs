@@ -368,12 +368,13 @@ fn parse_result_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
 
 fn parse_log_message(message: ClaudeSdkMessage) -> Vec<ProviderEvent> {
     if let Some(log) = message.log
-        && !log.message.is_empty() {
-            return vec![ProviderEvent::Status(format!(
-                "claude {}: {}",
-                log.level, log.message
-            ))];
-        }
+        && !log.message.is_empty()
+    {
+        return vec![ProviderEvent::Status(format!(
+            "claude {}: {}",
+            log.level, log.message
+        ))];
+    }
     Vec::new()
 }
 
@@ -604,7 +605,8 @@ mod tests {
             .map(|line| serde_json::from_str(line).expect("valid json log line"))
             .collect();
         assert!(entries.iter().any(|entry| {
-            entry.get("event").and_then(|value| value.as_str()) == Some("provider.claude.stdout_line")
+            entry.get("event").and_then(|value| value.as_str())
+                == Some("provider.claude.stdout_line")
                 && entry
                     .get("fields")
                     .and_then(|fields| fields.get("line"))

@@ -2,7 +2,7 @@
 //!
 //! TDD: Tests for concrete KanbanStatus and KanbanElementTypeTrait implementations
 
-use agent_kanban::builtin::{builtin_statuses_impl, builtin_element_types_impl};
+use agent_kanban::builtin::{builtin_element_types_impl, builtin_statuses_impl};
 
 mod builtin_status_tests {
     use super::*;
@@ -84,7 +84,10 @@ mod builtin_status_tests {
         let all = builtin_statuses_impl::all();
         assert_eq!(all.len(), 8);
 
-        let names: Vec<String> = all.iter().map(|s| s.status_type().name().to_string()).collect();
+        let names: Vec<String> = all
+            .iter()
+            .map(|s| s.status_type().name().to_string())
+            .collect();
         assert!(names.contains(&"plan".to_string()));
         assert!(names.contains(&"backlog".to_string()));
         assert!(names.contains(&"verified".to_string()));
@@ -155,7 +158,10 @@ mod builtin_element_type_tests {
         let all = builtin_element_types_impl::all();
         assert_eq!(all.len(), 6);
 
-        let names: Vec<String> = all.iter().map(|t| t.element_type().name().to_string()).collect();
+        let names: Vec<String> = all
+            .iter()
+            .map(|t| t.element_type().name().to_string())
+            .collect();
         assert!(names.contains(&"sprint".to_string()));
         assert!(names.contains(&"story".to_string()));
         assert!(names.contains(&"task".to_string()));

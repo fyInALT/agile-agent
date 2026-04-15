@@ -2,8 +2,8 @@
 //!
 //! Concrete implementations of KanbanStatus and KanbanElementTypeTrait traits.
 
-use crate::traits::{KanbanStatus, KanbanElementTypeTrait};
-use crate::types::{StatusType, ElementTypeIdentifier};
+use crate::traits::{KanbanElementTypeTrait, KanbanStatus};
+use crate::types::{ElementTypeIdentifier, StatusType};
 
 // ============================================================================
 // Builtin Status Implementations

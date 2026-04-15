@@ -1,11 +1,11 @@
 //! Tests for ElementSerde serialization proxy
 
+use agent_kanban::domain::{ElementId, ElementType};
+use agent_kanban::elements::{IssueElement, SprintElement, TaskElement};
+use agent_kanban::factory::ElementFactory;
 use agent_kanban::serde::ElementSerde;
-use agent_kanban::elements::{TaskElement, SprintElement, IssueElement};
 use agent_kanban::traits::KanbanElementTrait;
 use agent_kanban::types::StatusType;
-use agent_kanban::domain::{ElementId, ElementType};
-use agent_kanban::factory::ElementFactory;
 
 mod serde_tests {
     use super::*;
@@ -48,7 +48,8 @@ mod serde_tests {
 
     #[test]
     fn test_serde_deserialization() {
-        let json = r#"{"element_type":"task","title":"My Task","content":"","status":"plan","id":null}"#;
+        let json =
+            r#"{"element_type":"task","title":"My Task","content":"","status":"plan","id":null}"#;
         let serde: ElementSerde = serde_json::from_str(json).unwrap();
 
         assert_eq!(serde.element_type, "task");

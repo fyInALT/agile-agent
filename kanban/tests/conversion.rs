@@ -1,7 +1,7 @@
 //! Tests for conversion between old enum types and new trait-based types
 
-use agent_kanban::domain::{Status, ElementType};
-use agent_kanban::types::{StatusType, ElementTypeIdentifier};
+use agent_kanban::domain::{ElementType, Status};
+use agent_kanban::types::{ElementTypeIdentifier, StatusType};
 use std::convert::TryFrom;
 
 mod status_conversion_tests {
@@ -17,10 +17,22 @@ mod status_conversion_tests {
 
     #[test]
     fn test_status_from_status_type() {
-        assert_eq!(Status::try_from(StatusType::new("plan")).unwrap(), Status::Plan);
-        assert_eq!(Status::try_from(StatusType::new("backlog")).unwrap(), Status::Backlog);
-        assert_eq!(Status::try_from(StatusType::new("in_progress")).unwrap(), Status::InProgress);
-        assert_eq!(Status::try_from(StatusType::new("verified")).unwrap(), Status::Verified);
+        assert_eq!(
+            Status::try_from(StatusType::new("plan")).unwrap(),
+            Status::Plan
+        );
+        assert_eq!(
+            Status::try_from(StatusType::new("backlog")).unwrap(),
+            Status::Backlog
+        );
+        assert_eq!(
+            Status::try_from(StatusType::new("in_progress")).unwrap(),
+            Status::InProgress
+        );
+        assert_eq!(
+            Status::try_from(StatusType::new("verified")).unwrap(),
+            Status::Verified
+        );
     }
 
     #[test]
@@ -43,18 +55,42 @@ mod element_type_conversion_tests {
 
     #[test]
     fn test_element_type_to_identifier() {
-        assert_eq!(ElementType::Sprint.to_element_type_identifier().name(), "sprint");
-        assert_eq!(ElementType::Story.to_element_type_identifier().name(), "story");
-        assert_eq!(ElementType::Task.to_element_type_identifier().name(), "task");
-        assert_eq!(ElementType::Tips.to_element_type_identifier().name(), "tips");
+        assert_eq!(
+            ElementType::Sprint.to_element_type_identifier().name(),
+            "sprint"
+        );
+        assert_eq!(
+            ElementType::Story.to_element_type_identifier().name(),
+            "story"
+        );
+        assert_eq!(
+            ElementType::Task.to_element_type_identifier().name(),
+            "task"
+        );
+        assert_eq!(
+            ElementType::Tips.to_element_type_identifier().name(),
+            "tips"
+        );
     }
 
     #[test]
     fn test_element_type_from_identifier() {
-        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("sprint")).unwrap(), ElementType::Sprint);
-        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("story")).unwrap(), ElementType::Story);
-        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("task")).unwrap(), ElementType::Task);
-        assert_eq!(ElementType::try_from(ElementTypeIdentifier::new("tips")).unwrap(), ElementType::Tips);
+        assert_eq!(
+            ElementType::try_from(ElementTypeIdentifier::new("sprint")).unwrap(),
+            ElementType::Sprint
+        );
+        assert_eq!(
+            ElementType::try_from(ElementTypeIdentifier::new("story")).unwrap(),
+            ElementType::Story
+        );
+        assert_eq!(
+            ElementType::try_from(ElementTypeIdentifier::new("task")).unwrap(),
+            ElementType::Task
+        );
+        assert_eq!(
+            ElementType::try_from(ElementTypeIdentifier::new("tips")).unwrap(),
+            ElementType::Tips
+        );
     }
 
     #[test]

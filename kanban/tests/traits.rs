@@ -2,8 +2,10 @@
 //!
 //! TDD: These tests define the expected trait API before implementation
 
-use agent_kanban::traits::{KanbanStatus, KanbanElementTypeTrait, KanbanElementTrait};
-use agent_kanban::types::{StatusType, ElementTypeIdentifier, builtin_statuses, builtin_element_types};
+use agent_kanban::traits::{KanbanElementTrait, KanbanElementTypeTrait, KanbanStatus};
+use agent_kanban::types::{
+    ElementTypeIdentifier, StatusType, builtin_element_types, builtin_statuses,
+};
 
 mod kanban_status_trait_tests {
     use super::*;
@@ -179,7 +181,8 @@ mod kanban_element_trait_tests {
         }
 
         fn set_status(&mut self, status: StatusType) {
-            let status_enum: agent_kanban::domain::Status = status.try_into().expect("valid status");
+            let status_enum: agent_kanban::domain::Status =
+                status.try_into().expect("valid status");
             self.inner.set_status(status_enum);
         }
 
