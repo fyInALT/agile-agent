@@ -360,8 +360,6 @@ mod tests {
             active_task_had_error: false,
             continuation_attempts: 1,
             loop_phase: crate::app::LoopPhase::Executing,
-            loop_run_active: true,
-            remaining_loop_iterations: 2,
             was_interrupted: false,
         };
 

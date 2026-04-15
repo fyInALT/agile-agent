@@ -33,8 +33,6 @@ pub struct PersistedSession {
     pub active_task_had_error: bool,
     pub continuation_attempts: u8,
     pub loop_phase: LoopPhase,
-    pub loop_run_active: bool,
-    pub remaining_loop_iterations: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,8 +60,6 @@ impl PersistedSession {
             active_task_had_error: state.active_task_had_error,
             continuation_attempts: state.continuation_attempts,
             loop_phase: state.loop_phase,
-            loop_run_active: state.loop_run_active,
-            remaining_loop_iterations: state.remaining_loop_iterations,
         }
     }
 
@@ -82,8 +78,6 @@ impl PersistedSession {
         state.active_task_had_error = self.active_task_had_error;
         state.continuation_attempts = self.continuation_attempts;
         state.loop_phase = self.loop_phase;
-        state.loop_run_active = self.loop_run_active;
-        state.remaining_loop_iterations = self.remaining_loop_iterations;
 
         let restored_enabled: BTreeSet<String> = self
             .enabled_skill_names
@@ -288,8 +282,6 @@ mod tests {
             active_task_had_error: false,
             continuation_attempts: 1,
             loop_phase: LoopPhase::Executing,
-            loop_run_active: true,
-            remaining_loop_iterations: 2,
         };
 
         persisted.apply_to_app_state(&mut state);
@@ -301,7 +293,6 @@ mod tests {
         assert!(state.skills.is_enabled("reviewer"));
         assert_eq!(state.active_task_id.as_deref(), Some("task-1"));
         assert_eq!(state.continuation_attempts, 1);
-        assert!(state.loop_run_active);
     }
 
     #[test]
@@ -320,8 +311,6 @@ mod tests {
             active_task_had_error: false,
             continuation_attempts: 0,
             loop_phase: LoopPhase::Idle,
-            loop_run_active: false,
-            remaining_loop_iterations: 0,
         };
 
         let restored = apply_restored_session(&mut state, &session, Path::new("."));

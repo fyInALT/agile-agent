@@ -17,8 +17,6 @@ pub struct AgentState {
     pub active_task_had_error: bool,
     pub continuation_attempts: u8,
     pub loop_phase: LoopPhase,
-    pub loop_run_active: bool,
-    pub remaining_loop_iterations: usize,
     /// Whether the agent was interrupted during execution (crash, force quit, etc.)
     pub was_interrupted: bool,
 }
@@ -38,8 +36,6 @@ impl AgentState {
             active_task_had_error: state.active_task_had_error,
             continuation_attempts: state.continuation_attempts,
             loop_phase: state.loop_phase,
-            loop_run_active: state.loop_run_active,
-            remaining_loop_iterations: state.remaining_loop_iterations,
             was_interrupted: false, // Will be set to true on shutdown if executing
         }
     }
@@ -54,8 +50,6 @@ impl AgentState {
             active_task_had_error: state.active_task_had_error,
             continuation_attempts: state.continuation_attempts,
             loop_phase: state.loop_phase,
-            loop_run_active: state.loop_run_active,
-            remaining_loop_iterations: state.remaining_loop_iterations,
             was_interrupted: true,
         }
     }
@@ -77,8 +71,6 @@ impl AgentState {
         state.active_task_had_error = self.active_task_had_error;
         state.continuation_attempts = self.continuation_attempts;
         state.loop_phase = self.loop_phase;
-        state.loop_run_active = self.loop_run_active;
-        state.remaining_loop_iterations = self.remaining_loop_iterations;
 
         let restored_enabled: BTreeSet<String> = self
             .enabled_skill_names
@@ -115,7 +107,6 @@ mod tests {
         state.input = "draft".to_string();
         state.active_task_id = Some("task-1".to_string());
         state.loop_phase = LoopPhase::Executing;
-        state.loop_run_active = true;
 
         let snapshot = AgentState::from_app_state(&state);
         let mut restored = AppState::new(ProviderKind::Mock);
@@ -125,7 +116,6 @@ mod tests {
         assert_eq!(restored.input, "draft");
         assert_eq!(restored.active_task_id.as_deref(), Some("task-1"));
         assert_eq!(restored.loop_phase, LoopPhase::Executing);
-        assert!(restored.loop_run_active);
     }
 
     #[test]

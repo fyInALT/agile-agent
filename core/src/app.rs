@@ -108,13 +108,10 @@ pub struct AppState {
     pub active_task_id: Option<String>,
     pub active_task_had_error: bool,
     pub continuation_attempts: u8,
-    pub loop_run_active: bool,
-    pub remaining_loop_iterations: usize,
     pub claude_session_id: Option<String>,
     pub codex_thread_id: Option<String>,
     pub status: AppStatus,
     pub loop_phase: LoopPhase,
-    pub should_quit: bool,
 }
 
 impl Default for AppState {
@@ -132,13 +129,10 @@ impl Default for AppState {
             active_task_id: None,
             active_task_had_error: false,
             continuation_attempts: 0,
-            loop_run_active: false,
-            remaining_loop_iterations: 0,
             claude_session_id: None,
             codex_thread_id: None,
             status: AppStatus::Idle,
             loop_phase: LoopPhase::Idle,
-            should_quit: false,
         }
     }
 }
@@ -162,10 +156,6 @@ impl AppState {
             skills,
             ..Self::default()
         }
-    }
-
-    pub fn request_quit(&mut self) {
-        self.should_quit = true;
     }
 
     pub fn insert_char(&mut self, ch: char) {
@@ -678,17 +668,6 @@ impl AppState {
         self.claude_session_id = None;
         self.codex_thread_id = None;
         self.transcript.clear();
-    }
-
-    pub fn start_loop_run(&mut self, max_iterations: usize) {
-        self.loop_run_active = true;
-        self.remaining_loop_iterations = max_iterations;
-    }
-
-    pub fn stop_loop_run(&mut self, reason: impl Into<String>) {
-        self.loop_run_active = false;
-        self.remaining_loop_iterations = 0;
-        self.push_status_message(reason);
     }
 
     pub fn add_todo(&mut self, title: String) -> String {

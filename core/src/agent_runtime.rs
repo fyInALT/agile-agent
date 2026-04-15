@@ -431,9 +431,8 @@ fn provider_session_id_from_app(state: &AppState) -> Option<ProviderSessionId> {
 }
 
 fn agent_status_from_app(state: &AppState) -> AgentStatus {
-    if state.should_quit {
-        return AgentStatus::Stopped;
-    }
+    // Note: should_quit is now in SharedWorkplaceState.loop_control, not AppState
+    // Agent status is determined by activity, not by quit flag
     if state.status == AppStatus::Responding || state.loop_phase != LoopPhase::Idle {
         AgentStatus::Running
     } else {

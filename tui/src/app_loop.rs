@@ -74,7 +74,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 state.app_mut().set_loop_phase(LoopPhase::Idle);
                 state
                     .app_mut()
-                    .stop_loop_run("loop guardrail reached: max iterations");
+                    .push_status_message("loop guardrail reached: max iterations");
                 state.workplace_mut().loop_control.stop_loop();
             } else if let Some((prompt, started_new_task)) = next_loop_prompt(&mut state) {
                 if started_new_task {
@@ -83,7 +83,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 start_provider_request(&mut state, prompt, &mut provider_rx);
             } else {
                 state.app_mut().set_loop_phase(LoopPhase::Idle);
-                state.app_mut().stop_loop_run("no ready todo available");
+                state.app_mut().push_status_message("no ready todo available");
                 state.workplace_mut().loop_control.stop_loop();
             }
         }
@@ -360,9 +360,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
                         }
                         InputOutcome::Quit => {
-    state.app_mut().request_quit();
-    // Sync quit flag to workplace immediately for loop exit
-    state.session.workplace_mut().loop_control.should_quit = true;
+    state.session.workplace_mut().loop_control.signal_quit();
 }
                         InputOutcome::Submit(user_input) => {
                             if let Some(command_result) = parse_local_command(&user_input) {
@@ -757,7 +755,7 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
             Some(task_engine::build_task_prompt(&task))
         }
         LocalCommand::RunLoop => {
-            state.app_mut().start_loop_run(5);
+            state.workplace_mut().loop_control.start_loop(5);
             state.app_mut().set_loop_phase(LoopPhase::Planning);
             state
                 .app_mut()
@@ -772,9 +770,7 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
             None
         }
         LocalCommand::Quit => {
-            state.app_mut().request_quit();
-            // Sync quit flag to workplace immediately for loop exit
-            state.session.workplace_mut().loop_control.should_quit = true;
+            state.workplace_mut().loop_control.signal_quit();
             None
         }
     }
@@ -1069,15 +1065,13 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        // Initially not quitting
+        // Initially not quitting (should_quit is in workplace, not app)
         assert!(!state.workplace().loop_control.should_quit);
-        assert!(!state.app().should_quit);
 
         // Execute quit command
         handle_local_command(&mut state, LocalCommand::Quit);
 
-        // Both should be set immediately
-        assert!(state.app().should_quit);
+        // should_quit is now set in workplace
         assert!(state.workplace().loop_control.should_quit);
     }
 }

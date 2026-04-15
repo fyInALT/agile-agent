@@ -127,21 +127,17 @@ impl RuntimeSession {
 
     /// Sync shared fields from app to workplace
     /// Called before persisting to ensure workplace has latest shared state
+    /// Note: Loop control fields now live directly in workplace, not in AppState
     pub fn sync_app_to_workplace(&mut self) {
-        self.workplace.loop_control.should_quit = self.app.should_quit;
-        self.workplace.loop_control.loop_run_active = self.app.loop_run_active;
-        self.workplace.loop_control.current_iteration =
-            self.workplace.loop_control.max_iterations.saturating_sub(self.app.remaining_loop_iterations);
+        // Only sync skills.enabled_names - loop control is already in workplace
         self.workplace.skills.enabled_names = self.app.skills.enabled_names.clone();
-        // Note: backlog is already synced through separate calls
     }
 
     /// Sync shared fields from workplace to app
     /// Called after restoring to ensure app has latest shared state
+    /// Note: Loop control fields now live directly in workplace
     pub fn sync_workplace_to_app(&mut self) {
-        self.app.should_quit = self.workplace.loop_control.should_quit;
-        self.app.loop_run_active = self.workplace.loop_control.loop_run_active;
-        self.app.remaining_loop_iterations = self.workplace.loop_control.remaining_iterations();
+        // Only sync skills.enabled_names - loop control is in workplace, not AppState
         self.app.skills.enabled_names = self.workplace.skills.enabled_names.clone();
     }
 
@@ -555,8 +551,6 @@ mod tests {
                 .expect("bootstrap first");
         first.app.input = "draft input".to_string();
         first.app.active_task_id = Some("task-restore-1".to_string());
-        first.app.loop_run_active = true;
-        first.app.remaining_loop_iterations = 5;
         first.mark_stopped_and_persist().expect("persist first");
 
         let restored =
@@ -565,8 +559,6 @@ mod tests {
 
         assert_eq!(restored.app.input, "draft input");
         assert_eq!(restored.app.active_task_id.as_deref(), Some("task-restore-1"));
-        assert!(restored.app.loop_run_active);
-        assert_eq!(restored.app.remaining_loop_iterations, 5);
     }
 
     #[test]
@@ -699,7 +691,6 @@ mod tests {
             RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
                 .expect("bootstrap first");
         first.app.input = "saved input".to_string();
-        first.app.loop_run_active = true;
         first.graceful_shutdown(ShutdownReason::UserQuit).expect("shutdown");
 
         // Bootstrap with resume_snapshot=true should restore from shutdown snapshot
@@ -709,7 +700,6 @@ mod tests {
 
         // Should have restored state from snapshot
         assert_eq!(restored.app.input, "saved input");
-        assert!(restored.app.loop_run_active);
     }
 
     #[test]

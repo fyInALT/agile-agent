@@ -154,7 +154,7 @@ impl ShellHarness {
             InputOutcome::Submit(text) => {
                 self.state.app_mut().push_user_message(text);
             }
-            InputOutcome::Quit => self.state.app_mut().request_quit(),
+            InputOutcome::Quit => self.state.workplace_mut().loop_control.signal_quit(),
             InputOutcome::SwitchViewMode(n) => {
                 self.state.view_state.switch_by_number(n);
             }

@@ -288,8 +288,6 @@ mod tests {
             active_task_had_error: false,
             continuation_attempts: 0,
             loop_phase: LoopPhase::Idle,
-            loop_run_active: false,
-            remaining_loop_iterations: 0,
             was_interrupted: false,
         }
     }
