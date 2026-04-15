@@ -13,6 +13,7 @@ use crate::provider::ProviderKind;
 
 // Decision layer imports
 use agent_decision::{
+    AutoAction,
     BlockedState,
     HumanDecisionRequest, HumanDecisionResponse, HumanSelection,
     HumanDecisionQueue, HumanDecisionTimeoutConfig,
@@ -90,6 +91,8 @@ pub struct BlockedHandlingConfig {
     pub notify_others: bool,
     /// Record blocked history
     pub record_history: bool,
+    /// Maximum history entries (0 = unlimited)
+    pub max_history_entries: usize,
 }
 
 impl Default for BlockedHandlingConfig {
@@ -99,6 +102,7 @@ impl Default for BlockedHandlingConfig {
             timeout_config: HumanDecisionTimeoutConfig::default(),
             notify_others: true,
             record_history: true,
+            max_history_entries: 1000,
         }
     }
 }
@@ -966,6 +970,26 @@ impl AgentPool {
         &self.blocked_history
     }
 
+    /// Prune history to max size
+    ///
+    /// Removes oldest resolved entries first, then oldest unresolved if still over limit.
+    fn prune_history(&mut self) {
+        let max = self.blocked_config.max_history_entries;
+        if max == 0 {
+            return; // No limit
+        }
+
+        while self.blocked_history.len() > max {
+            // Find the oldest resolved entry
+            if let Some(pos) = self.blocked_history.iter().position(|e| e.resolved) {
+                self.blocked_history.remove(pos);
+            } else {
+                // No resolved entries, remove the oldest
+                self.blocked_history.remove(0);
+            }
+        }
+    }
+
     /// Find blocked agents
     pub fn blocked_agents(&self) -> Vec<&AgentSlot> {
         self.slots
@@ -1018,6 +1042,22 @@ impl AgentPool {
                 resolved: false,
                 resolution: None,
             });
+            self.prune_history();
+        }
+
+        // Notify other agents if configured
+        if self.blocked_config.notify_others {
+            // Emit event for other agents to react
+            crate::logging::debug_event(
+                "agent.blocked.notify_others",
+                "agent blocked, notifying other agents",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "reason_type": reason_type,
+                    "description": blocked_state.reason().description(),
+                    "urgency": format!("{}", blocked_state.reason().urgency()),
+                }),
+            );
         }
 
         // Handle blocked task
@@ -1069,17 +1109,18 @@ impl AgentPool {
                             .unwrap_or(false);
 
                         if task_exists {
-                            // Clear task from blocked slot
-                            if let Some(blocked_slot) = self.get_slot_mut_by_id(agent_id) {
-                                blocked_slot.clear_task();
-                            }
-                            // Assign to idle agent (task stays Running in backlog)
-                            if let Some(idle_slot) = self.get_slot_mut_by_id(&idle_agent) {
-                                // Assign task - this should succeed for Idle slot
-                                if idle_slot.assign_task(task_id.clone()).is_ok() {
-                                    // Task already Running, no need to call start_task
+                            // Try to assign to idle agent FIRST
+                            let reassignment_succeeded = self.get_slot_mut_by_id(&idle_agent)
+                                .map(|slot| slot.assign_task(task_id.clone()).is_ok())
+                                .unwrap_or(false);
+
+                            // Only clear from blocked slot if reassignment succeeded
+                            if reassignment_succeeded {
+                                if let Some(blocked_slot) = self.get_slot_mut_by_id(agent_id) {
+                                    blocked_slot.clear_task();
                                 }
                             }
+                            // If reassignment failed, task stays with blocked agent
                         }
                     }
                 }
@@ -1207,6 +1248,69 @@ impl AgentPool {
     /// Get requests approaching timeout
     pub fn approaching_timeout_requests(&self) -> Vec<&HumanDecisionRequest> {
         self.human_queue.approaching_timeout()
+    }
+
+    /// Process expired requests and execute timeout actions
+    ///
+    /// Returns the number of requests processed.
+    pub fn process_expired_requests(&mut self) -> usize {
+        let expired = self.human_queue.check_expired();
+        let count = expired.len();
+
+        for request in expired {
+            let selection = self.timeout_action_for_request(&request);
+            let response = HumanDecisionResponse::new(
+                request.id,
+                selection,
+            );
+            // Ignore errors - the request is already removed from queue
+            let _ = self.process_human_response(response);
+        }
+
+        count
+    }
+
+    /// Determine the timeout action for a request based on config
+    fn timeout_action_for_request(&self, request: &HumanDecisionRequest) -> HumanSelection {
+        let timeout_action = self.blocked_config.timeout_config.timeout_default;
+
+        match timeout_action {
+            AutoAction::FollowRecommendation => {
+                // If there's a recommendation, accept it
+                if request.recommendation.is_some() {
+                    HumanSelection::AcceptedRecommendation
+                } else {
+                    // No recommendation, select default option
+                    self.select_default_option(request)
+                }
+            }
+            AutoAction::SelectDefault => {
+                self.select_default_option(request)
+            }
+            AutoAction::Cancel => {
+                HumanSelection::Cancelled
+            }
+            AutoAction::MarkTaskFailed => {
+                // Mark task as failed - this would require a new selection type
+                // For now, treat as cancelled
+                HumanSelection::Cancelled
+            }
+            AutoAction::ReleaseResource => {
+                HumanSelection::Cancelled
+            }
+        }
+    }
+
+    /// Select the default option from a request
+    fn select_default_option(&self, request: &HumanDecisionRequest) -> HumanSelection {
+        if let Some(first_option) = request.options.first() {
+            HumanSelection::Selected {
+                option_id: first_option.id.clone(),
+            }
+        } else {
+            // No options available, skip
+            HumanSelection::Skipped
+        }
     }
 }
 
@@ -1745,6 +1849,7 @@ mod tests {
             timeout_config: HumanDecisionTimeoutConfig::default(),
             notify_others: false,
             record_history: false,
+            max_history_entries: 100,
         };
         let pool = AgentPool::with_blocked_config(
             WorkplaceId::new("workplace-001"),
@@ -1829,6 +1934,7 @@ mod tests {
             timeout_config: HumanDecisionTimeoutConfig::default(),
             notify_others: true,
             record_history: true,
+            max_history_entries: 100,
         };
         let mut pool = AgentPool::with_blocked_config(
             WorkplaceId::new("workplace-001"),

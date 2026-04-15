@@ -582,6 +582,9 @@ pub struct HumanDecisionQueue {
     medium: Vec<HumanDecisionRequest>,
     low: Vec<HumanDecisionRequest>,
 
+    /// Index for O(1) lookup: request_id -> urgency level
+    id_index: HashMap<String, UrgencyLevel>,
+
     /// Completed requests (history)
     history: Vec<HumanDecisionResponse>,
 
@@ -596,6 +599,7 @@ impl HumanDecisionQueue {
             high: Vec::new(),
             medium: Vec::new(),
             low: Vec::new(),
+            id_index: HashMap::new(),
             history: Vec::new(),
             timeout_config,
         }
@@ -603,28 +607,39 @@ impl HumanDecisionQueue {
 
     /// Push request to appropriate priority queue
     pub fn push(&mut self, request: HumanDecisionRequest) {
-        match request.urgency {
+        let urgency = request.urgency;
+        let request_id = request.id.clone();
+        match urgency {
             UrgencyLevel::Critical => self.critical.push(request),
             UrgencyLevel::High => self.high.push(request),
             UrgencyLevel::Medium => self.medium.push(request),
             UrgencyLevel::Low => self.low.push(request),
         }
+        self.id_index.insert(request_id, urgency);
     }
 
     /// Pop next request (priority order)
     pub fn pop(&mut self) -> Option<HumanDecisionRequest> {
         // Priority: Critical > High > Medium > Low
         if !self.critical.is_empty() {
-            return Some(self.critical.remove(0));
+            let request = self.critical.remove(0);
+            self.id_index.remove(&request.id);
+            return Some(request);
         }
         if !self.high.is_empty() {
-            return Some(self.high.remove(0));
+            let request = self.high.remove(0);
+            self.id_index.remove(&request.id);
+            return Some(request);
         }
         if !self.medium.is_empty() {
-            return Some(self.medium.remove(0));
+            let request = self.medium.remove(0);
+            self.id_index.remove(&request.id);
+            return Some(request);
         }
         if !self.low.is_empty() {
-            return Some(self.low.remove(0));
+            let request = self.low.remove(0);
+            self.id_index.remove(&request.id);
+            return Some(request);
         }
         None
     }
@@ -651,12 +666,18 @@ impl HumanDecisionQueue {
     }
 
     fn find_and_remove(&mut self, id: &str) -> Option<HumanDecisionRequest> {
-        for queue in [&mut self.critical, &mut self.high, &mut self.medium, &mut self.low] {
-            if let Some(pos) = queue.iter().position(|r| r.id == id) {
-                return Some(queue.remove(pos));
-            }
-        }
-        None
+        // O(1) lookup using index
+        let urgency = self.id_index.remove(id)?;
+
+        // Remove from the appropriate queue
+        let queue = match urgency {
+            UrgencyLevel::Critical => &mut self.critical,
+            UrgencyLevel::High => &mut self.high,
+            UrgencyLevel::Medium => &mut self.medium,
+            UrgencyLevel::Low => &mut self.low,
+        };
+
+        queue.iter().position(|r| r.id == id).map(|pos| queue.remove(pos))
     }
 
     /// Check for expired requests
