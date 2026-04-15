@@ -127,38 +127,7 @@ fn run_codex(
         _ => None,
     };
 
-    let thread_request = if let Some(thread_id) = existing_thread.clone() {
-        JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/resume".to_string(),
-            params: serde_json::json!({
-                "threadId": thread_id,
-                "persistExtendedHistory": true
-            }),
-        }
-    } else {
-        JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/start".to_string(),
-            params: serde_json::json!({
-                "model": serde_json::Value::Null,
-                "modelProvider": serde_json::Value::Null,
-                "profile": serde_json::Value::Null,
-                "cwd": cwd.display().to_string(),
-                "approvalPolicy": serde_json::Value::Null,
-                "sandbox": "workspace-write",
-                "config": serde_json::Value::Null,
-                "baseInstructions": serde_json::Value::Null,
-                "developerInstructions": serde_json::Value::Null,
-                "compactPrompt": serde_json::Value::Null,
-                "includeApplyPatchTool": serde_json::Value::Null,
-                "experimentalRawEvents": false,
-                "persistExtendedHistory": true
-            }),
-        }
-    };
+    let thread_request = build_thread_request(&cwd, existing_thread.clone());
     send_request(&mut stdin, &thread_request)?;
     let thread_response = wait_for_response(&mut stdout_lines, &mut stdin, 2, event_tx, None)?;
 
@@ -239,6 +208,40 @@ fn resolve_codex_executable() -> Result<String> {
 fn resolve_codex_executable_from(configured: &str) -> Result<std::path::PathBuf> {
     which::which(configured)
         .with_context(|| format!("codex executable not found at `{configured}`"))
+}
+
+fn build_thread_request(cwd: &PathBuf, existing_thread: Option<String>) -> JsonRpcRequest {
+    if let Some(thread_id) = existing_thread {
+        JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "thread/resume".to_string(),
+            params: serde_json::json!({
+                "threadId": thread_id,
+                "persistExtendedHistory": true
+            }),
+        }
+    } else {
+        JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "thread/start".to_string(),
+            params: serde_json::json!({
+                "model": serde_json::Value::Null,
+                "modelProvider": serde_json::Value::Null,
+                "profile": serde_json::Value::Null,
+                "cwd": cwd.display().to_string(),
+                "approvalPolicy": serde_json::Value::Null,
+                "config": serde_json::Value::Null,
+                "baseInstructions": serde_json::Value::Null,
+                "developerInstructions": serde_json::Value::Null,
+                "compactPrompt": serde_json::Value::Null,
+                "includeApplyPatchTool": serde_json::Value::Null,
+                "experimentalRawEvents": false,
+                "persistExtendedHistory": true
+            }),
+        }
+    }
 }
 
 fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
@@ -1047,6 +1050,7 @@ mod tests {
     use super::JsonRpcMessage;
     use super::JsonRpcRequest;
     use super::ProviderEvent;
+    use super::build_thread_request;
     use super::handle_notification;
     use super::parse_item_event;
     use super::parse_jsonrpc_message;
@@ -1092,6 +1096,20 @@ mod tests {
         assert!(json.contains("\"jsonrpc\":\"2.0\""));
         assert!(json.contains("\"method\":\"initialize\""));
         assert!(json.contains("\"clientInfo\""));
+    }
+
+    #[test]
+    fn thread_start_request_omits_sandbox_field() {
+        let cwd = std::path::PathBuf::from("/tmp/project");
+        let request = build_thread_request(&cwd, None);
+
+        assert_eq!(request.method, "thread/start");
+        let params = request.params.as_object().expect("object params");
+        assert!(!params.contains_key("sandbox"));
+        assert_eq!(
+            params.get("cwd").and_then(|value| value.as_str()),
+            Some("/tmp/project")
+        );
     }
 
     #[test]
