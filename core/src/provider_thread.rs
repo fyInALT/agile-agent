@@ -706,8 +706,7 @@ mod tests {
         let _ = rx.try_recv(); // Can only receive events, not mutate state
 
         // elapsed() returns Duration (computed value, not mutable reference)
-        let elapsed = handle.elapsed();
-        assert!(elapsed.as_millis() >= 0);
+        let _elapsed = handle.elapsed(); // Verify elapsed() works, value not needed
 
         // is_running() returns bool (computed value)
         let running = handle.is_running();

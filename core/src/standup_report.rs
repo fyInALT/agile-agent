@@ -494,6 +494,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn make_test_assignment(agent: &str, task_id: &str, status: TaskStatus) -> AgentTaskAssignment {
         use crate::agent_slot::TaskId;
         AgentTaskAssignment {
