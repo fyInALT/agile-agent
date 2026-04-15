@@ -14,6 +14,16 @@ pub mod output;
 pub mod context;
 pub mod blocking;
 
+// Sprint 2: Output Classifier
+pub mod provider_kind;
+pub mod provider_event;
+pub mod classifier;
+pub mod classifier_registry;
+pub mod claude_classifier;
+pub mod codex_classifier;
+pub mod acp_classifier;
+pub mod initializer;
+
 // Re-export core types
 pub use error::*;
 pub use types::*;
@@ -45,3 +55,10 @@ pub use builtin_actions::{
 pub use output::*;
 pub use context::*;
 pub use blocking::*;
+
+// Re-export Sprint 2 types
+pub use provider_kind::*;
+pub use provider_event::*;
+pub use classifier::*;
+pub use classifier_registry::*;
+pub use initializer::*;
