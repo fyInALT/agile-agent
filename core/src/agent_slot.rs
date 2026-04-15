@@ -9,7 +9,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::agent_role::AgentRole;
-use crate::agent_runtime::{AgentId, AgentCodename, ProviderType};
+use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::provider::{ProviderEvent, SessionHandle};
 
@@ -32,6 +32,8 @@ pub enum AgentSlotStatus {
     Stopped { reason: String },
     /// Agent encountered an error
     Error { message: String },
+    /// Agent is blocked, waiting for human intervention
+    Blocked { reason: String },
 }
 
 impl AgentSlotStatus {
@@ -47,12 +49,16 @@ impl AgentSlotStatus {
 
     /// Create a new Responding status with current timestamp
     pub fn responding_now() -> Self {
-        Self::Responding { started_at: Instant::now() }
+        Self::Responding {
+            started_at: Instant::now(),
+        }
     }
 
     /// Create a new ToolExecuting status
     pub fn tool_executing(tool_name: impl Into<String>) -> Self {
-        Self::ToolExecuting { tool_name: tool_name.into() }
+        Self::ToolExecuting {
+            tool_name: tool_name.into(),
+        }
     }
 
     /// Create a new Finishing status
@@ -67,37 +73,52 @@ impl AgentSlotStatus {
 
     /// Create a new Stopped status
     pub fn stopped(reason: impl Into<String>) -> Self {
-        Self::Stopped { reason: reason.into() }
+        Self::Stopped {
+            reason: reason.into(),
+        }
     }
 
     /// Create a new Error status
     pub fn error(message: impl Into<String>) -> Self {
-        Self::Error { message: message.into() }
+        Self::Error {
+            message: message.into(),
+        }
+    }
+
+    /// Create a new Blocked status
+    pub fn blocked(reason: impl Into<String>) -> Self {
+        Self::Blocked {
+            reason: reason.into(),
+        }
     }
 
     /// Check if agent can transition to a new status
     pub fn can_transition_to(&self, target: &AgentSlotStatus) -> bool {
         match (self, target) {
-            // Idle can go to Starting or Stopped (user can stop idle agent)
+            // Idle can go to Starting, Blocked, or Stopped (user can stop idle agent)
             (Self::Idle, Self::Starting) => true,
+            (Self::Idle, Self::Blocked { .. }) => true,
             (Self::Idle, Self::Stopped { .. }) => true,
             // Starting can go to Responding, Stopping, or Error
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Stopping) => true,
             (Self::Starting, Self::Error { .. }) => true,
-            // Responding can go to ToolExecuting, Finishing, Stopping, or Error
+            // Responding can go to ToolExecuting, Finishing, Stopping, Blocked, or Error
             (Self::Responding { .. }, Self::ToolExecuting { .. }) => true,
             (Self::Responding { .. }, Self::Finishing) => true,
             (Self::Responding { .. }, Self::Stopping) => true,
+            (Self::Responding { .. }, Self::Blocked { .. }) => true,
             (Self::Responding { .. }, Self::Error { .. }) => true,
-            // ToolExecuting can go back to Responding or to Finishing/Stopping/Error
+            // ToolExecuting can go back to Responding or to Finishing/Stopping/Blocked/Error
             (Self::ToolExecuting { .. }, Self::Responding { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Finishing) => true,
             (Self::ToolExecuting { .. }, Self::Stopping) => true,
+            (Self::ToolExecuting { .. }, Self::Blocked { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Error { .. }) => true,
-            // Finishing can go to Idle, Stopping, or Error
+            // Finishing can go to Idle, Stopping, Blocked, or Error
             (Self::Finishing, Self::Idle) => true,
             (Self::Finishing, Self::Stopping) => true,
+            (Self::Finishing, Self::Blocked { .. }) => true,
             (Self::Finishing, Self::Error { .. }) => true,
             // Stopping can go to Stopped (after thread join) or Error (if join fails)
             (Self::Stopping, Self::Stopped { .. }) => true,
@@ -107,6 +128,10 @@ impl AgentSlotStatus {
             // Error can go to Idle (recovery) or Stopped
             (Self::Error { .. }, Self::Idle) => true,
             (Self::Error { .. }, Self::Stopped { .. }) => true,
+            // Blocked can go to Idle (user resolved), Responding (user provided input), or Stopped
+            (Self::Blocked { .. }, Self::Idle) => true,
+            (Self::Blocked { .. }, Self::Responding { .. }) => true,
+            (Self::Blocked { .. }, Self::Stopped { .. }) => true,
             // Same status is always valid
             (a, b) if a == b => true,
             // All other transitions are invalid
@@ -137,6 +162,11 @@ impl AgentSlotStatus {
         matches!(self, Self::Stopping)
     }
 
+    /// Check if agent is blocked
+    pub fn is_blocked(&self) -> bool {
+        matches!(self, Self::Blocked { .. })
+    }
+
     /// Get a human-readable label for the status
     pub fn label(&self) -> String {
         match self {
@@ -148,6 +178,7 @@ impl AgentSlotStatus {
             Self::Stopping => "stopping".to_string(),
             Self::Stopped { reason } => format!("stopped:{}", reason),
             Self::Error { message } => format!("error:{}", message),
+            Self::Blocked { reason } => format!("blocked:{}", reason),
         }
     }
 }
@@ -235,11 +266,7 @@ impl std::fmt::Debug for AgentSlot {
 
 impl AgentSlot {
     /// Create a new agent slot with given identity
-    pub fn new(
-        agent_id: AgentId,
-        codename: AgentCodename,
-        provider_type: ProviderType,
-    ) -> Self {
+    pub fn new(agent_id: AgentId, codename: AgentCodename, provider_type: ProviderType) -> Self {
         Self {
             agent_id,
             codename,
@@ -381,12 +408,12 @@ impl AgentSlot {
     }
 
     /// Get the thread handle (if provider thread is running)
-    pub fn thread_handle(&self) -> Option<&JoinHandle<()> >  {
+    pub fn thread_handle(&self) -> Option<&JoinHandle<()>> {
         self.thread_handle.as_ref()
     }
 
     /// Take the thread handle (for joining)
-    pub fn take_thread_handle(&mut self) -> Option<JoinHandle<()> >  {
+    pub fn take_thread_handle(&mut self) -> Option<JoinHandle<()>> {
         self.thread_handle.take()
     }
 
@@ -752,5 +779,55 @@ mod tests {
         // Cleanup - join the taken handle
         taken.unwrap().join().unwrap();
         drop(tx);
+    }
+
+    // Blocked status tests
+    #[test]
+    fn status_blocked_is_not_active() {
+        let status = AgentSlotStatus::blocked("API design not confirmed");
+        assert!(!status.is_active());
+    }
+
+    #[test]
+    fn status_blocked_label() {
+        let status = AgentSlotStatus::blocked("API design not confirmed");
+        assert_eq!(status.label(), "blocked:API design not confirmed");
+    }
+
+    #[test]
+    fn status_idle_can_transition_to_blocked() {
+        let status = AgentSlotStatus::idle();
+        assert!(status.can_transition_to(&AgentSlotStatus::blocked("test")));
+    }
+
+    #[test]
+    fn status_blocked_can_transition_to_idle() {
+        let status = AgentSlotStatus::blocked("test");
+        assert!(status.can_transition_to(&AgentSlotStatus::idle()));
+    }
+
+    #[test]
+    fn status_blocked_can_transition_to_stopped() {
+        let status = AgentSlotStatus::blocked("test");
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user resolved")));
+    }
+
+    #[test]
+    fn status_blocked_is_blocked() {
+        let status = AgentSlotStatus::blocked("test reason");
+        assert!(status.is_blocked());
+    }
+
+    #[test]
+    fn status_other_is_not_blocked() {
+        assert!(!AgentSlotStatus::idle().is_blocked());
+        assert!(!AgentSlotStatus::starting().is_blocked());
+        assert!(!AgentSlotStatus::stopped("test").is_blocked());
+    }
+
+    #[test]
+    fn status_blocked_can_transition_to_responding() {
+        let status = AgentSlotStatus::blocked("test");
+        assert!(status.can_transition_to(&AgentSlotStatus::responding_now()));
     }
 }
