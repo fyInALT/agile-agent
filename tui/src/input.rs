@@ -140,6 +140,11 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(5),
+        KeyEvent {
+            code: KeyCode::Char('6'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(6),
         // Alt+V to cycle view modes
         KeyEvent {
             code: KeyCode::Char('v'),
@@ -153,131 +158,188 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Left,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitFocusLeft,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split =>
+        {
+            InputOutcome::SplitFocusLeft
+        }
         KeyEvent {
             code: KeyCode::Right,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitFocusRight,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split =>
+        {
+            InputOutcome::SplitFocusRight
+        }
         KeyEvent {
             code: KeyCode::Char('s'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitSwap,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split =>
+        {
+            InputOutcome::SplitSwap
+        }
         KeyEvent {
             code: KeyCode::Char('e'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Split => InputOutcome::SplitEqual,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Split =>
+        {
+            InputOutcome::SplitEqual
+        }
 
         // Dashboard view: arrow keys and number selection
         KeyEvent {
             code: KeyCode::Up,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard => InputOutcome::DashboardPrev,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::DashboardPrev
+        }
         KeyEvent {
             code: KeyCode::Down,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard => InputOutcome::DashboardNext,
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::DashboardNext
+        }
         KeyEvent {
             code: KeyCode::Char(c),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Dashboard
-            && c >= '1' && c <= '9' => InputOutcome::DashboardSelect(c as u8),
+            && c >= '1'
+            && c <= '9' =>
+        {
+            InputOutcome::DashboardSelect(c as u8)
+        }
 
         // Mail view: arrow keys, c compose, r reply, m mark read
         KeyEvent {
             code: KeyCode::Up,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && !state.view_state.mail.composing => InputOutcome::MailPrev,
+            && !state.view_state.mail.composing =>
+        {
+            InputOutcome::MailPrev
+        }
         KeyEvent {
             code: KeyCode::Down,
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && !state.view_state.mail.composing => InputOutcome::MailNext,
+            && !state.view_state.mail.composing =>
+        {
+            InputOutcome::MailNext
+        }
         KeyEvent {
             code: KeyCode::Char('c'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && !state.view_state.mail.composing => InputOutcome::MailComposeStart,
+            && !state.view_state.mail.composing =>
+        {
+            InputOutcome::MailComposeStart
+        }
         KeyEvent {
             code: KeyCode::Esc,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => InputOutcome::MailComposeCancel,
+            && state.view_state.mail.composing =>
+        {
+            InputOutcome::MailComposeCancel
+        }
         KeyEvent {
             code: KeyCode::Tab,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => InputOutcome::MailComposeNextField,
+            && state.view_state.mail.composing =>
+        {
+            InputOutcome::MailComposeNextField
+        }
         KeyEvent {
             code: KeyCode::BackTab,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => InputOutcome::MailComposePrevField,
+            && state.view_state.mail.composing =>
+        {
+            InputOutcome::MailComposePrevField
+        }
         KeyEvent {
             code: KeyCode::Enter,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => {
-                InputOutcome::MailComposeSend(
-                    state.view_state.mail.compose_to.clone(),
-                    state.view_state.mail.compose_subject.clone(),
-                    state.view_state.mail.compose_body.clone(),
-                )
-            },
+            && state.view_state.mail.composing =>
+        {
+            InputOutcome::MailComposeSend(
+                state.view_state.mail.compose_to.clone(),
+                state.view_state.mail.compose_subject.clone(),
+                state.view_state.mail.compose_body.clone(),
+            )
+        }
         KeyEvent {
             code: KeyCode::Char(c),
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => {
-                state.view_state.mail.append_char(c);
-                InputOutcome::None
-            },
+            && state.view_state.mail.composing =>
+        {
+            state.view_state.mail.append_char(c);
+            InputOutcome::None
+        }
         KeyEvent {
             code: KeyCode::Backspace,
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::NONE)
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && state.view_state.mail.composing => {
-                state.view_state.mail.remove_char();
-                InputOutcome::None
-            },
+            && state.view_state.mail.composing =>
+        {
+            state.view_state.mail.remove_char();
+            InputOutcome::None
+        }
         KeyEvent {
             code: KeyCode::Char('m'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE) && state.composer.is_empty()
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
-            && !state.view_state.mail.composing => InputOutcome::MailMarkRead,
+            && !state.view_state.mail.composing =>
+        {
+            InputOutcome::MailMarkRead
+        }
 
         // Agent focus switching (Ctrl+1-9 for direct selection)
         KeyEvent {
@@ -330,7 +392,8 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Tab, ..
         } if state.app().status == AppStatus::Idle => InputOutcome::FocusNextAgent,
         KeyEvent {
-            code: KeyCode::BackTab, ..
+            code: KeyCode::BackTab,
+            ..
         } if state.app().status == AppStatus::Idle => InputOutcome::FocusPreviousAgent,
         // Ctrl+N to spawn new agent
         KeyEvent {
@@ -568,7 +631,10 @@ mod tests {
         app.status = AppStatus::Idle;
         let mut state = state_from_app(app);
 
-        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+        );
 
         assert!(matches!(outcome, InputOutcome::FocusPreviousAgent));
     }
@@ -697,16 +763,27 @@ mod tests {
     }
 
     #[test]
+    fn alt_6_switches_to_overview_view() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('6'), KeyModifiers::ALT),
+        );
+
+        assert!(matches!(outcome, InputOutcome::SwitchViewMode(6)));
+    }
+
+    #[test]
     fn split_view_left_arrow_focuses_left() {
         let app = AppState::new(ProviderKind::Mock);
         let mut state = state_from_app(app);
         state.view_state.switch_by_number(2); // Split mode
         state.view_state.split.focused_side = 1; // Start on right
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::SplitFocusLeft));
     }
@@ -760,10 +837,8 @@ mod tests {
         let mut state = state_from_app(app);
         state.view_state.switch_by_number(3); // Dashboard mode
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::DashboardNext));
     }
@@ -774,10 +849,7 @@ mod tests {
         let mut state = state_from_app(app);
         state.view_state.switch_by_number(3); // Dashboard mode
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-        );
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::DashboardPrev));
     }
@@ -802,10 +874,8 @@ mod tests {
         let mut state = state_from_app(app);
         state.view_state.switch_by_number(4); // Mail mode
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::MailNext));
     }
@@ -816,10 +886,7 @@ mod tests {
         let mut state = state_from_app(app);
         state.view_state.switch_by_number(4); // Mail mode
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-        );
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
         assert!(matches!(outcome, InputOutcome::MailPrev));
     }
@@ -859,10 +926,8 @@ mod tests {
         state.view_state.switch_by_number(2); // Split mode
         state.composer.insert_text("text");
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
         // Should add 't' to composer, not navigate
         assert!(matches!(outcome, InputOutcome::None));
@@ -875,10 +940,8 @@ mod tests {
         // Stay in Focused mode (default)
         state.composer.insert_text("text");
 
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        );
+        let outcome =
+            handle_key_event(&mut state, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
         // Left with text in composer moves cursor, not split navigation
         assert!(matches!(outcome, InputOutcome::None));
