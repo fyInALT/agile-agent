@@ -691,6 +691,14 @@ impl TuiState {
             .map(|s| s.agent_id().clone())
     }
 
+    pub fn agent_has_provider_session(&self, agent_id: &AgentId) -> bool {
+        self.agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(agent_id))
+            .and_then(|slot| slot.session_handle())
+            .is_some()
+    }
+
     pub fn create_shutdown_snapshot(&self, reason: ShutdownReason) -> ShutdownSnapshot {
         let agents = if let Some(pool) = self.agent_pool.as_ref() {
             pool.slots()

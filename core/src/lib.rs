@@ -13,6 +13,7 @@ pub mod autonomy;
 pub mod backlog;
 pub mod backlog_store;
 pub mod blocker_escalation;
+pub mod command_bus;
 pub mod commands;
 pub mod data_migration;
 pub mod decision_kanban;

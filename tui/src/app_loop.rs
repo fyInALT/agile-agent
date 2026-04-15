@@ -1,9 +1,11 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
+use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec, ParsedSlashCommand};
+use agent_core::command_bus::parse::parse_slash_command;
 use agent_core::app::TranscriptEntry;
 use agent_core::commands::LocalCommand;
-use agent_core::commands::parse_local_command;
+use agent_core::commands::parse_legacy_alias;
 use agent_core::logging;
 use agent_core::probe;
 use agent_core::provider;
@@ -489,28 +491,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.session.workplace_mut().loop_control.signal_quit();
                         }
                         InputOutcome::Submit(user_input) => {
-                            if let Some(command_result) = parse_local_command(&user_input) {
-                                match command_result {
-                                    Ok(command) => {
-                                        logging::debug_event(
-                                            "tui.command",
-                                            "executed local TUI command",
-                                            serde_json::json!({
-                                                "command": format!("{:?}", command),
-                                            }),
-                                        );
-                                        if let Some(prompt) =
-                                            handle_local_command(&mut state, command)
-                                        {
-                                            start_provider_request(
-                                                &mut state,
-                                                prompt,
-                                                &mut provider_rx,
-                                            );
-                                        }
-                                    }
-                                    Err(error) => state.app_mut().push_error_message(error),
-                                }
+                            if handle_command_submission(&mut state, user_input.clone(), &mut provider_rx)? {
                                 continue;
                             }
 
@@ -970,6 +951,148 @@ fn start_multi_agent_provider_request_for_agent(
         true
     } else {
         false
+    }
+}
+
+fn handle_command_submission(
+    state: &mut TuiState,
+    user_input: String,
+    provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
+) -> Result<bool> {
+    if !user_input.trim_start().starts_with('/') {
+        return Ok(false);
+    }
+
+    if let Some(invocation) = parse_legacy_alias(&user_input) {
+        if let Err(error) = execute_invocation(state, invocation, provider_rx) {
+            state.app_mut().push_error_message(error.to_string());
+        }
+        return Ok(true);
+    }
+
+    let parsed = match parse_slash_command(&user_input) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            state.app_mut().push_error_message(error.to_string());
+            return Ok(true);
+        }
+    };
+
+    let ParsedSlashCommand::Invocation(invocation) = parsed;
+    if let Err(error) = execute_invocation(state, invocation, provider_rx) {
+        state.app_mut().push_error_message(error.to_string());
+    }
+    Ok(true)
+}
+
+fn execute_invocation(
+    state: &mut TuiState,
+    invocation: CommandInvocation,
+    provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
+) -> Result<()> {
+    match invocation.namespace {
+        CommandNamespace::Local => execute_local_invocation(state, invocation, provider_rx),
+        CommandNamespace::Agent => execute_agent_invocation(state, invocation),
+        CommandNamespace::Provider => execute_provider_invocation(state, invocation),
+    }
+}
+
+fn execute_local_invocation(
+    state: &mut TuiState,
+    invocation: CommandInvocation,
+    provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
+) -> Result<()> {
+    if let Some(command) = legacy_local_command_from_invocation(&invocation) {
+        logging::debug_event(
+            "tui.command.legacy",
+            "executed legacy local alias",
+            serde_json::json!({
+                "command": format!("{:?}", command),
+            }),
+        );
+        if let Some(prompt) = handle_local_command(state, command) {
+            start_provider_request(state, prompt, provider_rx);
+        }
+        return Ok(());
+    }
+
+    let path = invocation
+        .path
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let args = invocation
+        .args
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let lines = crate::command_runtime::execute_local_command(state, &path, &args)?;
+    for line in lines {
+        state.app_mut().push_status_message(line);
+    }
+    Ok(())
+}
+
+fn execute_agent_invocation(state: &mut TuiState, invocation: CommandInvocation) -> Result<()> {
+    let explicit_target = invocation.target.as_ref().map(|target| match target {
+        CommandTargetSpec::AgentName(value) => value.as_str(),
+    });
+    let path = invocation
+        .path
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let args = invocation
+        .args
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let lines = crate::command_runtime::execute_agent_command(state, explicit_target, &path, &args)?;
+    for line in lines {
+        state.app_mut().push_status_message(line);
+    }
+    Ok(())
+}
+
+fn execute_provider_invocation(state: &mut TuiState, invocation: CommandInvocation) -> Result<()> {
+    let explicit_target = invocation.target.as_ref().map(|target| match target {
+        CommandTargetSpec::AgentName(value) => value.as_str(),
+    });
+    let raw_tail = invocation.raw_tail.as_deref().unwrap_or("");
+    let request = crate::command_runtime::execute_provider_command(state, explicit_target, raw_tail)?;
+    if !start_multi_agent_provider_request_for_agent(
+        state,
+        request.agent_id.clone(),
+        request.raw_tail.clone(),
+    ) {
+        task_engine::handle_provider_start_failure(
+            state.app_mut(),
+            format!("failed to send provider command `{}`", request.raw_tail),
+        );
+    } else {
+        state.app_mut().push_status_message(format!(
+            "sent provider command `{}` to {}",
+            request.raw_tail, request.codename
+        ));
+    }
+    Ok(())
+}
+
+fn legacy_local_command_from_invocation(invocation: &CommandInvocation) -> Option<LocalCommand> {
+    let path = invocation.path.iter().map(|value| value.as_str()).collect::<Vec<_>>();
+    match path.as_slice() {
+        ["legacy", "provider"] => Some(LocalCommand::Provider),
+        ["legacy", "skills"] => Some(LocalCommand::Skills),
+        ["legacy", "doctor"] => Some(LocalCommand::Doctor),
+        ["legacy", "run-once"] => Some(LocalCommand::RunOnce),
+        ["legacy", "run-loop"] => Some(LocalCommand::RunLoop),
+        ["legacy", "quit"] => Some(LocalCommand::Quit),
+        ["legacy", "todo-add"] => invocation
+            .args
+            .first()
+            .cloned()
+            .map(LocalCommand::TodoAdd),
+        _ => None,
     }
 }
 
@@ -1490,6 +1613,7 @@ fn current_time_as_u32() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::event_poll_timeout;
+    use super::handle_command_submission;
     use super::shutdown_tui_state;
     use super::handle_agent_provider_event;
     use super::handle_agent_channel_disconnect;
@@ -1876,6 +2000,41 @@ mod tests {
         assert!(crate::tui_snapshot::load_resume_snapshot(&workplace)
             .expect("load tui snapshot")
             .is_some());
+    }
+
+    #[test]
+    fn namespaced_local_command_does_not_fall_through_to_chat() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        let mut provider_rx = None;
+
+        let handled =
+            handle_command_submission(&mut state, "/local status".to_string(), &mut provider_rx)
+                .expect("ok");
+        assert!(handled);
+        assert!(state.app().transcript.iter().all(|entry| {
+            !matches!(entry, TranscriptEntry::User(text) if text == "/local status")
+        }));
+    }
+
+    #[test]
+    fn provider_passthrough_rejection_does_not_fall_through_to_chat() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.ensure_overview_agent();
+        let mut provider_rx = None;
+
+        let handled =
+            handle_command_submission(&mut state, "/provider /status".to_string(), &mut provider_rx)
+                .expect("ok");
+        assert!(handled);
+        assert!(state.app().transcript.iter().all(|entry| {
+            !matches!(entry, TranscriptEntry::User(text) if text == "/provider /status")
+        }));
     }
 
     #[test]
