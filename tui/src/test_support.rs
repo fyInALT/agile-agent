@@ -116,7 +116,9 @@ impl ShellHarness {
                         status.status.label()
                     ));
                 } else {
-                    self.state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                    self.state
+                        .app_mut()
+                        .push_status_message("no agents to switch (press Ctrl+N to spawn)");
                 }
             }
             InputOutcome::FocusPreviousAgent => {
@@ -127,7 +129,9 @@ impl ShellHarness {
                         status.status.label()
                     ));
                 } else {
-                    self.state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                    self.state
+                        .app_mut()
+                        .push_status_message("no agents to switch (press Ctrl+N to spawn)");
                 }
             }
             InputOutcome::FocusAgent(index) => {
@@ -138,10 +142,9 @@ impl ShellHarness {
                         status.status.label()
                     ));
                 } else {
-                    self.state.app_mut().push_status_message(format!(
-                        "no agent at index {}",
-                        index + 1
-                    ));
+                    self.state
+                        .app_mut()
+                        .push_status_message(format!("no agent at index {}", index + 1));
                 }
             }
             InputOutcome::SpawnAgent => {
@@ -207,6 +210,21 @@ impl ShellHarness {
                 self.state.view_state.mail.prev_compose_field();
             }
             InputOutcome::MailComposeSend(_, _, _) => {}
+            InputOutcome::OverviewFilterBlocked => {
+                self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::BlockedOnly;
+            }
+            InputOutcome::OverviewFilterRunning => {
+                self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::RunningOnly;
+            }
+            InputOutcome::OverviewFilterAll => {
+                self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::All;
+            }
+            InputOutcome::OverviewPageUp => {
+                self.state.view_state.overview.page_up(1);
+            }
+            InputOutcome::OverviewPageDown => {
+                self.state.view_state.overview.page_down(1);
+            }
         }
     }
 }

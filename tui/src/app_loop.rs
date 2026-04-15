@@ -24,14 +24,14 @@ use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::confirmation_overlay::ConfirmationCommand;
 use crate::input::InputOutcome;
 use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
-use crate::render::render_app;
-use crate::terminal::AppTerminal;
-use crate::confirmation_overlay::ConfirmationCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
-use crate::resume_overlay::{ResumeOverlay, ResumeCommand};
+use crate::render::render_app;
+use crate::resume_overlay::{ResumeCommand, ResumeOverlay};
+use crate::terminal::AppTerminal;
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
 
@@ -48,7 +48,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         false
     };
 
-    let session = RuntimeSession::bootstrap(launch_cwd, provider::default_provider(), effective_resume_last)?;
+    let session = RuntimeSession::bootstrap(
+        launch_cwd,
+        provider::default_provider(),
+        effective_resume_last,
+    )?;
     let mut state = TuiState::from_session(session);
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
     let mut last_flush = Instant::now();
@@ -83,7 +87,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 start_provider_request(&mut state, prompt, &mut provider_rx);
             } else {
                 state.app_mut().set_loop_phase(LoopPhase::Idle);
-                state.app_mut().push_status_message("no ready todo available");
+                state
+                    .app_mut()
+                    .push_status_message("no ready todo available");
                 state.workplace_mut().loop_control.stop_loop();
             }
         }
@@ -96,49 +102,53 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     // Handle provider selection overlay
                     if state.is_provider_overlay_open() {
                         if let Some(overlay) = state.provider_overlay.as_mut()
-                            && let Some(command) = overlay.handle_key_event(key_event) {
-                                match command {
-                                    ProviderSelectionCommand::Close => {
-                                        state.close_provider_overlay();
-                                    }
-                                    ProviderSelectionCommand::Select(provider) => {
-                                        state.close_provider_overlay();
-                                        if let Some(agent_id) = state.spawn_agent(provider) {
-                                            state.app_mut().push_status_message(format!(
-                                                "spawned {} with {}",
-                                                agent_id.as_str(),
-                                                provider.label()
-                                            ));
-                                        } else {
-                                            state.app_mut().push_error_message("failed to spawn agent (pool full)");
-                                        }
+                            && let Some(command) = overlay.handle_key_event(key_event)
+                        {
+                            match command {
+                                ProviderSelectionCommand::Close => {
+                                    state.close_provider_overlay();
+                                }
+                                ProviderSelectionCommand::Select(provider) => {
+                                    state.close_provider_overlay();
+                                    if let Some(agent_id) = state.spawn_agent(provider) {
+                                        state.app_mut().push_status_message(format!(
+                                            "spawned {} with {}",
+                                            agent_id.as_str(),
+                                            provider.label()
+                                        ));
+                                    } else {
+                                        state.app_mut().push_error_message(
+                                            "failed to spawn agent (pool full)",
+                                        );
                                     }
                                 }
                             }
+                        }
                         continue;
                     }
 
                     // Handle confirmation overlay
                     if state.is_confirmation_overlay_open() {
                         if let Some(overlay) = state.confirmation_overlay.as_mut()
-                            && let Some(command) = overlay.handle_key_event(key_event) {
-                                match command {
-                                    ConfirmationCommand::Cancel => {
-                                        state.close_confirmation_overlay();
-                                    }
-                                    ConfirmationCommand::Confirm => {
-                                        state.close_confirmation_overlay();
-                                        if let Some(agent_id) = state.stop_focused_agent() {
-                                            state.app_mut().push_status_message(format!(
-                                                "stopped agent {}",
-                                                agent_id
-                                            ));
-                                        } else {
-                                            state.app_mut().push_status_message("no agent to stop");
-                                        }
+                            && let Some(command) = overlay.handle_key_event(key_event)
+                        {
+                            match command {
+                                ConfirmationCommand::Cancel => {
+                                    state.close_confirmation_overlay();
+                                }
+                                ConfirmationCommand::Confirm => {
+                                    state.close_confirmation_overlay();
+                                    if let Some(agent_id) = state.stop_focused_agent() {
+                                        state.app_mut().push_status_message(format!(
+                                            "stopped agent {}",
+                                            agent_id
+                                        ));
+                                    } else {
+                                        state.app_mut().push_status_message("no agent to stop");
                                     }
                                 }
                             }
+                        }
                         continue;
                     }
 
@@ -153,9 +163,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         let page_height = terminal.size()?.height.saturating_sub(2) as usize;
                         if let Some(overlay) = state.transcript_overlay.as_mut()
                             && let Some(command) = overlay.handle_key_event(key_event, page_height)
-                                && matches!(command, OverlayCommand::Close) {
-                                    state.close_transcript_overlay();
-                                }
+                            && matches!(command, OverlayCommand::Close)
+                        {
+                            state.close_transcript_overlay();
+                        }
                         continue;
                     }
 
@@ -196,7 +207,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 ));
                             } else {
                                 // Single-agent mode, no pool yet
-                                state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                                state.app_mut().push_status_message(
+                                    "no agents to switch (press Ctrl+N to spawn)",
+                                );
                             }
                         }
                         InputOutcome::FocusPreviousAgent => {
@@ -207,7 +220,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     status.status.label()
                                 ));
                             } else {
-                                state.app_mut().push_status_message("no agents to switch (press Ctrl+N to spawn)");
+                                state.app_mut().push_status_message(
+                                    "no agents to switch (press Ctrl+N to spawn)",
+                                );
                             }
                         }
                         InputOutcome::FocusAgent(index) => {
@@ -234,26 +249,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::SwitchViewMode(n) => {
                             state.view_state.switch_by_number(n);
                             let label = state.view_state.mode.label();
-                            state.app_mut().push_status_message(format!(
-                                "switched to {} view",
-                                label
-                            ));
+                            state
+                                .app_mut()
+                                .push_status_message(format!("switched to {} view", label));
                         }
                         InputOutcome::NextViewMode => {
                             state.view_state.next_mode();
                             let label = state.view_state.mode.label();
-                            state.app_mut().push_status_message(format!(
-                                "switched to {} view",
-                                label
-                            ));
+                            state
+                                .app_mut()
+                                .push_status_message(format!("switched to {} view", label));
                         }
                         InputOutcome::PrevViewMode => {
                             state.view_state.prev_mode();
                             let label = state.view_state.mode.label();
-                            state.app_mut().push_status_message(format!(
-                                "switched to {} view",
-                                label
-                            ));
+                            state
+                                .app_mut()
+                                .push_status_message(format!("switched to {} view", label));
                         }
                         // Split view input handling
                         InputOutcome::SplitFocusLeft => {
@@ -285,7 +297,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         // Mail view input handling
                         InputOutcome::MailNext => {
                             let focused_id = state.focused_agent_id();
-                            let count = focused_id.as_ref()
+                            let count = focused_id
+                                .as_ref()
                                 .and_then(|id| state.mailbox.inbox_for(id))
                                 .map(|inbox| inbox.len())
                                 .unwrap_or(0);
@@ -322,7 +335,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.view_state.mail.prev_compose_field();
                         }
                         InputOutcome::MailComposeSend(to, subject, body) => {
-                            use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+                            use agent_core::agent_mail::{
+                                AgentMail, MailBody, MailSubject, MailTarget,
+                            };
                             use agent_core::agent_runtime::AgentId;
 
                             // Parse recipient from 'to' field (codename or agent_id)
@@ -331,21 +346,33 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 state.focused_agent_id()
                             } else {
                                 // Try to parse as agent_id or find by codename
-                                state.agent_pool.as_ref().and_then(|pool| {
-                                    pool.agent_statuses().iter()
-                                        .find(|s| s.codename.as_str() == to || s.agent_id.as_str() == to)
-                                        .map(|s| s.agent_id.clone())
-                                }).or_else(|| Some(AgentId::new(&to)))
+                                state
+                                    .agent_pool
+                                    .as_ref()
+                                    .and_then(|pool| {
+                                        pool.agent_statuses()
+                                            .iter()
+                                            .find(|s| {
+                                                s.codename.as_str() == to
+                                                    || s.agent_id.as_str() == to
+                                            })
+                                            .map(|s| s.agent_id.clone())
+                                    })
+                                    .or_else(|| Some(AgentId::new(&to)))
                             };
 
                             if let Some(recipient_id) = recipient {
                                 let mail_subject = if subject.is_empty() {
-                                    MailSubject::Custom { label: "Note".to_string() }
+                                    MailSubject::Custom {
+                                        label: "Note".to_string(),
+                                    }
                                 } else {
                                     MailSubject::Custom { label: subject }
                                 };
 
-                                let sender = state.focused_agent_id().unwrap_or_else(|| AgentId::new("unknown"));
+                                let sender = state
+                                    .focused_agent_id()
+                                    .unwrap_or_else(|| AgentId::new("unknown"));
                                 let mail = AgentMail::new(
                                     sender,
                                     MailTarget::Direct(recipient_id),
@@ -356,12 +383,36 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 state.view_state.mail.cancel_compose();
                                 state.app_mut().push_status_message("mail sent");
                             } else {
-                                state.app_mut().push_status_message("no recipient specified");
+                                state
+                                    .app_mut()
+                                    .push_status_message("no recipient specified");
                             }
                         }
+                        // Overview view input handling
+                        InputOutcome::OverviewFilterBlocked => {
+                            state.view_state.overview.filter =
+                                crate::overview_state::OverviewFilter::BlockedOnly;
+                            state.app_mut().push_status_message("showing blocked agents only");
+                        }
+                        InputOutcome::OverviewFilterRunning => {
+                            state.view_state.overview.filter =
+                                crate::overview_state::OverviewFilter::RunningOnly;
+                            state.app_mut().push_status_message("showing running agents only");
+                        }
+                        InputOutcome::OverviewFilterAll => {
+                            state.view_state.overview.filter =
+                                crate::overview_state::OverviewFilter::All;
+                            state.app_mut().push_status_message("showing all agents");
+                        }
+                        InputOutcome::OverviewPageUp => {
+                            state.view_state.overview.page_up(1);
+                        }
+                        InputOutcome::OverviewPageDown => {
+                            state.view_state.overview.page_down(1);
+                        }
                         InputOutcome::Quit => {
-    state.session.workplace_mut().loop_control.signal_quit();
-}
+                            state.session.workplace_mut().loop_control.signal_quit();
+                        }
                         InputOutcome::Submit(user_input) => {
                             if let Some(command_result) = parse_local_command(&user_input) {
                                 match command_result {
@@ -428,8 +479,12 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                 match event {
                     ProviderEvent::Status(text) => state.app_mut().push_status_message(text),
-                    ProviderEvent::AssistantChunk(chunk) => state.append_active_assistant_chunk(&chunk),
-                    ProviderEvent::ThinkingChunk(chunk) => state.append_active_thinking_chunk(&chunk),
+                    ProviderEvent::AssistantChunk(chunk) => {
+                        state.append_active_assistant_chunk(&chunk)
+                    }
+                    ProviderEvent::ThinkingChunk(chunk) => {
+                        state.append_active_thinking_chunk(&chunk)
+                    }
                     ProviderEvent::ExecCommandStarted {
                         call_id,
                         input_preview,
@@ -580,7 +635,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         // In full implementation, would route to specific agent's transcript
                         match event {
                             ProviderEvent::Status(text) => {
-                                state.app_mut().push_status_message(format!("{}: {}", agent_id.as_str(), text));
+                                state.app_mut().push_status_message(format!(
+                                    "{}: {}",
+                                    agent_id.as_str(),
+                                    text
+                                ));
                             }
                             ProviderEvent::AssistantChunk(chunk) => {
                                 // If this is the focused agent, append to active display
@@ -589,9 +648,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 }
                                 // Also append to agent's transcript in pool
                                 if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                        slot.append_transcript(TranscriptEntry::Assistant(chunk));
-                                    }
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                                {
+                                    slot.append_transcript(TranscriptEntry::Assistant(chunk));
+                                }
                             }
                             ProviderEvent::ThinkingChunk(chunk) => {
                                 if state.focused_agent_id().as_ref() == Some(&agent_id) {
@@ -600,47 +660,74 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
                             ProviderEvent::Finished => {
                                 if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
-                                    }
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                                {
+                                    let _ = slot.transition_to(
+                                        agent_core::agent_slot::AgentSlotStatus::idle(),
+                                    );
+                                }
                                 state.unregister_agent_channel(&agent_id);
-                                state.app_mut().push_status_message(format!("{} finished", agent_id.as_str()));
+                                state
+                                    .app_mut()
+                                    .push_status_message(format!("{} finished", agent_id.as_str()));
                             }
                             ProviderEvent::Error(error) => {
                                 if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                        slot.append_transcript(TranscriptEntry::Error(error.clone()));
-                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::error(error.clone()));
-                                    }
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                                {
+                                    slot.append_transcript(TranscriptEntry::Error(error.clone()));
+                                    let _ = slot.transition_to(
+                                        agent_core::agent_slot::AgentSlotStatus::error(
+                                            error.clone(),
+                                        ),
+                                    );
+                                }
                                 state.unregister_agent_channel(&agent_id);
-                                state.app_mut().push_error_message(format!("{} error: {}", agent_id.as_str(), error));
+                                state.app_mut().push_error_message(format!(
+                                    "{} error: {}",
+                                    agent_id.as_str(),
+                                    error
+                                ));
                             }
                             ProviderEvent::SessionHandle(handle) => {
                                 if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                        slot.set_session_handle(handle);
-                                    }
+                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                                {
+                                    slot.set_session_handle(handle);
+                                }
                             }
                             // Other events handled similarly
                             _ => {}
                         }
                     }
-                    agent_core::event_aggregator::AgentEvent::ThreadFinished { agent_id, outcome } => {
+                    agent_core::event_aggregator::AgentEvent::ThreadFinished {
+                        agent_id,
+                        outcome,
+                    } => {
                         if let Some(pool) = state.agent_pool.as_mut()
-                            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                slot.clear_provider_thread();
-                                match outcome {
-                                    agent_core::agent_slot::ThreadOutcome::NormalExit => {
-                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
-                                    }
-                                    agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
-                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::error(error));
-                                    }
-                                    agent_core::agent_slot::ThreadOutcome::Cancelled => {
-                                        let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::stopped("cancelled"));
-                                    }
+                            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.clear_provider_thread();
+                            match outcome {
+                                agent_core::agent_slot::ThreadOutcome::NormalExit => {
+                                    let _ = slot.transition_to(
+                                        agent_core::agent_slot::AgentSlotStatus::idle(),
+                                    );
+                                }
+                                agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
+                                    let _ = slot.transition_to(
+                                        agent_core::agent_slot::AgentSlotStatus::error(error),
+                                    );
+                                }
+                                agent_core::agent_slot::ThreadOutcome::Cancelled => {
+                                    let _ = slot.transition_to(
+                                        agent_core::agent_slot::AgentSlotStatus::stopped(
+                                            "cancelled",
+                                        ),
+                                    );
                                 }
                             }
+                        }
                         state.unregister_agent_channel(&agent_id);
                     }
                     _ => {}
@@ -650,7 +737,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             // Handle disconnected channels
             for disconnected_id in poll_result.disconnected_channels {
                 state.unregister_agent_channel(&disconnected_id);
-                state.app_mut().push_status_message(format!("{} disconnected", disconnected_id.as_str()));
+                state
+                    .app_mut()
+                    .push_status_message(format!("{} disconnected", disconnected_id.as_str()));
             }
         }
 
@@ -658,7 +747,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         if state.mailbox.pending_count() > 0 {
             let delivered_to = state.mailbox.process_pending();
             for agent_id in delivered_to {
-                state.app_mut().push_status_message(format!("📬 {} received mail", agent_id.as_str()));
+                state
+                    .app_mut()
+                    .push_status_message(format!("📬 {} received mail", agent_id.as_str()));
             }
         }
 
@@ -835,7 +926,9 @@ fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
 
     if let Some(rx) = event_rx {
         // Register the event channel with EventAggregator
-        let agent_id = state.focused_agent_id().expect("focused agent should exist after start");
+        let agent_id = state
+            .focused_agent_id()
+            .expect("focused agent should exist after start");
         state.register_agent_channel(agent_id.clone(), rx);
         state.app_mut().begin_provider_response();
         state.app_mut().push_status_message(format!(
@@ -844,7 +937,10 @@ fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
             provider_kind.label()
         ));
     } else {
-        task_engine::handle_provider_start_failure(state.app_mut(), "failed to start provider for agent".to_string());
+        task_engine::handle_provider_start_failure(
+            state.app_mut(),
+            "failed to start provider for agent".to_string(),
+        );
     }
 }
 
@@ -929,38 +1025,39 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
         // Poll for input with timeout
         if crossterm::event::poll(Duration::from_millis(100))?
             && let Event::Key(key_event) = crossterm::event::read()?
-                && let Some(cmd) = overlay.handle_key_event(key_event) {
-                    match cmd {
-                        ResumeCommand::Resume => {
-                            logging::debug_event(
-                                "tui.resume.choice",
-                                "user chose to resume",
-                                serde_json::json!({}),
-                            );
-                            return Ok(true);
-                        }
-                        ResumeCommand::StartFresh => {
-                            logging::debug_event(
-                                "tui.resume.choice",
-                                "user chose start fresh",
-                                serde_json::json!({}),
-                            );
-                            // Clear snapshot for fresh start
-                            workplace.clear_shutdown_snapshot()?;
-                            return Ok(false);
-                        }
-                        ResumeCommand::CancelRestore => {
-                            logging::debug_event(
-                                "tui.resume.choice",
-                                "user chose cancel restore",
-                                serde_json::json!({}),
-                            );
-                            // Clear snapshot and start clean
-                            workplace.clear_shutdown_snapshot()?;
-                            return Ok(false);
-                        }
-                    }
+            && let Some(cmd) = overlay.handle_key_event(key_event)
+        {
+            match cmd {
+                ResumeCommand::Resume => {
+                    logging::debug_event(
+                        "tui.resume.choice",
+                        "user chose to resume",
+                        serde_json::json!({}),
+                    );
+                    return Ok(true);
                 }
+                ResumeCommand::StartFresh => {
+                    logging::debug_event(
+                        "tui.resume.choice",
+                        "user chose start fresh",
+                        serde_json::json!({}),
+                    );
+                    // Clear snapshot for fresh start
+                    workplace.clear_shutdown_snapshot()?;
+                    return Ok(false);
+                }
+                ResumeCommand::CancelRestore => {
+                    logging::debug_event(
+                        "tui.resume.choice",
+                        "user chose cancel restore",
+                        serde_json::json!({}),
+                    );
+                    // Clear snapshot and start clean
+                    workplace.clear_shutdown_snapshot()?;
+                    return Ok(false);
+                }
+            }
+        }
     }
 }
 
@@ -1034,7 +1131,9 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn an agent to activate multi-agent mode
-        let agent_id = state.spawn_agent(ProviderKind::Claude).expect("spawn agent");
+        let agent_id = state
+            .spawn_agent(ProviderKind::Claude)
+            .expect("spawn agent");
         assert!(state.is_multi_agent_mode());
 
         // Start provider request - should use multi-agent flow
@@ -1042,10 +1141,17 @@ mod tests {
         start_provider_request(&mut state, "hello".to_string(), &mut provider_rx);
 
         // In multi-agent mode, provider_rx should NOT be set (events go through EventAggregator)
-        assert!(provider_rx.is_none(), "multi-agent mode should not use provider_rx");
+        assert!(
+            provider_rx.is_none(),
+            "multi-agent mode should not use provider_rx"
+        );
 
         // EventAggregator should have a registered channel
-        assert_eq!(state.agent_channel_count(), 1, "should have one registered channel");
+        assert_eq!(
+            state.agent_channel_count(),
+            1,
+            "should have one registered channel"
+        );
 
         // The channel should be for the spawned agent (either empty or has events)
         let registered = state.poll_agent_events();

@@ -64,6 +64,16 @@ pub enum InputOutcome {
     MailComposeNextField,
     /// Mail: cycle to previous compose field
     MailComposePrevField,
+    /// Overview: filter to blocked agents
+    OverviewFilterBlocked,
+    /// Overview: filter to running agents
+    OverviewFilterRunning,
+    /// Overview: show all agents
+    OverviewFilterAll,
+    /// Overview: page up in agent list
+    OverviewPageUp,
+    /// Overview: page down in agent list
+    OverviewPageDown,
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -339,6 +349,60 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             && !state.view_state.mail.composing =>
         {
             InputOutcome::MailMarkRead
+        }
+
+        // Overview view: filter keys
+        KeyEvent {
+            code: KeyCode::Char('f'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewFilterBlocked
+        }
+        KeyEvent {
+            code: KeyCode::Char('r'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewFilterRunning
+        }
+        KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewFilterAll
+        }
+
+        // Overview: page navigation (use PageUp/PageDown)
+        KeyEvent {
+            code: KeyCode::PageUp,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewPageUp
+        }
+        KeyEvent {
+            code: KeyCode::PageDown,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewPageDown
         }
 
         // Agent focus switching (Ctrl+1-9 for direct selection)
@@ -917,6 +981,76 @@ mod tests {
         );
 
         assert!(matches!(outcome, InputOutcome::MailMarkRead));
+    }
+
+    #[test]
+    fn overview_f_filters_blocked() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6); // Overview mode
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewFilterBlocked));
+    }
+
+    #[test]
+    fn overview_r_filters_running() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewFilterRunning));
+    }
+
+    #[test]
+    fn overview_a_shows_all() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewFilterAll));
+    }
+
+    #[test]
+    fn overview_page_up() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewPageUp));
+    }
+
+    #[test]
+    fn overview_page_down() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewPageDown));
     }
 
     #[test]
