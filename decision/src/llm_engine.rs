@@ -227,7 +227,7 @@ impl LLMDecisionEngine {
     fn parse_structured_response(
         &self,
         response: &str,
-        situation: &dyn DecisionSituation,
+        _situation: &dyn DecisionSituation,
         action_registry: &ActionRegistry,
     ) -> crate::error::Result<Vec<Box<dyn DecisionAction>>> {
         // Extract ACTION line

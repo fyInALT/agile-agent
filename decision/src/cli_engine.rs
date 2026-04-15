@@ -10,7 +10,7 @@ use crate::error::DecisionError;
 use crate::output::DecisionOutput;
 use crate::provider_kind::ProviderKind;
 use crate::situation::DecisionSituation;
-use crate::types::{ActionType, DecisionEngineType};
+use crate::types::DecisionEngineType;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -166,7 +166,7 @@ impl CLIDecisionEngine {
     }
 
     /// Simulate CLI input (placeholder - actual implementation would read from stdin)
-    fn get_cli_input(&mut self, prompt: &str) -> crate::error::Result<String> {
+    fn get_cli_input(&mut self, _prompt: &str) -> crate::error::Result<String> {
         // This is a placeholder - in production, this would:
         // 1. Display prompt to console
         // 2. Read input with timeout

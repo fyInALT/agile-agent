@@ -125,7 +125,8 @@ pub struct TieredDecisionEngine {
     /// CLI engine (Tier 4)
     cli_engine: Option<CLIDecisionEngine>,
 
-    /// Mock engine for testing
+    /// Mock engine for testing (reserved for future use)
+    #[allow(dead_code)]
     mock_engine: MockDecisionEngine,
 
     /// Decision history
@@ -213,7 +214,8 @@ impl TieredDecisionEngine {
         }
     }
 
-    /// Make decision with fallback
+    /// Make decision with fallback (reserved for future use)
+    #[allow(dead_code)]
     fn decide_with_fallback(
         &mut self,
         situation_type: SituationType,
