@@ -294,6 +294,13 @@ mod tests {
     }
 
     #[test]
+    fn agent_status_defaults_to_overview_in_overview_context() {
+        let shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+        let lines = execute_agent_command(&shell.state, None, &["status"], &[]).expect("status");
+        assert!(lines.iter().any(|line| line.contains("target: OVERVIEW")));
+    }
+
+    #[test]
     fn provider_passthrough_rejects_mock_provider() {
         let shell = ShellHarness::new_with_overview(ProviderKind::Mock);
         let error = execute_provider_command(&shell.state, None, "/status").expect_err("must fail");

@@ -138,4 +138,13 @@ mod tests {
     fn unsupported_flat_slash_command_is_not_a_legacy_alias() {
         assert!(parse_legacy_alias("/status").is_none());
     }
+
+    #[test]
+    fn legacy_backlog_alias_maps_to_local_kanban_list() {
+        let parsed = parse_legacy_alias("/backlog").expect("alias");
+        assert_eq!(
+            parsed.path,
+            vec!["kanban".to_string(), "list".to_string()]
+        );
+    }
 }
