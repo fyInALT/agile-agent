@@ -279,7 +279,6 @@ impl ProjectRules {
 mod tests {
     use super::*;
     use crate::builtin_situations::WaitingForChoiceSituation;
-    use crate::situation::ChoiceOption;
 
     #[test]
     fn test_decision_context_new() {
