@@ -502,12 +502,19 @@ impl MultiAgentSession {
 
         match event {
             ProviderEvent::SessionHandle(handle) => {
+                logging::debug_event(
+                    "agent.session_handle",
+                    "session handle received",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "handle_type": format!("{:?}", handle),
+                    }),
+                );
                 slot.set_session_handle(handle);
                 Ok(())
             }
             ProviderEvent::Status(text) => {
-                // Log status, don't add to transcript
-                crate::logging::debug_event(
+                logging::debug_event(
                     "agent.status",
                     "agent status message",
                     serde_json::json!({
@@ -518,12 +525,135 @@ impl MultiAgentSession {
                 Ok(())
             }
             ProviderEvent::Finished => {
+                logging::debug_event(
+                    "agent.finished",
+                    "agent finished processing",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                    }),
+                );
                 slot.transition_to(AgentSlotStatus::finishing())?;
                 Ok(())
             }
             ProviderEvent::Error(error) => {
+                logging::debug_event(
+                    "agent.error",
+                    "agent encountered error",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": error,
+                    }),
+                );
                 slot.append_transcript(crate::app::TranscriptEntry::Error(error.clone()));
                 slot.transition_to(AgentSlotStatus::error(error))?;
+                Ok(())
+            }
+            // Tool events - log for debugging
+            ProviderEvent::ExecCommandStarted { call_id, input_preview, source } => {
+                logging::debug_event(
+                    "tool.exec.started",
+                    "exec command started",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "input_preview": input_preview,
+                        "source": source,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::ExecCommandFinished { call_id, output_preview, status, exit_code, duration_ms, source } => {
+                logging::debug_event(
+                    "tool.exec.finished",
+                    "exec command finished",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "exit_code": exit_code,
+                        "duration_ms": duration_ms,
+                        "status": format!("{:?}", status),
+                        "source": source,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::GenericToolCallStarted { name, call_id, input_preview } => {
+                logging::debug_event(
+                    "tool.generic.started",
+                    "generic tool call started",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "tool_name": name,
+                        "call_id": call_id,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::GenericToolCallFinished { name, call_id, output_preview, success, exit_code, duration_ms } => {
+                logging::debug_event(
+                    "tool.generic.finished",
+                    "generic tool call finished",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "tool_name": name,
+                        "call_id": call_id,
+                        "success": success,
+                        "exit_code": exit_code,
+                        "duration_ms": duration_ms,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::McpToolCallStarted { call_id, invocation } => {
+                logging::debug_event(
+                    "tool.mcp.started",
+                    "MCP tool call started",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "tool_name": invocation.tool,
+                        "server": invocation.server,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::McpToolCallFinished { call_id, invocation, result_blocks, error, status, is_error } => {
+                logging::debug_event(
+                    "tool.mcp.finished",
+                    "MCP tool call finished",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "tool_name": invocation.tool,
+                        "server": invocation.server,
+                        "is_error": is_error,
+                        "status": format!("{:?}", status),
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::WebSearchStarted { call_id, query } => {
+                logging::debug_event(
+                    "tool.websearch.started",
+                    "web search started",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "query": query,
+                    }),
+                );
+                Ok(())
+            }
+            ProviderEvent::WebSearchFinished { call_id, query, action } => {
+                logging::debug_event(
+                    "tool.websearch.finished",
+                    "web search finished",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "call_id": call_id,
+                        "query": query,
+                    }),
+                );
                 Ok(())
             }
             // Chunk and tool events handled by TuiState (streaming buffers)
@@ -554,16 +684,47 @@ impl MultiAgentSession {
             .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found", agent_id.as_str()))?;
 
+        logging::debug_event(
+            "thread.finished.handling",
+            "handling thread finish with outcome",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "outcome": format!("{:?}", outcome),
+            }),
+        );
+
         slot.clear_provider_thread();
 
         match outcome {
             crate::agent_slot::ThreadOutcome::NormalExit => {
+                logging::debug_event(
+                    "thread.finished.normal",
+                    "provider thread exited normally",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                    }),
+                );
                 slot.transition_to(AgentSlotStatus::idle())?;
             }
             crate::agent_slot::ThreadOutcome::ErrorExit { error } => {
+                logging::debug_event(
+                    "thread.finished.error",
+                    "provider thread exited with error",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": error,
+                    }),
+                );
                 slot.transition_to(AgentSlotStatus::error(error))?;
             }
             crate::agent_slot::ThreadOutcome::Cancelled => {
+                logging::debug_event(
+                    "thread.finished.cancelled",
+                    "provider thread was cancelled",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                    }),
+                );
                 slot.transition_to(AgentSlotStatus::stopped("cancelled"))?;
             }
         }

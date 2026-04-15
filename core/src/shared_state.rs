@@ -36,6 +36,7 @@ use std::sync::Arc;
 
 use crate::agent_runtime::WorkplaceId;
 use crate::backlog::BacklogState;
+use crate::logging;
 use crate::skills::SkillRegistry;
 use agent_kanban::events::KanbanEventBus;
 use agent_kanban::file_repository::FileKanbanRepository;
@@ -99,6 +100,14 @@ impl LoopControlFlags {
 
     /// Start autonomous loop with max iterations
     pub fn start_loop(&mut self, max_iterations: usize) {
+        logging::debug_event(
+            "loop.start",
+            "autonomous loop started",
+            serde_json::json!({
+                "max_iterations": max_iterations,
+                "previous_active": self.loop_run_active,
+            }),
+        );
         self.loop_run_active = true;
         self.max_iterations = max_iterations;
         self.current_iteration = 0;
@@ -106,31 +115,78 @@ impl LoopControlFlags {
 
     /// Stop autonomous loop
     pub fn stop_loop(&mut self) {
+        logging::debug_event(
+            "loop.stop",
+            "autonomous loop stopped",
+            serde_json::json!({
+                "current_iteration": self.current_iteration,
+                "was_active": self.loop_run_active,
+            }),
+        );
         self.loop_run_active = false;
     }
 
     /// Increment iteration count
     pub fn increment_iteration(&mut self) {
         self.current_iteration += 1;
+        logging::debug_event(
+            "loop.iteration",
+            "iteration completed",
+            serde_json::json!({
+                "current_iteration": self.current_iteration,
+                "max_iterations": self.max_iterations,
+                "remaining": self.remaining_iterations(),
+            }),
+        );
     }
 
     /// Signal quit to all agents
     pub fn signal_quit(&mut self) {
+        logging::debug_event(
+            "loop.quit",
+            "quit signal received",
+            serde_json::json!({
+                "current_iteration": self.current_iteration,
+                "loop_run_active": self.loop_run_active,
+                "loop_paused": self.loop_paused,
+            }),
+        );
         self.should_quit = true;
     }
 
     /// Pause loop execution
     pub fn pause(&mut self) {
+        logging::debug_event(
+            "loop.pause",
+            "loop execution paused",
+            serde_json::json!({
+                "current_iteration": self.current_iteration,
+            }),
+        );
         self.loop_paused = true;
     }
 
     /// Resume loop execution
     pub fn resume(&mut self) {
+        logging::debug_event(
+            "loop.resume",
+            "loop execution resumed",
+            serde_json::json!({
+                "current_iteration": self.current_iteration,
+            }),
+        );
         self.loop_paused = false;
     }
 
     /// Reset iteration count
     pub fn reset_iterations(&mut self) {
+        logging::debug_event(
+            "loop.reset",
+            "iteration count reset",
+            serde_json::json!({
+                "previous_iteration": self.current_iteration,
+            }),
+        );
         self.current_iteration = 0;
     }
 }
@@ -293,6 +349,13 @@ impl SharedWorkplaceState {
 
     /// Signal all agents to quit
     pub fn signal_quit(&mut self) {
+        logging::debug_event(
+            "workplace.quit",
+            "workplace quit signal sent to all agents",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+            }),
+        );
         self.loop_control.signal_quit();
     }
 }
