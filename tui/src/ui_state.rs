@@ -33,6 +33,7 @@ use std::time::Instant;
 use crate::composer::textarea::TextArea;
 use crate::composer::textarea::TextAreaState;
 use crate::confirmation_overlay::ConfirmationOverlay;
+use crate::human_decision_overlay::HumanDecisionOverlay;
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
@@ -97,6 +98,8 @@ pub struct TuiState {
     pub provider_overlay: Option<ProviderSelectionOverlay>,
     /// Confirmation overlay (for agent stop)
     pub confirmation_overlay: Option<ConfirmationOverlay>,
+    /// Human decision overlay (for decision layer)
+    pub human_decision_overlay: Option<HumanDecisionOverlay>,
 }
 
 impl TuiState {
@@ -125,6 +128,7 @@ impl TuiState {
             view_state: TuiViewState::new(),
             provider_overlay: None,
             confirmation_overlay: None,
+            human_decision_overlay: None,
         }
     }
 
@@ -1006,6 +1010,7 @@ impl TuiState {
         self.is_overlay_open()
             || self.is_provider_overlay_open()
             || self.is_confirmation_overlay_open()
+            || self.is_human_decision_overlay_open()
     }
 
     /// Open confirmation overlay for stopping agent
@@ -1021,6 +1026,24 @@ impl TuiState {
     /// Check if confirmation overlay is open
     pub fn is_confirmation_overlay_open(&self) -> bool {
         self.confirmation_overlay.is_some()
+    }
+
+    /// Open human decision overlay for decision request
+    pub fn open_human_decision_overlay(
+        &mut self,
+        request: agent_decision::HumanDecisionRequest,
+    ) {
+        self.human_decision_overlay = Some(HumanDecisionOverlay::new(request));
+    }
+
+    /// Close human decision overlay
+    pub fn close_human_decision_overlay(&mut self) {
+        self.human_decision_overlay = None;
+    }
+
+    /// Check if human decision overlay is open
+    pub fn is_human_decision_overlay_open(&self) -> bool {
+        self.human_decision_overlay.is_some()
     }
 
     fn active_tool_ref(&self) -> Option<&ActiveTool> {
