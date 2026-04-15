@@ -30,6 +30,64 @@ pub struct WorkplaceMeta {
     pub agent_ids: Vec<String>,
 }
 
+/// Decision state for persistence
+///
+/// Stores the decision agent's state for restore on startup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionState {
+    /// Decision agent ID
+    pub decision_agent_id: String,
+
+    /// Main agent ID this decision agent is attached to
+    pub main_agent_id: String,
+
+    /// Provider type (e.g., "claude", "codex")
+    pub provider_type: String,
+
+    /// Decision agent role (e.g., "Reviewer", "Architect")
+    pub role: String,
+
+    /// Last decision timestamp
+    pub last_decision_at: Option<String>,
+
+    /// Total decisions made
+    pub total_decisions: u32,
+
+    /// Created timestamp
+    pub created_at: String,
+
+    /// Updated timestamp
+    pub updated_at: String,
+}
+
+/// Decision history entry for audit trail
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionHistoryEntry {
+    /// Decision ID
+    pub decision_id: String,
+
+    /// Agent ID that made the decision
+    pub agent_id: String,
+
+    /// Decision type (e.g., "human_decision", "auto_approval")
+    pub decision_type: String,
+
+    /// Situation type (e.g., "action_required", "question")
+    pub situation_type: String,
+
+    /// Outcome (e.g., "approved", "rejected", "custom")
+    pub outcome: String,
+
+    /// Timestamp
+    pub timestamp: String,
+
+    /// Duration in milliseconds
+    pub duration_ms: u64,
+
+    /// Optional notes
+    pub notes: Option<String>,
+}
+
 impl WorkplaceStore {
     pub fn from_existing(workplace_id: WorkplaceId, path: PathBuf, cwd: PathBuf) -> Self {
         Self {
@@ -115,6 +173,26 @@ impl WorkplaceStore {
 
     pub fn kanban_elements_dir(&self) -> PathBuf {
         self.kanban_dir().join("elements")
+    }
+
+    /// Path for decision layer directory
+    pub fn decision_dir(&self) -> PathBuf {
+        self.path.join("decision")
+    }
+
+    /// Path for decision state persistence
+    pub fn decision_state_path(&self) -> PathBuf {
+        self.decision_dir().join("state.json")
+    }
+
+    /// Path for project rules (CLAUDE.md in workplace)
+    pub fn project_rules_path(&self) -> PathBuf {
+        self.path.join("project_rules.md")
+    }
+
+    /// Path for decision history log
+    pub fn decision_history_path(&self) -> PathBuf {
+        self.decision_dir().join("history.json")
     }
 
     pub fn load_meta(&self) -> Result<WorkplaceMeta> {
@@ -286,6 +364,168 @@ impl WorkplaceStore {
         self.shutdown_snapshot_path().exists()
     }
 
+    /// Ensure decision directory exists
+    pub fn ensure_decision_dir(&self) -> Result<()> {
+        fs::create_dir_all(self.decision_dir()).with_context(|| {
+            format!(
+                "failed to create decision directory {}",
+                self.decision_dir().display()
+            )
+        })?;
+        logging::debug_event(
+            "workplace.decision.ensure",
+            "ensured decision directory",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "decision_dir": self.decision_dir().display().to_string(),
+            }),
+        );
+        Ok(())
+    }
+
+    /// Save decision state
+    pub fn save_decision_state(&self, state: &DecisionState) -> Result<PathBuf> {
+        self.ensure_decision_dir()?;
+        let path = self.decision_state_path();
+        let payload =
+            serde_json::to_string_pretty(state).context("failed to serialize decision state")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "workplace.decision.save_state",
+            "saved decision state",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(path)
+    }
+
+    /// Load decision state if exists
+    pub fn load_decision_state(&self) -> Result<Option<DecisionState>> {
+        let path = self.decision_state_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let state: DecisionState = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "workplace.decision.load_state",
+            "loaded decision state",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+            }),
+        );
+        Ok(Some(state))
+    }
+
+    /// Clear decision state (after restore)
+    pub fn clear_decision_state(&self) -> Result<()> {
+        let path = self.decision_state_path();
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+            logging::debug_event(
+                "workplace.decision.clear_state",
+                "cleared decision state",
+                serde_json::json!({
+                    "workplace_id": self.workplace_id.as_str(),
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Check if decision state exists
+    pub fn has_decision_state(&self) -> bool {
+        self.decision_state_path().exists()
+    }
+
+    /// Save project rules to workplace
+    pub fn save_project_rules(&self, rules: &str) -> Result<PathBuf> {
+        self.ensure_decision_dir()?;
+        let path = self.project_rules_path();
+        fs::write(&path, rules)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "workplace.decision.save_rules",
+            "saved project rules",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(path)
+    }
+
+    /// Load project rules from workplace (CLAUDE.md copy)
+    pub fn load_project_rules(&self) -> Result<Option<String>> {
+        // First check workplace-level project rules
+        let workplace_rules_path = self.project_rules_path();
+        if workplace_rules_path.exists() {
+            let rules = fs::read_to_string(&workplace_rules_path)
+                .with_context(|| format!("failed to read {}", workplace_rules_path.display()))?;
+            return Ok(Some(rules));
+        }
+
+        // Fall back to root cwd's CLAUDE.md
+        let cwd_claude_md = self.cwd.join("CLAUDE.md");
+        if cwd_claude_md.exists() {
+            let rules = fs::read_to_string(&cwd_claude_md)
+                .with_context(|| format!("failed to read {}", cwd_claude_md.display()))?;
+            return Ok(Some(rules));
+        }
+
+        Ok(None)
+    }
+
+    /// Append decision to history log
+    pub fn append_decision_history(&self, entry: &DecisionHistoryEntry) -> Result<()> {
+        self.ensure_decision_dir()?;
+        let path = self.decision_history_path();
+
+        // Load existing history or create new
+        let mut history: Vec<DecisionHistoryEntry> = if path.exists() {
+            let payload = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            serde_json::from_str(&payload)
+                .with_context(|| format!("failed to parse {}", path.display()))?
+        } else {
+            Vec::new()
+        };
+
+        history.push(entry.clone());
+
+        let payload =
+            serde_json::to_string_pretty(&history).context("failed to serialize decision history")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+
+        logging::debug_event(
+            "workplace.decision.append_history",
+            "appended decision history entry",
+            serde_json::json!({
+                "workplace_id": self.workplace_id.as_str(),
+                "decision_id": entry.decision_id,
+            }),
+        );
+        Ok(())
+    }
+
+    /// Load decision history
+    pub fn load_decision_history(&self) -> Result<Vec<DecisionHistoryEntry>> {
+        let path = self.decision_history_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let history: Vec<DecisionHistoryEntry> = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(history)
+    }
+
     fn ensure_meta(&self) -> Result<()> {
         if !self.meta_path().exists() {
             self.save_meta(&self.default_meta())?;
@@ -366,6 +606,8 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::DecisionState;
+    use super::DecisionHistoryEntry;
     use super::WorkplaceMeta;
     use super::WorkplaceStore;
     use super::slugify;
@@ -483,5 +725,145 @@ mod tests {
 
         assert!(store.kanban_dir().ends_with("kanban"));
         assert!(store.kanban_elements_dir().ends_with("kanban/elements"));
+    }
+
+    // Story 8.4: Decision Layer Integration Tests
+
+    #[test]
+    fn decision_dir_created() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        store.ensure_decision_dir().expect("ensure decision dir");
+
+        assert!(store.decision_dir().exists());
+        assert!(store.decision_dir().ends_with("decision"));
+    }
+
+    #[test]
+    fn decision_state_persisted() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        let state = DecisionState {
+            decision_agent_id: "decision_001".to_string(),
+            main_agent_id: "agent_001".to_string(),
+            provider_type: "claude".to_string(),
+            role: "Reviewer".to_string(),
+            last_decision_at: Some("2026-04-15T10:00:00Z".to_string()),
+            total_decisions: 5,
+            created_at: "2026-04-15T09:00:00Z".to_string(),
+            updated_at: "2026-04-15T10:00:00Z".to_string(),
+        };
+
+        store.save_decision_state(&state).expect("save state");
+
+        assert!(store.has_decision_state());
+
+        let loaded = store.load_decision_state().expect("load state").expect("state");
+        assert_eq!(loaded.decision_agent_id, "decision_001");
+        assert_eq!(loaded.main_agent_id, "agent_001");
+        assert_eq!(loaded.total_decisions, 5);
+    }
+
+    #[test]
+    fn decision_state_restored() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        // Save state
+        let state = DecisionState {
+            decision_agent_id: "decision_002".to_string(),
+            main_agent_id: "agent_002".to_string(),
+            provider_type: "codex".to_string(),
+            role: "Architect".to_string(),
+            last_decision_at: None,
+            total_decisions: 0,
+            created_at: "2026-04-15T09:00:00Z".to_string(),
+            updated_at: "2026-04-15T09:00:00Z".to_string(),
+        };
+
+        store.save_decision_state(&state).expect("save state");
+
+        // Simulate restore by loading
+        let loaded = store.load_decision_state().expect("load state").expect("state");
+
+        // Verify restore works
+        assert_eq!(loaded.role, "Architect");
+        assert_eq!(loaded.provider_type, "codex");
+
+        // Clear after restore
+        store.clear_decision_state().expect("clear state");
+        assert!(!store.has_decision_state());
+    }
+
+    #[test]
+    fn project_rules_loaded() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        // Test loading from workplace-level rules
+        let rules = "# Project Rules\n\n- Use TDD\n- Write tests\n";
+        store.save_project_rules(rules).expect("save rules");
+
+        let loaded = store.load_project_rules().expect("load rules").expect("rules");
+        assert!(loaded.contains("Use TDD"));
+    }
+
+    #[test]
+    fn project_rules_loaded_from_cwd_claude_md() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        // Create CLAUDE.md in cwd
+        let claude_md_path = temp.path().join("CLAUDE.md");
+        let rules = "# CLAUDE.md\n\n- Use TDD-first\n";
+        std::fs::write(&claude_md_path, rules).expect("write CLAUDE.md");
+
+        // Should fall back to cwd's CLAUDE.md
+        let loaded = store.load_project_rules().expect("load rules").expect("rules");
+        assert!(loaded.contains("TDD-first"));
+    }
+
+    #[test]
+    fn decision_history_append_and_load() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        store.ensure().expect("ensure");
+
+        let entry1 = DecisionHistoryEntry {
+            decision_id: "dec_001".to_string(),
+            agent_id: "agent_001".to_string(),
+            decision_type: "human_decision".to_string(),
+            situation_type: "action_required".to_string(),
+            outcome: "approved".to_string(),
+            timestamp: "2026-04-15T10:00:00Z".to_string(),
+            duration_ms: 5000,
+            notes: Some("Approved quickly".to_string()),
+        };
+
+        let entry2 = DecisionHistoryEntry {
+            decision_id: "dec_002".to_string(),
+            agent_id: "agent_001".to_string(),
+            decision_type: "auto_approval".to_string(),
+            situation_type: "confirmation".to_string(),
+            outcome: "approved".to_string(),
+            timestamp: "2026-04-15T10:05:00Z".to_string(),
+            duration_ms: 100,
+            notes: None,
+        };
+
+        store.append_decision_history(&entry1).expect("append 1");
+        store.append_decision_history(&entry2).expect("append 2");
+
+        let history = store.load_decision_history().expect("load history");
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].decision_id, "dec_001");
+        assert_eq!(history[1].decision_type, "auto_approval");
     }
 }
