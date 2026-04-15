@@ -1316,21 +1316,56 @@ impl AgentPool {
     /// Process expired requests and execute timeout actions
     ///
     /// Returns the number of requests processed.
+    /// Note: This handles expired requests that were already removed from queue by check_expired.
     pub fn process_expired_requests(&mut self) -> usize {
         let expired = self.human_queue.check_expired();
         let count = expired.len();
 
         for request in expired {
             let selection = self.timeout_action_for_request(&request);
-            let response = HumanDecisionResponse::new(
-                request.id,
-                selection,
-            );
-            // Ignore errors - the request is already removed from queue
-            let _ = self.process_human_response(response);
+            let agent_id = AgentId::new(request.agent_id.clone());
+
+            // Find and update history
+            if let Some(entry) = self.blocked_history.iter_mut().find(|e| e.agent_id == agent_id && !e.resolved) {
+                entry.resolved = true;
+                entry.resolution = Some(format!("timeout: {:?}", selection));
+            }
+
+            // Clear blocked status and execute timeout action
+            self.execute_timeout_action(&agent_id, selection);
         }
 
         count
+    }
+
+    /// Execute timeout action on an agent (called when request already removed from queue)
+    fn execute_timeout_action(&mut self, agent_id: &AgentId, selection: HumanSelection) {
+        let slot = self.get_slot_mut_by_id(agent_id);
+        if slot.is_none() {
+            return;
+        }
+
+        let slot = slot.unwrap();
+        if !slot.status().is_blocked() {
+            return;
+        }
+
+        // Transition to appropriate status based on selection
+        match selection {
+            HumanSelection::Cancelled => {
+                let _ = slot.transition_to(AgentSlotStatus::Idle);
+            }
+            HumanSelection::Skipped => {
+                // Clear task but keep agent ready
+                slot.clear_task();
+                let _ = slot.transition_to(AgentSlotStatus::Idle);
+            }
+            _ => {
+                // For other selections, just transition to responding
+                use std::time::Instant;
+                let _ = slot.transition_to(AgentSlotStatus::Responding { started_at: Instant::now() });
+            }
+        }
     }
 
     /// Determine the timeout action for a request based on config
