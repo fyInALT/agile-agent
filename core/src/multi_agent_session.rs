@@ -562,7 +562,7 @@ impl MultiAgentSession {
                 );
                 Ok(())
             }
-            ProviderEvent::ExecCommandFinished { call_id, output_preview, status, exit_code, duration_ms, source } => {
+            ProviderEvent::ExecCommandFinished { call_id, output_preview: _, status, exit_code, duration_ms, source } => {
                 logging::debug_event(
                     "tool.exec.finished",
                     "exec command finished",
@@ -577,7 +577,7 @@ impl MultiAgentSession {
                 );
                 Ok(())
             }
-            ProviderEvent::GenericToolCallStarted { name, call_id, input_preview } => {
+            ProviderEvent::GenericToolCallStarted { name, call_id, input_preview: _ } => {
                 logging::debug_event(
                     "tool.generic.started",
                     "generic tool call started",
@@ -589,7 +589,7 @@ impl MultiAgentSession {
                 );
                 Ok(())
             }
-            ProviderEvent::GenericToolCallFinished { name, call_id, output_preview, success, exit_code, duration_ms } => {
+            ProviderEvent::GenericToolCallFinished { name, call_id, output_preview: _, success, exit_code, duration_ms } => {
                 logging::debug_event(
                     "tool.generic.finished",
                     "generic tool call finished",
@@ -617,7 +617,7 @@ impl MultiAgentSession {
                 );
                 Ok(())
             }
-            ProviderEvent::McpToolCallFinished { call_id, invocation, result_blocks, error, status, is_error } => {
+            ProviderEvent::McpToolCallFinished { call_id, invocation, result_blocks: _, error: _, status, is_error } => {
                 logging::debug_event(
                     "tool.mcp.finished",
                     "MCP tool call finished",
@@ -644,7 +644,7 @@ impl MultiAgentSession {
                 );
                 Ok(())
             }
-            ProviderEvent::WebSearchFinished { call_id, query, action } => {
+            ProviderEvent::WebSearchFinished { call_id, query, action: _ } => {
                 logging::debug_event(
                     "tool.websearch.finished",
                     "web search finished",

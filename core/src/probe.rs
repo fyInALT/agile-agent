@@ -181,7 +181,9 @@ mod tests {
     fn write_fake_executable(dir: &TempDir, name: &str, version_output: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
-        let path = dir.path().join(name);
+        // Use unique name to avoid race conditions in parallel tests
+        let unique_name = format!("{}-{}", name, std::process::id());
+        let path = dir.path().join(&unique_name);
         let script = format!("#!/bin/sh\necho \"{version_output}\"\n");
         fs::write(&path, script).expect("write fake executable");
         let mut permissions = fs::metadata(&path).expect("metadata").permissions();
