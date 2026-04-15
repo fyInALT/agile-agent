@@ -1,6 +1,7 @@
 use crate::command_bus::model::{
     CommandInvocation, CommandNamespace, CommandParseError, CommandTargetSpec, ParsedSlashCommand,
 };
+use crate::command_bus::registry::{longest_registered_path_prefix, namespace_path_heads};
 
 pub fn parse_slash_command(input: &str) -> Result<ParsedSlashCommand, CommandParseError> {
     let trimmed = input.trim();
@@ -30,7 +31,7 @@ fn parse_local(tokens: &[String]) -> Result<ParsedSlashCommand, CommandParseErro
         return Err(CommandParseError::new("usage: /local <path...>"));
     }
 
-    let (path, args) = split_path_and_args(&tokens[1..], None);
+    let (path, args) = split_path_and_args(CommandNamespace::Local, &tokens[1..], None);
     if path.is_empty() {
         return Err(CommandParseError::new("usage: /local <path...>"));
     }
@@ -49,14 +50,14 @@ fn parse_agent(tokens: &[String]) -> Result<ParsedSlashCommand, CommandParseErro
         return Err(CommandParseError::new("usage: /agent [target] <path...>"));
     }
 
-    let known_commands = ["status", "summary"];
-    let (target, command_start) = if tokens.len() >= 3 && !known_commands.contains(&tokens[1].as_str()) {
+    let known_heads = namespace_path_heads(CommandNamespace::Agent);
+    let (target, command_start) = if tokens.len() >= 3 && !known_heads.contains(&tokens[1].as_str()) {
         (Some(CommandTargetSpec::AgentName(tokens[1].clone())), 2usize)
     } else {
         (None, 1usize)
     };
 
-    let (path, args) = split_path_and_args(&tokens[command_start..], Some(&["status", "summary"]));
+    let (path, args) = split_path_and_args(CommandNamespace::Agent, &tokens[command_start..], Some(&known_heads));
     if path.is_empty() {
         return Err(CommandParseError::new("usage: /agent [target] <path...>"));
     }
@@ -104,9 +105,15 @@ fn parse_provider(tokens: &[String]) -> Result<ParsedSlashCommand, CommandParseE
 }
 
 fn split_path_and_args(
+    namespace: CommandNamespace,
     tokens: &[String],
     known_paths: Option<&[&str]>,
 ) -> (Vec<String>, Vec<String>) {
+    if let Some(path) = longest_registered_path_prefix(namespace, tokens) {
+        let args = tokens.iter().skip(path.len()).cloned().collect::<Vec<_>>();
+        return (path, args);
+    }
+
     if let Some(known_paths) = known_paths {
         if let Some((first, rest)) = tokens.split_first() {
             if known_paths.contains(&first.as_str()) {
@@ -118,14 +125,7 @@ fn split_path_and_args(
     match tokens.len() {
         0 => (vec![], vec![]),
         1 => (vec![tokens[0].clone()], vec![]),
-        _ => {
-            let path_len = match tokens[0].as_str() {
-                "kanban" | "config" => 2.min(tokens.len()),
-                _ => 1,
-            };
-            let (path, args) = tokens.split_at(path_len);
-            (path.to_vec(), args.to_vec())
-        }
+        _ => (vec![tokens[0].clone()], tokens[1..].to_vec()),
     }
 }
 
