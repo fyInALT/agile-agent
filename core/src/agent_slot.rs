@@ -579,12 +579,29 @@ impl AgentSlot {
 
     /// Set the session handle
     pub fn set_session_handle(&mut self, handle: SessionHandle) {
+        logging::debug_event(
+            "slot.session_handle.set",
+            "session handle set on agent slot",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "handle_type": format!("{:?}", handle),
+            }),
+        );
         self.session_handle = Some(handle);
         self.last_activity = Instant::now();
     }
 
     /// Clear the session handle
     pub fn clear_session_handle(&mut self) {
+        logging::debug_event(
+            "slot.session_handle.clear",
+            "session handle cleared from agent slot",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+            }),
+        );
         self.session_handle = None;
     }
 

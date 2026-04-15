@@ -358,19 +358,61 @@ impl AgentPool {
 
     /// Restore an agent slot into the pool.
     pub fn restore_slot(&mut self, slot: AgentSlot) -> Result<(), String> {
+        let agent_id = slot.agent_id().as_str().to_string();
+        let codename = slot.codename().as_str().to_string();
+        let role = slot.role().label();
+
+        logging::debug_event(
+            "pool.slot.restore",
+            "restoring agent slot from snapshot",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "codename": codename,
+                "role": role,
+                "current_pool_size": self.slots.len(),
+                "max_slots": self.max_slots,
+            }),
+        );
+
         if !self.can_spawn() {
+            logging::debug_event(
+                "pool.slot.restore.failed",
+                "restore failed - pool full",
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "current_size": self.slots.len(),
+                    "max_slots": self.max_slots,
+                }),
+            );
             return Err("Agent pool is full".to_string());
         }
-        if self.slots.iter().any(|existing| existing.agent_id() == slot.agent_id()) {
-            return Err(format!(
+        if self.slots.iter().any(|existing| existing.agent_id().as_str() == agent_id) {
+            let err = format!(
                 "Agent {} already exists in pool",
-                slot.agent_id().as_str()
-            ));
+                agent_id
+            );
+            logging::debug_event(
+                "pool.slot.restore.failed",
+                "restore failed - agent already exists",
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "error": err,
+                }),
+            );
+            return Err(err);
         }
 
         if slot.role() == AgentRole::ProductOwner {
             if self.overview_agent().is_some() {
-                return Err("OVERVIEW agent already exists".to_string());
+                let err = "OVERVIEW agent already exists".to_string();
+                logging::debug_event(
+                    "pool.slot.restore.failed",
+                    "restore failed - overview agent exists",
+                    serde_json::json!({
+                        "error": err,
+                    }),
+                );
+                return Err(err);
             }
             self.slots.insert(0, slot);
         } else {
@@ -391,6 +433,15 @@ impl AgentPool {
         {
             self.next_agent_index = self.next_agent_index.max(restored_index + 1);
         }
+
+        logging::debug_event(
+            "pool.slot.restore.complete",
+            "agent slot restored successfully",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "new_pool_size": self.slots.len(),
+            }),
+        );
 
         Ok(())
     }
