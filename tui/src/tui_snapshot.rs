@@ -2,8 +2,22 @@
 //!
 //! Captures TUI-specific state for graceful restore across sessions.
 
+use std::fs;
+
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use agent_core::agent_mail::AgentMailbox;
+use agent_core::agent_role::AgentRole;
+use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+use agent_core::agent_slot::{AgentSlotStatus, TaskId};
+use agent_core::app::TranscriptEntry;
+use agent_core::backlog::BacklogState;
+use agent_core::provider::{ProviderKind, SessionHandle};
+use agent_core::shutdown_snapshot::ShutdownReason;
+use agent_core::workplace_store::WorkplaceStore;
+
+use crate::overview_state::OverviewFilter;
 use crate::view_mode::{ComposeField, ViewMode};
 
 /// Snapshot of TUI state at shutdown
@@ -17,8 +31,57 @@ pub struct TuiShutdownSnapshot {
     pub dashboard_state: Option<DashboardViewSnapshot>,
     /// Mail state (if in mail mode)
     pub mail_state: Option<MailViewSnapshot>,
+    /// Overview state (if in overview mode)
+    pub overview_state: Option<OverviewViewSnapshot>,
     /// Timestamp when snapshot was captured
     pub captured_at: String,
+}
+
+/// Complete TUI resume snapshot for restoring a multi-agent TUI session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TuiResumeSnapshot {
+    /// Timestamp when the snapshot was captured.
+    pub captured_at: String,
+    /// Why the session was shut down.
+    pub shutdown_reason: ShutdownReason,
+    /// Current composer contents.
+    pub composer_text: String,
+    /// Selected provider for new work.
+    pub selected_provider: ProviderKind,
+    /// Shared backlog state.
+    pub backlog: BacklogState,
+    /// Full mailbox state.
+    pub mailbox: AgentMailbox,
+    /// All agents visible in the TUI.
+    pub agents: Vec<PersistedAgentSnapshot>,
+    /// Focused agent at shutdown.
+    pub focused_agent_id: Option<AgentId>,
+    /// TUI view state.
+    pub view_state: TuiShutdownSnapshot,
+}
+
+/// Persisted view of one TUI agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PersistedAgentSnapshot {
+    pub agent_id: AgentId,
+    pub codename: AgentCodename,
+    pub provider_type: ProviderType,
+    pub role: AgentRole,
+    pub status: PersistedAgentStatus,
+    pub provider_session_id: Option<String>,
+    pub transcript: Vec<TranscriptEntry>,
+    pub assigned_task_id: Option<TaskId>,
+}
+
+/// Serializable snapshot of a live agent status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedAgentStatus {
+    Idle,
+    Active,
+    Blocked { reason: String },
+    Stopped { reason: String },
+    Error { message: String },
 }
 
 impl TuiShutdownSnapshot {
@@ -28,6 +91,7 @@ impl TuiShutdownSnapshot {
         split_state: Option<SplitViewSnapshot>,
         dashboard_state: Option<DashboardViewSnapshot>,
         mail_state: Option<MailViewSnapshot>,
+        overview_state: Option<OverviewViewSnapshot>,
     ) -> Self {
         use chrono::Utc;
         Self {
@@ -35,6 +99,7 @@ impl TuiShutdownSnapshot {
             split_state,
             dashboard_state,
             mail_state,
+            overview_state,
             captured_at: Utc::now().to_rfc3339(),
         }
     }
@@ -58,7 +123,19 @@ impl TuiShutdownSnapshot {
             compose_field: view_state.mail.compose_field,
         });
 
-        Self::new(view_state.mode, split_state, dashboard_state, mail_state)
+        let overview_state = Some(OverviewViewSnapshot {
+            filter: view_state.overview.filter,
+            page_offset: view_state.overview.page_offset,
+            agent_list_rows: view_state.overview.agent_list_rows,
+        });
+
+        Self::new(
+            view_state.mode,
+            split_state,
+            dashboard_state,
+            mail_state,
+            overview_state,
+        )
     }
 
     /// Apply snapshot to TuiViewState
@@ -81,7 +158,138 @@ impl TuiShutdownSnapshot {
             view_state.mail.selected_mail_index = mail.selected_mail_index;
             view_state.mail.compose_field = mail.compose_field;
         }
+
+        if let Some(overview) = &self.overview_state {
+            view_state.overview.filter = overview.filter;
+            view_state.overview.page_offset = overview.page_offset;
+            view_state.overview.agent_list_rows = overview.agent_list_rows;
+        }
     }
+}
+
+impl TuiResumeSnapshot {
+    pub fn from_state(state: &crate::ui_state::TuiState, reason: ShutdownReason) -> Self {
+        let agents = state
+            .agent_pool
+            .as_ref()
+            .map(|pool| {
+                pool.slots()
+                    .iter()
+                    .map(PersistedAgentSnapshot::from_slot)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Self {
+            captured_at: chrono::Utc::now().to_rfc3339(),
+            shutdown_reason: reason,
+            composer_text: state.composer.text().to_string(),
+            selected_provider: state.app().selected_provider,
+            backlog: state.workplace().backlog.clone(),
+            mailbox: state.mailbox.clone(),
+            agents,
+            focused_agent_id: state.focused_agent_id(),
+            view_state: TuiShutdownSnapshot::from_view_state(&state.view_state),
+        }
+    }
+}
+
+impl PersistedAgentSnapshot {
+    pub fn from_slot(slot: &agent_core::agent_slot::AgentSlot) -> Self {
+        Self {
+            agent_id: slot.agent_id().clone(),
+            codename: slot.codename().clone(),
+            provider_type: slot.provider_type(),
+            role: slot.role(),
+            status: PersistedAgentStatus::from_slot_status(slot.status()),
+            provider_session_id: slot.session_handle().map(|handle| match handle {
+                SessionHandle::ClaudeSession { session_id } => session_id.clone(),
+                SessionHandle::CodexThread { thread_id } => thread_id.clone(),
+            }),
+            transcript: slot.transcript().to_vec(),
+            assigned_task_id: slot.assigned_task_id().cloned(),
+        }
+    }
+
+    pub fn restore_status(&self) -> AgentSlotStatus {
+        match &self.status {
+            PersistedAgentStatus::Idle => AgentSlotStatus::idle(),
+            PersistedAgentStatus::Active => AgentSlotStatus::idle(),
+            PersistedAgentStatus::Blocked { reason } => AgentSlotStatus::blocked(reason.clone()),
+            PersistedAgentStatus::Stopped { reason } => AgentSlotStatus::stopped(reason.clone()),
+            PersistedAgentStatus::Error { message } => AgentSlotStatus::error(message.clone()),
+        }
+    }
+
+    pub fn restore_session_handle(&self) -> Option<SessionHandle> {
+        self.provider_session_id
+            .as_ref()
+            .map(|value| match self.provider_type {
+                ProviderType::Codex => SessionHandle::CodexThread {
+                    thread_id: value.clone(),
+                },
+                _ => SessionHandle::ClaudeSession {
+                    session_id: value.clone(),
+                },
+            })
+    }
+}
+
+impl PersistedAgentStatus {
+    fn from_slot_status(status: &AgentSlotStatus) -> Self {
+        match status {
+            AgentSlotStatus::Idle => Self::Idle,
+            AgentSlotStatus::Blocked { reason } => Self::Blocked {
+                reason: reason.clone(),
+            },
+            AgentSlotStatus::Stopped { reason } => Self::Stopped {
+                reason: reason.clone(),
+            },
+            AgentSlotStatus::Error { message } => Self::Error {
+                message: message.clone(),
+            },
+            AgentSlotStatus::Starting
+            | AgentSlotStatus::Responding { .. }
+            | AgentSlotStatus::ToolExecuting { .. }
+            | AgentSlotStatus::Finishing
+            | AgentSlotStatus::Stopping => Self::Active,
+        }
+    }
+}
+
+pub fn resume_snapshot_path(workplace: &WorkplaceStore) -> std::path::PathBuf {
+    workplace.path().join("tui_shutdown_snapshot.json")
+}
+
+pub fn save_resume_snapshot(
+    workplace: &WorkplaceStore,
+    snapshot: &TuiResumeSnapshot,
+) -> Result<std::path::PathBuf> {
+    let path = resume_snapshot_path(workplace);
+    let payload = serde_json::to_string_pretty(snapshot)
+        .context("failed to serialize TUI resume snapshot")?;
+    fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(path)
+}
+
+pub fn load_resume_snapshot(workplace: &WorkplaceStore) -> Result<Option<TuiResumeSnapshot>> {
+    let path = resume_snapshot_path(workplace);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let payload =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let snapshot = serde_json::from_str(&payload)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(Some(snapshot))
+}
+
+pub fn clear_resume_snapshot(workplace: &WorkplaceStore) -> Result<()> {
+    let path = resume_snapshot_path(workplace);
+    if path.exists() {
+        fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Snapshot of split view state
@@ -116,6 +324,17 @@ pub struct MailViewSnapshot {
     pub compose_field: ComposeField,
 }
 
+/// Snapshot of overview view state
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OverviewViewSnapshot {
+    /// Active overview filter
+    pub filter: OverviewFilter,
+    /// Current page offset
+    pub page_offset: usize,
+    /// Configured agent rows
+    pub agent_list_rows: usize,
+}
+
 /// Serde module for f32 split ratio
 mod split_ratio_serde {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -140,6 +359,11 @@ mod split_ratio_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_state::TuiState;
+    use agent_core::provider::ProviderKind;
+    use agent_core::runtime_session::RuntimeSession;
+    use agent_core::shutdown_snapshot::ShutdownReason;
+    use tempfile::TempDir;
 
     #[test]
     fn tui_snapshot_serializes_view_mode() {
@@ -151,6 +375,7 @@ mod tests {
                 focused_side: 0,
                 split_ratio: 0.5,
             }),
+            None,
             None,
             None,
         );
@@ -167,6 +392,7 @@ mod tests {
             "split_state": null,
             "dashboard_state": {"selected_card_index": 2, "scroll_offset": 1},
             "mail_state": null,
+            "overview_state": null,
             "captured_at": "2026-04-14T00:00:00Z"
         }"#;
 
@@ -188,6 +414,7 @@ mod tests {
                 selected_mail_index: 5,
                 compose_field: ComposeField::Body,
             }),
+            None,
         );
 
         let mut view_state = TuiViewState::default();
@@ -196,5 +423,49 @@ mod tests {
         assert_eq!(view_state.mode, ViewMode::Mail);
         assert_eq!(view_state.mail.selected_mail_index, 5);
         assert_eq!(view_state.mail.compose_field, ComposeField::Body);
+    }
+
+    #[test]
+    fn resume_snapshot_round_trip_restores_multi_agent_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.ensure_overview_agent();
+        let alpha_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        state.view_state.mode = ViewMode::Overview;
+        state.view_state.overview.filter = crate::overview_state::OverviewFilter::RunningOnly;
+        state.focus_agent(&alpha_id);
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&alpha_id)
+        {
+            slot.append_transcript(agent_core::app::TranscriptEntry::Assistant(
+                "restored worker output".to_string(),
+            ));
+        }
+
+        let snapshot = TuiResumeSnapshot::from_state(&state, ShutdownReason::UserQuit);
+
+        let fresh = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap fresh");
+        let mut restored = TuiState::from_session(fresh);
+        restored
+            .restore_from_resume_snapshot(snapshot)
+            .expect("restore snapshot");
+
+        assert_eq!(restored.view_state.mode, ViewMode::Overview);
+        assert_eq!(
+            restored.view_state.overview.filter,
+            crate::overview_state::OverviewFilter::RunningOnly
+        );
+        assert_eq!(restored.focused_agent_codename(), "alpha");
+        let alpha_slot = restored
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&alpha_id))
+            .expect("alpha slot");
+        assert!(alpha_slot.transcript().iter().any(|entry| {
+            matches!(entry, agent_core::app::TranscriptEntry::Assistant(text) if text == "restored worker output")
+        }));
     }
 }

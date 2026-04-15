@@ -99,7 +99,13 @@ pub fn execute(cli: Cli) -> Result<()> {
     init_logging_for_mode(&launch_cwd, run_mode_for_cli(&cli));
 
     match cli.command {
-        None => agent_tui::run_tui(),
+        None => {
+            if tui_resume_enabled(&cli) {
+                agent_tui::run_tui_with_resume_last()
+            } else {
+                agent_tui::run_tui()
+            }
+        }
         Some(Command::ResumeLast) => agent_tui::run_tui_with_resume_last(),
         Some(Command::Agent {
             command: AgentCommand::Current,
@@ -137,6 +143,10 @@ pub fn execute(cli: Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn tui_resume_enabled(cli: &Cli) -> bool {
+    matches!(cli.command, None | Some(Command::ResumeLast))
 }
 
 fn run_mode_for_cli(cli: &Cli) -> RunMode {
@@ -448,4 +458,25 @@ fn persist_agent_runtime_bundle(agent_runtime: &AgentRuntime, state: &AppState) 
     agent_runtime.persist_messages(state)?;
     agent_runtime.persist_memory(state)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command, run_mode_for_cli, tui_resume_enabled};
+    use agent_core::logging::RunMode;
+
+    #[test]
+    fn default_command_enables_resume_last_for_tui() {
+        let cli = Cli { command: None };
+        assert!(tui_resume_enabled(&cli));
+    }
+
+    #[test]
+    fn doctor_command_does_not_enable_tui_resume() {
+        let cli = Cli {
+            command: Some(Command::Doctor),
+        };
+        assert!(!tui_resume_enabled(&cli));
+        assert_eq!(run_mode_for_cli(&cli), RunMode::Doctor);
+    }
 }

@@ -2,11 +2,12 @@
 //!
 //! State management for Overview display mode in multi-agent TUI.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
 /// Filter mode for Overview agent list
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OverviewFilter {
     #[default]
     All,

@@ -35,6 +35,9 @@ use crate::ui_state::AtCommandResult;
 use crate::resume_overlay::{ResumeCommand, ResumeOverlay};
 use crate::terminal::AppTerminal;
 use crate::transcript::overlay::OverlayCommand;
+use crate::tui_snapshot::clear_resume_snapshot;
+use crate::tui_snapshot::load_resume_snapshot;
+use crate::tui_snapshot::save_resume_snapshot;
 use crate::ui_state::TuiState;
 use crate::ui_state::parse_at_command;
 
@@ -51,15 +54,28 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         false
     };
 
+    let workplace = agent_core::workplace_store::WorkplaceStore::for_cwd(&launch_cwd)?;
+    let tui_resume_snapshot = if effective_resume_last {
+        load_resume_snapshot(&workplace)?
+    } else {
+        None
+    };
+
     let session = RuntimeSession::bootstrap(
-        launch_cwd,
+        launch_cwd.clone(),
         provider::default_provider(),
-        effective_resume_last,
+        effective_resume_last && tui_resume_snapshot.is_none(),
     )?;
     let mut state = TuiState::from_session(session);
 
-    // Ensure OVERVIEW agent exists on startup (always at index 0)
-    state.ensure_overview_agent();
+    if let Some(snapshot) = tui_resume_snapshot {
+        state.restore_from_resume_snapshot(snapshot)?;
+        workplace.clear_shutdown_snapshot()?;
+        clear_resume_snapshot(&workplace)?;
+    } else {
+        // Ensure OVERVIEW agent exists on startup (always at index 0)
+        state.ensure_overview_agent();
+    }
 
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
     let mut last_flush = Instant::now();
@@ -761,8 +777,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         }
     }
 
-    state.sync_app_input_from_composer();
-    state.session.mark_stopped_and_persist()?;
+    shutdown_tui_state(&mut state)?;
     Ok(state.into_app_state())
 }
 
@@ -958,6 +973,26 @@ fn start_multi_agent_provider_request_for_agent(
     }
 }
 
+fn shutdown_tui_state(state: &mut TuiState) -> Result<()> {
+    state.sync_app_input_from_composer();
+    let reason = if state.session.was_interrupted() {
+        agent_core::shutdown_snapshot::ShutdownReason::Interrupted
+    } else {
+        agent_core::shutdown_snapshot::ShutdownReason::UserQuit
+    };
+
+    let summary = state.create_shutdown_snapshot(reason.clone());
+    state.session
+        .agent_runtime
+        .workplace()
+        .save_shutdown_snapshot(&summary)?;
+
+    let resume_snapshot = state.create_resume_snapshot(reason);
+    save_resume_snapshot(state.session.agent_runtime.workplace(), &resume_snapshot)?;
+
+    state.session.quick_shutdown()
+}
+
 fn resolve_agent_target_ids(
     state: &TuiState,
     agents: &[String],
@@ -1115,6 +1150,7 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
                     );
                     // Clear snapshot for fresh start
                     workplace.clear_shutdown_snapshot()?;
+                    clear_resume_snapshot(&workplace)?;
                     return Ok(false);
                 }
                 ResumeCommand::CancelRestore => {
@@ -1125,6 +1161,7 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
                     );
                     // Clear snapshot and start clean
                     workplace.clear_shutdown_snapshot()?;
+                    clear_resume_snapshot(&workplace)?;
                     return Ok(false);
                 }
             }
@@ -1350,6 +1387,7 @@ fn current_time_as_u32() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::event_poll_timeout;
+    use super::shutdown_tui_state;
     use super::handle_agent_provider_event;
     use super::handle_agent_channel_disconnect;
     use super::handle_multi_agent_submission;
@@ -1645,6 +1683,27 @@ mod tests {
             .expect("slot");
         assert!(slot.status().is_idle());
         assert_eq!(state.agent_channel_count(), 0);
+    }
+
+    #[test]
+    fn shutdown_tui_state_saves_resume_artifacts() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.ensure_overview_agent();
+        state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        state.view_state.mode = crate::view_mode::ViewMode::Overview;
+        state.composer.insert_text("draft after restart");
+
+        shutdown_tui_state(&mut state).expect("shutdown");
+
+        let workplace =
+            agent_core::workplace_store::WorkplaceStore::for_cwd(temp.path()).expect("workplace");
+        assert!(workplace.has_shutdown_snapshot());
+        assert!(crate::tui_snapshot::load_resume_snapshot(&workplace)
+            .expect("load tui snapshot")
+            .is_some());
     }
 
     #[test]

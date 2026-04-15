@@ -3,6 +3,9 @@ use agent_core::agent_pool::AgentPool;
 use agent_core::agent_pool::AgentStatusSnapshot;
 use agent_core::agent_role::AgentRole;
 use agent_core::agent_runtime::AgentId;
+use agent_core::agent_runtime::AgentMeta;
+use agent_core::agent_runtime::AgentStatus;
+use agent_core::agent_runtime::ProviderSessionId;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
@@ -12,6 +15,10 @@ use agent_core::logging;
 use agent_core::provider::{ProviderEvent, ProviderKind};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shared_state::SharedWorkplaceState;
+use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
+use agent_core::shutdown_snapshot::ProviderThreadSnapshot;
+use agent_core::shutdown_snapshot::ShutdownReason;
+use agent_core::shutdown_snapshot::ShutdownSnapshot;
 use agent_core::tool_calls::ExecCommandStatus;
 use agent_core::tool_calls::McpInvocation;
 use agent_core::tool_calls::McpToolCallStatus;
@@ -30,6 +37,7 @@ use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
+use crate::tui_snapshot::TuiResumeSnapshot;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
 use crate::view_mode::TuiViewState;
@@ -677,6 +685,149 @@ impl TuiState {
             .as_ref()
             .and_then(|pool| pool.focused_slot())
             .map(|s| s.agent_id().clone())
+    }
+
+    pub fn create_shutdown_snapshot(&self, reason: ShutdownReason) -> ShutdownSnapshot {
+        let agents = if let Some(pool) = self.agent_pool.as_ref() {
+            pool.slots()
+                .iter()
+                .map(|slot| {
+                    let meta = AgentMeta {
+                        agent_id: slot.agent_id().clone(),
+                        codename: slot.codename().clone(),
+                        workplace_id: self.session.workplace().workplace_id.clone(),
+                        provider_type: slot.provider_type(),
+                        provider_session_id: slot.session_handle().map(|handle| match handle {
+                            agent_core::provider::SessionHandle::ClaudeSession { session_id } => {
+                                ProviderSessionId::new(session_id)
+                            }
+                            agent_core::provider::SessionHandle::CodexThread { thread_id } => {
+                                ProviderSessionId::new(thread_id)
+                            }
+                        }),
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                        updated_at: chrono::Utc::now().to_rfc3339(),
+                        status: if slot.status().is_active() {
+                            AgentStatus::Running
+                        } else if slot.status().is_terminal() {
+                            AgentStatus::Stopped
+                        } else {
+                            AgentStatus::Idle
+                        },
+                    };
+
+                    let provider_thread_state = if slot.status().is_active() {
+                        Some(ProviderThreadSnapshot::waiting_for_response(
+                            None,
+                            chrono::Utc::now().to_rfc3339(),
+                        ))
+                    } else {
+                        None
+                    };
+
+                    AgentShutdownSnapshot {
+                        meta,
+                        assigned_task_id: slot.assigned_task_id().map(|task| task.as_str().to_string()),
+                        was_active: slot.status().is_active(),
+                        had_error: matches!(
+                            slot.status(),
+                            agent_core::agent_slot::AgentSlotStatus::Error { .. }
+                        ),
+                        provider_thread_state,
+                        captured_at: chrono::Utc::now().to_rfc3339(),
+                    }
+                })
+                .collect()
+        } else {
+            let snapshot = if self.session.was_interrupted() {
+                AgentShutdownSnapshot::active(
+                    self.session.agent_runtime.meta().clone(),
+                    self.app().active_task_id.clone(),
+                    ProviderThreadSnapshot::waiting_for_response(
+                        None,
+                        chrono::Utc::now().to_rfc3339(),
+                    ),
+                )
+            } else {
+                AgentShutdownSnapshot::idle(self.session.agent_runtime.meta().clone())
+            };
+            vec![snapshot]
+        };
+
+        ShutdownSnapshot::new(
+            self.session.workplace().workplace_id.as_str().to_string(),
+            agents,
+            self.workplace().backlog.clone(),
+            self.mailbox.pending_mail_for_snapshot(),
+            reason,
+        )
+    }
+
+    pub fn create_resume_snapshot(&self, reason: ShutdownReason) -> TuiResumeSnapshot {
+        TuiResumeSnapshot::from_state(self, reason)
+    }
+
+    pub fn restore_from_resume_snapshot(&mut self, snapshot: TuiResumeSnapshot) -> Result<()> {
+        self.view_state = TuiViewState::default();
+        snapshot.view_state.apply_to(&mut self.view_state);
+
+        self.workplace_mut().backlog = snapshot.backlog.clone();
+        self.mailbox = snapshot.mailbox.clone();
+        self.app_mut().selected_provider = snapshot.selected_provider;
+        self.app_mut().input = snapshot.composer_text.clone();
+        self.composer = TextArea::from_text(snapshot.composer_text.clone());
+        self.sync_app_input_from_composer();
+
+        let workplace_id = self.session.workplace().workplace_id.clone();
+        let mut pool = AgentPool::new(workplace_id, 10);
+        for agent in snapshot.agents {
+            let restored_slot = agent_core::agent_slot::AgentSlot::restored(
+                agent.agent_id.clone(),
+                agent.codename.clone(),
+                agent.provider_type,
+                agent.role,
+                agent.restore_status(),
+                agent.restore_session_handle(),
+                agent.transcript.clone(),
+                agent.assigned_task_id.clone(),
+            );
+            pool.restore_slot(restored_slot)
+                .map_err(|error| anyhow::anyhow!(error))?;
+        }
+        self.agent_pool = Some(pool);
+
+        if let Some(focused_id) = snapshot.focused_agent_id.as_ref() {
+            let _ = self.focus_agent(focused_id);
+        } else {
+            self.ensure_overview_agent();
+        }
+        self.sync_overview_page_to_focus();
+
+        if let Some(status) = self.focused_agent_status() {
+            self.app_mut().selected_provider = status
+                .provider_type
+                .to_provider_kind()
+                .unwrap_or(self.app().selected_provider);
+            self.app_mut().transcript = self
+                .agent_pool
+                .as_ref()
+                .and_then(|pool| pool.get_slot_by_id(&status.agent_id))
+                .map(|slot| slot.transcript().to_vec())
+                .unwrap_or_default();
+            self.app_mut().active_task_id =
+                status.assigned_task_id.map(|task| task.as_str().to_string());
+            self.app_mut().status = match self
+                .agent_pool
+                .as_ref()
+                .and_then(|pool| pool.get_slot_by_id(&status.agent_id))
+                .map(|slot| slot.status())
+            {
+                Some(state) if state.is_active() => AppStatus::Responding,
+                _ => AppStatus::Idle,
+            };
+        }
+
+        Ok(())
     }
 
     fn unread_mail_for_agent(&self, agent_id: &AgentId) -> String {

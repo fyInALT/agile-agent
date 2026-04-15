@@ -355,6 +355,32 @@ impl AgentSlot {
         }
     }
 
+    /// Restore a slot from persisted state without an active provider thread.
+    pub fn restored(
+        agent_id: AgentId,
+        codename: AgentCodename,
+        provider_type: ProviderType,
+        role: AgentRole,
+        status: AgentSlotStatus,
+        session_handle: Option<SessionHandle>,
+        transcript: Vec<TranscriptEntry>,
+        assigned_task_id: Option<TaskId>,
+    ) -> Self {
+        Self {
+            agent_id,
+            codename,
+            provider_type,
+            role,
+            status,
+            session_handle,
+            transcript,
+            assigned_task_id,
+            event_rx: None,
+            thread_handle: None,
+            last_activity: Instant::now(),
+        }
+    }
+
     /// Get the agent's unique identifier
     pub fn agent_id(&self) -> &AgentId {
         &self.agent_id

@@ -283,7 +283,7 @@ impl AgentChat {
 }
 
 /// Mailbox for managing agent mail
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentMailbox {
     /// Inbox per agent (unread mail)
     inbox: HashMap<AgentId, Vec<AgentMail>>,

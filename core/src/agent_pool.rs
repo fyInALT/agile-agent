@@ -240,6 +240,50 @@ impl AgentPool {
             .collect()
     }
 
+    /// Get all slots for snapshot/export use.
+    pub fn slots(&self) -> &[AgentSlot] {
+        &self.slots
+    }
+
+    /// Restore an agent slot into the pool.
+    pub fn restore_slot(&mut self, slot: AgentSlot) -> Result<(), String> {
+        if !self.can_spawn() {
+            return Err("Agent pool is full".to_string());
+        }
+        if self.slots.iter().any(|existing| existing.agent_id() == slot.agent_id()) {
+            return Err(format!(
+                "Agent {} already exists in pool",
+                slot.agent_id().as_str()
+            ));
+        }
+
+        if slot.role() == AgentRole::ProductOwner {
+            if self.overview_agent().is_some() {
+                return Err("OVERVIEW agent already exists".to_string());
+            }
+            self.slots.insert(0, slot);
+        } else {
+            self.slots.push(slot);
+        }
+
+        if let Some(restored_index) = self
+            .slots
+            .last()
+            .and_then(|restored| parse_agent_index(restored.agent_id().as_str()))
+        {
+            self.next_agent_index = self.next_agent_index.max(restored_index + 1);
+        } else if let Some(restored_index) = self
+            .slots
+            .iter()
+            .filter_map(|slot| parse_agent_index(slot.agent_id().as_str()))
+            .max()
+        {
+            self.next_agent_index = self.next_agent_index.max(restored_index + 1);
+        }
+
+        Ok(())
+    }
+
     /// Switch focus to a different agent by index
     pub fn focus_agent_by_index(&mut self, index: usize) -> Result<(), String> {
         if index >= self.slots.len() {
@@ -485,6 +529,10 @@ impl AgentPool {
             })
             .collect()
     }
+}
+
+fn parse_agent_index(agent_id: &str) -> Option<usize> {
+    agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
 }
 
 #[cfg(test)]
