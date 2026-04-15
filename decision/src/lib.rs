@@ -26,6 +26,9 @@ pub mod initializer;
 
 // Sprint 3: Decision Engine
 pub mod engine;
+pub mod llm_engine;
+pub mod cli_engine;
+pub mod tiered_engine;
 pub mod mock_engine;
 pub mod condition;
 pub mod rule_engine;
@@ -81,6 +84,9 @@ pub use initializer::*;
 
 // Re-export Sprint 3 types
 pub use engine::*;
+pub use llm_engine::*;
+pub use cli_engine::*;
+pub use tiered_engine::*;
 pub use mock_engine::*;
 pub use condition::*;
 pub use rule_engine::*;

@@ -17,6 +17,10 @@ pub enum DecisionError {
     #[error("Failed to parse action: {0}")]
     ActionParseError(String),
 
+    /// Failed to parse response
+    #[error("Failed to parse response: {0}")]
+    ParseError(String),
+
     /// Failed to serialize/deserialize decision
     #[error("Serialization error: {0}")]
     SerializationError(String),
@@ -32,6 +36,18 @@ pub enum DecisionError {
     /// Blocking resolution failed
     #[error("Blocking resolution failed: {0}")]
     BlockingError(String),
+
+    /// Persistence error
+    #[error("Persistence error: {0}")]
+    PersistenceError(String),
+
+    /// Session pool exhausted
+    #[error("Session pool exhausted: {0}")]
+    SessionPoolExhausted(String),
+
+    /// Rate limit exceeded
+    #[error("Rate limit exceeded, waiting at position {0}")]
+    RateLimitExceeded(usize),
 
     /// IO error
     #[error("IO error: {0}")]

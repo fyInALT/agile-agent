@@ -327,6 +327,11 @@ impl RunningContextCache {
         )
     }
 
+    /// Summary alias for generate_summary
+    pub fn summary(&self) -> String {
+        self.generate_summary()
+    }
+
     /// Get current estimated size
     pub fn size_estimate(&self) -> usize {
         self.current_size
