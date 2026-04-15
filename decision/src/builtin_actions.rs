@@ -48,9 +48,16 @@ pub fn custom_instruction() -> ActionType {
 
 /// Action: Select option
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SelectOptionAction {
+    #[serde(default = "default_option_id")]
     pub option_id: String,
+    #[serde(default)]
     pub reason: String,
+}
+
+fn default_option_id() -> String {
+    "A".to_string()
 }
 
 impl SelectOptionAction {
@@ -118,7 +125,9 @@ impl DecisionAction for SelectOptionAction {
 
 /// Action: Reflect
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ReflectAction {
+    #[serde(default)]
     pub prompt: String,
 }
 
@@ -160,8 +169,11 @@ impl DecisionAction for ReflectAction {
 
 /// Action: Confirm completion
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ConfirmCompletionAction {
+    #[serde(default)]
     pub submit_pr: bool,
+    #[serde(default)]
     pub next_task_id: Option<String>,
 }
 
@@ -211,8 +223,11 @@ impl DecisionAction for ConfirmCompletionAction {
 
 /// Action: Continue
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ContinueAction {
+    #[serde(default)]
     pub prompt: String,
+    #[serde(default)]
     pub focus_items: Vec<String>,
 }
 
@@ -262,10 +277,18 @@ impl DecisionAction for ContinueAction {
 
 /// Action: Retry
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RetryAction {
+    #[serde(default)]
     pub prompt: String,
+    #[serde(default = "default_cooldown_ms")]
     pub cooldown_ms: u64,
+    #[serde(default)]
     pub adjusted: bool,
+}
+
+fn default_cooldown_ms() -> u64 {
+    1000
 }
 
 impl RetryAction {
@@ -319,7 +342,9 @@ impl DecisionAction for RetryAction {
 
 /// Action: Request human
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RequestHumanAction {
+    #[serde(default)]
     pub message: String,
 }
 
@@ -361,7 +386,9 @@ impl DecisionAction for RequestHumanAction {
 
 /// Action: Custom instruction
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CustomInstructionAction {
+    #[serde(default)]
     pub instruction: String,
 }
 
