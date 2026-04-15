@@ -5,6 +5,7 @@ use agent_core::workplace_store::WorkplaceStore;
 use anyhow::Result;
 
 mod app_loop;
+mod command_runtime;
 mod composer;
 mod confirmation_overlay;
 mod diff_render;

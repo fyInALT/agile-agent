@@ -25,6 +25,11 @@ pub enum ProviderKind {
     Codex,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderCapabilities {
+    pub supports_slash_passthrough: bool,
+}
+
 impl ProviderKind {
     pub fn label(self) -> &'static str {
         match self {
@@ -48,6 +53,17 @@ impl ProviderKind {
             ProviderKind::Claude,
             ProviderKind::Codex,
         ]
+    }
+
+    pub fn capabilities(self) -> ProviderCapabilities {
+        match self {
+            Self::Mock => ProviderCapabilities {
+                supports_slash_passthrough: false,
+            },
+            Self::Claude | Self::Codex => ProviderCapabilities {
+                supports_slash_passthrough: true,
+            },
+        }
     }
 }
 
