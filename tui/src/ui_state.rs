@@ -23,14 +23,14 @@ use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use crate::composer::textarea::TextArea;
+use crate::composer::textarea::TextAreaState;
+use crate::confirmation_overlay::ConfirmationOverlay;
 use crate::markdown_stream::MarkdownStreamCollector;
+use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
-use crate::composer::textarea::TextAreaState;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
-use crate::provider_overlay::ProviderSelectionOverlay;
-use crate::confirmation_overlay::ConfirmationOverlay;
 use crate::view_mode::TuiViewState;
 
 /// Per-agent transcript view state
@@ -165,7 +165,10 @@ impl TuiState {
                 if formatted.is_empty() {
                     String::new()
                 } else {
-                    format!("\n=== Incoming Messages ===\n{}\n=== End Messages ===\n\n", formatted.join("\n"))
+                    format!(
+                        "\n=== Incoming Messages ===\n{}\n=== End Messages ===\n\n",
+                        formatted.join("\n")
+                    )
                 }
             } else {
                 String::new()
@@ -235,7 +238,8 @@ impl TuiState {
     pub fn focus_next_agent(&mut self) -> Option<AgentStatusSnapshot> {
         let (current_id, new_index) = {
             let pool = self.agent_pool.as_ref()?;
-            let current_id = pool.focused_slot()
+            let current_id = pool
+                .focused_slot()
                 .map(|s| s.agent_id().as_str().to_string());
             let new_index = (pool.focused_slot_index() + 1) % pool.active_count();
             (current_id, new_index)
@@ -279,7 +283,8 @@ impl TuiState {
     pub fn focus_previous_agent(&mut self) -> Option<AgentStatusSnapshot> {
         let (current_id, new_index) = {
             let pool = self.agent_pool.as_ref()?;
-            let current_id = pool.focused_slot()
+            let current_id = pool
+                .focused_slot()
                 .map(|s| s.agent_id().as_str().to_string());
             let count = pool.active_count();
             let new_index = if pool.focused_slot_index() == 0 {
@@ -367,7 +372,10 @@ impl TuiState {
     }
 
     /// Spawn a new agent in the pool
-    pub fn spawn_agent(&mut self, provider: ProviderKind) -> Option<agent_core::agent_runtime::AgentId> {
+    pub fn spawn_agent(
+        &mut self,
+        provider: ProviderKind,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
@@ -391,14 +399,16 @@ impl TuiState {
 
     /// Get all agent statuses from the pool
     pub fn agent_statuses(&self) -> Vec<AgentStatusSnapshot> {
-        self.agent_pool.as_ref()
+        self.agent_pool
+            .as_ref()
             .map(|pool| pool.agent_statuses())
             .unwrap_or_default()
     }
 
     /// Get the focused agent status
     pub fn focused_agent_status(&self) -> Option<AgentStatusSnapshot> {
-        self.agent_pool.as_ref()
+        self.agent_pool
+            .as_ref()
             .and_then(|pool| pool.focused_slot())
             .map(|s| AgentStatusSnapshot {
                 agent_id: s.agent_id().clone(),
@@ -412,7 +422,10 @@ impl TuiState {
 
     /// Check if multi-agent mode is active (agent pool exists with agents)
     pub fn is_multi_agent_mode(&self) -> bool {
-        self.agent_pool.as_ref().map(|p| p.active_count() > 0).unwrap_or(false)
+        self.agent_pool
+            .as_ref()
+            .map(|p| p.active_count() > 0)
+            .unwrap_or(false)
     }
 
     /// Get the focused agent codename for display
@@ -428,7 +441,8 @@ impl TuiState {
 
     /// Get the focused agent ID (if pool exists)
     pub fn focused_agent_id(&self) -> Option<AgentId> {
-        self.agent_pool.as_ref()
+        self.agent_pool
+            .as_ref()
             .and_then(|pool| pool.focused_slot())
             .map(|s| s.agent_id().clone())
     }
@@ -490,13 +504,15 @@ impl TuiState {
                 }
 
                 // Transition to responding status
-                let _ = focused.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                let _ = focused
+                    .transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
 
                 // Return event_rx for EventAggregator registration
                 Some(event_rx)
             }
             Err(e) => {
-                self.app_mut().push_error_message(format!("Failed to start provider: {}", e));
+                self.app_mut()
+                    .push_error_message(format!("Failed to start provider: {}", e));
                 None
             }
         }
@@ -528,7 +544,10 @@ impl TuiState {
     }
 
     /// Poll agent events with timeout
-    pub fn poll_agent_events_with_timeout(&self, timeout: std::time::Duration) -> agent_core::event_aggregator::PollResult {
+    pub fn poll_agent_events_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> agent_core::event_aggregator::PollResult {
         self.event_aggregator.poll_with_timeout(timeout)
     }
 
@@ -559,7 +578,9 @@ impl TuiState {
 
     /// Check if any overlay is open (transcript or provider)
     pub fn is_any_overlay_open(&self) -> bool {
-        self.is_overlay_open() || self.is_provider_overlay_open() || self.is_confirmation_overlay_open()
+        self.is_overlay_open()
+            || self.is_provider_overlay_open()
+            || self.is_confirmation_overlay_open()
     }
 
     /// Open confirmation overlay for stopping agent
@@ -636,7 +657,10 @@ impl TuiState {
     }
 
     pub fn active_entries_for_display(&self) -> Vec<TranscriptEntry> {
-        self.active_cell.as_ref().map(ActiveCell::as_transcript_entries).unwrap_or_default()
+        self.active_cell
+            .as_ref()
+            .map(ActiveCell::as_transcript_entries)
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -677,16 +701,18 @@ impl TuiState {
                 started,
                 exit_code,
                 duration_ms,
-            } => Some(ActiveCell::Tool(ActiveTool::Generic(ActiveGenericToolCall {
-                name,
-                call_id,
-                input_preview,
-                output_preview,
-                success,
-                started,
-                exit_code,
-                duration_ms,
-            }))),
+            } => Some(ActiveCell::Tool(ActiveTool::Generic(
+                ActiveGenericToolCall {
+                    name,
+                    call_id,
+                    input_preview,
+                    output_preview,
+                    success,
+                    started,
+                    exit_code,
+                    duration_ms,
+                },
+            ))),
             TranscriptEntry::PatchApply {
                 call_id,
                 changes,
@@ -764,7 +790,10 @@ impl TuiState {
         })
     }
 
-    pub fn active_cell_transcript_lines(&self, width: u16) -> Option<Vec<ratatui::text::Line<'static>>> {
+    pub fn active_cell_transcript_lines(
+        &self,
+        width: u16,
+    ) -> Option<Vec<ratatui::text::Line<'static>>> {
         let entries = self.active_entries_for_display();
         let lines = cells::flatten_cells(&cells::build_overlay_cells(&entries, width));
         (!lines.is_empty()).then_some(lines)
@@ -797,8 +826,13 @@ impl TuiState {
                 self.app().transcript.last(),
                 self.active_stream_ref().map(|stream| stream.kind),
             ),
-            (Some(TranscriptEntry::Assistant(_)), Some(StreamTextKind::Assistant))
-                | (Some(TranscriptEntry::Thinking(_)), Some(StreamTextKind::Thinking))
+            (
+                Some(TranscriptEntry::Assistant(_)),
+                Some(StreamTextKind::Assistant)
+            ) | (
+                Some(TranscriptEntry::Thinking(_)),
+                Some(StreamTextKind::Thinking)
+            )
         )
     }
 
@@ -859,9 +893,10 @@ impl TuiState {
         if self
             .active_stream_ref()
             .is_some_and(|stream| stream.kind != kind && !stream.tail.is_empty())
-            && let Some(stream) = self.take_active_stream() {
-                self.flush_stream_to_transcript(stream);
-            }
+            && let Some(stream) = self.take_active_stream()
+        {
+            self.flush_stream_to_transcript(stream);
+        }
 
         if self.active_stream_ref().is_none() {
             self.set_active_stream(ActiveStream {
@@ -971,7 +1006,8 @@ impl TuiState {
                 let matches_call_id = call_id.is_some() && entry.call_id == call_id;
                 let matches_latest = call_id.is_none();
                 if matches_call_id || matches_latest {
-                    entry.output_preview
+                    entry
+                        .output_preview
                         .get_or_insert_with(String::new)
                         .push_str(delta);
                     self.bump_active_entries_revision();
@@ -991,21 +1027,24 @@ impl TuiState {
         source: Option<String>,
     ) {
         if let Some(ActiveTool::Exec(mut group)) = self.take_active_tool()
-            && let Some(index) = group.iter().rposition(|entry| {
-                call_id.is_some() && entry.call_id == call_id
-            })
+            && let Some(index) = group
+                .iter()
+                .rposition(|entry| call_id.is_some() && entry.call_id == call_id)
         {
             let entry = group.remove(index);
-            self.session.app.transcript.push(TranscriptEntry::ExecCommand {
-                call_id: entry.call_id,
-                source: entry.source.or(source),
-                allow_exploring_group: entry.allow_exploring_group,
-                input_preview: entry.input_preview,
-                output_preview: output_preview.or(entry.output_preview),
-                status,
-                exit_code,
-                duration_ms,
-            });
+            self.session
+                .app
+                .transcript
+                .push(TranscriptEntry::ExecCommand {
+                    call_id: entry.call_id,
+                    source: entry.source.or(source),
+                    allow_exploring_group: entry.allow_exploring_group,
+                    input_preview: entry.input_preview,
+                    output_preview: output_preview.or(entry.output_preview),
+                    status,
+                    exit_code,
+                    duration_ms,
+                });
             if group.is_empty() {
                 self.active_cell = None;
             } else {
@@ -1061,16 +1100,19 @@ impl TuiState {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_name = entry.name == name;
             if matches_call_id || matches_name {
-                self.session.app.transcript.push(TranscriptEntry::GenericToolCall {
-                    name: entry.name,
-                    call_id: entry.call_id.or(call_id),
-                    input_preview: entry.input_preview,
-                    output_preview: output_preview.or(entry.output_preview),
-                    success,
-                    started: false,
-                    exit_code,
-                    duration_ms,
-                });
+                self.session
+                    .app
+                    .transcript
+                    .push(TranscriptEntry::GenericToolCall {
+                        name: entry.name,
+                        call_id: entry.call_id.or(call_id),
+                        input_preview: entry.input_preview,
+                        output_preview: output_preview.or(entry.output_preview),
+                        success,
+                        started: false,
+                        exit_code,
+                        duration_ms,
+                    });
                 self.bump_active_entries_revision();
                 return;
             }
@@ -1114,7 +1156,8 @@ impl TuiState {
                 let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
                 let matches_latest = call_id.is_none();
                 if matches_call_id || matches_latest {
-                    entry.output_preview
+                    entry
+                        .output_preview
                         .get_or_insert_with(String::new)
                         .push_str(delta);
                     self.bump_active_entries_revision();
@@ -1136,16 +1179,19 @@ impl TuiState {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
-                self.session.app.transcript.push(TranscriptEntry::PatchApply {
-                    call_id: entry.call_id.or(call_id),
-                    changes: if changes.is_empty() {
-                        entry.changes
-                    } else {
-                        changes
-                    },
-                    status,
-                    output_preview: entry.output_preview,
-                });
+                self.session
+                    .app
+                    .transcript
+                    .push(TranscriptEntry::PatchApply {
+                        call_id: entry.call_id.or(call_id),
+                        changes: if changes.is_empty() {
+                            entry.changes
+                        } else {
+                            changes
+                        },
+                        status,
+                        output_preview: entry.output_preview,
+                    });
                 self.bump_active_entries_revision();
                 return;
             }
@@ -1179,12 +1225,15 @@ impl TuiState {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
-                self.session.app.transcript.push(TranscriptEntry::WebSearch {
-                    call_id: entry.call_id.or(call_id),
-                    query,
-                    action,
-                    started: false,
-                });
+                self.session
+                    .app
+                    .transcript
+                    .push(TranscriptEntry::WebSearch {
+                        call_id: entry.call_id.or(call_id),
+                        query,
+                        action,
+                        started: false,
+                    });
                 self.bump_active_entries_revision();
                 return;
             }
@@ -1227,14 +1276,17 @@ impl TuiState {
             let matches_call_id = call_id.is_some() && entry.call_id == call_id;
             let matches_latest = entry.call_id.is_none();
             if matches_call_id || matches_latest {
-                self.session.app.transcript.push(TranscriptEntry::McpToolCall {
-                    call_id: entry.call_id.or(call_id),
-                    invocation,
-                    result_blocks,
-                    error,
-                    status,
-                    is_error,
-                });
+                self.session
+                    .app
+                    .transcript
+                    .push(TranscriptEntry::McpToolCall {
+                        call_id: entry.call_id.or(call_id),
+                        invocation,
+                        result_blocks,
+                        error,
+                        status,
+                        is_error,
+                    });
                 self.bump_active_entries_revision();
                 return;
             }
@@ -1273,7 +1325,9 @@ impl TuiState {
         if self.transcript_follow_tail {
             self.transcript_scroll_offset = 0;
         } else {
-            self.transcript_scroll_offset = self.transcript_scroll_offset.min(self.transcript_max_scroll);
+            self.transcript_scroll_offset = self
+                .transcript_scroll_offset
+                .min(self.transcript_max_scroll);
         }
     }
 
@@ -1377,55 +1431,70 @@ impl TuiState {
                 (_, ActiveCell::Stream(stream)) => self.flush_stream_to_transcript(stream),
                 (Some(_), ActiveCell::Tool(ActiveTool::Exec(group))) => {
                     for entry in group {
-                        self.session.app.transcript.push(TranscriptEntry::ExecCommand {
-                            call_id: entry.call_id,
-                            source: entry.source,
-                            allow_exploring_group: entry.allow_exploring_group,
-                            input_preview: entry.input_preview,
-                            output_preview: entry.output_preview,
-                            status: ExecCommandStatus::Failed,
-                            exit_code: entry.exit_code,
-                            duration_ms: entry.duration_ms,
-                        });
+                        self.session
+                            .app
+                            .transcript
+                            .push(TranscriptEntry::ExecCommand {
+                                call_id: entry.call_id,
+                                source: entry.source,
+                                allow_exploring_group: entry.allow_exploring_group,
+                                input_preview: entry.input_preview,
+                                output_preview: entry.output_preview,
+                                status: ExecCommandStatus::Failed,
+                                exit_code: entry.exit_code,
+                                duration_ms: entry.duration_ms,
+                            });
                     }
                 }
                 (Some(_), ActiveCell::Tool(ActiveTool::Generic(entry))) => {
-                    self.session.app.transcript.push(TranscriptEntry::GenericToolCall {
-                        name: entry.name,
-                        call_id: entry.call_id,
-                        input_preview: entry.input_preview,
-                        output_preview: entry.output_preview,
-                        success: false,
-                        started: false,
-                        exit_code: None,
-                        duration_ms: None,
-                    });
+                    self.session
+                        .app
+                        .transcript
+                        .push(TranscriptEntry::GenericToolCall {
+                            name: entry.name,
+                            call_id: entry.call_id,
+                            input_preview: entry.input_preview,
+                            output_preview: entry.output_preview,
+                            success: false,
+                            started: false,
+                            exit_code: None,
+                            duration_ms: None,
+                        });
                 }
                 (Some(_), ActiveCell::Tool(ActiveTool::Patch(entry))) => {
-                    self.session.app.transcript.push(TranscriptEntry::PatchApply {
-                        call_id: entry.call_id,
-                        changes: entry.changes,
-                        status: PatchApplyStatus::Failed,
-                        output_preview: entry.output_preview,
-                    });
+                    self.session
+                        .app
+                        .transcript
+                        .push(TranscriptEntry::PatchApply {
+                            call_id: entry.call_id,
+                            changes: entry.changes,
+                            status: PatchApplyStatus::Failed,
+                            output_preview: entry.output_preview,
+                        });
                 }
                 (Some(_), ActiveCell::Tool(ActiveTool::WebSearch(entry))) => {
-                    self.session.app.transcript.push(TranscriptEntry::WebSearch {
-                        call_id: entry.call_id,
-                        query: entry.query,
-                        action: entry.action,
-                        started: false,
-                    });
+                    self.session
+                        .app
+                        .transcript
+                        .push(TranscriptEntry::WebSearch {
+                            call_id: entry.call_id,
+                            query: entry.query,
+                            action: entry.action,
+                            started: false,
+                        });
                 }
                 (Some(reason), ActiveCell::Tool(ActiveTool::Mcp(entry))) => {
-                    self.session.app.transcript.push(TranscriptEntry::McpToolCall {
-                        call_id: entry.call_id,
-                        invocation: entry.invocation,
-                        result_blocks: entry.result_blocks,
-                        error: entry.error.or_else(|| Some(reason.to_string())),
-                        status: McpToolCallStatus::Failed,
-                        is_error: true,
-                    });
+                    self.session
+                        .app
+                        .transcript
+                        .push(TranscriptEntry::McpToolCall {
+                            call_id: entry.call_id,
+                            invocation: entry.invocation,
+                            result_blocks: entry.result_blocks,
+                            error: entry.error.or_else(|| Some(reason.to_string())),
+                            status: McpToolCallStatus::Failed,
+                            is_error: true,
+                        });
                 }
                 (_, ActiveCell::Tool(tool)) => {
                     for entry in tool.as_transcript_entries() {
@@ -1448,7 +1517,8 @@ impl TuiState {
         for entry in &mut self.session.app.transcript {
             match entry {
                 TranscriptEntry::ExecCommand {
-                    status: exec_status, ..
+                    status: exec_status,
+                    ..
                 } if matches!(*exec_status, ExecCommandStatus::InProgress) => {
                     *exec_status = ExecCommandStatus::Failed;
                 }
@@ -1509,7 +1579,9 @@ impl TuiState {
 
     fn prepare_for_active_tool_start(&mut self, start: ActiveToolStart) {
         let should_flush = match start {
-            ActiveToolStart::Exec => matches!(self.active_tool_ref(), Some(tool) if !matches!(tool, ActiveTool::Exec(_))),
+            ActiveToolStart::Exec => {
+                matches!(self.active_tool_ref(), Some(tool) if !matches!(tool, ActiveTool::Exec(_)))
+            }
             ActiveToolStart::Other => self.active_tool_ref().is_some(),
         };
         if should_flush {
@@ -1679,6 +1751,110 @@ pub struct QueuedStreamCommit {
     pub(crate) enqueued_at: Instant,
 }
 
+/// Parsed @ command result for agent routing
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AtCommandResult {
+    /// Send to single agent
+    Single { agent: String, message: String },
+    /// Broadcast to multiple agents
+    Broadcast {
+        agents: Vec<String>,
+        message: String,
+    },
+    /// No @ command, normal input
+    Normal(String),
+    /// Malformed @ command
+    Invalid { error: String },
+}
+
+/// Parse input for @ command syntax
+///
+/// Supports:
+/// - `@alpha hello` -> Single { agent: "alpha", message: "hello" }
+/// - `@alpha,bravo hello` -> Broadcast { agents: ["alpha", "bravo"], message: "hello" }
+/// - `@alpha, bravo hello` -> Broadcast { agents: ["alpha", "bravo"], message: "hello" } (space after comma)
+/// - `hello world` -> Normal("hello world")
+pub fn parse_at_command(input: &str) -> AtCommandResult {
+    let trimmed = input.trim();
+
+    if !trimmed.starts_with('@') {
+        return AtCommandResult::Normal(input.to_string());
+    }
+
+    // Find the message part after agents
+    let rest = &trimmed[1..]; // Skip the '@'
+
+    // Collect all words
+    let words: Vec<&str> = rest.split(' ').filter(|s| !s.is_empty()).collect();
+
+    if words.is_empty() {
+        return AtCommandResult::Invalid {
+            error: "No agent specified".to_string(),
+        };
+    }
+
+    // Find where agent specs end
+    // - Words ending with comma are agent names (more agents follow)
+    // - A word not ending with comma after a comma-ending word is still an agent
+    // - The message starts after all agent names are collected
+    let mut agent_words: Vec<&str> = Vec::new();
+    let mut message_words: Vec<&str> = Vec::new();
+    let mut expecting_more_agents = false;
+
+    for word in &words {
+        if expecting_more_agents {
+            // Previous word ended with comma, so this word is an agent name
+            agent_words.push(word);
+            expecting_more_agents = word.ends_with(',');
+        } else if agent_words.is_empty() {
+            // First word - always an agent
+            agent_words.push(word);
+            expecting_more_agents = word.ends_with(',');
+        } else {
+            // Not expecting more agents, this is the message
+            message_words.push(word);
+        }
+    }
+
+    // Check if we have any agents
+    if agent_words.is_empty() {
+        return AtCommandResult::Invalid {
+            error: "No agent specified".to_string(),
+        };
+    }
+
+    // Join agent words and split by comma
+    let agent_spec = agent_words.join("");
+    let agents: Vec<String> = agent_spec
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if agents.is_empty() {
+        return AtCommandResult::Invalid {
+            error: "No agent specified".to_string(),
+        };
+    }
+
+    // Check if we have a message
+    let message = message_words.join(" ");
+    if message.is_empty() {
+        return AtCommandResult::Invalid {
+            error: "Missing message after agent name".to_string(),
+        };
+    }
+
+    if agents.len() == 1 {
+        AtCommandResult::Single {
+            agent: agents.into_iter().next().unwrap(),
+            message,
+        }
+    } else {
+        AtCommandResult::Broadcast { agents, message }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StreamTextKind {
     Assistant,
@@ -1695,8 +1871,10 @@ enum ActiveToolStart {
 mod tests {
     use super::ActiveCellTranscriptKey;
     use super::ActiveStream;
+    use super::AtCommandResult;
     use super::StreamTextKind;
     use super::TuiState;
+    use super::parse_at_command;
     use agent_core::agent_runtime::AgentId;
     use agent_core::agent_slot::TaskId;
     use agent_core::app::TranscriptEntry;
@@ -1864,7 +2042,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert!(rendered.iter().any(|line| line.contains("$ ls -la")), "{rendered:?}");
+        assert!(
+            rendered.iter().any(|line| line.contains("$ ls -la")),
+            "{rendered:?}"
+        );
         assert!(
             rendered
                 .iter()
@@ -2180,11 +2361,9 @@ mod tests {
                 ..
             }) if tail == "hello world"
         ));
-        assert!(!state
-            .app()
-            .transcript
-            .iter()
-            .any(|entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world")));
+        assert!(!state.app().transcript.iter().any(
+            |entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world")
+        ));
 
         state.finalize_active_entries_after_failure(None);
 
@@ -2205,13 +2384,9 @@ mod tests {
         state.append_active_assistant_chunk("hello ");
         state.append_active_assistant_chunk("world\nnext");
 
-        assert!(
-            !state
-                .app()
-                .transcript
-                .iter()
-                .any(|entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world\n"))
-        );
+        assert!(!state.app().transcript.iter().any(
+            |entry| matches!(entry, TranscriptEntry::Assistant(text) if text == "hello world\n")
+        ));
         assert!(state.active_tool_is_empty());
         assert!(matches!(
             state.active_stream_for_test(),
@@ -2337,11 +2512,9 @@ mod tests {
                 ..
             }) if tail == "step 1 step 2"
         ));
-        assert!(!state
-            .app()
-            .transcript
-            .iter()
-            .any(|entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2")));
+        assert!(!state.app().transcript.iter().any(
+            |entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2")
+        ));
 
         state.finalize_active_entries_after_failure(None);
 
@@ -2379,13 +2552,9 @@ mod tests {
         state.append_active_thinking_chunk("step 1 ");
         state.append_active_thinking_chunk("step 2\nnext");
 
-        assert!(
-            !state
-                .app()
-                .transcript
-                .iter()
-                .any(|entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2\n"))
-        );
+        assert!(!state.app().transcript.iter().any(
+            |entry| matches!(entry, TranscriptEntry::Thinking(text) if text == "step 1 step 2\n")
+        ));
         assert!(state.active_tool_is_empty());
         assert!(matches!(
             state.active_stream_for_test(),
@@ -2750,8 +2919,14 @@ mod tests {
         state.register_agent_channel(agent_id.clone(), event_rx);
 
         // Simulate provider events
-        event_tx.send(ProviderEvent::AssistantChunk("Hello from agent".to_string())).unwrap();
-        event_tx.send(ProviderEvent::Status("Working".to_string())).unwrap();
+        event_tx
+            .send(ProviderEvent::AssistantChunk(
+                "Hello from agent".to_string(),
+            ))
+            .unwrap();
+        event_tx
+            .send(ProviderEvent::Status("Working".to_string()))
+            .unwrap();
 
         // Poll events
         let poll_result = state.poll_agent_events();
@@ -2790,7 +2965,9 @@ mod tests {
         let mail = AgentMail::new(
             AgentId::new("sender"),
             MailTarget::Direct(agent_id.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         state.mailbox.send_mail(mail);
@@ -2815,9 +2992,12 @@ mod tests {
         let mail = AgentMail::new(
             AgentId::new("sender"),
             MailTarget::Direct(agent_id.clone()),
-            MailSubject::TaskHelpRequest { task_id: TaskId::new("task-1") },
+            MailSubject::TaskHelpRequest {
+                task_id: TaskId::new("task-1"),
+            },
             MailBody::Text("Need help".to_string()),
-        ).with_action_required();
+        )
+        .with_action_required();
         state.mailbox.send_mail(mail);
         state.mailbox.process_pending();
 
@@ -2856,7 +3036,9 @@ mod tests {
         let mail = AgentMail::new(
             AgentId::new("sender"),
             MailTarget::Direct(agent_id.clone()),
-            MailSubject::Custom { label: "Test".to_string() },
+            MailSubject::Custom {
+                label: "Test".to_string(),
+            },
             MailBody::Text("Message".to_string()),
         );
         state.mailbox.send_mail(mail);
@@ -2890,7 +3072,9 @@ mod tests {
         let mail = AgentMail::new(
             AgentId::new("helper"),
             MailTarget::Direct(agent_id.clone()),
-            MailSubject::InfoRequest { query: "What is the status?".to_string() },
+            MailSubject::InfoRequest {
+                query: "What is the status?".to_string(),
+            },
             MailBody::Text("Please respond".to_string()),
         );
         state.mailbox.send_mail(mail);
@@ -2911,5 +3095,68 @@ mod tests {
         assert!(augmented.contains("=== Incoming Messages ==="));
         assert!(augmented.contains("Write tests for feature X"));
         assert!(augmented.starts_with("\n=== Incoming Messages ==="));
+    }
+
+    #[test]
+    fn parse_single_agent() {
+        let result = parse_at_command("@alpha hello world");
+        assert!(matches!(result, AtCommandResult::Single { agent, message }
+            if agent == "alpha" && message == "hello world"));
+    }
+
+    #[test]
+    fn parse_comma_separated() {
+        let result = parse_at_command("@alpha,bravo hello");
+        assert!(
+            matches!(result, AtCommandResult::Broadcast { agents, message }
+            if agents == vec!["alpha", "bravo"] && message == "hello")
+        );
+    }
+
+    #[test]
+    fn parse_normal_input() {
+        let result = parse_at_command("hello world");
+        assert!(matches!(result, AtCommandResult::Normal(s) if s == "hello world"));
+    }
+
+    #[test]
+    fn parse_invalid_no_message() {
+        let result = parse_at_command("@alpha");
+        assert!(matches!(result, AtCommandResult::Invalid { .. }));
+    }
+
+    #[test]
+    fn parse_invalid_no_agent() {
+        let result = parse_at_command("@ hello");
+        assert!(matches!(result, AtCommandResult::Invalid { .. }));
+    }
+
+    #[test]
+    fn parse_agents_with_spaces() {
+        // Test: @alpha, bravo hello - space after comma should be trimmed
+        let result = parse_at_command("@alpha, bravo hello");
+        assert!(
+            matches!(result, AtCommandResult::Broadcast { agents, message }
+            if agents == vec!["alpha", "bravo"] && message == "hello")
+        );
+    }
+
+    #[test]
+    fn parse_message_with_leading_spaces() {
+        let result = parse_at_command("@alpha   hello world");
+        assert!(matches!(result, AtCommandResult::Single { agent, message }
+            if agent == "alpha" && message == "hello world"));
+    }
+
+    #[test]
+    fn parse_empty_message_after_trim() {
+        let result = parse_at_command("@alpha   ");
+        assert!(matches!(result, AtCommandResult::Invalid { .. }));
+    }
+
+    #[test]
+    fn parse_input_with_leading_spaces() {
+        let result = parse_at_command("  hello world");
+        assert!(matches!(result, AtCommandResult::Normal(s) if s == "  hello world"));
     }
 }
