@@ -113,32 +113,30 @@ impl RuntimeHarness {
 }
 
 fn write_fake_claude(script_path: &PathBuf, provider_log: &PathBuf) {
-    let script = format!(
-        "#!/usr/bin/env bash
-set -euo pipefail
-if [[ \"${{1-}}\" == \"--version\" ]]; then
-  echo \"fake-claude 0.1.0\"
-  exit 0
-fi
-resume=\"<none>\"
-for ((i=1; i<=$#; i++)); do
-  if [[ \"${{!i}}\" == \"--resume\" ]]; then
-    j=$((i+1))
-    resume=\"${{!j}}\"
-  fi
-done
-echo \"resume=${{resume}}\" >> \"{}\"
-cat >/dev/null
-session=\"sess-cli-1\"
-if [[ \"$resume\" != \"<none>\" ]]; then
-  session=\"$resume\"
-fi
-printf '{{\"type\":\"system\",\"session_id\":\"%s\"}}\\n' \"$session\"
-printf '{{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"done\"}}]}}}}\\n'
-printf '{{\"type\":\"result\",\"session_id\":\"%s\",\"is_error\":false}}\\n' \"$session\"
-",
-        provider_log.display()
-    );
+    // Build script with simple string concatenation to avoid format string escaping issues
+    let script = String::new()
+        + "#!/usr/bin/env bash\n"
+        + "set -euo pipefail\n"
+        + "if [[ \"${1-}\" == \"--version\" ]]; then\n"
+        + "  echo \"fake-claude 0.1.0\"\n"
+        + "  exit 0\n"
+        + "fi\n"
+        + "resume=\"<none>\"\n"
+        + "for ((i=1; i<=$#; i++)); do\n"
+        + "  if [[ \"${!i}\" == \"--resume\" ]]; then\n"
+        + "    j=$((i+1))\n"
+        + "    resume=\"${!j}\"\n"
+        + "  fi\n"
+        + "done\n"
+        + &format!("echo \"resume=$resume\" >> \"{}\"\n", provider_log.display())
+        + "cat >/dev/null\n"
+        + "session=\"sess-cli-1\"\n"
+        + "if [[ \"$resume\" != \"<none>\" ]]; then\n"
+        + "  session=\"$resume\"\n"
+        + "fi\n"
+        + "printf '{\"type\":\"system\",\"session_id\":\"%s\"}\\n' \"$session\"\n"
+        + "printf '{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}}\\n'\n"
+        + "printf '{\"type\":\"result\",\"session_id\":\"%s\",\"is_error\":false}\\n' \"$session\"\n";
 
     fs::write(script_path, script).expect("write fake claude");
     let mut permissions = fs::metadata(script_path).expect("metadata").permissions();
@@ -147,50 +145,37 @@ printf '{{\"type\":\"result\",\"session_id\":\"%s\",\"is_error\":false}}\\n' \"$
 }
 
 fn write_fake_codex(script_path: &PathBuf, provider_log: &PathBuf) {
-    let script = format!(
-        "#!/usr/bin/env bash
-set -euo pipefail
-if [[ \"${{1-}}\" == \"--version\" ]]; then
-  echo \"codex-cli 0.1.0\"
-  exit 0
-fi
-thread_id=\"thr-cli-1\"
-while IFS= read -r line; do
-  if [[ \"$line\" == *'\"id\":1'* && \"$line\" == *'\"method\":\"initialize\"'* ]]; then
-    printf '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}\\n'
-    continue
-  fi
-  if [[ \"$line\" == *'\"method\":\"initialized\"'* ]]; then
-    continue
-  fi
-  if [[ \"$line\" == *'\"id\":2'* && \"$line\" == *'\"method\":\"thread/start\"'* ]]; then
-    echo 'resume=<none>' >> \"{}\"
-    printf '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"thread\":{{\"id\":\"%s\"}}}}}}\\n' \"$thread_id\"
-    printf '{{\"method\":\"thread/started\",\"params\":{{\"thread\":{{\"id\":\"%s\"}}}}}}\\n' \"$thread_id\"
-    continue
-  fi
-  if [[ \"$line\" == *'\"id\":2'* && \"$line\" == *'\"method\":\"thread/resume\"'* ]]; then
-    resumed=$(printf '%s' \"$line\" | sed -n 's/.*\"threadId\":\"\\([^\"]*\\)\".*/\\1/p')
-    if [[ -n \"$resumed\" ]]; then
-      thread_id=\"$resumed\"
-    fi
-    echo \"resume=$thread_id\" >> \"{}\"
-    printf '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"thread\":{{\"id\":\"%s\"}}}}}}\\n' \"$thread_id\"
-    printf '{{\"method\":\"thread/started\",\"params\":{{\"thread\":{{\"id\":\"%s\"}}}}}}\\n' \"$thread_id\"
-    continue
-  fi
-  if [[ \"$line\" == *'\"id\":3'* && \"$line\" == *'\"method\":\"turn/start\"'* ]]; then
-    printf '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"turn\":{{\"id\":\"turn-1\"}}}}}}\\n'
-    printf '{{\"method\":\"turn/started\",\"params\":{{\"turn\":{{\"id\":\"turn-1\"}}}}}}\\n'
-    printf '{{\"method\":\"item/agentMessage/delta\",\"params\":{{\"delta\":\"done\",\"itemId\":\"item-1\",\"threadId\":\"%s\",\"turnId\":\"turn-1\"}}}}\\n' \"$thread_id\"
-    printf '{{\"method\":\"turn/completed\",\"params\":{{\"turn\":{{\"id\":\"turn-1\"}}}}}}\\n'
-    break
-  fi
-done
-",
-        provider_log.display(),
-        provider_log.display()
-    );
+    // Build script with simple string concatenation to avoid format string escaping issues
+    let log_path = provider_log.display().to_string();
+    let script = String::new()
+        + "#!/usr/bin/env bash\n"
+        + "set -euo pipefail\n"
+        + "if [[ \"${1-}\" == \"--version\" ]]; then\n"
+        + "  echo \"codex-cli 0.1.0\"\n"
+        + "  exit 0\n"
+        + "fi\n"
+        + "\n"
+        + "# Default thread ID\n"
+        + "thread_id=\"thr-cli-1\"\n"
+        + "\n"
+        + "# Parse args to detect exec mode and resume\n"
+        + "args=(\"$@\")\n"
+        + "for ((i=0; i<${#args[@]}; i++)); do\n"
+        + "  if [[ \"${args[i]}\" == \"resume\" ]]; then\n"
+        + "    # Next arg should be the thread_id\n"
+        + "    if ((i+1 < ${#args[@]})); then\n"
+        + "      thread_id=\"${args[i+1]}\"\n"
+        + &format!("      echo \"resume=$thread_id\" >> \"{}\"\n", log_path)
+        + "    fi\n"
+        + "    break\n"
+        + "  fi\n"
+        + "done\n"
+        + "\n"
+        + "# Output JSONL format for codex exec --json\n"
+        + "printf '{\"type\":\"thread.started\",\"thread_id\":\"%s\"}\\n' \"$thread_id\"\n"
+        + "printf '{\"type\":\"turn.started\"}\\n'\n"
+        + "printf '{\"type\":\"item.completed\",\"item\":{\"id\":\"item-1\",\"type\":\"agent_message\",\"text\":\"done\"}}\\n'\n"
+        + "printf '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":10}}\\n'\n";
 
     fs::write(script_path, script).expect("write fake codex");
     let mut permissions = fs::metadata(script_path).expect("metadata").permissions();

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::env;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Child;
 use std::process::Command;
@@ -15,7 +14,6 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
-use serde::Serialize;
 
 use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
@@ -67,9 +65,30 @@ fn run_codex(
     event_tx: &Sender<ProviderEvent>,
 ) -> Result<()> {
     let mut command = Command::new(&executable);
-    command.args(["app-server", "--listen", "stdio://"]);
+
+    // Build exec mode args - bypass sandbox to avoid bubblewrap permission issues
+    let mut args: Vec<String> = vec![
+        "exec".to_string(),
+        "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "--json".to_string(),
+    ];
+
+    // Handle session resume
+    let thread_id_for_log = match session_handle {
+        Some(SessionHandle::CodexThread { thread_id }) => {
+            args.push("resume".to_string());
+            args.push(thread_id.clone());
+            Some(thread_id)
+        }
+        _ => None,
+    };
+
+    // Add prompt as final argument
+    args.push(prompt.clone());
+
+    command.args(&args);
     command.current_dir(&cwd);
-    command.stdin(Stdio::piped());
+    command.stdin(Stdio::null());  // exec mode doesn't need stdin
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -82,11 +101,11 @@ fn run_codex(
         serde_json::json!({
             "executable": executable,
             "cwd": cwd.display().to_string(),
-            "args": ["app-server", "--listen", "stdio://"],
+            "args": args,
+            "resuming_thread": thread_id_for_log,
         }),
     );
 
-    let mut stdin = child.stdin.take().context("codex stdin pipe unavailable")?;
     let stdout = child
         .stdout
         .take()
@@ -97,68 +116,10 @@ fn run_codex(
         .context("codex stderr pipe unavailable")?;
 
     let stderr_handle = thread::spawn(move || read_stderr(stderr));
-    let mut stdout_lines = BufReader::new(stdout).lines();
+    let stdout_lines = BufReader::new(stdout).lines();
 
     let _ = event_tx.send(ProviderEvent::Status("codex provider started".to_string()));
 
-    send_request(
-        &mut stdin,
-        &JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "initialize".to_string(),
-            params: serde_json::json!({
-                "clientInfo": {
-                    "name": "agile-agent",
-                    "title": "agile-agent",
-                    "version": "0.1.0"
-                },
-                "capabilities": {
-                    "experimentalApi": true
-                }
-            }),
-        },
-    )?;
-    wait_for_response(&mut stdout_lines, &mut stdin, 1, event_tx, None)?;
-    send_notification(&mut stdin, "initialized")?;
-
-    let existing_thread = match session_handle {
-        Some(SessionHandle::CodexThread { thread_id }) => Some(thread_id),
-        _ => None,
-    };
-
-    let thread_request = build_thread_request(&cwd, existing_thread.clone());
-    send_request(&mut stdin, &thread_request)?;
-    let thread_response = wait_for_response(&mut stdout_lines, &mut stdin, 2, event_tx, None)?;
-
-    let thread_id = existing_thread
-        .or_else(|| thread_id_from_result(thread_response.result.as_ref()))
-        .context("codex thread response did not include a thread id")?;
-    let _ = event_tx.send(ProviderEvent::SessionHandle(SessionHandle::CodexThread {
-        thread_id: thread_id.clone(),
-    }));
-
-    send_request(
-        &mut stdin,
-        &JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 3,
-            method: "turn/start".to_string(),
-            params: serde_json::json!({
-                "threadId": thread_id,
-                "input": [
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }),
-        },
-    )?;
-    let _ = wait_for_response(&mut stdout_lines, &mut stdin, 3, event_tx, None)?;
-
-    let mut turn_started = false;
-    let mut turn_completed = false;
     let mut streamed_agent_message_ids = HashSet::new();
     for line in stdout_lines {
         let line = line.context("failed to read line from codex stdout")?;
@@ -167,20 +128,20 @@ fn run_codex(
             continue;
         }
 
-        let message = parse_jsonrpc_message(trimmed)?;
-        if handle_message(
-            message,
-            &mut stdin,
-            event_tx,
-            &mut turn_started,
-            &mut turn_completed,
-            &mut streamed_agent_message_ids,
-        )? {
+        logging::debug_event(
+            "provider.codex.stdout_line",
+            "read raw Codex JSONL line",
+            serde_json::json!({
+                "line": trimmed,
+            }),
+        );
+
+        let event = parse_exec_event(trimmed)?;
+        if handle_exec_event(event, event_tx, &mut streamed_agent_message_ids)? {
             break;
         }
     }
 
-    drop(stdin);
     wait_for_child_shutdown(&mut child)?;
 
     let stderr_output = stderr_handle.join().expect("codex stderr thread panicked");
@@ -208,40 +169,6 @@ fn resolve_codex_executable() -> Result<String> {
 fn resolve_codex_executable_from(configured: &str) -> Result<std::path::PathBuf> {
     which::which(configured)
         .with_context(|| format!("codex executable not found at `{configured}`"))
-}
-
-fn build_thread_request(cwd: &PathBuf, existing_thread: Option<String>) -> JsonRpcRequest {
-    if let Some(thread_id) = existing_thread {
-        JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/resume".to_string(),
-            params: serde_json::json!({
-                "threadId": thread_id,
-                "persistExtendedHistory": true
-            }),
-        }
-    } else {
-        JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "thread/start".to_string(),
-            params: serde_json::json!({
-                "model": serde_json::Value::Null,
-                "modelProvider": serde_json::Value::Null,
-                "profile": serde_json::Value::Null,
-                "cwd": cwd.display().to_string(),
-                "approvalPolicy": serde_json::Value::Null,
-                "config": serde_json::Value::Null,
-                "baseInstructions": serde_json::Value::Null,
-                "developerInstructions": serde_json::Value::Null,
-                "compactPrompt": serde_json::Value::Null,
-                "includeApplyPatchTool": serde_json::Value::Null,
-                "experimentalRawEvents": false,
-                "persistExtendedHistory": true
-            }),
-        }
-    }
 }
 
 fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
@@ -277,340 +204,65 @@ fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct JsonRpcRequest {
-    jsonrpc: &'static str,
-    id: u64,
-    method: String,
-    params: serde_json::Value,
-}
-
+/// Event from codex exec --json output
 #[derive(Debug, Deserialize)]
-struct JsonRpcMessage {
+struct ExecEvent {
+    #[serde(rename = "type")]
+    event_type: String,
     #[serde(default)]
-    id: Option<u64>,
+    thread_id: Option<String>,
     #[serde(default)]
-    method: Option<String>,
+    item: Option<serde_json::Value>,
     #[serde(default)]
-    params: Option<serde_json::Value>,
-    #[serde(default)]
-    result: Option<serde_json::Value>,
-    #[serde(default)]
-    error: Option<JsonRpcError>,
+    usage: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
-struct JsonRpcError {
-    #[serde(default)]
-    code: i64,
-    #[serde(default)]
-    message: String,
+fn parse_exec_event(line: &str) -> Result<ExecEvent> {
+    serde_json::from_str(line).with_context(|| format!("invalid codex JSONL event: {line}"))
 }
 
-fn send_request(stdin: &mut impl Write, request: &JsonRpcRequest) -> Result<()> {
-    let json = serde_json::to_string(request).context("failed to serialize codex request")?;
-    logging::debug_event(
-        "provider.codex.request",
-        "writing Codex JSON-RPC request",
-        serde_json::json!({
-            "payload": json,
-        }),
-    );
-    stdin
-        .write_all(json.as_bytes())
-        .context("failed to write codex request")?;
-    stdin.write_all(b"\n").context("failed to write newline")?;
-    stdin.flush().context("failed to flush codex stdin")?;
-    Ok(())
-}
-
-fn send_notification(stdin: &mut impl Write, method: &str) -> Result<()> {
-    let payload = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method
-    });
-    let json = serde_json::to_string(&payload).context("failed to serialize codex notification")?;
-    logging::debug_event(
-        "provider.codex.request",
-        "writing Codex JSON-RPC notification",
-        serde_json::json!({
-            "payload": json,
-            "method": method,
-        }),
-    );
-    stdin
-        .write_all(json.as_bytes())
-        .context("failed to write codex notification")?;
-    stdin
-        .write_all(b"\n")
-        .context("failed to write notification newline")?;
-    stdin
-        .flush()
-        .context("failed to flush codex notification")?;
-    Ok(())
-}
-
-fn send_response(stdin: &mut impl Write, id: u64, result: serde_json::Value) -> Result<()> {
-    let payload = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": result
-    });
-    let json = serde_json::to_string(&payload).context("failed to serialize codex response")?;
-    logging::debug_event(
-        "provider.codex.approval",
-        "writing Codex approval response",
-        serde_json::json!({
-            "id": id,
-            "payload": json,
-        }),
-    );
-    stdin
-        .write_all(json.as_bytes())
-        .context("failed to write codex response")?;
-    stdin
-        .write_all(b"\n")
-        .context("failed to write response newline")?;
-    stdin.flush().context("failed to flush codex response")?;
-    Ok(())
-}
-
-fn parse_jsonrpc_message(line: &str) -> Result<JsonRpcMessage> {
-    serde_json::from_str(line).with_context(|| format!("invalid codex JSON-RPC message: {line}"))
-}
-
-fn wait_for_response(
-    stdout_lines: &mut impl Iterator<Item = std::io::Result<String>>,
-    stdin: &mut impl Write,
-    target_id: u64,
+fn handle_exec_event(
+    event: ExecEvent,
     event_tx: &Sender<ProviderEvent>,
-    turn_completed: Option<&mut bool>,
-) -> Result<JsonRpcMessage> {
-    let mut turn_completed = turn_completed;
-    let mut streamed_agent_message_ids = HashSet::new();
-    for line in stdout_lines.by_ref() {
-        let line = line.context("failed to read line from codex stdout")?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        logging::debug_event(
-            "provider.codex.stdout_line",
-            "read raw Codex JSON-RPC line",
-            serde_json::json!({
-                "line": trimmed,
-                "target_id": target_id,
-            }),
-        );
-        let message = parse_jsonrpc_message(trimmed)?;
-        if message.id == Some(target_id) && (message.result.is_some() || message.error.is_some()) {
-            logging::debug_event(
-                "provider.codex.response",
-                "received Codex JSON-RPC response",
-                serde_json::json!({
-                    "id": message.id,
-                    "result": message.result,
-                    "error": message.error.as_ref().map(|error| error.message.clone()),
-                }),
-            );
-            if let Some(error) = &message.error {
-                anyhow::bail!("JSON-RPC error {}: {}", error.code, error.message);
-            }
-            return Ok(message);
-        }
-
-        let mut local_turn_started = false;
-        if handle_message(
-            message,
-            stdin,
-            event_tx,
-            &mut local_turn_started,
-            turn_completed.as_deref_mut().unwrap_or(&mut false),
-            &mut streamed_agent_message_ids,
-        )? {
-            continue;
-        }
-    }
-
-    anyhow::bail!("codex closed stdout while waiting for response {target_id}")
-}
-
-fn thread_id_from_result(result: Option<&serde_json::Value>) -> Option<String> {
-    let result = result?;
-    result
-        .get("thread")
-        .and_then(|thread| thread.get("id"))
-        .and_then(|value| value.as_str())
-        .map(ToOwned::to_owned)
-}
-
-fn handle_message(
-    message: JsonRpcMessage,
-    stdin: &mut impl Write,
-    event_tx: &Sender<ProviderEvent>,
-    turn_started: &mut bool,
-    turn_completed: &mut bool,
     streamed_agent_message_ids: &mut HashSet<String>,
 ) -> Result<bool> {
-    if let Some(method) = message.method {
-        if let Some(id) = message.id {
-            handle_server_request(method, id, stdin, event_tx)?;
-            return Ok(false);
-        }
-        return handle_notification(
-            method,
-            message.params,
-            event_tx,
-            turn_started,
-            turn_completed,
-            streamed_agent_message_ids,
-        );
-    }
-
-    if let Some(error) = message.error {
-        let _ = event_tx.send(ProviderEvent::Error(format!(
-            "JSON-RPC error {}: {}",
-            error.code, error.message
-        )));
-    }
-
-    Ok(false)
-}
-
-fn handle_server_request(
-    method: String,
-    id: u64,
-    stdin: &mut impl Write,
-    event_tx: &Sender<ProviderEvent>,
-) -> Result<()> {
-    let _ = event_tx.send(ProviderEvent::Status(format!(
-        "codex server request: {method}"
-    )));
-
-    let decision = match method.as_str() {
-        "item/commandExecution/requestApproval" | "execCommandApproval" => {
-            serde_json::json!({ "decision": "accept" })
-        }
-        "item/fileChange/requestApproval" | "applyPatchApproval" => {
-            serde_json::json!({ "decision": "accept" })
-        }
-        _ => serde_json::json!({}),
-    };
-
     logging::debug_event(
-        "provider.codex.approval",
-        "resolved Codex approval request",
+        "provider.codex.event",
+        "received Codex exec event",
         serde_json::json!({
-            "method": method,
-            "id": id,
-            "decision": decision,
+            "type": event.event_type,
+            "thread_id": event.thread_id,
+            "item": event.item,
         }),
     );
 
-    send_response(stdin, id, decision)
-}
-
-fn handle_notification(
-    method: String,
-    params: Option<serde_json::Value>,
-    event_tx: &Sender<ProviderEvent>,
-    turn_started: &mut bool,
-    turn_completed: &mut bool,
-    streamed_agent_message_ids: &mut HashSet<String>,
-) -> Result<bool> {
-    let params = params.unwrap_or(serde_json::Value::Null);
-    logging::debug_event(
-        "provider.codex.notification",
-        "received Codex notification",
-        serde_json::json!({
-            "method": method,
-            "params": params,
-        }),
-    );
-
-    match method.as_str() {
-        "thread/started" => {
-            if let Some(thread_id) = params
-                .get("thread")
-                .and_then(|thread| thread.get("id"))
-                .and_then(|value| value.as_str())
-            {
+    match event.event_type.as_str() {
+        "thread.started" => {
+            if let Some(thread_id) = event.thread_id {
                 let _ = event_tx.send(ProviderEvent::SessionHandle(SessionHandle::CodexThread {
-                    thread_id: thread_id.to_string(),
+                    thread_id,
                 }));
             }
             let _ = event_tx.send(ProviderEvent::Status("codex thread started".to_string()));
         }
-        "turn/started" => {
-            *turn_started = true;
+        "turn.started" => {
             let _ = event_tx.send(ProviderEvent::Status("codex turn started".to_string()));
         }
-        "turn/completed" => {
-            *turn_completed = true;
+        "turn.completed" => {
             let _ = event_tx.send(ProviderEvent::Status("codex turn completed".to_string()));
-            return Ok(true);
+            return Ok(true); // End of turn
         }
-        "thread/status/changed" => {
-            if params
-                .get("status")
-                .and_then(|status| status.get("type"))
-                .and_then(|value| value.as_str())
-                == Some("idle")
-                && *turn_started
-            {
-                *turn_completed = true;
-                return Ok(true);
+        "item.started" | "item.completed" => {
+            if let Some(item) = event.item {
+                for e in parse_item_event(&event.event_type, &item, streamed_agent_message_ids) {
+                    let _ = event_tx.send(e);
+                }
             }
         }
-        "item/agentMessage/delta" => {
-            if let Some(item_id) = params.get("itemId").and_then(|value| value.as_str()) {
-                streamed_agent_message_ids.insert(item_id.to_string());
-            }
-            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
-                && !delta.is_empty()
-            {
-                let _ = event_tx.send(ProviderEvent::AssistantChunk(delta.to_string()));
-            }
-        }
-        "item/started" | "item/completed" => {
-            let item = params.get("item").unwrap_or(&params);
-            for event in parse_item_event(method.as_str(), item, streamed_agent_message_ids) {
-                let _ = event_tx.send(event);
-            }
-        }
-        "configWarning"
-        | "account/rateLimits/updated"
-        | "thread/tokenUsage/updated"
-        | "serverRequest/resolved" => {}
-        "item/commandExecution/outputDelta" => {
-            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
-                && !delta.is_empty()
-            {
-                let _ = event_tx.send(ProviderEvent::ExecCommandOutputDelta {
-                    call_id: params
-                        .get("itemId")
-                        .and_then(|value| value.as_str())
-                        .map(ToOwned::to_owned),
-                    delta: delta.to_string(),
-                });
-            }
-        }
-        "item/fileChange/outputDelta" => {
-            if let Some(delta) = params.get("delta").and_then(|value| value.as_str())
-                && !delta.is_empty()
-            {
-                let _ = event_tx.send(ProviderEvent::PatchApplyOutputDelta {
-                    call_id: params
-                        .get("itemId")
-                        .and_then(|value| value.as_str())
-                        .map(ToOwned::to_owned),
-                    delta: delta.to_string(),
-                });
-            }
-        }
-        other => {
+        _ => {
             let _ = event_tx.send(ProviderEvent::Status(format!(
-                "ignored codex event: {other}"
+                "ignored codex event: {}",
+                event.event_type
             )));
         }
     }
@@ -633,7 +285,7 @@ fn parse_item_event(
         .map(ToOwned::to_owned);
 
     match (method, item_type) {
-        ("item/started", "commandExecution") => {
+        ("item.started" | "item/started", "commandExecution") => {
             let command = item
                 .get("command")
                 .and_then(|value| value.as_str())
@@ -648,7 +300,7 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item/completed", "commandExecution") => {
+        ("item.completed" | "item/completed", "commandExecution") => {
             let output = item
                 .get("aggregatedOutput")
                 .and_then(|value| value.as_str())
@@ -671,16 +323,16 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item/started", "fileChange") => vec![ProviderEvent::PatchApplyStarted {
+        ("item.started" | "item/started", "fileChange") => vec![ProviderEvent::PatchApplyStarted {
             call_id: item_id,
             changes: parse_patch_changes(item),
         }],
-        ("item/completed", "fileChange") => vec![ProviderEvent::PatchApplyFinished {
+        ("item.completed" | "item/completed", "fileChange") => vec![ProviderEvent::PatchApplyFinished {
             call_id: item_id,
             changes: parse_patch_changes(item),
             status: parse_patch_apply_status(item),
         }],
-        ("item/started", "webSearch") => item
+        ("item.started" | "item/started", "webSearch") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -690,7 +342,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item/completed", "webSearch") => item
+        ("item.completed" | "item/completed", "webSearch") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -701,7 +353,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item/completed", "imageView") => item
+        ("item.completed" | "item/completed", "imageView") => item
             .get("path")
             .and_then(|value| value.as_str())
             .map(|path| {
@@ -711,7 +363,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item/completed", "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
+        ("item.completed" | "item/completed", "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
             call_id: item_id,
             revised_prompt: item
                 .get("revisedPrompt")
@@ -726,7 +378,7 @@ fn parse_item_event(
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
         }],
-        ("item/started", "mcpToolCall") => {
+        ("item.started" | "item/started", "mcpToolCall") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 vec![ProviderEvent::McpToolCallStarted {
                     call_id: item_id,
@@ -734,7 +386,7 @@ fn parse_item_event(
                 }]
             })
         }
-        ("item/completed", "mcpToolCall") => {
+        ("item.completed" | "item/completed", "mcpToolCall") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 let (result_blocks, error, is_error) = parse_mcp_tool_call_result(item);
                 vec![ProviderEvent::McpToolCallFinished {
@@ -748,7 +400,7 @@ fn parse_item_event(
             })
         }
         (_, "userMessage") => Vec::new(),
-        ("item/completed", "agentMessage") => item
+        ("item.completed" | "item/completed", "agentMessage") => item
             .get("text")
             .and_then(|value| value.as_str())
             .filter(|text| {
@@ -1047,20 +699,13 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::mpsc;
 
-    use super::JsonRpcMessage;
-    use super::JsonRpcRequest;
+    use super::ExecEvent;
     use super::ProviderEvent;
-    use super::build_thread_request;
-    use super::handle_notification;
+    use super::handle_exec_event;
+    use super::parse_exec_event;
     use super::parse_item_event;
-    use super::parse_jsonrpc_message;
     use super::resolve_codex_executable_from;
-    use super::thread_id_from_result;
-    use super::wait_for_response;
-    use crate::logging;
-    use crate::logging::RunMode;
     use crate::provider::SessionHandle;
-    use crate::workplace_store::WorkplaceStore;
 
     #[test]
     fn resolves_missing_executable_with_clear_error() {
@@ -1075,88 +720,108 @@ mod tests {
     }
 
     #[test]
-    fn builds_initialize_request() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "initialize".to_string(),
-            params: serde_json::json!({
-                "clientInfo": {
-                    "name": "agile-agent",
-                    "title": "agile-agent",
-                    "version": "0.1.0"
-                },
-                "capabilities": {
-                    "experimentalApi": true
-                }
-            }),
+    fn parses_exec_event_thread_started() {
+        let line = r#"{"type":"thread.started","thread_id":"thr-cli-1"}"#;
+        let event = parse_exec_event(line).expect("parse event");
+        assert_eq!(event.event_type, "thread.started");
+        assert_eq!(event.thread_id, Some("thr-cli-1".to_string()));
+    }
+
+    #[test]
+    fn parses_exec_event_item_completed() {
+        let line = r#"{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"hello"}}"#;
+        let event = parse_exec_event(line).expect("parse event");
+        assert_eq!(event.event_type, "item.completed");
+        assert!(event.item.is_some());
+        let item = event.item.unwrap();
+        assert_eq!(item.get("type").and_then(|v| v.as_str()), Some("agent_message"));
+    }
+
+    #[test]
+    fn handle_exec_event_emits_session_handle() {
+        let (tx, rx) = mpsc::channel();
+        let mut streamed = HashSet::new();
+
+        let event = ExecEvent {
+            event_type: "thread.started".to_string(),
+            thread_id: Some("thr-123".to_string()),
+            item: None,
+            usage: None,
         };
 
-        let json = serde_json::to_string(&request).expect("serialize");
-        assert!(json.contains("\"jsonrpc\":\"2.0\""));
-        assert!(json.contains("\"method\":\"initialize\""));
-        assert!(json.contains("\"clientInfo\""));
-    }
-
-    #[test]
-    fn thread_start_request_omits_sandbox_field() {
-        let cwd = std::path::PathBuf::from("/tmp/project");
-        let request = build_thread_request(&cwd, None);
-
-        assert_eq!(request.method, "thread/start");
-        let params = request.params.as_object().expect("object params");
-        assert!(!params.contains_key("sandbox"));
+        let finished = handle_exec_event(event, &tx, &mut streamed).expect("handle event");
+        assert!(!finished);
         assert_eq!(
-            params.get("cwd").and_then(|value| value.as_str()),
-            Some("/tmp/project")
+            rx.recv().expect("session handle"),
+            ProviderEvent::SessionHandle(SessionHandle::CodexThread {
+                thread_id: "thr-123".to_string()
+            })
         );
     }
 
     #[test]
-    fn extracts_thread_id_from_response_result() {
-        let result = serde_json::json!({
-            "thread": {
-                "id": "thr_123"
-            }
-        });
+    fn handle_exec_event_emits_assistant_chunk_from_item() {
+        let (tx, rx) = mpsc::channel();
+        let mut streamed = HashSet::new();
 
+        let event = ExecEvent {
+            event_type: "item.completed".to_string(),
+            thread_id: None,
+            item: Some(serde_json::json!({
+                "id": "msg-1",
+                "type": "agent_message",
+                "text": "hello world"
+            })),
+            usage: None,
+        };
+
+        let finished = handle_exec_event(event, &tx, &mut streamed).expect("handle event");
+        assert!(!finished);
         assert_eq!(
-            thread_id_from_result(Some(&result)),
-            Some("thr_123".to_string())
+            rx.recv().expect("assistant chunk"),
+            ProviderEvent::AssistantChunk("hello world".to_string())
         );
     }
 
     #[test]
-    fn parses_jsonrpc_error() {
-        let line = r#"{"id":1,"error":{"code":-32600,"message":"Invalid Request"}}"#;
+    fn handle_exec_event_returns_true_on_turn_completed() {
+        let (tx, _rx) = mpsc::channel();
+        let mut streamed = HashSet::new();
 
-        let response = parse_jsonrpc_message(line).expect("parse response");
-        let error = response.error.expect("must have error");
-        assert_eq!(error.code, -32600);
-        assert_eq!(error.message, "Invalid Request");
+        let event = ExecEvent {
+            event_type: "turn.completed".to_string(),
+            thread_id: None,
+            item: None,
+            usage: Some(serde_json::json!({"input_tokens": 100, "output_tokens": 50})),
+        };
+
+        let finished = handle_exec_event(event, &tx, &mut streamed).expect("handle event");
+        assert!(finished);
     }
 
     #[test]
-    fn parses_thread_started_notification() {
-        let line = r#"{"method":"thread/started","params":{"thread":{"id":"thr_123"}}}"#;
-
-        let response: JsonRpcMessage = parse_jsonrpc_message(line).expect("parse response");
-        let params = response.params.expect("params");
-        let thread_id = params
-            .get("thread")
-            .and_then(|thread| thread.get("id"))
-            .and_then(|value| value.as_str());
-        assert_eq!(thread_id, Some("thr_123"));
-    }
-
-    #[test]
-    fn parses_assistant_text_item() {
+    fn parses_assistant_text_item_with_dot_format() {
         let item = serde_json::json!({
             "type": "message",
             "status": "completed",
             "content": [
                 { "type": "text", "text": "hello world" }
             ]
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events,
+            vec![ProviderEvent::AssistantChunk("hello world".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_assistant_text_item_with_slash_format() {
+        // Support both formats for backward compatibility
+        let item = serde_json::json!({
+            "type": "agentMessage",
+            "text": "hello world"
         });
 
         let events = parse_item_event("item/completed", &item, &HashSet::new());
@@ -1176,38 +841,8 @@ mod tests {
             ]
         });
 
-        let events = parse_item_event("item/completed", &item, &HashSet::new());
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
         assert!(events.is_empty());
-    }
-
-    #[test]
-    fn streams_agent_message_delta_notifications() {
-        let (tx, rx) = mpsc::channel();
-        let mut turn_started = false;
-        let mut turn_completed = false;
-        let mut streamed = HashSet::new();
-
-        let finished = handle_notification(
-            "item/agentMessage/delta".to_string(),
-            Some(serde_json::json!({
-                "delta": "hello",
-                "itemId": "msg-1",
-                "threadId": "thr-1",
-                "turnId": "turn-1"
-            })),
-            &tx,
-            &mut turn_started,
-            &mut turn_completed,
-            &mut streamed,
-        )
-        .expect("handle notification");
-
-        assert!(!finished);
-        assert!(streamed.contains("msg-1"));
-        assert_eq!(
-            rx.recv().expect("assistant chunk"),
-            ProviderEvent::AssistantChunk("hello".to_string())
-        );
     }
 
     #[test]
@@ -1220,72 +855,8 @@ mod tests {
         let mut streamed = HashSet::new();
         streamed.insert("msg-1".to_string());
 
-        let events = parse_item_event("item/completed", &item, &streamed);
+        let events = parse_item_event("item.completed", &item, &streamed);
         assert!(events.is_empty());
-    }
-
-    #[test]
-    fn streams_command_execution_output_delta_notifications() {
-        let (tx, rx) = mpsc::channel();
-        let mut turn_started = false;
-        let mut turn_completed = false;
-        let mut streamed = HashSet::new();
-
-        let finished = handle_notification(
-            "item/commandExecution/outputDelta".to_string(),
-            Some(serde_json::json!({
-                "delta": "partial output",
-                "itemId": "cmd-1",
-                "threadId": "thr-1",
-                "turnId": "turn-1"
-            })),
-            &tx,
-            &mut turn_started,
-            &mut turn_completed,
-            &mut streamed,
-        )
-        .expect("handle notification");
-
-        assert!(!finished);
-        assert_eq!(
-            rx.recv().expect("exec output delta"),
-            ProviderEvent::ExecCommandOutputDelta {
-                call_id: Some("cmd-1".to_string()),
-                delta: "partial output".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn streams_file_change_output_delta_notifications() {
-        let (tx, rx) = mpsc::channel();
-        let mut turn_started = false;
-        let mut turn_completed = false;
-        let mut streamed = HashSet::new();
-
-        let finished = handle_notification(
-            "item/fileChange/outputDelta".to_string(),
-            Some(serde_json::json!({
-                "delta": "patch rejected by user",
-                "itemId": "patch-1",
-                "threadId": "thr-1",
-                "turnId": "turn-1"
-            })),
-            &tx,
-            &mut turn_started,
-            &mut turn_completed,
-            &mut streamed,
-        )
-        .expect("handle notification");
-
-        assert!(!finished);
-        assert_eq!(
-            rx.recv().expect("patch output delta"),
-            ProviderEvent::PatchApplyOutputDelta {
-                call_id: Some("patch-1".to_string()),
-                delta: "patch rejected by user".to_string(),
-            }
-        );
     }
 
     #[test]
@@ -1320,7 +891,7 @@ mod tests {
             ]
         });
 
-        let events = parse_item_event("item/started", &item, &HashSet::new());
+        let events = parse_item_event("item.started", &item, &HashSet::new());
 
         assert_eq!(
             events,
@@ -1359,7 +930,7 @@ mod tests {
             "source": "userShell"
         });
 
-        let events = parse_item_event("item/completed", &item, &HashSet::new());
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
 
         assert_eq!(
             events,
@@ -1389,7 +960,7 @@ mod tests {
             ]
         });
 
-        let events = parse_item_event("item/completed", &item, &HashSet::new());
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
 
         assert_eq!(
             events,
@@ -1423,14 +994,14 @@ mod tests {
         });
 
         assert_eq!(
-            parse_item_event("item/started", &started, &HashSet::new()),
+            parse_item_event("item.started", &started, &HashSet::new()),
             vec![ProviderEvent::WebSearchStarted {
                 call_id: Some("search-1".to_string()),
                 query: "ratatui stylize".to_string(),
             }]
         );
         assert_eq!(
-            parse_item_event("item/completed", &completed, &HashSet::new()),
+            parse_item_event("item.completed", &completed, &HashSet::new()),
             vec![ProviderEvent::WebSearchFinished {
                 call_id: Some("search-1".to_string()),
                 query: "ratatui stylize".to_string(),
@@ -1466,7 +1037,7 @@ mod tests {
         });
 
         assert_eq!(
-            parse_item_event("item/started", &started, &HashSet::new()),
+            parse_item_event("item.started", &started, &HashSet::new()),
             vec![ProviderEvent::McpToolCallStarted {
                 call_id: Some("mcp-1".to_string()),
                 invocation: crate::tool_calls::McpInvocation {
@@ -1480,7 +1051,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            parse_item_event("item/completed", &completed, &HashSet::new()),
+            parse_item_event("item.completed", &completed, &HashSet::new()),
             vec![ProviderEvent::McpToolCallFinished {
                 call_id: Some("mcp-1".to_string()),
                 invocation: crate::tool_calls::McpInvocation {
@@ -1519,14 +1090,14 @@ mod tests {
         });
 
         assert_eq!(
-            parse_item_event("item/completed", &image_view, &HashSet::new()),
+            parse_item_event("item.completed", &image_view, &HashSet::new()),
             vec![ProviderEvent::ViewImage {
                 call_id: Some("image-view-1".to_string()),
                 path: "example.png".to_string(),
             }]
         );
         assert_eq!(
-            parse_item_event("item/completed", &image_generation, &HashSet::new()),
+            parse_item_event("item.completed", &image_generation, &HashSet::new()),
             vec![ProviderEvent::ImageGenerationFinished {
                 call_id: Some("image-gen-1".to_string()),
                 revised_prompt: Some("A tiny blue square".to_string()),
@@ -1534,44 +1105,5 @@ mod tests {
                 saved_path: Some("/tmp/ig-1.png".to_string()),
             }]
         );
-    }
-
-    #[test]
-    fn wait_for_response_logs_raw_jsonrpc_messages() {
-        let _guard = logging::test_guard();
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let workplace = WorkplaceStore::for_cwd(temp.path()).expect("workplace");
-        workplace.ensure().expect("ensure");
-        logging::init_for_workplace(&workplace, RunMode::RunLoop).expect("init logger");
-
-        let mut stdout_lines = vec![
-            Ok(r#"{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thr-123"}}}"#.to_string()),
-            Ok(r#"{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-123"}}}"#.to_string()),
-        ]
-        .into_iter();
-        let mut stdin = Vec::new();
-        let (tx, _rx) = mpsc::channel();
-
-        let response =
-            wait_for_response(&mut stdout_lines, &mut stdin, 2, &tx, None).expect("response");
-        assert_eq!(
-            thread_id_from_result(response.result.as_ref()),
-            Some("thr-123".to_string())
-        );
-
-        let log_path = logging::current_log_path().expect("log path");
-        let contents = std::fs::read_to_string(log_path).expect("log file");
-        let entries: Vec<serde_json::Value> = contents
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("valid json log line"))
-            .collect();
-
-        assert!(entries.iter().any(|entry| {
-            entry.get("event").and_then(|value| value.as_str())
-                == Some("provider.codex.notification")
-        }));
-        assert!(entries.iter().any(|entry| {
-            entry.get("event").and_then(|value| value.as_str()) == Some("provider.codex.response")
-        }));
     }
 }
