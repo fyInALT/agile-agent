@@ -99,6 +99,16 @@ impl fmt::Debug for BlockedState {
     }
 }
 
+impl Clone for BlockedState {
+    fn clone(&self) -> Self {
+        Self {
+            reason: self.reason.clone_boxed(),
+            blocked_at: self.blocked_at,
+            context: self.context.clone(),
+        }
+    }
+}
+
 /// Blocking context
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BlockingContext {
