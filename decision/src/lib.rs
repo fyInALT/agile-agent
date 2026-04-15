@@ -30,6 +30,9 @@ pub mod mock_engine;
 pub mod condition;
 pub mod rule_engine;
 
+// Sprint 4-5: Context Cache and Lifecycle
+pub mod lifecycle;
+
 // Re-export core types
 pub use error::*;
 pub use types::*;
@@ -74,3 +77,6 @@ pub use engine::*;
 pub use mock_engine::*;
 pub use condition::*;
 pub use rule_engine::*;
+
+// Re-export Sprint 4-5 types
+pub use lifecycle::*;

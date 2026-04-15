@@ -32,6 +32,14 @@ pub enum DecisionError {
     /// Blocking resolution failed
     #[error("Blocking resolution failed: {0}")]
     BlockingError(String),
+
+    /// IO error
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    /// JSON error
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 /// Result type alias for decision layer
