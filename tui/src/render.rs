@@ -57,6 +57,10 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
     if state.is_confirmation_overlay_open() {
         render_confirmation_overlay(frame, state);
     }
+
+    if state.is_human_decision_overlay_open() {
+        render_human_decision_overlay(frame, state);
+    }
 }
 
 /// Render focused (single agent) view - default mode
@@ -789,6 +793,187 @@ fn render_confirmation_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     )));
 
     let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner_area);
+}
+
+/// Render human decision overlay for decision layer requests
+fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    let overlay = state
+        .human_decision_overlay
+        .as_ref()
+        .expect("human decision overlay should be open");
+
+    // Use larger area for decision modal (50% width, 60% height)
+    let area = centered_rect(50, 60, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    // Determine border color based on urgency
+    let border_color = match overlay.request.urgency {
+        agent_decision::UrgencyLevel::Critical => Color::Red,
+        agent_decision::UrgencyLevel::High => Color::Yellow,
+        agent_decision::UrgencyLevel::Medium => Color::Cyan,
+        agent_decision::UrgencyLevel::Low => Color::Gray,
+    };
+
+    let urgency_text = overlay.urgency_text();
+    let title = format!(" Human Decision {} ", urgency_text);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+
+    // Request info
+    lines.push(Line::from(vec![
+        Span::styled("Request: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            overlay.request.id.clone(),
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("Agent: ", Style::default().fg(Color::Gray)),
+        Span::styled(overlay.request.agent_id.clone(), Style::default().fg(Color::White)),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("Expires: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            overlay.remaining_time_text(),
+            Style::default().fg(Color::Yellow),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Separator
+    lines.push(Line::from(Span::styled(
+        "─".repeat(inner_area.width as usize),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    lines.push(Line::from(""));
+
+    // Situation description
+    if !overlay.request.situation_description.is_empty() {
+        lines.push(Line::from(Span::styled(
+            overlay.request.situation_description.clone(),
+            Style::default().fg(Color::White),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            overlay.request.situation_type.name.clone(),
+            Style::default().fg(Color::White),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Separator
+    lines.push(Line::from(Span::styled(
+        "─".repeat(inner_area.width as usize),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    lines.push(Line::from(""));
+
+    // Options header
+    lines.push(Line::from(Span::styled("Options:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))));
+
+    // Options list
+    for (i, option) in overlay.request.options.iter().enumerate() {
+        let letter = (b'A' + i as u8) as char;
+        let is_selected = i == overlay.selected_index;
+
+        let option_style = if is_selected {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!(" [{}] ", letter), option_style),
+            Span::styled(option.label.clone(), if is_selected {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::White)
+            }),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Recommendation (if present)
+    if let Some(rec) = &overlay.request.recommendation {
+        lines.push(Line::from(Span::styled(
+            "─".repeat(inner_area.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Recommendation:",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", rec.action_type),
+                Style::default().fg(Color::Green),
+            ),
+            Span::styled(rec.reasoning.clone(), Style::default().fg(Color::Gray)),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("Confidence: {:.0}%", rec.confidence * 100.0),
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Custom input mode
+    if overlay.custom_mode {
+        lines.push(Line::from(Span::styled(
+            "─".repeat(inner_area.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Custom Instruction:",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            overlay.custom_input.clone(),
+            Style::default().fg(Color::Yellow),
+        )));
+        lines.push(Line::from(Span::styled("_", Style::default().fg(Color::Yellow))));
+    }
+
+    // Key hints
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─".repeat(inner_area.width as usize),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let hint_text = if overlay.custom_mode {
+        "Enter=Submit  Esc=Cancel"
+    } else if overlay.request.recommendation.is_some() {
+        "A/B/C/D=Select  R=Recommendation  I=Custom  S=Skip  Esc=Cancel"
+    } else {
+        "A/B/C/D=Select  I=Custom  S=Skip  Esc=Cancel"
+    };
+
+    lines.push(Line::from(Span::styled(
+        hint_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner_area);
 }
 

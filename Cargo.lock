@@ -66,6 +66,7 @@ name = "agent-tui"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-decision",
  "agent-kanban",
  "anyhow",
  "chrono",
