@@ -15,6 +15,7 @@ mod input;
 mod markdown;
 mod markdown_stream;
 mod overview_state;
+mod overview_row;
 mod provider_overlay;
 mod render;
 mod resume_overlay;
