@@ -54,6 +54,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         effective_resume_last,
     )?;
     let mut state = TuiState::from_session(session);
+
+    // Ensure OVERVIEW agent exists on startup (always at index 0)
+    state.ensure_overview_agent();
+
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
     let mut last_flush = Instant::now();
 
@@ -1308,9 +1312,14 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn an agent to activate multi-agent mode
+        // This creates OVERVIEW at index 0 (focused) + worker at index 1
         let agent_id = state
             .spawn_agent(ProviderKind::Claude)
             .expect("spawn agent");
+
+        // Focus the spawned worker agent so events go to it
+        state.focus_agent(&agent_id);
+
         assert!(state.is_multi_agent_mode());
 
         // Start provider request - should use multi-agent flow

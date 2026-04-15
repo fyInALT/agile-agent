@@ -158,6 +158,42 @@ impl AgentPool {
         Ok(agent_id)
     }
 
+    /// Spawn the OVERVIEW agent (ProductOwner role) at the top of the pool
+    ///
+    /// The OVERVIEW agent is a special coordination agent that always stays at index 0.
+    /// Returns the agent ID on success, or error if pool is full or OVERVIEW already exists.
+    pub fn spawn_overview_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
+        // Check if OVERVIEW agent already exists
+        if self.slots.iter().any(|s| s.role() == AgentRole::ProductOwner) {
+            return Err("OVERVIEW agent already exists".to_string());
+        }
+
+        if !self.can_spawn() {
+            return Err("Agent pool is full".to_string());
+        }
+
+        let agent_id = AgentId::new("OVERVIEW");
+        let codename = AgentCodename::new("OVERVIEW");
+        let provider_type = ProviderType::from_provider_kind(provider_kind);
+
+        let slot = AgentSlot::with_role(agent_id.clone(), codename, provider_type, AgentRole::ProductOwner);
+
+        // Insert at the beginning (always at index 0)
+        self.slots.insert(0, slot);
+        // Note: Do NOT increment next_agent_index for OVERVIEW agent
+        // Worker agents should start from index 0 (alpha)
+
+        // Focus on OVERVIEW agent by default
+        self.focused_slot = 0;
+
+        Ok(agent_id)
+    }
+
+    /// Get the OVERVIEW agent slot (ProductOwner role)
+    pub fn overview_agent(&self) -> Option<&AgentSlot> {
+        self.slots.iter().find(|s| s.role() == AgentRole::ProductOwner)
+    }
+
     /// Stop a specific agent by ID
     ///
     /// Returns the slot index that was stopped.

@@ -379,10 +379,52 @@ impl TuiState {
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
-            self.agent_pool = Some(AgentPool::new(workplace_id, 10));
+            let mut pool = AgentPool::new(workplace_id, 10);
+
+            // Always create OVERVIEW agent first (at index 0)
+            let overview_provider = self.session.app.selected_provider;
+            pool.spawn_overview_agent(overview_provider).ok();
+
+            self.agent_pool = Some(pool);
         }
 
         self.agent_pool.as_mut()?.spawn_agent(provider).ok()
+    }
+
+    /// Focus a specific agent by ID
+    pub fn focus_agent(&mut self, agent_id: &AgentId) -> Option<AgentStatusSnapshot> {
+        let pool = self.agent_pool.as_mut()?;
+        pool.focus_agent(agent_id).ok()?;
+
+        let focused = pool.focused_slot()?;
+        Some(AgentStatusSnapshot {
+            agent_id: focused.agent_id().clone(),
+            codename: focused.codename().clone(),
+            provider_type: focused.provider_type(),
+            role: focused.role(),
+            status: focused.status().clone(),
+            assigned_task_id: focused.assigned_task_id().cloned(),
+        })
+    }
+
+    /// Ensure OVERVIEW agent exists (called on initialization)
+    pub fn ensure_overview_agent(&mut self) {
+        if self.agent_pool.is_none() {
+            let workplace_id = self.session.workplace().workplace_id.clone();
+            let mut pool = AgentPool::new(workplace_id, 10);
+
+            // Create OVERVIEW agent with the current provider
+            let overview_provider = self.session.app.selected_provider;
+            pool.spawn_overview_agent(overview_provider).ok();
+
+            self.agent_pool = Some(pool);
+        } else if let Some(pool) = self.agent_pool.as_mut() {
+            // Check if OVERVIEW agent exists
+            if pool.overview_agent().is_none() {
+                let overview_provider = self.session.app.selected_provider;
+                pool.spawn_overview_agent(overview_provider).ok();
+            }
+        }
     }
 
     /// Stop the focused agent in the pool
@@ -2825,11 +2867,16 @@ mod tests {
         // Initially no pool
         assert!(state.agent_pool.is_none());
 
-        // Spawn creates pool and agent
+        // Spawn creates pool with OVERVIEW agent + worker agent
         let agent_id = state.spawn_agent(ProviderKind::Claude);
         assert!(agent_id.is_some());
         assert!(state.agent_pool.is_some());
-        assert_eq!(state.agent_pool.as_ref().unwrap().active_count(), 1);
+        // OVERVIEW agent + 1 worker agent = 2
+        let pool = state.agent_pool.as_ref().unwrap();
+        assert_eq!(pool.active_count(), 2);
+        // OVERVIEW agent should be first (focused)
+        let focused = pool.focused_slot().expect("focused slot");
+        assert_eq!(focused.codename().as_str(), "OVERVIEW");
     }
 
     #[test]
@@ -2958,8 +3005,11 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        // Spawn agent
+        // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
         let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Focus the spawned worker agent so mail checks work on it
+        state.focus_agent(&agent_id);
 
         // Send mail to that agent
         let mail = AgentMail::new(
@@ -2985,8 +3035,11 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        // Spawn agent
+        // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
         let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Focus the spawned worker agent so mail checks work on it
+        state.focus_agent(&agent_id);
 
         // Send mail with action required
         let mail = AgentMail::new(
@@ -3031,8 +3084,12 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        // Spawn agent and send mail
+        // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
         let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Focus the spawned worker agent so mail checks work on it
+        state.focus_agent(&agent_id);
+
         let mail = AgentMail::new(
             AgentId::new("sender"),
             MailTarget::Direct(agent_id.clone()),
@@ -3067,8 +3124,12 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        // Spawn agent and send mail
+        // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
         let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+
+        // Focus the spawned worker agent so mail checks work on it
+        state.focus_agent(&agent_id);
+
         let mail = AgentMail::new(
             AgentId::new("helper"),
             MailTarget::Direct(agent_id.clone()),

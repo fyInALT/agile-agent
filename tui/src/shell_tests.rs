@@ -499,32 +499,38 @@ fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
 
 #[test]
 fn overview_spawn_agent_shows_in_list() {
-    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
     shell.state.view_state.switch_by_number(6);
 
-    // Initially empty - shows placeholder
+    // Initially shows OVERVIEW agent
     let rendered_before = shell.render_to_string(80, 24);
     println!("=== Before spawn ===\n{}", rendered_before);
-    assert!(rendered_before.contains("Hint: Press Ctrl+N"));
+    assert!(rendered_before.contains("OVERVIEW"), "Should show OVERVIEW agent");
 
-    // Spawn an agent
+    // Spawn a worker agent
     shell.state.spawn_agent(ProviderKind::Mock);
 
     // Check agent_statuses
     let statuses = shell.state.agent_statuses();
     println!("Agent statuses count: {}", statuses.len());
     for s in &statuses {
-        println!("  - {} ({})", s.codename.as_str(), s.status.label());
+        println!(
+            "  - id={} codename={} ({}) role={}",
+            s.agent_id.as_str(),
+            s.codename.as_str(),
+            s.status.label(),
+            s.role.label()
+        );
     }
 
-    // After spawn - should show the agent
+    // After spawn - should show OVERVIEW + worker agent
     let rendered_after = shell.render_to_string(80, 24);
     println!("=== After spawn ===\n{}", rendered_after);
 
-    // Should show the spawned agent's codename (alpha is first)
+    // Should show both OVERVIEW agent and worker agent (alpha)
     assert!(
-        rendered_after.contains("alpha") || rendered_after.contains("○"),
-        "Spawned agent should be visible. Got:\n{}",
+        rendered_after.contains("OVERVIEW") && rendered_after.contains("alpha"),
+        "Should show OVERVIEW agent and worker agent. Got:\n{}",
         rendered_after
     );
 }

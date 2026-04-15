@@ -64,6 +64,12 @@ impl ShellHarness {
         }
     }
 
+    pub(crate) fn new_with_overview(provider: ProviderKind) -> Self {
+        let mut harness = Self::new(provider);
+        harness.state.ensure_overview_agent();
+        harness
+    }
+
     pub(crate) fn render_to_string(&mut self, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
