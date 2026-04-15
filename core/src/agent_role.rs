@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum AgentRole {
     /// Product Owner - focuses on requirements, priorities, backlog grooming
-    #[default]
+    /// This is the OVERVIEW agent role (special coordinator)
     ProductOwner,
     /// Scrum Master - focuses on process, blockers, coordination
     ScrumMaster,
     /// Developer - focuses on implementation, testing, delivery
+    /// This is the default role for worker agents spawned by users
+    #[default]
     Developer,
 }
 
@@ -153,7 +155,8 @@ mod tests {
 
     #[test]
     fn role_default() {
-        assert_eq!(AgentRole::default(), AgentRole::ProductOwner);
+        // Default role is now Developer (worker agent), not ProductOwner
+        assert_eq!(AgentRole::default(), AgentRole::Developer);
     }
 
     #[test]

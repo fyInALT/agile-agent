@@ -498,6 +498,38 @@ fn transcript_redraw_clears_stale_suffix_when_scrolling_to_shorter_lines() {
 // Overview mode integration tests
 
 #[test]
+fn overview_spawn_agent_shows_in_list() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    // Initially empty - shows placeholder
+    let rendered_before = shell.render_to_string(80, 24);
+    println!("=== Before spawn ===\n{}", rendered_before);
+    assert!(rendered_before.contains("Hint: Press Ctrl+N"));
+
+    // Spawn an agent
+    shell.state.spawn_agent(ProviderKind::Mock);
+
+    // Check agent_statuses
+    let statuses = shell.state.agent_statuses();
+    println!("Agent statuses count: {}", statuses.len());
+    for s in &statuses {
+        println!("  - {} ({})", s.codename.as_str(), s.status.label());
+    }
+
+    // After spawn - should show the agent
+    let rendered_after = shell.render_to_string(80, 24);
+    println!("=== After spawn ===\n{}", rendered_after);
+
+    // Should show the spawned agent's codename (alpha is first)
+    assert!(
+        rendered_after.contains("alpha") || rendered_after.contains("○"),
+        "Spawned agent should be visible. Got:\n{}",
+        rendered_after
+    );
+}
+
+#[test]
 fn overview_mode_switch_by_number() {
     let mut shell = ShellHarness::new(ProviderKind::Mock);
     shell.state.view_state.switch_by_number(6); // Overview mode
