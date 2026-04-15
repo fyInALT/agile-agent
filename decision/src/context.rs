@@ -268,6 +268,18 @@ impl ProjectRules {
         self.keywords.contains(keyword)
     }
 
+    /// Get a summary of project rules
+    pub fn summary(&self) -> String {
+        if self.rules.is_empty() {
+            "No project rules defined".to_string()
+        } else {
+            self.rules.iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
     pub fn requires_human_for(&self, action_type: &ActionType) -> bool {
         self.requires_human_rules
             .iter()
