@@ -38,6 +38,7 @@ pub mod recovery;
 
 // Sprint 8: Observability and Integration
 pub mod metrics;
+pub mod concurrent;
 
 // Re-export core types
 pub use error::*;
@@ -92,3 +93,4 @@ pub use recovery::*;
 
 // Re-export Sprint 8 types
 pub use metrics::*;
+pub use concurrent::*;
