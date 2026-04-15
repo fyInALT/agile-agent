@@ -631,6 +631,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             for event in poll_result.events {
                 match event {
                     agent_core::event_aggregator::AgentEvent::FromProvider { agent_id, event } => {
+                        // Generate scroll log message for Overview mode
+                        if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                            if let Some(msg) = generate_overview_log_message(&event, &agent_id, &state) {
+                                state.view_state.overview.push_log_message(msg);
+                            }
+                        }
+
                         // For now, process events from any agent in focused slot
                         // In full implementation, would route to specific agent's transcript
                         match event {
@@ -1059,6 +1066,93 @@ fn check_resume_snapshot(terminal: &mut AppTerminal, launch_cwd: &Path) -> Resul
             }
         }
     }
+}
+
+/// Generate scroll log message from provider event for Overview mode
+fn generate_overview_log_message(
+    event: &ProviderEvent,
+    agent_id: &agent_core::agent_runtime::AgentId,
+    state: &TuiState,
+) -> Option<crate::overview_state::OverviewLogMessage> {
+    use crate::overview_state::{OverviewLogMessage, OverviewMessageType};
+
+    let timestamp = current_time_as_u32();
+    let codename = state
+        .agent_pool
+        .as_ref()
+        .and_then(|p| p.get_slot_by_id(agent_id))
+        .map(|s| s.codename().as_str().to_string())
+        .unwrap_or_else(|| agent_id.as_str().to_string());
+
+    match event {
+        ProviderEvent::Status(text) => Some(OverviewLogMessage {
+            timestamp,
+            agent: codename,
+            message_type: OverviewMessageType::Progress,
+            content: text.clone(),
+        }),
+        ProviderEvent::Finished => Some(OverviewLogMessage {
+            timestamp,
+            agent: codename,
+            message_type: OverviewMessageType::Complete,
+            content: "Task complete".to_string(),
+        }),
+        ProviderEvent::Error(error) => Some(OverviewLogMessage {
+            timestamp,
+            agent: codename,
+            message_type: OverviewMessageType::Blocked,
+            content: format!("ERROR: {}", error),
+        }),
+        ProviderEvent::ExecCommandStarted { input_preview, .. } => {
+            let preview = input_preview.clone().unwrap_or_else(|| "exec".to_string());
+            Some(OverviewLogMessage {
+                timestamp,
+                agent: codename,
+                message_type: OverviewMessageType::Progress,
+                content: format!("Running: {}", preview),
+            })
+        }
+        ProviderEvent::ExecCommandFinished { status, .. } => {
+            let status_str = match status {
+                agent_core::tool_calls::ExecCommandStatus::Completed => "Success",
+                agent_core::tool_calls::ExecCommandStatus::Failed => "Failed",
+                agent_core::tool_calls::ExecCommandStatus::Declined => "Declined",
+                agent_core::tool_calls::ExecCommandStatus::InProgress => "In Progress",
+            };
+            Some(OverviewLogMessage {
+                timestamp,
+                agent: codename,
+                message_type: OverviewMessageType::Progress,
+                content: format!("Exec {}", status_str),
+            })
+        }
+        ProviderEvent::GenericToolCallStarted { name, .. } => Some(OverviewLogMessage {
+            timestamp,
+            agent: codename,
+            message_type: OverviewMessageType::Progress,
+            content: format!("Tool: {}", name),
+        }),
+        ProviderEvent::WebSearchStarted { query, .. } => Some(OverviewLogMessage {
+            timestamp,
+            agent: codename,
+            message_type: OverviewMessageType::Progress,
+            content: format!("Searching: {}", query),
+        }),
+        _ => None,
+    }
+}
+
+/// Get current time as HH:MM:SS packed into u32
+fn current_time_as_u32() -> u32 {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    let secs_part = secs % 60;
+    (hours * 10000 + mins * 100 + secs_part) as u32
 }
 
 #[cfg(test)]
