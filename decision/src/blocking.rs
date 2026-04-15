@@ -338,6 +338,386 @@ impl AgentSlotStatus {
     }
 }
 
+/// Recommendation from Decision Agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Recommendation {
+    /// Recommended action type
+    pub action_type: String,
+
+    /// Action parameters (JSON)
+    pub action_params: String,
+
+    /// Reasoning
+    pub reasoning: String,
+
+    /// Confidence (0.0-1.0)
+    pub confidence: f64,
+}
+
+impl Recommendation {
+    pub fn new(action_type: impl Into<String>, reasoning: impl Into<String>, confidence: f64) -> Self {
+        Self {
+            action_type: action_type.into(),
+            action_params: "{}".to_string(),
+            reasoning: reasoning.into(),
+            confidence,
+        }
+    }
+
+    pub fn with_params(self, params: impl Into<String>) -> Self {
+        Self { action_params: params.into(), ..self }
+    }
+}
+
+/// Human decision request (for queue)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HumanDecisionRequest {
+    /// Request ID
+    pub id: String,
+
+    /// Agent ID
+    pub agent_id: String,
+
+    /// Situation type
+    pub situation_type: crate::types::SituationType,
+
+    /// Situation description
+    pub situation_description: String,
+
+    /// Available options
+    pub options: Vec<ChoiceOption>,
+
+    /// Recommendation from Decision Agent
+    pub recommendation: Option<Recommendation>,
+
+    /// Urgency level
+    pub urgency: UrgencyLevel,
+
+    /// Created timestamp
+    pub created_at: DateTime<Utc>,
+
+    /// Expiration timestamp
+    pub expires_at: DateTime<Utc>,
+
+    /// Blocking context
+    pub context: BlockingContext,
+}
+
+impl HumanDecisionRequest {
+    pub fn new(
+        id: impl Into<String>,
+        agent_id: impl Into<String>,
+        situation_type: crate::types::SituationType,
+        options: Vec<ChoiceOption>,
+        urgency: UrgencyLevel,
+        timeout_ms: u64,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: id.into(),
+            agent_id: agent_id.into(),
+            situation_type,
+            situation_description: String::new(),
+            options,
+            recommendation: None,
+            urgency,
+            created_at: now,
+            expires_at: now + chrono::Duration::milliseconds(timeout_ms as i64),
+            context: BlockingContext::default(),
+        }
+    }
+
+    pub fn with_description(self, description: impl Into<String>) -> Self {
+        Self { situation_description: description.into(), ..self }
+    }
+
+    pub fn with_recommendation(self, recommendation: Recommendation) -> Self {
+        Self { recommendation: Some(recommendation), ..self }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.expires_at
+    }
+
+    pub fn remaining_seconds(&self) -> i64 {
+        (self.expires_at - Utc::now()).num_seconds().max(0)
+    }
+}
+
+/// Human selection
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HumanSelection {
+    /// Selected specific option
+    Selected { option_id: String },
+
+    /// Accepted recommendation
+    AcceptedRecommendation,
+
+    /// Custom instruction provided
+    Custom { instruction: String },
+
+    /// Task skipped
+    Skipped,
+
+    /// Operation cancelled
+    Cancelled,
+}
+
+impl HumanSelection {
+    pub fn selected(option_id: impl Into<String>) -> Self {
+        HumanSelection::Selected { option_id: option_id.into() }
+    }
+
+    pub fn accept_recommendation() -> Self {
+        HumanSelection::AcceptedRecommendation
+    }
+
+    pub fn custom(instruction: impl Into<String>) -> Self {
+        HumanSelection::Custom { instruction: instruction.into() }
+    }
+
+    pub fn skip() -> Self {
+        HumanSelection::Skipped
+    }
+
+    pub fn cancel() -> Self {
+        HumanSelection::Cancelled
+    }
+}
+
+/// Human decision response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HumanDecisionResponse {
+    /// Request ID
+    pub request_id: String,
+
+    /// Human selection
+    pub selection: HumanSelection,
+
+    /// Response timestamp
+    pub responded_at: DateTime<Utc>,
+
+    /// Response time in milliseconds
+    pub response_time_ms: u64,
+}
+
+impl HumanDecisionResponse {
+    pub fn new(request_id: impl Into<String>, selection: HumanSelection) -> Self {
+        Self {
+            request_id: request_id.into(),
+            selection,
+            responded_at: Utc::now(),
+            response_time_ms: 0,
+        }
+    }
+
+    pub fn with_response_time(self, created_at: DateTime<Utc>) -> Self {
+        let response_time_ms = (self.responded_at - created_at).num_milliseconds() as u64;
+        Self { response_time_ms, ..self }
+    }
+}
+
+/// Human decision timeout configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HumanDecisionTimeoutConfig {
+    /// Default timeout (1 hour)
+    pub default_timeout_ms: u64,
+
+    /// High urgency timeout (30 minutes)
+    pub high_timeout_ms: u64,
+
+    /// Critical urgency timeout (15 minutes)
+    pub critical_timeout_ms: u64,
+
+    /// Low urgency timeout (2 hours)
+    pub low_timeout_ms: u64,
+
+    /// Warning before timeout (1 minute)
+    pub warning_before_ms: u64,
+
+    /// Default action on timeout
+    pub timeout_default: AutoAction,
+}
+
+impl Default for HumanDecisionTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            default_timeout_ms: 3600000,  // 1 hour
+            high_timeout_ms: 1800000,     // 30 min
+            critical_timeout_ms: 900000,  // 15 min
+            low_timeout_ms: 7200000,      // 2 hours
+            warning_before_ms: 60000,     // 1 min
+            timeout_default: AutoAction::FollowRecommendation,
+        }
+    }
+}
+
+impl HumanDecisionTimeoutConfig {
+    pub fn timeout_for_urgency(&self, urgency: UrgencyLevel) -> u64 {
+        match urgency {
+            UrgencyLevel::Critical => self.critical_timeout_ms,
+            UrgencyLevel::High => self.high_timeout_ms,
+            UrgencyLevel::Medium => self.default_timeout_ms,
+            UrgencyLevel::Low => self.low_timeout_ms,
+        }
+    }
+}
+
+/// Human decision queue with priority ordering
+#[derive(Debug)]
+pub struct HumanDecisionQueue {
+    /// Priority queues
+    critical: Vec<HumanDecisionRequest>,
+    high: Vec<HumanDecisionRequest>,
+    medium: Vec<HumanDecisionRequest>,
+    low: Vec<HumanDecisionRequest>,
+
+    /// Completed requests (history)
+    history: Vec<HumanDecisionResponse>,
+
+    /// Timeout configuration
+    timeout_config: HumanDecisionTimeoutConfig,
+}
+
+impl HumanDecisionQueue {
+    pub fn new(timeout_config: HumanDecisionTimeoutConfig) -> Self {
+        Self {
+            critical: Vec::new(),
+            high: Vec::new(),
+            medium: Vec::new(),
+            low: Vec::new(),
+            history: Vec::new(),
+            timeout_config,
+        }
+    }
+
+    /// Push request to appropriate priority queue
+    pub fn push(&mut self, request: HumanDecisionRequest) {
+        match request.urgency {
+            UrgencyLevel::Critical => self.critical.push(request),
+            UrgencyLevel::High => self.high.push(request),
+            UrgencyLevel::Medium => self.medium.push(request),
+            UrgencyLevel::Low => self.low.push(request),
+        }
+    }
+
+    /// Pop next request (priority order)
+    pub fn pop(&mut self) -> Option<HumanDecisionRequest> {
+        // Priority: Critical > High > Medium > Low
+        if !self.critical.is_empty() {
+            return Some(self.critical.remove(0));
+        }
+        if !self.high.is_empty() {
+            return Some(self.high.remove(0));
+        }
+        if !self.medium.is_empty() {
+            return Some(self.medium.remove(0));
+        }
+        if !self.low.is_empty() {
+            return Some(self.low.remove(0));
+        }
+        None
+    }
+
+    /// Peek next request without removing
+    pub fn peek(&self) -> Option<&HumanDecisionRequest> {
+        // Priority: Critical > High > Medium > Low
+        self.critical.first()
+            .or_else(|| self.high.first())
+            .or_else(|| self.medium.first())
+            .or_else(|| self.low.first())
+    }
+
+    /// Complete request
+    pub fn complete(&mut self, response: HumanDecisionResponse) -> bool {
+        // Find and remove request
+        let removed = self.find_and_remove(&response.request_id);
+        if removed.is_some() {
+            self.history.push(response);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn find_and_remove(&mut self, id: &str) -> Option<HumanDecisionRequest> {
+        for queue in [&mut self.critical, &mut self.high, &mut self.medium, &mut self.low] {
+            if let Some(pos) = queue.iter().position(|r| r.id == id) {
+                return Some(queue.remove(pos));
+            }
+        }
+        None
+    }
+
+    /// Check for expired requests
+    pub fn check_expired(&mut self) -> Vec<HumanDecisionRequest> {
+        let now = Utc::now();
+        let expired: Vec<HumanDecisionRequest> = self.all_requests()
+            .into_iter()
+            .filter(|r| now > r.expires_at)
+            .cloned()
+            .collect();
+
+        // Remove expired
+        for req in &expired {
+            self.find_and_remove(&req.id);
+        }
+
+        expired
+    }
+
+    /// Get requests approaching timeout
+    pub fn approaching_timeout(&self) -> Vec<&HumanDecisionRequest> {
+        let warning_threshold = Utc::now() + chrono::Duration::milliseconds(self.timeout_config.warning_before_ms as i64);
+        self.all_requests()
+            .into_iter()
+            .filter(|r| r.expires_at < warning_threshold && !r.is_expired())
+            .collect()
+    }
+
+    fn all_requests(&self) -> Vec<&HumanDecisionRequest> {
+        self.critical.iter()
+            .chain(self.high.iter())
+            .chain(self.medium.iter())
+            .chain(self.low.iter())
+            .collect()
+    }
+
+    pub fn total_pending(&self) -> usize {
+        self.critical.len() + self.high.len() + self.medium.len() + self.low.len()
+    }
+
+    pub fn critical_count(&self) -> usize {
+        self.critical.len()
+    }
+
+    pub fn high_count(&self) -> usize {
+        self.high.len()
+    }
+
+    pub fn medium_count(&self) -> usize {
+        self.medium.len()
+    }
+
+    pub fn low_count(&self) -> usize {
+        self.low.len()
+    }
+
+    pub fn history(&self) -> &[HumanDecisionResponse] {
+        &self.history
+    }
+
+    pub fn timeout_config(&self) -> &HumanDecisionTimeoutConfig {
+        &self.timeout_config
+    }
+}
+
+impl Default for HumanDecisionQueue {
+    fn default() -> Self {
+        Self::new(HumanDecisionTimeoutConfig::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,5 +905,207 @@ mod tests {
         let debug_str = format!("{:?}", state);
         assert!(debug_str.contains("BlockedState"));
         assert!(debug_str.contains("human_decision"));
+    }
+
+    #[test]
+    fn test_recommendation_new() {
+        let rec = Recommendation::new("select_option", "Deny dangerous command", 0.95);
+        assert_eq!(rec.action_type, "select_option");
+        assert_eq!(rec.confidence, 0.95);
+    }
+
+    #[test]
+    fn test_recommendation_with_params() {
+        let rec = Recommendation::new("select_option", "reason", 0.8)
+            .with_params("{\"option_id\": \"A\"}");
+        assert_eq!(rec.action_params, "{\"option_id\": \"A\"}");
+    }
+
+    #[test]
+    fn test_human_decision_request_new() {
+        let req = HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("waiting_for_choice"),
+            vec![ChoiceOption::new("A", "Option A")],
+            UrgencyLevel::High,
+            1800000,
+        );
+        assert_eq!(req.id, "req-1");
+        assert_eq!(req.urgency, UrgencyLevel::High);
+        assert!(!req.is_expired());
+    }
+
+    #[test]
+    fn test_human_decision_request_with_description() {
+        let req = HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::Medium,
+            3600000,
+        ).with_description("Test description");
+        assert_eq!(req.situation_description, "Test description");
+    }
+
+    #[test]
+    fn test_human_selection_selected() {
+        let sel = HumanSelection::selected("A");
+        assert!(matches!(sel, HumanSelection::Selected { option_id } if option_id == "A"));
+    }
+
+    #[test]
+    fn test_human_selection_accept_recommendation() {
+        let sel = HumanSelection::accept_recommendation();
+        assert!(matches!(sel, HumanSelection::AcceptedRecommendation));
+    }
+
+    #[test]
+    fn test_human_selection_custom() {
+        let sel = HumanSelection::custom("Do something else");
+        assert!(matches!(sel, HumanSelection::Custom { instruction } if instruction == "Do something else"));
+    }
+
+    #[test]
+    fn test_human_selection_skip() {
+        let sel = HumanSelection::skip();
+        assert!(matches!(sel, HumanSelection::Skipped));
+    }
+
+    #[test]
+    fn test_human_selection_cancel() {
+        let sel = HumanSelection::cancel();
+        assert!(matches!(sel, HumanSelection::Cancelled));
+    }
+
+    #[test]
+    fn test_human_decision_response_new() {
+        let resp = HumanDecisionResponse::new("req-1", HumanSelection::selected("A"));
+        assert_eq!(resp.request_id, "req-1");
+        assert!(matches!(resp.selection, HumanSelection::Selected { .. }));
+    }
+
+    #[test]
+    fn test_human_decision_timeout_config_default() {
+        let config = HumanDecisionTimeoutConfig::default();
+        assert_eq!(config.default_timeout_ms, 3600000);
+        assert_eq!(config.critical_timeout_ms, 900000);
+    }
+
+    #[test]
+    fn test_timeout_config_for_urgency() {
+        let config = HumanDecisionTimeoutConfig::default();
+        assert_eq!(config.timeout_for_urgency(UrgencyLevel::Critical), 900000);
+        assert_eq!(config.timeout_for_urgency(UrgencyLevel::High), 1800000);
+        assert_eq!(config.timeout_for_urgency(UrgencyLevel::Medium), 3600000);
+        assert_eq!(config.timeout_for_urgency(UrgencyLevel::Low), 7200000);
+    }
+
+    #[test]
+    fn test_human_decision_queue_new() {
+        let queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+        assert_eq!(queue.total_pending(), 0);
+    }
+
+    #[test]
+    fn test_human_decision_queue_push_critical() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+        let req = HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::Critical,
+            900000,
+        );
+        queue.push(req);
+        assert_eq!(queue.critical_count(), 1);
+        assert_eq!(queue.total_pending(), 1);
+    }
+
+    #[test]
+    fn test_human_decision_queue_push_high() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+        let req = HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::High,
+            1800000,
+        );
+        queue.push(req);
+        assert_eq!(queue.high_count(), 1);
+    }
+
+    #[test]
+    fn test_human_decision_queue_pop_priority() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+
+        // Push in reverse priority order
+        queue.push(HumanDecisionRequest::new("low", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Low, 7200000));
+        queue.push(HumanDecisionRequest::new("medium", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Medium, 3600000));
+        queue.push(HumanDecisionRequest::new("critical", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Critical, 900000));
+
+        // Pop should return critical first
+        let first = queue.pop();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().id, "critical");
+    }
+
+    #[test]
+    fn test_human_decision_queue_complete() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+        queue.push(HumanDecisionRequest::new("req-1", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Medium, 3600000));
+
+        let resp = HumanDecisionResponse::new("req-1", HumanSelection::selected("A"));
+        assert!(queue.complete(resp));
+        assert_eq!(queue.total_pending(), 0);
+        assert_eq!(queue.history().len(), 1);
+    }
+
+    #[test]
+    fn test_human_decision_queue_peek() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+        queue.push(HumanDecisionRequest::new("req-1", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::High, 1800000));
+
+        let peeked = queue.peek();
+        assert!(peeked.is_some());
+        assert_eq!(peeked.unwrap().id, "req-1");
+
+        // Peek should not remove
+        assert_eq!(queue.total_pending(), 1);
+    }
+
+    #[test]
+    fn test_human_decision_request_serde() {
+        let req = HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![ChoiceOption::new("A", "Option A")],
+            UrgencyLevel::High,
+            1800000,
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: HumanDecisionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req.id, parsed.id);
+    }
+
+    #[test]
+    fn test_human_selection_serde() {
+        let sel = HumanSelection::selected("A");
+        let json = serde_json::to_string(&sel).unwrap();
+        let parsed: HumanSelection = serde_json::from_str(&json).unwrap();
+        assert_eq!(sel, parsed);
+    }
+
+    #[test]
+    fn test_human_decision_response_serde() {
+        let resp = HumanDecisionResponse::new("req-1", HumanSelection::skip());
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: HumanDecisionResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp.request_id, parsed.request_id);
     }
 }
