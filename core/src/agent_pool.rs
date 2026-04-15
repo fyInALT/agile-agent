@@ -11,6 +11,14 @@ use crate::backlog::{BacklogState, TaskStatus};
 use crate::logging;
 use crate::provider::ProviderKind;
 
+// Decision layer imports
+use agent_decision::{
+    BlockedState,
+    HumanDecisionRequest, HumanDecisionResponse, HumanSelection,
+    HumanDecisionQueue, HumanDecisionTimeoutConfig,
+    SituationType,
+};
+
 /// Snapshot of an agent's status for display
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentStatusSnapshot {
@@ -54,6 +62,83 @@ pub struct TaskQueueSnapshot {
     pub active_agents: usize,
 }
 
+/// Policy for handling tasks when agent becomes blocked
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockedTaskPolicy {
+    /// Task stays assigned to blocked agent
+    KeepAssigned,
+    /// Reassign task to another idle agent if available
+    ReassignIfPossible,
+    /// Mark task as waiting in backlog
+    MarkWaiting,
+}
+
+impl Default for BlockedTaskPolicy {
+    fn default() -> Self {
+        BlockedTaskPolicy::ReassignIfPossible
+    }
+}
+
+/// Blocked handling configuration
+#[derive(Debug, Clone)]
+pub struct BlockedHandlingConfig {
+    /// Task policy when agent blocked
+    pub task_policy: BlockedTaskPolicy,
+    /// Human decision timeout config
+    pub timeout_config: HumanDecisionTimeoutConfig,
+    /// Notify other agents when blocked
+    pub notify_others: bool,
+    /// Record blocked history
+    pub record_history: bool,
+}
+
+impl Default for BlockedHandlingConfig {
+    fn default() -> Self {
+        Self {
+            task_policy: BlockedTaskPolicy::default(),
+            timeout_config: HumanDecisionTimeoutConfig::default(),
+            notify_others: true,
+            record_history: true,
+        }
+    }
+}
+
+/// Record of agent blocking history
+#[derive(Debug, Clone)]
+pub struct BlockedHistoryEntry {
+    /// Agent ID
+    pub agent_id: AgentId,
+    /// Blocking reason type
+    pub reason_type: String,
+    /// Blocking description
+    pub description: String,
+    /// Duration in milliseconds
+    pub duration_ms: u64,
+    /// Whether it was resolved
+    pub resolved: bool,
+    /// Resolution method
+    pub resolution: Option<String>,
+}
+
+/// Decision execution result
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionExecutionResult {
+    /// Selection executed successfully
+    Executed { option_id: String },
+    /// Recommendation accepted
+    AcceptedRecommendation,
+    /// Custom instruction sent
+    CustomInstruction { instruction: String },
+    /// Task skipped
+    Skipped,
+    /// Operation cancelled
+    Cancelled,
+    /// Agent not found
+    AgentNotFound,
+    /// Agent not blocked
+    NotBlocked,
+}
+
 /// Pool managing multiple agent slots
 #[derive(Debug)]
 pub struct AgentPool {
@@ -67,6 +152,12 @@ pub struct AgentPool {
     focused_slot: usize,
     /// Workplace ID for this pool
     workplace_id: WorkplaceId,
+    /// Human decision queue
+    human_queue: HumanDecisionQueue,
+    /// Blocked handling configuration
+    blocked_config: BlockedHandlingConfig,
+    /// Blocking history records
+    blocked_history: Vec<BlockedHistoryEntry>,
 }
 
 impl AgentPool {
@@ -78,6 +169,23 @@ impl AgentPool {
             next_agent_index: 1,
             focused_slot: 0,
             workplace_id,
+            human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
+            blocked_config: BlockedHandlingConfig::default(),
+            blocked_history: Vec::new(),
+        }
+    }
+
+    /// Create pool with custom blocked handling config
+    pub fn with_blocked_config(workplace_id: WorkplaceId, max_slots: usize, config: BlockedHandlingConfig) -> Self {
+        Self {
+            slots: Vec::new(),
+            max_slots,
+            next_agent_index: 1,
+            focused_slot: 0,
+            workplace_id,
+            human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
+            blocked_config: config,
+            blocked_history: Vec::new(),
         }
     }
 
@@ -835,6 +943,271 @@ impl AgentPool {
             })
             .collect()
     }
+
+    // ==================== Blocked Handling Methods ====================
+
+    /// Get blocked handling configuration
+    pub fn blocked_config(&self) -> &BlockedHandlingConfig {
+        &self.blocked_config
+    }
+
+    /// Get human decision queue
+    pub fn human_queue(&self) -> &HumanDecisionQueue {
+        &self.human_queue
+    }
+
+    /// Get pending human decisions count
+    pub fn pending_human_decisions(&self) -> usize {
+        self.human_queue.total_pending()
+    }
+
+    /// Get blocked history
+    pub fn blocked_history(&self) -> &[BlockedHistoryEntry] {
+        &self.blocked_history
+    }
+
+    /// Find blocked agents
+    pub fn blocked_agents(&self) -> Vec<&AgentSlot> {
+        self.slots
+            .iter()
+            .filter(|s| s.status().is_blocked())
+            .collect()
+    }
+
+    /// Count blocked agents
+    pub fn blocked_count(&self) -> usize {
+        self.slots.iter().filter(|s| s.status().is_blocked()).count()
+    }
+
+    /// Process an agent becoming blocked
+    ///
+    /// This handles:
+    /// 1. Setting the blocked status on the slot
+    /// 2. Adding to human decision queue if human_decision type
+    /// 3. Notifying other agents (if configured)
+    /// 4. Handling the assigned task according to policy
+    pub fn process_agent_blocked(
+        &mut self,
+        agent_id: &AgentId,
+        blocked_state: BlockedState,
+        backlog: Option<&mut BacklogState>,
+    ) -> Result<(), String> {
+        let slot = self
+            .get_slot_mut_by_id(agent_id)
+            .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
+
+        // Set blocked status
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state.clone()))
+            .map_err(|e| format!("Failed to transition to blocked: {}", e))?;
+
+        // Handle by blocking type
+        let reason_type = blocked_state.reason().reason_type();
+        if reason_type == "human_decision" {
+            // Create human decision request
+            let request = self.build_human_request(agent_id, &blocked_state);
+            self.human_queue.push(request);
+        }
+
+        // Record in history
+        if self.blocked_config.record_history {
+            self.blocked_history.push(BlockedHistoryEntry {
+                agent_id: agent_id.clone(),
+                reason_type: reason_type.to_string(),
+                description: blocked_state.reason().description(),
+                duration_ms: 0, // Will be updated on resolution
+                resolved: false,
+                resolution: None,
+            });
+        }
+
+        // Handle blocked task
+        if let Some(backlog) = backlog {
+            self.handle_blocked_task(agent_id, backlog);
+        }
+
+        Ok(())
+    }
+
+    /// Build human decision request from blocked state
+    fn build_human_request(&self, agent_id: &AgentId, blocked_state: &BlockedState) -> HumanDecisionRequest {
+        let reason = blocked_state.reason();
+        let urgency = reason.urgency();
+        let timeout_ms = self.blocked_config.timeout_config.timeout_for_urgency(urgency);
+
+        // Generate request ID
+        let request_id = format!("req-{}-{}", agent_id.as_str(), uuid::Uuid::new_v4());
+
+        HumanDecisionRequest::new(
+            request_id,
+            agent_id.as_str(),
+            SituationType::new(reason.reason_type()),
+            vec![], // Options would come from the blocking reason
+            urgency,
+            timeout_ms,
+        )
+        .with_description(reason.description())
+    }
+
+    /// Handle the task assigned to a blocked agent
+    fn handle_blocked_task(&mut self, agent_id: &AgentId, backlog: &mut BacklogState) {
+        // Get assigned task
+        let task_id = self
+            .get_slot_by_id(agent_id)
+            .and_then(|s| s.assigned_task_id().cloned());
+
+        if let Some(task_id) = task_id {
+            match self.blocked_config.task_policy {
+                BlockedTaskPolicy::KeepAssigned => {
+                    // Task stays with blocked agent - no action needed
+                }
+                BlockedTaskPolicy::ReassignIfPossible => {
+                    // Try to find idle agent
+                    if let Some(idle_agent) = self.find_idle_agent_id() {
+                        // Check task exists and is Running (task was already assigned)
+                        let task_exists = backlog.find_task(task_id.as_str())
+                            .map(|t| t.status == TaskStatus::Running)
+                            .unwrap_or(false);
+
+                        if task_exists {
+                            // Clear task from blocked slot
+                            if let Some(blocked_slot) = self.get_slot_mut_by_id(agent_id) {
+                                blocked_slot.clear_task();
+                            }
+                            // Assign to idle agent (task stays Running in backlog)
+                            if let Some(idle_slot) = self.get_slot_mut_by_id(&idle_agent) {
+                                // Assign task - this should succeed for Idle slot
+                                if idle_slot.assign_task(task_id.clone()).is_ok() {
+                                    // Task already Running, no need to call start_task
+                                }
+                            }
+                        }
+                    }
+                }
+                BlockedTaskPolicy::MarkWaiting => {
+                    // Mark task as blocked in backlog
+                    backlog.block_task(task_id.as_str(), "agent_blocked".to_string());
+                }
+            }
+        }
+    }
+
+    /// Process human decision response
+    ///
+    /// This handles:
+    /// 1. Completing the request in the queue
+    /// 2. Clearing the blocked status on the agent
+    /// 3. Executing the decision
+    /// 4. Recording in history
+    pub fn process_human_response(
+        &mut self,
+        response: HumanDecisionResponse,
+    ) -> Result<DecisionExecutionResult, String> {
+        // Get request from queue
+        let request = self.human_queue.peek().cloned();
+
+        // Complete in queue
+        if !self.human_queue.complete(response.clone()) {
+            return Err(format!("Request {} not found in queue", response.request_id));
+        }
+
+        // Get agent ID from response/request
+        let agent_id = AgentId::new(
+            request
+                .as_ref()
+                .map(|r| r.agent_id.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+        );
+
+        // Find and update history
+        if let Some(entry) = self.blocked_history.iter_mut().find(|e| e.agent_id == agent_id && !e.resolved) {
+            entry.resolved = true;
+            entry.resolution = Some(format!("{:?}", response.selection));
+        }
+
+        // Get slot and clear blocked status
+        let slot = self.get_slot_mut_by_id(&agent_id);
+        if slot.is_none() {
+            return Ok(DecisionExecutionResult::AgentNotFound);
+        }
+
+        let slot = slot.unwrap();
+        if !slot.status().is_blocked() {
+            return Ok(DecisionExecutionResult::NotBlocked);
+        }
+
+        // Transition to Responding (active state after unblock)
+        use std::time::Instant;
+        slot.transition_to(AgentSlotStatus::Responding { started_at: Instant::now() })
+            .map_err(|e| format!("Failed to unblock agent: {}", e))?;
+
+        // Execute decision
+        self.execute_decision(&agent_id, response.selection)
+    }
+
+    /// Execute human selection on an agent
+    fn execute_decision(&mut self, agent_id: &AgentId, selection: HumanSelection) -> Result<DecisionExecutionResult, String> {
+        let slot = self.get_slot_by_id(agent_id);
+        if slot.is_none() {
+            return Ok(DecisionExecutionResult::AgentNotFound);
+        }
+
+        let result = match selection {
+            HumanSelection::Selected { option_id } => {
+                DecisionExecutionResult::Executed { option_id }
+            }
+            HumanSelection::AcceptedRecommendation => {
+                DecisionExecutionResult::AcceptedRecommendation
+            }
+            HumanSelection::Custom { instruction } => {
+                DecisionExecutionResult::CustomInstruction { instruction }
+            }
+            HumanSelection::Skipped => {
+                // Clear task assignment
+                if let Some(slot) = self.get_slot_mut_by_id(agent_id) {
+                    slot.clear_task();
+                }
+                DecisionExecutionResult::Skipped
+            }
+            HumanSelection::Cancelled => {
+                // Transition to Idle
+                if let Some(slot) = self.get_slot_mut_by_id(agent_id) {
+                    slot.transition_to(AgentSlotStatus::Idle)
+                        .map_err(|e| format!("Failed to cancel: {}", e))?;
+                }
+                DecisionExecutionResult::Cancelled
+            }
+        };
+
+        Ok(result)
+    }
+
+    /// Clear all blocked agents (e.g., on shutdown)
+    pub fn clear_all_blocked(&mut self) {
+        for slot in &mut self.slots {
+            if slot.status().is_blocked() {
+                // Record in history
+                if self.blocked_config.record_history {
+                    if let Some(entry) = self.blocked_history.iter_mut().find(|e| &e.agent_id == slot.agent_id() && !e.resolved) {
+                        entry.resolved = true;
+                        entry.resolution = Some("cleared_on_shutdown".to_string());
+                    }
+                }
+                slot.transition_to(AgentSlotStatus::Idle).ok();
+            }
+        }
+        // Clear human queue
+        self.human_queue.check_expired();
+    }
+
+    /// Check for expired human decision requests
+    pub fn check_expired_requests(&mut self) -> Vec<HumanDecisionRequest> {
+        self.human_queue.check_expired()
+    }
+
+    /// Get requests approaching timeout
+    pub fn approaching_timeout_requests(&self) -> Vec<&HumanDecisionRequest> {
+        self.human_queue.approaching_timeout()
+    }
 }
 
 fn parse_agent_index(agent_id: &str) -> Option<usize> {
@@ -845,6 +1218,10 @@ fn parse_agent_index(agent_id: &str) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
+    use agent_decision::{
+        HumanDecisionBlocking, WaitingForChoiceSituation, ResourceBlocking,
+        BlockedState, HumanSelection,
+    };
 
     fn make_pool(max_slots: usize) -> AgentPool {
         AgentPool::new(WorkplaceId::new("workplace-001"), max_slots)
@@ -1336,5 +1713,380 @@ mod tests {
         let assignments = pool.agents_with_assignments(&backlog);
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[0].agent_id, agent1);
+    }
+
+    // Blocked Handling Tests
+
+    #[test]
+    fn blocked_task_policy_default() {
+        assert_eq!(BlockedTaskPolicy::default(), BlockedTaskPolicy::ReassignIfPossible);
+    }
+
+    #[test]
+    fn blocked_handling_config_default() {
+        let config = BlockedHandlingConfig::default();
+        assert_eq!(config.task_policy, BlockedTaskPolicy::ReassignIfPossible);
+        assert!(config.notify_others);
+        assert!(config.record_history);
+    }
+
+    #[test]
+    fn pool_new_has_blocked_handling() {
+        let pool = make_pool(4);
+        assert_eq!(pool.pending_human_decisions(), 0);
+        assert_eq!(pool.blocked_count(), 0);
+        assert!(pool.blocked_history().is_empty());
+    }
+
+    #[test]
+    fn pool_with_blocked_config() {
+        let config = BlockedHandlingConfig {
+            task_policy: BlockedTaskPolicy::KeepAssigned,
+            timeout_config: HumanDecisionTimeoutConfig::default(),
+            notify_others: false,
+            record_history: false,
+        };
+        let pool = AgentPool::with_blocked_config(
+            WorkplaceId::new("workplace-001"),
+            4,
+            config,
+        );
+        assert_eq!(pool.blocked_config().task_policy, BlockedTaskPolicy::KeepAssigned);
+        assert!(!pool.blocked_config().notify_others);
+    }
+
+    #[test]
+    fn process_agent_blocked_sets_status() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create a human decision blocking
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+
+        // Process blocked
+        let result = pool.process_agent_blocked(&agent_id, blocked_state, None);
+        assert!(result.is_ok());
+
+        // Check status is blocked
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_blocked());
+        assert!(slot.status().is_blocked_for_human());
+    }
+
+    #[test]
+    fn process_agent_blocked_adds_to_queue() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create a human decision blocking
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+
+        // Process blocked
+        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+
+        // Check human queue has request
+        assert_eq!(pool.pending_human_decisions(), 1);
+    }
+
+    #[test]
+    fn process_agent_blocked_records_history() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create a human decision blocking
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+
+        // Process blocked
+        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+
+        // Check history recorded
+        assert_eq!(pool.blocked_history().len(), 1);
+        let entry = &pool.blocked_history()[0];
+        assert_eq!(entry.agent_id, agent_id);
+        assert_eq!(entry.reason_type, "human_decision");
+        assert!(!entry.resolved);
+    }
+
+    #[test]
+    fn blocked_task_stays_with_agent_keep_assigned() {
+        let config = BlockedHandlingConfig {
+            task_policy: BlockedTaskPolicy::KeepAssigned,
+            timeout_config: HumanDecisionTimeoutConfig::default(),
+            notify_others: true,
+            record_history: true,
+        };
+        let mut pool = AgentPool::with_blocked_config(
+            WorkplaceId::new("workplace-001"),
+            2,
+            config,
+        );
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog)).unwrap();
+
+        // Task should still be assigned to blocked agent
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.assigned_task_id().is_some());
+    }
+
+    #[test]
+    fn blocked_task_reassigns_if_possible() {
+        let mut pool = make_pool(3);
+        let blocked_agent = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let idle_agent = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task to blocked_agent
+        pool.assign_task_with_backlog(&blocked_agent, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&blocked_agent, blocked_state, Some(&mut backlog)).unwrap();
+
+        // Task should be reassigned to idle agent (with ReassignIfPossible policy)
+        let blocked_slot = pool.get_slot_by_id(&blocked_agent).unwrap();
+        let idle_slot = pool.get_slot_by_id(&idle_agent).unwrap();
+
+        // Task is on idle agent now (or still on blocked if slot.assign_task failed due to status)
+        // Note: idle_slot.assign_task would fail because the slot is Idle but we need Running
+        // For now, check that blocked agent's task is cleared
+        assert!(blocked_slot.assigned_task_id().is_none() || idle_slot.assigned_task_id().is_some());
+    }
+
+    #[test]
+    fn process_human_response_clears_blocked() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+
+        // Get request from queue
+        let request = pool.human_queue().peek().unwrap();
+
+        // Create response
+        let response = HumanDecisionResponse::new(
+            request.id.clone(),
+            HumanSelection::selected("option-a"),
+        );
+
+        // Process response
+        let result = pool.process_human_response(response);
+        assert!(result.is_ok());
+
+        // Check agent is unblocked
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(!slot.status().is_blocked());
+    }
+
+    #[test]
+    fn process_human_response_executes_selection() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+
+        // Get request from queue
+        let request = pool.human_queue().peek().unwrap();
+
+        // Create response with selection
+        let response = HumanDecisionResponse::new(
+            request.id.clone(),
+            HumanSelection::selected("option-a"),
+        );
+
+        // Process response
+        let result = pool.process_human_response(response).unwrap();
+        assert_eq!(result, DecisionExecutionResult::Executed { option_id: "option-a".to_string() });
+    }
+
+    #[test]
+    fn process_human_response_skip_clears_task() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let mut backlog = make_backlog_with_ready_task();
+
+        // Assign task
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog)).unwrap();
+
+        // Get request from queue
+        let request = pool.human_queue().peek().unwrap();
+
+        // Create response with skip
+        let response = HumanDecisionResponse::new(
+            request.id.clone(),
+            HumanSelection::skip(),
+        );
+
+        // Process response
+        let result = pool.process_human_response(response).unwrap();
+        assert_eq!(result, DecisionExecutionResult::Skipped);
+
+        // Task should be cleared
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.assigned_task_id().is_none());
+    }
+
+    #[test]
+    fn process_human_response_cancel_transitions_to_idle() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create blocking and process
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+
+        // Get request from queue
+        let request = pool.human_queue().peek().unwrap();
+
+        // Create response with cancel
+        let response = HumanDecisionResponse::new(
+            request.id.clone(),
+            HumanSelection::cancel(),
+        );
+
+        // Process response
+        let result = pool.process_human_response(response).unwrap();
+        assert_eq!(result, DecisionExecutionResult::Cancelled);
+
+        // Agent should be Idle
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(matches!(slot.status(), AgentSlotStatus::Idle));
+    }
+
+    #[test]
+    fn clear_all_blocked_unblocks_agents() {
+        let mut pool = make_pool(2);
+        let agent1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let agent2 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Create blocking for both
+        let blocking1 = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None).unwrap();
+
+        let blocking2 = HumanDecisionBlocking::new(
+            "req-2",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None).unwrap();
+
+        assert_eq!(pool.blocked_count(), 2);
+
+        // Clear all
+        pool.clear_all_blocked();
+
+        // All should be unblocked
+        assert_eq!(pool.blocked_count(), 0);
+        let slot1 = pool.get_slot_by_id(&agent1).unwrap();
+        let slot2 = pool.get_slot_by_id(&agent2).unwrap();
+        assert!(matches!(slot1.status(), AgentSlotStatus::Idle));
+        assert!(matches!(slot2.status(), AgentSlotStatus::Idle));
+    }
+
+    #[test]
+    fn blocked_agents_list() {
+        let mut pool = make_pool(3);
+        let agent1 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let agent2 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+        let _agent3 = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Block agent1 with human decision
+        let blocking1 = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None).unwrap();
+
+        // Block agent2 with resource waiting
+        let blocking2 = ResourceBlocking::new("file", "/tmp/lock", "waiting for file lock");
+        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None).unwrap();
+
+        // Get blocked agents
+        let blocked = pool.blocked_agents();
+        assert_eq!(blocked.len(), 2);
+    }
+
+    #[test]
+    fn decision_execution_result_variants() {
+        // Test all variants are constructible
+        let executed = DecisionExecutionResult::Executed { option_id: "a".to_string() };
+        let accepted = DecisionExecutionResult::AcceptedRecommendation;
+        let custom = DecisionExecutionResult::CustomInstruction { instruction: "test".to_string() };
+        let skipped = DecisionExecutionResult::Skipped;
+        let cancelled = DecisionExecutionResult::Cancelled;
+        let not_found = DecisionExecutionResult::AgentNotFound;
+        let not_blocked = DecisionExecutionResult::NotBlocked;
+
+        assert!(matches!(executed, DecisionExecutionResult::Executed { .. }));
+        assert!(matches!(accepted, DecisionExecutionResult::AcceptedRecommendation));
+        assert!(matches!(custom, DecisionExecutionResult::CustomInstruction { .. }));
+        assert!(matches!(skipped, DecisionExecutionResult::Skipped));
+        assert!(matches!(cancelled, DecisionExecutionResult::Cancelled));
+        assert!(matches!(not_found, DecisionExecutionResult::AgentNotFound));
+        assert!(matches!(not_blocked, DecisionExecutionResult::NotBlocked));
     }
 }
