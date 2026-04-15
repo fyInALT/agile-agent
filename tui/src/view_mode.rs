@@ -483,6 +483,8 @@ impl TaskMatrixViewState {
     }
 }
 
+use crate::overview_state::OverviewViewState;
+
 /// Combined view state for all modes
 #[derive(Debug, Clone, Default)]
 pub struct TuiViewState {
@@ -496,6 +498,8 @@ pub struct TuiViewState {
     pub mail: MailViewState,
     /// Task matrix view specific state
     pub task_matrix: TaskMatrixViewState,
+    /// Overview view specific state
+    pub overview: OverviewViewState,
 }
 
 impl TuiViewState {

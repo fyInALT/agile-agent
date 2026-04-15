@@ -14,9 +14,10 @@ mod history_cell;
 mod input;
 mod markdown;
 mod markdown_stream;
+mod overview_state;
 mod provider_overlay;
-mod resume_overlay;
 mod render;
+mod resume_overlay;
 mod streaming;
 mod terminal;
 mod text_formatting;
@@ -46,24 +47,25 @@ fn run_tui_with_options(resume_last: bool) -> Result<()> {
         let launch_cwd = std::env::current_dir()?;
         if let Ok(workplace) = WorkplaceStore::for_cwd(&launch_cwd)
             && workplace.ensure().is_ok()
-                && let Ok(initialized) = logging::init_for_workplace(
-                    &workplace,
-                    if resume_last {
-                        RunMode::ResumeLast
-                    } else {
-                        RunMode::Tui
-                    },
-                ) {
-                    logging::debug_event(
-                        "app.launch",
-                        "initialized TUI logging",
-                        serde_json::json!({
-                            "cwd": launch_cwd.display().to_string(),
-                            "resume_last": resume_last,
-                            "log_path": initialized.log_path.display().to_string(),
-                        }),
-                    );
-                }
+            && let Ok(initialized) = logging::init_for_workplace(
+                &workplace,
+                if resume_last {
+                    RunMode::ResumeLast
+                } else {
+                    RunMode::Tui
+                },
+            )
+        {
+            logging::debug_event(
+                "app.launch",
+                "initialized TUI logging",
+                serde_json::json!({
+                    "cwd": launch_cwd.display().to_string(),
+                    "resume_last": resume_last,
+                    "log_path": initialized.log_path.display().to_string(),
+                }),
+            );
+        }
     }
 
     if !probe::has_any_real_provider() {
