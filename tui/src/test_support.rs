@@ -116,6 +116,9 @@ impl ShellHarness {
             InputOutcome::ScrollTranscriptEnd => self.state.scroll_transcript_end(),
             InputOutcome::FocusNextAgent => {
                 if let Some(status) = self.state.focus_next_agent() {
+                    if self.state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                        self.state.sync_overview_page_to_focus();
+                    }
                     self.state.app_mut().push_status_message(format!(
                         "focused {} ({})",
                         status.codename.as_str(),
@@ -129,6 +132,9 @@ impl ShellHarness {
             }
             InputOutcome::FocusPreviousAgent => {
                 if let Some(status) = self.state.focus_previous_agent() {
+                    if self.state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                        self.state.sync_overview_page_to_focus();
+                    }
                     self.state.app_mut().push_status_message(format!(
                         "focused {} ({})",
                         status.codename.as_str(),
@@ -142,6 +148,9 @@ impl ShellHarness {
             }
             InputOutcome::FocusAgent(index) => {
                 if let Some(status) = self.state.focus_agent_by_index(index) {
+                    if self.state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                        self.state.sync_overview_page_to_focus();
+                    }
                     self.state.app_mut().push_status_message(format!(
                         "focused {} ({})",
                         status.codename.as_str(),
@@ -228,10 +237,12 @@ impl ShellHarness {
                 self.state.view_state.overview.filter = crate::overview_state::OverviewFilter::All;
             }
             InputOutcome::OverviewPageUp => {
-                self.state.view_state.overview.page_up(1);
+                let total_pages = self.state.overview_total_pages();
+                self.state.view_state.overview.page_up(total_pages);
             }
             InputOutcome::OverviewPageDown => {
-                self.state.view_state.overview.page_down(1);
+                let total_pages = self.state.overview_total_pages();
+                self.state.view_state.overview.page_down(total_pages);
             }
             InputOutcome::OverviewSearchStart => {
                 self.state.view_state.overview.search_active = true;
@@ -242,15 +253,17 @@ impl ShellHarness {
                 self.state.view_state.overview.search_query.clear();
             }
             InputOutcome::OverviewSearchSelect(agent_name) => {
-                let statuses = self.state.agent_statuses();
-                if let Some(index) = statuses
-                    .iter()
-                    .position(|s| s.codename.as_str() == agent_name)
+                if self
+                    .state
+                    .focus_overview_agent_by_codename(&agent_name)
+                    .is_some()
                 {
-                    self.state.view_state.overview.focused_agent_index = index;
                     self.state.view_state.overview.search_active = false;
                     self.state.view_state.overview.search_query.clear();
                 }
+            }
+            InputOutcome::OverviewFocusNumber(n) => {
+                let _ = self.state.focus_overview_agent_by_number(n);
             }
         }
     }

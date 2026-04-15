@@ -13,6 +13,7 @@ use agent_core::task_engine;
 use agent_core::task_engine::ExecutionGuardrails;
 use agent_core::task_engine::TurnResolution;
 use anyhow::Result;
+use chrono::Timelike;
 use crossterm::event;
 use crossterm::event::Event;
 use crossterm::event::KeyCode;
@@ -30,10 +31,12 @@ use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
 use crate::provider_overlay::ProviderSelectionCommand;
 use crate::render::render_app;
+use crate::ui_state::AtCommandResult;
 use crate::resume_overlay::{ResumeCommand, ResumeOverlay};
 use crate::terminal::AppTerminal;
 use crate::transcript::overlay::OverlayCommand;
 use crate::ui_state::TuiState;
+use crate::ui_state::parse_at_command;
 
 /// Interval for periodic persistence flush
 const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -204,6 +207,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OpenTranscript => state.open_transcript_overlay(),
                         InputOutcome::FocusNextAgent => {
                             if let Some(status) = state.focus_next_agent() {
+                                if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                                    state.sync_overview_page_to_focus();
+                                }
                                 state.app_mut().push_status_message(format!(
                                     "focused {} ({})",
                                     status.codename.as_str(),
@@ -218,6 +224,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                         InputOutcome::FocusPreviousAgent => {
                             if let Some(status) = state.focus_previous_agent() {
+                                if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                                    state.sync_overview_page_to_focus();
+                                }
                                 state.app_mut().push_status_message(format!(
                                     "focused {} ({})",
                                     status.codename.as_str(),
@@ -231,6 +240,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                         InputOutcome::FocusAgent(index) => {
                             if let Some(status) = state.focus_agent_by_index(index) {
+                                if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                                    state.sync_overview_page_to_focus();
+                                }
                                 state.app_mut().push_status_message(format!(
                                     "focused {} ({})",
                                     status.codename.as_str(),
@@ -396,6 +408,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OverviewFilterBlocked => {
                             state.view_state.overview.filter =
                                 crate::overview_state::OverviewFilter::BlockedOnly;
+                            state.ensure_overview_focus_visible();
                             state
                                 .app_mut()
                                 .push_status_message("showing blocked agents only");
@@ -403,6 +416,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OverviewFilterRunning => {
                             state.view_state.overview.filter =
                                 crate::overview_state::OverviewFilter::RunningOnly;
+                            state.ensure_overview_focus_visible();
                             state
                                 .app_mut()
                                 .push_status_message("showing running agents only");
@@ -410,13 +424,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OverviewFilterAll => {
                             state.view_state.overview.filter =
                                 crate::overview_state::OverviewFilter::All;
+                            state.ensure_overview_focus_visible();
                             state.app_mut().push_status_message("showing all agents");
                         }
                         InputOutcome::OverviewPageUp => {
-                            state.view_state.overview.page_up(1);
+                            let total_pages = state.overview_total_pages();
+                            state.view_state.overview.page_up(total_pages);
                         }
                         InputOutcome::OverviewPageDown => {
-                            state.view_state.overview.page_down(1);
+                            let total_pages = state.overview_total_pages();
+                            state.view_state.overview.page_down(total_pages);
                         }
                         InputOutcome::OverviewSearchStart => {
                             state.view_state.overview.search_active = true;
@@ -431,13 +448,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.app_mut().push_status_message("search cancelled");
                         }
                         InputOutcome::OverviewSearchSelect(agent_name) => {
-                            // Find agent by name and focus it
-                            let statuses = state.agent_statuses();
-                            if let Some(index) = statuses
-                                .iter()
-                                .position(|s| s.codename.as_str() == agent_name)
-                            {
-                                state.view_state.overview.focused_agent_index = index;
+                            if state.focus_overview_agent_by_codename(&agent_name).is_some() {
                                 state.view_state.overview.search_active = false;
                                 state.view_state.overview.search_query.clear();
                                 state
@@ -447,6 +458,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 state
                                     .app_mut()
                                     .push_status_message(format!("agent {} not found", agent_name));
+                            }
+                        }
+                        InputOutcome::OverviewFocusNumber(n) => {
+                            if let Some(status) = state.focus_overview_agent_by_number(n) {
+                                state.app_mut().push_status_message(format!(
+                                    "focused {} ({})",
+                                    status.codename.as_str(),
+                                    status.status.label()
+                                ));
                             }
                         }
                         InputOutcome::Quit => {
@@ -478,8 +498,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 continue;
                             }
 
-                            let augmented_prompt =
-                                state.workplace().skills.build_injected_prompt(&user_input);
                             logging::debug_event(
                                 "tui.submit",
                                 "submitted prompt from TUI",
@@ -489,8 +507,18 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     "active_task_id": state.app().active_task_id,
                                 }),
                             );
-                            state.app_mut().set_loop_phase(LoopPhase::Executing);
-                            start_provider_request(&mut state, augmented_prompt, &mut provider_rx);
+                            if state.is_multi_agent_mode() {
+                                handle_multi_agent_submission(&mut state, user_input);
+                            } else {
+                                let augmented_prompt =
+                                    state.workplace().skills.build_injected_prompt(&user_input);
+                                state.app_mut().set_loop_phase(LoopPhase::Executing);
+                                start_provider_request(
+                                    &mut state,
+                                    augmented_prompt,
+                                    &mut provider_rx,
+                                );
+                            }
                         }
                     }
                 }
@@ -509,29 +537,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                             // Click within agent list area
                             if click_row < agent_list_height {
-                                let statuses = state.agent_statuses();
-                                let filter = state.view_state.overview.filter;
-
-                                // Apply filter to get visible agents
-                                let filtered: Vec<_> = statuses
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, s)| match filter {
-                                        crate::overview_state::OverviewFilter::All => true,
-                                        crate::overview_state::OverviewFilter::BlockedOnly => {
-                                            s.status.is_blocked()
-                                        }
-                                        crate::overview_state::OverviewFilter::RunningOnly => {
-                                            s.status.is_active()
-                                        }
-                                    })
-                                    .collect();
+                                let visible = state.overview_visible_agent_indices();
 
                                 // Select clicked agent
                                 let clicked_index = click_row as usize;
-                                if clicked_index < filtered.len() {
-                                    let (original_index, snapshot) = filtered[clicked_index];
-                                    state.view_state.overview.focused_agent_index = clicked_index;
+                                if let Some(original_index) = visible.get(clicked_index).copied()
+                                    && let Some(snapshot) = state.focus_agent_by_index(original_index)
+                                {
                                     state.app_mut().push_status_message(format!(
                                         "focused {}",
                                         snapshot.codename.as_str()
@@ -716,113 +728,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             for event in poll_result.events {
                 match event {
                     agent_core::event_aggregator::AgentEvent::FromProvider { agent_id, event } => {
-                        // Generate scroll log message for Overview mode
-                        if state.view_state.mode == crate::view_mode::ViewMode::Overview {
-                            if let Some(msg) =
-                                generate_overview_log_message(&event, &agent_id, &state)
-                            {
-                                state.view_state.overview.push_log_message(msg);
-                            }
-                        }
-
-                        // For now, process events from any agent in focused slot
-                        // In full implementation, would route to specific agent's transcript
-                        match event {
-                            ProviderEvent::Status(text) => {
-                                state.app_mut().push_status_message(format!(
-                                    "{}: {}",
-                                    agent_id.as_str(),
-                                    text
-                                ));
-                            }
-                            ProviderEvent::AssistantChunk(chunk) => {
-                                // If this is the focused agent, append to active display
-                                if state.focused_agent_id().as_ref() == Some(&agent_id) {
-                                    state.append_active_assistant_chunk(&chunk);
-                                }
-                                // Also append to agent's transcript in pool
-                                if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-                                {
-                                    slot.append_transcript(TranscriptEntry::Assistant(chunk));
-                                }
-                            }
-                            ProviderEvent::ThinkingChunk(chunk) => {
-                                if state.focused_agent_id().as_ref() == Some(&agent_id) {
-                                    state.append_active_thinking_chunk(&chunk);
-                                }
-                            }
-                            ProviderEvent::Finished => {
-                                if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-                                {
-                                    let _ = slot.transition_to(
-                                        agent_core::agent_slot::AgentSlotStatus::idle(),
-                                    );
-                                }
-                                state.unregister_agent_channel(&agent_id);
-                                state
-                                    .app_mut()
-                                    .push_status_message(format!("{} finished", agent_id.as_str()));
-                            }
-                            ProviderEvent::Error(error) => {
-                                if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-                                {
-                                    slot.append_transcript(TranscriptEntry::Error(error.clone()));
-                                    let _ = slot.transition_to(
-                                        agent_core::agent_slot::AgentSlotStatus::error(
-                                            error.clone(),
-                                        ),
-                                    );
-                                }
-                                state.unregister_agent_channel(&agent_id);
-                                state.app_mut().push_error_message(format!(
-                                    "{} error: {}",
-                                    agent_id.as_str(),
-                                    error
-                                ));
-                            }
-                            ProviderEvent::SessionHandle(handle) => {
-                                if let Some(pool) = state.agent_pool.as_mut()
-                                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-                                {
-                                    slot.set_session_handle(handle);
-                                }
-                            }
-                            // Other events handled similarly
-                            _ => {}
-                        }
+                        handle_agent_provider_event(&mut state, agent_id, event);
                     }
                     agent_core::event_aggregator::AgentEvent::ThreadFinished {
                         agent_id,
                         outcome,
                     } => {
-                        if let Some(pool) = state.agent_pool.as_mut()
-                            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
-                        {
-                            slot.clear_provider_thread();
-                            match outcome {
-                                agent_core::agent_slot::ThreadOutcome::NormalExit => {
-                                    let _ = slot.transition_to(
-                                        agent_core::agent_slot::AgentSlotStatus::idle(),
-                                    );
-                                }
-                                agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
-                                    let _ = slot.transition_to(
-                                        agent_core::agent_slot::AgentSlotStatus::error(error),
-                                    );
-                                }
-                                agent_core::agent_slot::ThreadOutcome::Cancelled => {
-                                    let _ = slot.transition_to(
-                                        agent_core::agent_slot::AgentSlotStatus::stopped(
-                                            "cancelled",
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                        state.unregister_agent_channel(&agent_id);
+                        handle_agent_thread_finished(&mut state, agent_id, outcome);
                     }
                     _ => {}
                 }
@@ -830,10 +742,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
             // Handle disconnected channels
             for disconnected_id in poll_result.disconnected_channels {
-                state.unregister_agent_channel(&disconnected_id);
-                state
-                    .app_mut()
-                    .push_status_message(format!("{} disconnected", disconnected_id.as_str()));
+                handle_agent_channel_disconnect(&mut state, disconnected_id);
             }
         }
 
@@ -1002,39 +911,107 @@ fn start_provider_request(
 }
 
 fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
-    let provider_kind = state.app().selected_provider;
     let focused_id = state.focused_agent_id();
 
     logging::debug_event(
         "tui.multi_agent_request",
         "starting provider request for focused agent",
         serde_json::json!({
-            "provider": provider_kind.label(),
             "focused_agent": focused_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
             "prompt": prompt,
         }),
     );
 
-    // Start provider for focused agent and get event receiver
-    let event_rx = state.start_provider_for_focused_agent(prompt.clone(), provider_kind);
+    if let Some(agent_id) = focused_id {
+        if !start_multi_agent_provider_request_for_agent(state, agent_id, prompt) {
+            task_engine::handle_provider_start_failure(
+                state.app_mut(),
+                "failed to start provider for agent".to_string(),
+            );
+        }
+    }
+}
 
+fn start_multi_agent_provider_request_for_agent(
+    state: &mut TuiState,
+    agent_id: agent_core::agent_runtime::AgentId,
+    prompt: String,
+) -> bool {
+    let provider_label = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(&agent_id))
+        .map(|slot| slot.provider_type().label().to_string())
+        .unwrap_or_else(|| state.app().selected_provider.label().to_string());
+
+    let event_rx = state.start_provider_for_agent(&agent_id, prompt);
     if let Some(rx) = event_rx {
-        // Register the event channel with EventAggregator
-        let agent_id = state
-            .focused_agent_id()
-            .expect("focused agent should exist after start");
         state.register_agent_channel(agent_id.clone(), rx);
-        state.app_mut().begin_provider_response();
         state.app_mut().push_status_message(format!(
             "started {} ({})",
             agent_id.as_str(),
-            provider_kind.label()
+            provider_label
         ));
+        true
     } else {
-        task_engine::handle_provider_start_failure(
-            state.app_mut(),
-            "failed to start provider for agent".to_string(),
-        );
+        false
+    }
+}
+
+fn resolve_agent_target_ids(
+    state: &TuiState,
+    agents: &[String],
+) -> std::result::Result<Vec<agent_core::agent_runtime::AgentId>, String> {
+    let statuses = state.agent_statuses();
+    let mut resolved = Vec::with_capacity(agents.len());
+
+    for agent in agents {
+        let Some(status) = statuses.iter().find(|status| {
+            status.codename.as_str() == agent || status.agent_id.as_str() == agent
+        }) else {
+            return Err(format!("agent {} not found", agent));
+        };
+        resolved.push(status.agent_id.clone());
+    }
+
+    Ok(resolved)
+}
+
+fn handle_multi_agent_submission(state: &mut TuiState, user_input: String) -> bool {
+    match parse_at_command(&user_input) {
+        AtCommandResult::Invalid { error } => {
+            state.app_mut().push_error_message(error);
+            true
+        }
+        AtCommandResult::Normal(message) => {
+            let augmented_prompt = state.workplace().skills.build_injected_prompt(&message);
+            start_multi_agent_provider_request(state, augmented_prompt);
+            true
+        }
+        AtCommandResult::Single { agent, message } => {
+            let prompt = state.workplace().skills.build_injected_prompt(&message);
+            match resolve_agent_target_ids(state, &[agent]) {
+                Ok(agent_ids) => {
+                    for agent_id in agent_ids {
+                        start_multi_agent_provider_request_for_agent(state, agent_id, prompt.clone());
+                    }
+                }
+                Err(error) => state.app_mut().push_error_message(error),
+            }
+            true
+        }
+        AtCommandResult::Broadcast { agents, message } => {
+            let prompt = state.workplace().skills.build_injected_prompt(&message);
+            match resolve_agent_target_ids(state, &agents) {
+                Ok(agent_ids) => {
+                    for agent_id in agent_ids {
+                        start_multi_agent_provider_request_for_agent(state, agent_id, prompt.clone());
+                    }
+                }
+                Err(error) => state.app_mut().push_error_message(error),
+            }
+            true
+        }
     }
 }
 
@@ -1225,26 +1202,157 @@ fn generate_overview_log_message(
             message_type: OverviewMessageType::Progress,
             content: format!("Searching: {}", query),
         }),
+        ProviderEvent::AssistantChunk(chunk) => {
+            let summary = chunk.split_whitespace().collect::<Vec<_>>().join(" ");
+            if summary.is_empty() {
+                None
+            } else {
+                Some(OverviewLogMessage {
+                    timestamp,
+                    agent: codename,
+                    message_type: OverviewMessageType::Progress,
+                    content: summary,
+                })
+            }
+        }
         _ => None,
     }
 }
 
+fn handle_agent_provider_event(
+    state: &mut TuiState,
+    agent_id: agent_core::agent_runtime::AgentId,
+    event: ProviderEvent,
+) {
+    if let Some(msg) = generate_overview_log_message(&event, &agent_id, state) {
+        state.view_state.overview.push_log_message(msg);
+    }
+
+    match event {
+        ProviderEvent::Status(text) => {
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_transcript(TranscriptEntry::Status(text.clone()));
+            }
+            state
+                .app_mut()
+                .push_status_message(format!("{}: {}", agent_id.as_str(), text));
+        }
+        ProviderEvent::AssistantChunk(chunk) => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.append_active_assistant_chunk(&chunk);
+            }
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_transcript(TranscriptEntry::Assistant(chunk));
+            }
+        }
+        ProviderEvent::ThinkingChunk(chunk) => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.append_active_thinking_chunk(&chunk);
+            }
+        }
+        ProviderEvent::Finished => {
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+                && slot.status().is_active()
+            {
+                let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
+            }
+            state.unregister_agent_channel(&agent_id);
+            state
+                .app_mut()
+                .push_status_message(format!("{} finished", agent_id.as_str()));
+        }
+        ProviderEvent::Error(error) => {
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_transcript(TranscriptEntry::Error(error.clone()));
+                let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::blocked(
+                    error.clone(),
+                ));
+            }
+            state.unregister_agent_channel(&agent_id);
+            state
+                .app_mut()
+                .push_error_message(format!("{} error: {}", agent_id.as_str(), error));
+        }
+        ProviderEvent::SessionHandle(handle) => {
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.set_session_handle(handle);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_agent_thread_finished(
+    state: &mut TuiState,
+    agent_id: agent_core::agent_runtime::AgentId,
+    outcome: agent_core::agent_slot::ThreadOutcome,
+) {
+    if let Some(pool) = state.agent_pool.as_mut()
+        && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+    {
+        slot.clear_provider_thread();
+        match outcome {
+            agent_core::agent_slot::ThreadOutcome::NormalExit => {
+                if slot.status().is_active() {
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
+                }
+            }
+            agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
+                if !slot.status().is_blocked() {
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::blocked(
+                        error,
+                    ));
+                }
+            }
+            agent_core::agent_slot::ThreadOutcome::Cancelled => {
+                let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::stopped(
+                    "cancelled",
+                ));
+            }
+        }
+    }
+    state.unregister_agent_channel(&agent_id);
+}
+
+fn handle_agent_channel_disconnect(
+    state: &mut TuiState,
+    agent_id: agent_core::agent_runtime::AgentId,
+) {
+    if let Some(pool) = state.agent_pool.as_mut()
+        && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+    {
+        slot.clear_provider_thread();
+        if slot.status().is_active() {
+            let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::idle());
+        }
+    }
+    state.unregister_agent_channel(&agent_id);
+    state
+        .app_mut()
+        .push_status_message(format!("{} disconnected", agent_id.as_str()));
+}
+
 /// Get current time as HH:MM:SS packed into u32
 fn current_time_as_u32() -> u32 {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let hours = (secs % 86400) / 3600;
-    let mins = (secs % 3600) / 60;
-    let secs_part = secs % 60;
-    (hours * 10000 + mins * 100 + secs_part) as u32
+    let now = chrono::Local::now();
+    (now.hour() as u32 * 10000) + (now.minute() as u32 * 100) + now.second() as u32
 }
 
 #[cfg(test)]
 mod tests {
     use super::event_poll_timeout;
+    use super::handle_agent_provider_event;
+    use super::handle_agent_channel_disconnect;
+    use super::handle_multi_agent_submission;
     use super::handle_provider_terminal_error;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
@@ -1345,6 +1453,198 @@ mod tests {
             registered.empty_channels.contains(&agent_id),
             "spawned agent should have an empty channel registered"
         );
+    }
+
+    #[test]
+    fn routed_direct_prompt_targets_named_agent_without_changing_focus() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let alpha_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        let bravo_id = state.spawn_agent(ProviderKind::Mock).expect("spawn bravo");
+        let bravo_codename = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&bravo_id))
+            .map(|slot| slot.codename().as_str().to_string())
+            .expect("bravo codename");
+
+        assert_eq!(state.focused_agent_codename(), "OVERVIEW");
+
+        assert!(handle_multi_agent_submission(
+            &mut state,
+            format!("@{bravo_codename} investigate this"),
+        ));
+
+        assert_eq!(state.focused_agent_codename(), "OVERVIEW");
+        assert_eq!(state.agent_channel_count(), 1);
+        let poll_result = state.poll_agent_events();
+        assert!(poll_result.empty_channels.contains(&bravo_id));
+        let alpha_slot = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&alpha_id))
+            .expect("alpha slot");
+        assert!(alpha_slot.transcript().is_empty());
+        let bravo_slot = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&bravo_id))
+            .expect("bravo slot");
+        assert!(bravo_slot.transcript().iter().any(|entry| {
+            matches!(entry, TranscriptEntry::User(text) if text == "investigate this")
+        }));
+    }
+
+    #[test]
+    fn routed_broadcast_prompt_starts_all_named_agents() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let alpha_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        let bravo_id = state.spawn_agent(ProviderKind::Mock).expect("spawn bravo");
+        let codenames = state
+            .agent_pool
+            .as_ref()
+            .map(|pool| {
+                [alpha_id.clone(), bravo_id.clone()]
+                    .into_iter()
+                    .map(|id| {
+                        pool.get_slot_by_id(&id)
+                            .expect("slot")
+                            .codename()
+                            .as_str()
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .expect("pool");
+
+        assert!(handle_multi_agent_submission(
+            &mut state,
+            format!("@{},{} sync now", codenames[0], codenames[1]),
+        ));
+
+        assert_eq!(state.agent_channel_count(), 2);
+        let poll_result = state.poll_agent_events();
+        assert!(poll_result.empty_channels.contains(&alpha_id));
+        assert!(poll_result.empty_channels.contains(&bravo_id));
+    }
+
+    #[test]
+    fn agent_events_record_overview_logs_even_outside_overview_mode() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        state.focus_agent(&agent_id);
+        state.view_state.switch_by_number(1); // Focused mode
+
+        handle_agent_provider_event(
+            &mut state,
+            agent_id.clone(),
+            agent_core::provider::ProviderEvent::Status("working".to_string()),
+        );
+
+        assert_eq!(state.view_state.overview.log_buffer.len(), 1);
+        assert_eq!(
+            state.view_state.overview.log_buffer.back().unwrap().content,
+            "working"
+        );
+    }
+
+    #[test]
+    fn agent_error_event_marks_slot_blocked() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        state.focus_agent(&agent_id);
+
+        handle_agent_provider_event(
+            &mut state,
+            agent_id.clone(),
+            agent_core::provider::ProviderEvent::Error("need human input".to_string()),
+        );
+
+        let slot = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&agent_id))
+            .expect("slot");
+        assert!(slot.status().is_blocked());
+        assert!(state
+            .view_state
+            .overview
+            .log_buffer
+            .back()
+            .is_some_and(|msg| msg.message_type
+                == crate::overview_state::OverviewMessageType::Blocked));
+    }
+
+    #[test]
+    fn overview_assistant_output_is_recorded_in_scroll_log() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.ensure_overview_agent();
+        let overview_id = state.focused_agent_id().expect("overview id");
+
+        handle_agent_provider_event(
+            &mut state,
+            overview_id,
+            agent_core::provider::ProviderEvent::AssistantChunk(
+                "Overview reply content".to_string(),
+            ),
+        );
+
+        assert!(state
+            .view_state
+            .overview
+            .log_buffer
+            .iter()
+            .any(|msg| msg.content.contains("Overview reply content")));
+    }
+
+    #[test]
+    fn disconnected_active_agent_is_released_to_idle() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+        state.focus_agent(&agent_id);
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+        {
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::starting())
+                .expect("set starting");
+            slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now())
+                .expect("set responding");
+        }
+        let (_tx, rx) = std::sync::mpsc::channel();
+        state.register_agent_channel(agent_id.clone(), rx);
+
+        handle_agent_channel_disconnect(&mut state, agent_id.clone());
+
+        let slot = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&agent_id))
+            .expect("slot");
+        assert!(slot.status().is_idle());
+        assert_eq!(state.agent_channel_count(), 0);
     }
 
     #[test]

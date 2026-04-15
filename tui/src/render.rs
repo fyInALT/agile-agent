@@ -275,7 +275,7 @@ fn render_overview_view(frame: &mut Frame<'_>, state: &mut TuiState) {
 
     render_overview_agent_list(frame, state, areas[0]);
     render_overview_separator(frame, areas[1]);
-    render_overview_scroll_log(frame, state, areas[2]);
+    render_overview_content(frame, state, areas[2]);
     render_overview_separator(frame, areas[3]);
     render_composer(frame, state, areas[4]);
     render_overview_footer(frame, state, areas[5]);
@@ -306,73 +306,37 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
     fill_background(frame, area, Style::default());
 
     let statuses = state.agent_statuses();
-    let focused_index = state.view_state.overview.focused_agent_index;
-    let filter = state.view_state.overview.filter;
-
-    // Apply filter
-    let filtered: Vec<(usize, &AgentStatusSnapshot)> = statuses
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| match filter {
-            crate::overview_state::OverviewFilter::All => true,
-            crate::overview_state::OverviewFilter::BlockedOnly => s.status.is_blocked(),
-            crate::overview_state::OverviewFilter::RunningOnly => s.status.is_active(),
-        })
-        .collect();
+    let visible = state.overview_visible_agent_indices();
+    let focused_index = state.agent_pool.as_ref().map(|pool| pool.focused_slot_index());
 
     // Build lines for each agent row
     let mut lines = Vec::new();
     let max_width = area.width as usize;
-
-    // Check if we have an OVERVIEW agent (ProductOwner role)
-    let overview_agent = filtered
-        .iter()
-        .find(|(_, s)| s.role == AgentRole::ProductOwner);
-
-    // Render Overview agent first if present
-    if let Some((_, overview_snapshot)) = overview_agent {
-        let mut row =
-            crate::overview_row::OverviewAgentRow::from_snapshot(overview_snapshot, false, true);
-        row.truncate_to(max_width);
-
-        lines.push(Line::from(Span::styled(
-            row.truncated,
-            Style::default().fg(Color::White),
-        )));
-    }
-
-    // Then render other agents
-    for (row_idx, (_, snapshot)) in filtered.iter().enumerate() {
-        // Skip Overview agent (already rendered)
-        if snapshot.role == AgentRole::ProductOwner {
+    for index in &visible {
+        let Some(snapshot) = statuses.get(*index) else {
             continue;
-        }
-
-        // Adjust focus index calculation to account for Overview agent at top
-        let adjusted_focus_index = if overview_agent.is_some() {
-            focused_index.saturating_sub(1)
-        } else {
-            focused_index
         };
-        let is_focused = row_idx == adjusted_focus_index;
-        let mut row =
-            crate::overview_row::OverviewAgentRow::from_snapshot(snapshot, is_focused, false);
+
+        let is_overview_agent = snapshot.role == AgentRole::ProductOwner;
+        let is_focused = focused_index == Some(*index);
+        let mut row = crate::overview_row::OverviewAgentRow::from_snapshot(
+            snapshot,
+            is_focused,
+            is_overview_agent,
+        );
         row.truncate_to(max_width);
 
         let style = if is_focused {
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD)
+        } else if is_overview_agent {
+            Style::default().fg(Color::White)
         } else {
             Style::default().fg(Color::Gray)
         };
 
         lines.push(Line::from(Span::styled(row.truncated, style)));
-
-        // Stop when we've filled the list area
-        if lines.len() >= area.height as usize {
-            break;
-        }
     }
 
     // Fill remaining rows with empty lines
@@ -381,7 +345,7 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
     }
 
     // If no agents, show hint
-    if filtered.is_empty() {
+    if visible.is_empty() {
         lines[0] = Line::from(Span::styled(
             "◎ OVERVIEW idle Coordinating Agent work",
             Style::default().fg(Color::White),
@@ -396,6 +360,18 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
+}
+
+fn render_overview_content(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    let render_shared_log = state
+        .focused_agent_status()
+        .is_none_or(|status| status.role == AgentRole::ProductOwner);
+
+    if render_shared_log {
+        render_overview_scroll_log(frame, state, area);
+    } else {
+        render_overview_focused_agent_transcript(frame, state, area);
+    }
 }
 
 /// Render scroll log for Overview mode
@@ -461,6 +437,44 @@ fn render_overview_scroll_log(frame: &mut Frame<'_>, state: &mut TuiState, area:
     state.transcript_viewport_height = area.height;
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
+}
+
+fn render_overview_focused_agent_transcript(
+    frame: &mut Frame<'_>,
+    state: &mut TuiState,
+    area: Rect,
+) {
+    if area.height == 0 {
+        return;
+    }
+
+    let Some(agent_id) = state.focused_agent_id() else {
+        render_overview_scroll_log(frame, state, area);
+        return;
+    };
+    let Some((codename, transcript_entries)) = state.agent_pool.as_ref().and_then(|pool| {
+        pool.get_slot_by_id(&agent_id).map(|slot| {
+            (
+                slot.codename().as_str().to_string(),
+                slot.transcript().to_vec(),
+            )
+        })
+    }) else {
+        render_overview_scroll_log(frame, state, area);
+        return;
+    };
+
+    if transcript_entries.is_empty() {
+        fill_background(frame, area, Style::default());
+        frame.render_widget(
+            Paragraph::new(format!("{codename} - No messages yet"))
+                .style(Style::default().fg(Color::Gray)),
+            area,
+        );
+        return;
+    }
+
+    render_transcript_entries(frame, state, area, &transcript_entries);
 }
 
 /// Render footer for Overview mode
@@ -788,9 +802,19 @@ fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rec
 }
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
+    let transcript_entries = state.app().transcript.clone();
+    render_transcript_entries(frame, state, area, &transcript_entries);
+}
+
+fn render_transcript_entries(
+    frame: &mut Frame<'_>,
+    state: &mut TuiState,
+    area: Rect,
+    transcript_entries: &[TranscriptEntry],
+) {
     fill_background(frame, area, Style::default());
     state.transcript_viewport_height = area.height;
-    let transcript_cells = cells::build_cells(&state.app().transcript, area.width);
+    let transcript_cells = cells::build_cells(transcript_entries, area.width);
     let lines = cells::flatten_cells(&transcript_cells);
     let rendered_lines = lines
         .iter()

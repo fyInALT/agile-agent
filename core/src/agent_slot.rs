@@ -99,17 +99,21 @@ impl AgentSlotStatus {
             (Self::Idle, Self::Starting) => true,
             (Self::Idle, Self::Blocked { .. }) => true,
             (Self::Idle, Self::Stopped { .. }) => true,
-            // Starting can go to Responding, Stopping, or Error
+            // Starting can go to Idle (fast startup exit), Responding, Stopping, Blocked, or Error
+            (Self::Starting, Self::Idle) => true,
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Stopping) => true,
+            (Self::Starting, Self::Blocked { .. }) => true,
             (Self::Starting, Self::Error { .. }) => true,
-            // Responding can go to ToolExecuting, Finishing, Stopping, Blocked, or Error
+            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, or Error
+            (Self::Responding { .. }, Self::Idle) => true,
             (Self::Responding { .. }, Self::ToolExecuting { .. }) => true,
             (Self::Responding { .. }, Self::Finishing) => true,
             (Self::Responding { .. }, Self::Stopping) => true,
             (Self::Responding { .. }, Self::Blocked { .. }) => true,
             (Self::Responding { .. }, Self::Error { .. }) => true,
-            // ToolExecuting can go back to Responding or to Finishing/Stopping/Blocked/Error
+            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/Error
+            (Self::ToolExecuting { .. }, Self::Idle) => true,
             (Self::ToolExecuting { .. }, Self::Responding { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Finishing) => true,
             (Self::ToolExecuting { .. }, Self::Stopping) => true,
@@ -560,6 +564,12 @@ mod tests {
     }
 
     #[test]
+    fn status_starting_can_transition_to_idle() {
+        let status = AgentSlotStatus::starting();
+        assert!(status.can_transition_to(&AgentSlotStatus::idle()));
+    }
+
+    #[test]
     fn status_starting_can_transition_to_stopping() {
         let status = AgentSlotStatus::starting();
         assert!(status.can_transition_to(&AgentSlotStatus::stopping()));
@@ -572,6 +582,12 @@ mod tests {
     }
 
     #[test]
+    fn status_responding_can_transition_to_idle() {
+        let status = AgentSlotStatus::responding_now();
+        assert!(status.can_transition_to(&AgentSlotStatus::idle()));
+    }
+
+    #[test]
     fn status_responding_can_transition_to_stopping() {
         let status = AgentSlotStatus::responding_now();
         assert!(status.can_transition_to(&AgentSlotStatus::stopping()));
@@ -581,6 +597,12 @@ mod tests {
     fn status_tool_executing_can_transition_to_responding() {
         let status = AgentSlotStatus::tool_executing("bash");
         assert!(status.can_transition_to(&AgentSlotStatus::responding_now()));
+    }
+
+    #[test]
+    fn status_tool_executing_can_transition_to_idle() {
+        let status = AgentSlotStatus::tool_executing("bash");
+        assert!(status.can_transition_to(&AgentSlotStatus::idle()));
     }
 
     #[test]

@@ -762,6 +762,63 @@ fn overview_search_input_and_cancel() {
 }
 
 #[test]
+fn overview_search_moves_real_focus_to_matching_agent() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+    shell.state.view_state.switch_by_number(6);
+
+    assert_eq!(shell.state.focused_agent_codename(), "OVERVIEW");
+
+    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('a'), KeyModifiers::NONE);
+
+    assert_eq!(shell.state.focused_agent_codename(), "alpha");
+}
+
+#[test]
+fn overview_mode_shows_focused_worker_transcript_in_lower_pane() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    let alpha_id = shell.state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+    {
+        let pool = shell.state.agent_pool.as_mut().expect("agent pool");
+        let slot = pool.get_slot_mut_by_id(&alpha_id).expect("alpha slot");
+        slot.append_transcript(TranscriptEntry::User("please investigate".to_string()));
+        slot.append_transcript(TranscriptEntry::Assistant(
+            "focused worker transcript marker".to_string(),
+        ));
+    }
+    shell.state.focus_agent(&alpha_id);
+    shell.state.view_state.switch_by_number(6);
+
+    let rendered = shell.render_to_string(80, 24);
+
+    assert!(rendered.contains("focused worker transcript marker"));
+    assert!(!rendered.contains("No activity yet. Agents will report progress here."));
+}
+
+#[test]
+fn overview_page_offset_changes_visible_workers() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    for _ in 0..4 {
+        shell.state.spawn_agent(ProviderKind::Mock).expect("spawn worker");
+    }
+    shell.state.view_state.switch_by_number(6);
+    shell.state.view_state.overview.agent_list_rows = 3;
+
+    let first_page = shell.render_to_string(80, 24);
+    shell.state.view_state.overview.page_offset = 1;
+    let second_page = shell.render_to_string(80, 24);
+
+    assert!(first_page.contains("alpha"));
+    assert!(first_page.contains("bravo"));
+    assert!(!first_page.contains("charlie"));
+
+    assert!(second_page.contains("charlie"));
+    assert!(second_page.contains("delta"));
+    assert!(!second_page.contains("alpha idle Waiting for task"));
+}
+
+#[test]
 fn overview_timestamp_same_minute_omitted() {
     let mut shell = ShellHarness::new(ProviderKind::Mock);
     shell.state.view_state.switch_by_number(6);

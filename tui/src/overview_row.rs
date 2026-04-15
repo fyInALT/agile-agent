@@ -19,7 +19,7 @@ impl OverviewAgentRow {
     /// Format agent status snapshot into display row
     pub fn from_snapshot(
         snapshot: &AgentStatusSnapshot,
-        focused: bool,
+        _focused: bool,
         is_overview_agent: bool,
     ) -> Self {
         let indicator = if is_overview_agent {
@@ -80,46 +80,69 @@ impl OverviewAgentRow {
             return;
         }
 
-        // Use chars() to handle unicode properly
         let mut chars = self.full.chars();
         let indicator = chars.next().unwrap_or('◎');
-
-        // Skip the space after indicator
         chars.next();
 
-        // Get the rest as a string
         let rest: String = chars.collect();
-        let parts: Vec<&str> = rest.split_whitespace().collect();
+        let mut parts = rest.splitn(3, ' ');
+        let name = parts.next().unwrap_or("");
+        let status = parts.next().unwrap_or("");
+        let task = parts.next().unwrap_or("");
 
-        // Try to preserve indicator + name prefix
-        if parts.is_empty() {
+        if name.is_empty() {
             self.truncated = format!("{}..", indicator);
             self.unicode_width = 3;
             return;
         }
 
-        let name = parts[0];
+        let indicator_name = format!("{} {}", indicator, name);
+        let indicator_name_status = if status.is_empty() {
+            indicator_name.clone()
+        } else {
+            format!("{} {}", indicator_name, status)
+        };
+
+        if !task.is_empty() {
+            let truncated_task = fit_segment(task, max_width.saturating_sub(unicode_width_str(&indicator_name_status) + 1));
+            if !truncated_task.is_empty() {
+                self.truncated = format!("{} {}", indicator_name_status, truncated_task);
+                self.unicode_width = unicode_width_str(&self.truncated);
+                if self.unicode_width <= max_width {
+                    return;
+                }
+            }
+        }
+
+        if unicode_width_str(&indicator_name_status) <= max_width {
+            self.truncated = indicator_name_status;
+            self.unicode_width = unicode_width_str(&self.truncated);
+            return;
+        }
+
+        let truncated_status =
+            fit_segment(status, max_width.saturating_sub(unicode_width_str(&indicator_name) + 1));
+        if !truncated_status.is_empty() {
+            self.truncated = format!("{} {}", indicator_name, truncated_status);
+            self.unicode_width = unicode_width_str(&self.truncated);
+            if self.unicode_width <= max_width {
+                return;
+            }
+        }
+
         let name_prefix = if name.chars().take(2).collect::<String>().len() >= 2 {
             name.chars().take(2).collect::<String>()
         } else {
             name.to_string()
         };
-
         if max_width == min_width {
             self.truncated = format!("{} {}", indicator, name_prefix);
             self.unicode_width = min_width;
             return;
         }
 
-        // Add more of the name if space available
-        let remaining = max_width - 3; // indicator + space + name prefix (2)
-        let name_chars: String = name.chars().take(remaining.saturating_sub(2)).collect();
-        let name_fit = if name.chars().count() > remaining.saturating_sub(2) {
-            format!("{}..", name_chars)
-        } else {
-            name.to_string()
-        };
-
+        let available_name_width = max_width.saturating_sub(3);
+        let name_fit = fit_segment(name, available_name_width);
         self.truncated = format!("{} {}", indicator, name_fit);
         self.unicode_width = unicode_width_str(&self.truncated);
     }
@@ -178,6 +201,33 @@ impl OverviewAgentRow {
 /// Calculate unicode display width of a string
 fn unicode_width_str(s: &str) -> usize {
     s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
+fn fit_segment(segment: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if unicode_width_str(segment) <= max_width {
+        return segment.to_string();
+    }
+    if max_width <= 3 {
+        return ".".repeat(max_width);
+    }
+
+    let mut fitted = String::new();
+    for ch in segment.chars() {
+        let next = format!("{fitted}{ch}");
+        if unicode_width_str(&next) + 3 > max_width {
+            break;
+        }
+        fitted.push(ch);
+    }
+
+    if fitted.is_empty() {
+        ".".repeat(max_width)
+    } else {
+        format!("{fitted}...")
+    }
 }
 
 #[cfg(test)]
@@ -254,6 +304,14 @@ mod tests {
         let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
         row.truncate_to(2);
         assert!(row.unicode_width <= 2);
+    }
+
+    #[test]
+    fn row_truncate_keeps_status_before_falling_back_to_name_only() {
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        row.truncate_to(18);
+        assert!(row.truncated.contains("idle"));
     }
 
     #[test]

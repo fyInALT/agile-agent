@@ -1,6 +1,7 @@
 use agent_core::agent_mail::AgentMailbox;
 use agent_core::agent_pool::AgentPool;
 use agent_core::agent_pool::AgentStatusSnapshot;
+use agent_core::agent_role::AgentRole;
 use agent_core::agent_runtime::AgentId;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
@@ -407,6 +408,195 @@ impl TuiState {
         })
     }
 
+    /// Return overview-mode agent indices in display order.
+    ///
+    /// OVERVIEW is always pinned first when present. The configured filter is
+    /// applied only to worker agents.
+    pub fn overview_filtered_agent_indices(&self) -> Vec<usize> {
+        let statuses = self.agent_statuses();
+        let overview_index = statuses
+            .iter()
+            .position(|status| status.role == AgentRole::ProductOwner);
+        let filter = self.view_state.overview.filter;
+
+        let mut indices = Vec::new();
+        if let Some(index) = overview_index {
+            indices.push(index);
+        }
+
+        for (index, status) in statuses.iter().enumerate() {
+            if Some(index) == overview_index {
+                continue;
+            }
+
+            let included = match filter {
+                crate::overview_state::OverviewFilter::All => true,
+                crate::overview_state::OverviewFilter::BlockedOnly => status.status.is_blocked(),
+                crate::overview_state::OverviewFilter::RunningOnly => status.status.is_active(),
+            };
+
+            if included {
+                indices.push(index);
+            }
+        }
+
+        indices
+    }
+
+    /// Return the total number of overview pages for the current filter.
+    pub fn overview_total_pages(&self) -> usize {
+        let filtered = self.overview_filtered_agent_indices();
+        if filtered.is_empty() {
+            return 0;
+        }
+
+        let rows = self.view_state.overview.agent_list_rows.max(1);
+        let statuses = self.agent_statuses();
+        let has_overview = filtered
+            .first()
+            .and_then(|index| statuses.get(*index))
+            .is_some_and(|status| status.role == AgentRole::ProductOwner);
+
+        if has_overview {
+            let worker_count = filtered.len().saturating_sub(1);
+            if worker_count == 0 {
+                1
+            } else {
+                let worker_rows = rows.saturating_sub(1).max(1);
+                worker_count.div_ceil(worker_rows)
+            }
+        } else {
+            filtered.len().div_ceil(rows)
+        }
+    }
+
+    /// Return visible overview-mode agent indices for the current page.
+    pub fn overview_visible_agent_indices(&self) -> Vec<usize> {
+        let filtered = self.overview_filtered_agent_indices();
+        if filtered.is_empty() {
+            return Vec::new();
+        }
+
+        let rows = self.view_state.overview.agent_list_rows.max(1);
+        let statuses = self.agent_statuses();
+        let has_overview = filtered
+            .first()
+            .and_then(|index| statuses.get(*index))
+            .is_some_and(|status| status.role == AgentRole::ProductOwner);
+
+        if has_overview {
+            if rows == 1 {
+                return vec![filtered[0]];
+            }
+
+            let worker_rows = rows.saturating_sub(1).max(1);
+            let page = self
+                .view_state
+                .overview
+                .page_offset
+                .min(self.overview_total_pages().saturating_sub(1));
+            let start = page * worker_rows;
+            let workers = &filtered[1..];
+            let end = (start + worker_rows).min(workers.len());
+
+            let mut visible = vec![filtered[0]];
+            visible.extend_from_slice(&workers[start..end]);
+            visible
+        } else {
+            let page = self
+                .view_state
+                .overview
+                .page_offset
+                .min(self.overview_total_pages().saturating_sub(1));
+            let start = page * rows;
+            let end = (start + rows).min(filtered.len());
+            filtered[start..end].to_vec()
+        }
+    }
+
+    /// Keep the current overview page aligned to the focused agent when possible.
+    pub fn sync_overview_page_to_focus(&mut self) {
+        let Some(pool) = self.agent_pool.as_ref() else {
+            self.view_state.overview.page_offset = 0;
+            return;
+        };
+
+        let filtered = self.overview_filtered_agent_indices();
+        if filtered.is_empty() {
+            self.view_state.overview.page_offset = 0;
+            return;
+        }
+
+        let focused_index = pool.focused_slot_index();
+        if !filtered.contains(&focused_index) {
+            self.view_state.overview.page_offset = 0;
+            return;
+        }
+
+        let rows = self.view_state.overview.agent_list_rows.max(1);
+        let statuses = self.agent_statuses();
+        let has_overview = filtered
+            .first()
+            .and_then(|index| statuses.get(*index))
+            .is_some_and(|status| status.role == AgentRole::ProductOwner);
+
+        if has_overview {
+            if focused_index == filtered[0] {
+                self.view_state.overview.page_offset = 0;
+                return;
+            }
+
+            let worker_rows = rows.saturating_sub(1).max(1);
+            if let Some(worker_position) = filtered[1..].iter().position(|index| *index == focused_index)
+            {
+                self.view_state.overview.page_offset = worker_position / worker_rows;
+            }
+        } else if let Some(position) = filtered.iter().position(|index| *index == focused_index) {
+            self.view_state.overview.page_offset = position / rows;
+        }
+    }
+
+    /// Ensure the focused agent remains visible under the current overview filter.
+    pub fn ensure_overview_focus_visible(&mut self) -> Option<AgentStatusSnapshot> {
+        let filtered = self.overview_filtered_agent_indices();
+        let focused_index = self.agent_pool.as_ref()?.focused_slot_index();
+        if filtered.contains(&focused_index) {
+            self.sync_overview_page_to_focus();
+            return self.focused_agent_status();
+        }
+
+        let next_index = *filtered.first()?;
+        let snapshot = self.focus_agent_by_index(next_index)?;
+        self.sync_overview_page_to_focus();
+        Some(snapshot)
+    }
+
+    /// Focus a visible overview agent by number key.
+    pub fn focus_overview_agent_by_number(&mut self, n: u8) -> Option<AgentStatusSnapshot> {
+        let index = (n as usize).saturating_sub(1);
+        let visible = self.overview_visible_agent_indices();
+        let original_index = *visible.get(index)?;
+        let snapshot = self.focus_agent_by_index(original_index)?;
+        self.sync_overview_page_to_focus();
+        Some(snapshot)
+    }
+
+    /// Focus an overview agent by codename or agent id.
+    pub fn focus_overview_agent_by_codename(
+        &mut self,
+        codename: &str,
+    ) -> Option<AgentStatusSnapshot> {
+        let index = self
+            .agent_statuses()
+            .iter()
+            .position(|status| {
+                status.codename.as_str() == codename || status.agent_id.as_str() == codename
+            })?;
+        let snapshot = self.focus_agent_by_index(index)?;
+        self.sync_overview_page_to_focus();
+        Some(snapshot)
+    }
+
     /// Ensure OVERVIEW agent exists (called on initialization)
     pub fn ensure_overview_agent(&mut self) {
         if self.agent_pool.is_none() {
@@ -489,6 +679,28 @@ impl TuiState {
             .map(|s| s.agent_id().clone())
     }
 
+    fn unread_mail_for_agent(&self, agent_id: &AgentId) -> String {
+        let inbox = self.mailbox.inbox_for(agent_id);
+        if let Some(mails) = inbox {
+            let unread = mails.iter().filter(|m| !m.is_read());
+            let formatted = unread.map(|m| m.format_for_prompt()).collect::<Vec<_>>();
+            if formatted.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n=== Incoming Messages ===\n{}\n=== End Messages ===\n\n",
+                    formatted.join("\n")
+                )
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    fn mark_agent_mail_read(&mut self, agent_id: &AgentId) {
+        self.mailbox.mark_all_read(agent_id);
+    }
+
     /// Start provider request for focused agent in pool
     ///
     /// Creates provider thread and registers event channel with AgentSlot.
@@ -498,37 +710,61 @@ impl TuiState {
         prompt: String,
         provider: ProviderKind,
     ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
-        // Get mail prefix and mark read BEFORE borrowing agent_pool
-        let mail_prefix = self.focused_unread_mail_for_prompt();
-        let augmented_prompt = if mail_prefix.is_empty() {
-            prompt
-        } else {
-            format!("{}{}", mail_prefix, prompt)
-        };
-        // Mark mail as read after preparing injection
-        self.mark_focused_mail_read();
-
-        // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
             self.agent_pool = Some(AgentPool::new(workplace_id, 10));
-            // Spawn first agent
             self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
         }
 
-        let pool = self.agent_pool.as_mut()?;
-        let focused = pool.focused_slot_mut()?;
-        let agent_id = focused.agent_id().clone();
+        let focused_id = self.focused_agent_id()?;
+        self.start_provider_for_agent(&focused_id, prompt)
+    }
 
-        // Get session handle if available
-        let session_handle = focused.session_handle().cloned();
+    /// Start provider request for a specific agent without changing focus.
+    pub fn start_provider_for_agent(
+        &mut self,
+        agent_id: &AgentId,
+        prompt: String,
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+        let mail_prefix = self.unread_mail_for_agent(agent_id);
+        let augmented_prompt = if mail_prefix.is_empty() {
+            prompt.clone()
+        } else {
+            format!("{}{}", mail_prefix, prompt)
+        };
+        self.mark_agent_mail_read(agent_id);
 
-        // Start provider thread with handle capture
+        let (provider_kind, session_handle, busy_codename) = {
+            let pool = self.agent_pool.as_ref()?;
+            let slot = pool.get_slot_by_id(agent_id)?;
+            if slot.has_provider_thread() || slot.status().is_stopping() || slot.status().is_active() {
+                (
+                    slot.provider_type()
+                        .to_provider_kind()
+                        .unwrap_or(self.session.app.selected_provider),
+                    slot.session_handle().cloned(),
+                    Some(slot.codename().as_str().to_string()),
+                )
+            } else {
+                (
+                    slot.provider_type()
+                        .to_provider_kind()
+                        .unwrap_or(self.session.app.selected_provider),
+                    slot.session_handle().cloned(),
+                    None,
+                )
+            }
+        };
+        if let Some(codename) = busy_codename {
+            self.app_mut()
+                .push_error_message(format!("agent {} is already busy", codename));
+            return None;
+        }
+
         let cwd = self.session.app.cwd.clone();
         let thread_name = format!("agent-{}-provider", agent_id.as_str());
-
         let thread_handle = agent_core::provider::start_provider_with_handle(
-            provider,
+            provider_kind,
             augmented_prompt,
             cwd,
             session_handle,
@@ -537,19 +773,15 @@ impl TuiState {
 
         match thread_handle {
             Ok(handle) => {
-                // Split into components: event_rx for EventAggregator, handle for AgentSlot
                 let (event_rx, join_handle) = handle.into_parts();
-
-                // Store thread handle in AgentSlot (event_rx managed by EventAggregator)
+                let pool = self.agent_pool.as_mut()?;
+                let slot = pool.get_slot_mut_by_id(agent_id)?;
+                slot.append_transcript(TranscriptEntry::User(prompt));
                 if let Some(jh) = join_handle {
-                    focused.set_thread_handle(jh);
+                    slot.set_thread_handle(jh);
                 }
-
-                // Transition to responding status
-                let _ = focused
-                    .transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
-
-                // Return event_rx for EventAggregator registration
+                let _ =
+                    slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
                 Some(event_rx)
             }
             Err(e) => {
@@ -1431,6 +1663,10 @@ impl TuiState {
     pub fn is_busy(&self) -> bool {
         self.session.app.status == AppStatus::Responding
             || !matches!(self.session.app.loop_phase, LoopPhase::Idle)
+            || self
+                .agent_pool
+                .as_ref()
+                .is_some_and(|pool| pool.has_active_agents())
     }
 
     pub fn switch_to_new_agent(
