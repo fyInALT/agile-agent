@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -7,6 +8,7 @@ use agent_core::backlog::BacklogState;
 use agent_core::backlog::TodoItem;
 use agent_core::backlog::TodoStatus;
 use agent_core::workplace_store::WorkplaceStore;
+use agent_core::workplace_store::WORKPLACES_ROOT_ENV;
 use tempfile::TempDir;
 
 pub struct RuntimeHarness {
@@ -17,6 +19,7 @@ pub struct RuntimeHarness {
     pub fake_claude_path: PathBuf,
     pub fake_codex_path: PathBuf,
     workplace: WorkplaceStore,
+    workplaces_root: PathBuf,
 }
 
 impl RuntimeHarness {
@@ -26,7 +29,7 @@ impl RuntimeHarness {
         let workdir = TempDir::new().expect("temp workdir");
         let workplace_root = home.path().join(".agile-agent").join("workplaces");
         let workplace =
-            WorkplaceStore::for_root(workdir.path(), workplace_root).expect("workplace");
+            WorkplaceStore::for_root(workdir.path(), workplace_root.clone()).expect("workplace");
         workplace.ensure().expect("ensure workplace");
         let bin_dir = home.path().join("bin");
         fs::create_dir_all(&bin_dir).expect("create bin dir");
@@ -44,6 +47,7 @@ impl RuntimeHarness {
             fake_claude_path,
             fake_codex_path,
             workplace,
+            workplaces_root: workplace_root,
         }
     }
 
@@ -93,7 +97,7 @@ impl RuntimeHarness {
         claude_path: impl AsRef<std::ffi::OsStr>,
         codex_path: impl AsRef<std::ffi::OsStr>,
     ) -> std::process::Output {
-        let bin = std::env::var("CARGO_BIN_EXE_agile-agent")
+        let bin = env::var("CARGO_BIN_EXE_agile-agent")
             .expect("CARGO_BIN_EXE_agile-agent must be set by cargo test");
         let mut command = Command::new(bin);
         command.current_dir(self.workdir.path());
@@ -102,6 +106,8 @@ impl RuntimeHarness {
         command.env("XDG_DATA_HOME", self._data.path());
         command.env("AGILE_AGENT_CLAUDE_PATH", claude_path);
         command.env("AGILE_AGENT_CODEX_PATH", codex_path);
+        // Set workplaces root to prevent using ~/.agile-agent/workplaces
+        command.env(WORKPLACES_ROOT_ENV, &self.workplaces_root);
         command.output().expect("run agile-agent binary")
     }
 }

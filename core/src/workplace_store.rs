@@ -1,6 +1,8 @@
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -12,6 +14,26 @@ use serde::Serialize;
 use crate::agent_runtime::WorkplaceId;
 use crate::logging;
 use crate::shutdown_snapshot::ShutdownSnapshot;
+
+/// Environment variable to override workplaces root directory
+pub const WORKPLACES_ROOT_ENV: &str = "AGILE_AGENT_WORKPLACES_ROOT";
+
+/// Check if running in test environment (cargo test)
+fn is_test_environment() -> bool {
+    // Check for explicit override - if user set the root, respect it
+    if env::var(WORKPLACES_ROOT_ENV).is_ok() {
+        return false;
+    }
+
+    // Detect cargo test: CARGO_MANIFEST_DIR is set (cargo-managed process)
+    // This covers cargo test, cargo run, cargo build, etc.
+    // We want to use temp dir for tests, but not for production runs.
+    // The key distinction: production runs have a non-temp cwd
+    env::var("CARGO_MANIFEST_DIR").is_ok()
+}
+
+/// Global temporary workplaces root for test processes
+static TEST_WORKPLACES_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkplaceStore {
@@ -546,6 +568,26 @@ impl WorkplaceStore {
 }
 
 pub fn workplaces_root() -> Result<PathBuf> {
+    // Check for environment variable override first
+    if let Ok(custom_root) = env::var(WORKPLACES_ROOT_ENV) {
+        return Ok(PathBuf::from(custom_root));
+    }
+
+    // If running in test environment, use a per-process temporary directory
+    if is_test_environment() {
+        let path = TEST_WORKPLACES_ROOT.get_or_init(|| {
+            // Create tempdir and keep its path
+            // The TempDir is leaked intentionally to persist for the process lifetime
+            let tempdir = tempfile::tempdir().expect("test workplaces root tempdir");
+            // Leak the TempDir to prevent cleanup during process lifetime
+            let path = tempdir.path().to_path_buf();
+            std::mem::forget(tempdir); // Don't drop, keep directory alive
+            path
+        });
+        return Ok(path.clone());
+    }
+
+    // Default: use home directory
     let home = home_dir().context("home directory is unavailable")?;
     Ok(home.join(".agile-agent").join("workplaces"))
 }
@@ -643,7 +685,8 @@ mod tests {
     fn ensure_logs_workplace_resolution_and_meta_write() {
         let _guard = logging::test_guard();
         let temp = TempDir::new().expect("tempdir");
-        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        let root = TempDir::new().expect("root");
+        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         logging::init_for_workplace(&store, RunMode::RunLoop).expect("init logger");
 
         store.ensure().expect("ensure");
@@ -686,7 +729,8 @@ mod tests {
     #[test]
     fn register_agent_adds_to_list() {
         let temp = TempDir::new().expect("tempdir");
-        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        let root = TempDir::new().expect("root");
+        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         store.ensure().expect("ensure");
 
         store.register_agent("agent_001").expect("register");
@@ -704,7 +748,8 @@ mod tests {
     #[test]
     fn unregister_agent_removes_from_list() {
         let temp = TempDir::new().expect("tempdir");
-        let store = WorkplaceStore::for_cwd(temp.path()).expect("store");
+        let root = TempDir::new().expect("root");
+        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         store.ensure().expect("ensure");
 
         store.register_agent("agent_001").expect("register 1");
