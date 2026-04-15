@@ -13,6 +13,7 @@ use crate::agent_pool::AgentPool;
 use crate::agent_runtime::{AgentId, WorkplaceId};
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::event_aggregator::{AgentEvent, EventAggregator, PollResult};
+use crate::logging;
 use crate::provider::{ProviderEvent, ProviderKind};
 use crate::shared_state::SharedWorkplaceState;
 use crate::shutdown_snapshot::ShutdownSnapshot;
@@ -240,11 +241,27 @@ impl MultiAgentSession {
 
     /// Spawn a new agent with the default provider
     pub fn spawn_default_agent(&mut self) -> Result<AgentId, String> {
+        logging::debug_event(
+            "session.agent.spawn_default",
+            "spawning agent with default provider",
+            serde_json::json!({
+                "default_provider": format!("{:?}", self.default_provider),
+                "current_agents": self.agents.active_count(),
+            }),
+        );
         self.agents.spawn_agent(self.default_provider)
     }
 
     /// Spawn a new agent with a specific provider
     pub fn spawn_agent(&mut self, provider: ProviderKind) -> Result<AgentId, String> {
+        logging::debug_event(
+            "session.agent.spawn",
+            "spawning agent with specific provider",
+            serde_json::json!({
+                "provider": format!("{:?}", provider),
+                "current_agents": self.agents.active_count(),
+            }),
+        );
         self.agents.spawn_agent(provider)
     }
 
@@ -273,14 +290,25 @@ impl MultiAgentSession {
 
     /// Switch focus to the next agent
     pub fn focus_next(&mut self) {
+        let old_index = self.focused_index;
         let count = self.agents.active_count();
         if count > 0 {
             self.focused_index = (self.focused_index + 1) % count;
+            logging::debug_event(
+                "session.focus.next",
+                "focus switched to next agent",
+                serde_json::json!({
+                    "old_index": old_index,
+                    "new_index": self.focused_index,
+                    "agent_count": count,
+                }),
+            );
         }
     }
 
     /// Switch focus to the previous agent
     pub fn focus_previous(&mut self) {
+        let old_index = self.focused_index;
         let count = self.agents.active_count();
         if count > 0 {
             self.focused_index = if self.focused_index == 0 {
@@ -288,21 +316,58 @@ impl MultiAgentSession {
             } else {
                 self.focused_index - 1
             };
+            logging::debug_event(
+                "session.focus.previous",
+                "focus switched to previous agent",
+                serde_json::json!({
+                    "old_index": old_index,
+                    "new_index": self.focused_index,
+                    "agent_count": count,
+                }),
+            );
         }
     }
 
     /// Switch focus to a specific agent by index
     pub fn focus_agent(&mut self, index: usize) -> bool {
+        let old_index = self.focused_index;
         if index < self.agents.active_count() {
             self.focused_index = index;
+            logging::debug_event(
+                "session.focus.index",
+                "focus switched to agent by index",
+                serde_json::json!({
+                    "old_index": old_index,
+                    "new_index": index,
+                    "success": true,
+                }),
+            );
             true
         } else {
+            logging::debug_event(
+                "session.focus.index",
+                "focus switch by index failed - out of bounds",
+                serde_json::json!({
+                    "requested_index": index,
+                    "agent_count": self.agents.active_count(),
+                    "success": false,
+                }),
+            );
             false
         }
     }
 
     /// Switch focus to a specific agent by ID
     pub fn focus_agent_by_id(&mut self, agent_id: &AgentId) -> Result<(), String> {
+        let old_index = self.focused_index;
+        logging::debug_event(
+            "session.focus.id",
+            "focus switch requested by agent ID",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "old_index": old_index,
+            }),
+        );
         self.agents.focus_agent(agent_id)
     }
 
@@ -338,8 +403,25 @@ impl MultiAgentSession {
     ///
     /// Returns true if the event was processed successfully.
     pub fn process_event(&mut self, event: AgentEvent) -> Result<bool, String> {
+        logging::debug_event(
+            "session.event.process",
+            "processing agent event",
+            serde_json::json!({
+                "event_type": format!("{:?}", event),
+                "agent_id": event.agent_id().as_str(),
+            }),
+        );
+
         match event {
             AgentEvent::FromProvider { agent_id, event } => {
+                logging::debug_event(
+                    "session.event.from_provider",
+                    "processing provider event",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "provider_event": format!("{:?}", event),
+                    }),
+                );
                 self.process_provider_event(&agent_id, event)?;
                 Ok(true)
             }
@@ -348,6 +430,14 @@ impl MultiAgentSession {
                 new_status,
                 ..
             } => {
+                logging::debug_event(
+                    "session.event.status_changed",
+                    "agent status changed",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "new_status": new_status.label(),
+                    }),
+                );
                 if let Some(slot) = self.agents.get_slot_mut_by_id(&agent_id) {
                     slot.transition_to(new_status)?;
                 }
@@ -358,16 +448,41 @@ impl MultiAgentSession {
                 task_id,
                 result,
             } => {
+                logging::debug_event(
+                    "session.event.task_completed",
+                    "agent task completed",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "task_id": task_id.as_str(),
+                        "result": format!("{:?}", result),
+                    }),
+                );
                 self.complete_task(&agent_id, &task_id, result)?;
                 Ok(true)
             }
             AgentEvent::AgentError { agent_id, error } => {
+                logging::debug_event(
+                    "session.event.agent_error",
+                    "agent encountered error",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": error,
+                    }),
+                );
                 if let Some(slot) = self.agents.get_slot_mut_by_id(&agent_id) {
                     slot.transition_to(AgentSlotStatus::error(error))?;
                 }
                 Ok(true)
             }
             AgentEvent::ThreadFinished { agent_id, outcome } => {
+                logging::debug_event(
+                    "session.event.thread_finished",
+                    "agent thread finished",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "outcome": format!("{:?}", outcome),
+                    }),
+                );
                 self.handle_thread_finished(&agent_id, outcome)?;
                 Ok(true)
             }

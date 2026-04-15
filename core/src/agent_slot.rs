@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
+use crate::logging;
 use crate::provider::{ProviderEvent, SessionHandle};
 
 /// Status of an agent slot in the multi-agent runtime
@@ -403,6 +404,16 @@ impl AgentSlot {
 
     /// Set the agent's role
     pub fn set_role(&mut self, role: AgentRole) {
+        logging::debug_event(
+            "slot.role.change",
+            "agent role changed",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_role": self.role.label(),
+                "new_role": role.label(),
+            }),
+        );
         self.role = role;
         self.last_activity = Instant::now();
     }
@@ -463,6 +474,16 @@ impl AgentSlot {
         event_rx: Receiver<ProviderEvent>,
         thread_handle: JoinHandle<()>,
     ) {
+        logging::debug_event(
+            "slot.thread.set",
+            "provider thread set on agent slot",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": self.status.label(),
+                "new_status": "starting",
+            }),
+        );
         self.event_rx = Some(event_rx);
         self.thread_handle = Some(thread_handle);
         self.status = AgentSlotStatus::starting();
@@ -471,6 +492,16 @@ impl AgentSlot {
 
     /// Set only the thread handle (event_rx managed separately by EventAggregator)
     pub fn set_thread_handle(&mut self, thread_handle: JoinHandle<()>) {
+        logging::debug_event(
+            "slot.thread.handle_only",
+            "thread handle set (event_rx managed externally)",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": self.status.label(),
+                "new_status": "starting",
+            }),
+        );
         self.thread_handle = Some(thread_handle);
         self.status = AgentSlotStatus::starting();
         self.last_activity = Instant::now();
@@ -478,6 +509,15 @@ impl AgentSlot {
 
     /// Clear provider thread components (after join)
     pub fn clear_provider_thread(&mut self) {
+        logging::debug_event(
+            "slot.thread.clear",
+            "provider thread cleared from agent slot",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": self.status.label(),
+            }),
+        );
         self.event_rx = None;
         self.thread_handle = None;
     }
@@ -497,15 +537,43 @@ impl AgentSlot {
     ///
     /// Returns Ok(()) if transition is valid, Err if invalid.
     pub fn transition_to(&mut self, new_status: AgentSlotStatus) -> Result<(), String> {
-        if !self.status.can_transition_to(&new_status) {
+        let old_status = self.status.clone();
+        let transition_valid = self.status.can_transition_to(&new_status);
+
+        logging::debug_event(
+            "slot.transition",
+            if transition_valid { "attempting status transition" } else { "invalid status transition attempted" },
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": old_status.label(),
+                "new_status": new_status.label(),
+                "transition_valid": transition_valid,
+                "role": self.role.label(),
+            }),
+        );
+
+        if !transition_valid {
             return Err(format!(
                 "Invalid transition from {} to {}",
-                self.status.label(),
+                old_status.label(),
                 new_status.label()
             ));
         }
         self.status = new_status;
         self.last_activity = Instant::now();
+
+        logging::debug_event(
+            "slot.transition.complete",
+            "status transition completed",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "new_status": self.status.label(),
+                "role": self.role.label(),
+            }),
+        );
+
         Ok(())
     }
 
@@ -522,19 +590,64 @@ impl AgentSlot {
 
     /// Assign a task to this agent
     pub fn assign_task(&mut self, task_id: TaskId) -> Result<(), String> {
+        logging::debug_event(
+            "slot.task.assign",
+            "task assignment requested",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "task_id": task_id.as_str(),
+                "current_status": self.status.label(),
+            }),
+        );
+
         if self.status != AgentSlotStatus::Idle {
-            return Err(format!(
+            let err = format!(
                 "Cannot assign task to agent with status {}",
                 self.status.label()
-            ));
+            );
+            logging::debug_event(
+                "slot.task.assign.failed",
+                "task assignment failed - agent not idle",
+                serde_json::json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "codename": self.codename.as_str(),
+                    "task_id": task_id.as_str(),
+                    "current_status": self.status.label(),
+                    "error": err,
+                }),
+            );
+            return Err(err);
         }
-        self.assigned_task_id = Some(task_id);
+        self.assigned_task_id = Some(task_id.clone());
         self.last_activity = Instant::now();
+
+        logging::debug_event(
+            "slot.task.assign.complete",
+            "task assigned successfully",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "task_id": task_id.as_str(),
+            }),
+        );
+
         Ok(())
     }
 
     /// Clear the assigned task
     pub fn clear_task(&mut self) {
+        let task_id = self.assigned_task_id.as_ref().map(|t| t.as_str().to_string());
+        logging::debug_event(
+            "slot.task.clear",
+            "task cleared from agent",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "task_id": task_id,
+                "status": self.status.label(),
+            }),
+        );
         self.assigned_task_id = None;
     }
 

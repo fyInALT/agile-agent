@@ -8,6 +8,7 @@ use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
+use crate::logging;
 use crate::provider::ProviderKind;
 
 /// Snapshot of an agent's status for display
@@ -140,6 +141,15 @@ impl AgentPool {
     /// Returns the new agent's ID on success, or error if pool is full.
     pub fn spawn_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
         if !self.can_spawn() {
+            logging::debug_event(
+                "pool.agent.spawn.failed",
+                "failed to spawn agent - pool is full",
+                serde_json::json!({
+                    "reason": "pool_full",
+                    "pool_size": self.slots.len(),
+                    "max_slots": self.max_slots,
+                }),
+            );
             return Err("Agent pool is full".to_string());
         }
 
@@ -147,12 +157,32 @@ impl AgentPool {
         let codename = Self::generate_codename(self.next_agent_index - 1);
         let provider_type = ProviderType::from_provider_kind(provider_kind);
 
-        let slot = AgentSlot::new(agent_id.clone(), codename, provider_type);
+        let slot = AgentSlot::new(agent_id.clone(), codename.clone(), provider_type);
         self.slots.push(slot);
+
+        logging::debug_event(
+            "pool.agent.spawn",
+            "spawned new agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "provider_type": provider_type.label(),
+                "pool_size": self.slots.len(),
+                "max_slots": self.max_slots,
+            }),
+        );
 
         // Focus on the newly spawned agent if this is the first one
         if self.slots.len() == 1 {
             self.focused_slot = 0;
+            logging::debug_event(
+                "pool.focus.change",
+                "focus set to first agent after spawn",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "index": 0,
+                }),
+            );
         }
 
         Ok(agent_id)
@@ -165,16 +195,44 @@ impl AgentPool {
     pub fn spawn_overview_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
         // Check if OVERVIEW agent already exists
         if self.slots.iter().any(|s| s.role() == AgentRole::ProductOwner) {
+            logging::debug_event(
+                "pool.agent.spawn.failed",
+                "failed to spawn OVERVIEW agent - already exists",
+                serde_json::json!({
+                    "reason": "overview_already_exists",
+                    "pool_size": self.slots.len(),
+                }),
+            );
             return Err("OVERVIEW agent already exists".to_string());
         }
 
         if !self.can_spawn() {
+            logging::debug_event(
+                "pool.agent.spawn.failed",
+                "failed to spawn OVERVIEW agent - pool is full",
+                serde_json::json!({
+                    "reason": "pool_full",
+                    "pool_size": self.slots.len(),
+                    "max_slots": self.max_slots,
+                }),
+            );
             return Err("Agent pool is full".to_string());
         }
 
         let agent_id = AgentId::new("OVERVIEW");
         let codename = AgentCodename::new("OVERVIEW");
         let provider_type = ProviderType::from_provider_kind(provider_kind);
+
+        logging::debug_event(
+            "pool.agent.spawn_overview",
+            "spawning OVERVIEW agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "provider_type": provider_type.label(),
+                "pool_size_before": self.slots.len(),
+            }),
+        );
 
         let slot = AgentSlot::with_role(agent_id.clone(), codename, provider_type, AgentRole::ProductOwner);
 
@@ -185,6 +243,15 @@ impl AgentPool {
 
         // Focus on OVERVIEW agent by default
         self.focused_slot = 0;
+
+        logging::debug_event(
+            "pool.focus.change",
+            "focus set to OVERVIEW agent after spawn",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "index": 0,
+            }),
+        );
 
         Ok(agent_id)
     }
@@ -200,8 +267,22 @@ impl AgentPool {
     pub fn stop_agent(&mut self, agent_id: &AgentId) -> Result<usize, String> {
         let index = self.find_slot_index(agent_id)?;
         let slot = &mut self.slots[index];
-        slot.transition_to(AgentSlotStatus::stopped("user requested"))
+        let codename = slot.codename().clone();
+        let reason = "user requested";
+        slot.transition_to(AgentSlotStatus::stopped(reason))
             .map_err(|e| format!("Failed to stop agent: {}", e))?;
+
+        logging::debug_event(
+            "pool.agent.stop",
+            "stopped agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "slot_index": index,
+                "reason": reason,
+            }),
+        );
+
         Ok(index)
     }
 
@@ -212,15 +293,45 @@ impl AgentPool {
         let index = self.find_slot_index(agent_id)?;
         let slot = &self.slots[index];
         if !slot.status().is_terminal() {
+            logging::debug_event(
+                "pool.agent.remove.failed",
+                "failed to remove agent - not in terminal state",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "current_status": slot.status().label(),
+                }),
+            );
             return Err(format!(
                 "Cannot remove agent with status {} (must be stopped)",
                 slot.status().label()
             ));
         }
+        let codename = slot.codename().clone();
         self.slots.remove(index);
+
+        logging::debug_event(
+            "pool.agent.remove",
+            "removed agent from pool",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "pool_size_after": self.slots.len(),
+            }),
+        );
+
         // Adjust focus if necessary
         if self.focused_slot >= self.slots.len() && !self.slots.is_empty() {
             self.focused_slot = self.slots.len() - 1;
+            if let Some(new_focused) = self.slots.get(self.focused_slot) {
+                logging::debug_event(
+                    "pool.focus.adjust",
+                    "adjusted focus after agent removal",
+                    serde_json::json!({
+                        "new_index": self.focused_slot,
+                        "new_agent_id": new_focused.agent_id().as_str(),
+                    }),
+                );
+            }
         }
         Ok(())
     }
@@ -287,19 +398,57 @@ impl AgentPool {
     /// Switch focus to a different agent by index
     pub fn focus_agent_by_index(&mut self, index: usize) -> Result<(), String> {
         if index >= self.slots.len() {
+            logging::debug_event(
+                "pool.focus.invalid_index",
+                "invalid focus index",
+                serde_json::json!({
+                    "attempted_index": index,
+                    "pool_size": self.slots.len(),
+                }),
+            );
             return Err(format!(
                 "Invalid focus index {} (only {} agents)",
                 index,
                 self.slots.len()
             ));
         }
+        let old_index = self.focused_slot;
+        let old_agent_id = self.slots.get(old_index).map(|s| s.agent_id().as_str().to_string());
+        let new_agent_id = self.slots.get(index).map(|s| s.agent_id().as_str().to_string());
         self.focused_slot = index;
+
+        logging::debug_event(
+            "pool.focus.change",
+            "focus changed by index",
+            serde_json::json!({
+                "old_index": old_index,
+                "new_index": index,
+                "old_agent_id": old_agent_id,
+                "new_agent_id": new_agent_id,
+            }),
+        );
+
         Ok(())
     }
 
     /// Switch focus to a different agent by ID
     pub fn focus_agent(&mut self, agent_id: &AgentId) -> Result<(), String> {
         let index = self.find_slot_index(agent_id)?;
+        let old_index = self.focused_slot;
+        let old_agent_id = self.slots.get(old_index).map(|s| s.agent_id().as_str().to_string());
+        let new_codename = self.slots.get(index).map(|s| s.codename().as_str().to_string());
+
+        logging::debug_event(
+            "pool.focus.change.by_id",
+            "focus changed by agent ID",
+            serde_json::json!({
+                "old_index": old_index,
+                "old_agent_id": old_agent_id,
+                "new_agent_id": agent_id.as_str(),
+                "new_codename": new_codename,
+            }),
+        );
+
         self.focus_agent_by_index(index)
     }
 
@@ -346,7 +495,32 @@ impl AgentPool {
         let slot = self
             .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
-        slot.assign_task(task_id)
+        let codename = slot.codename().clone();
+        slot.assign_task(task_id.clone()).map_err(|e| {
+            logging::debug_event(
+                "pool.task.assign.failed",
+                "failed to assign task",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "codename": codename.as_str(),
+                    "task_id": task_id.as_str(),
+                    "reason": e,
+                }),
+            );
+            e
+        })?;
+
+        logging::debug_event(
+            "pool.task.assign",
+            "assigned task to agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "task_id": task_id.as_str(),
+            }),
+        );
+
+        Ok(())
     }
 
     /// Assign a task to an idle agent with backlog validation
@@ -363,6 +537,15 @@ impl AgentPool {
     ) -> Result<(), String> {
         // Validate task exists and is ready
         if !backlog.can_assign_task(task_id.as_str()) {
+            logging::debug_event(
+                "pool.task.assign.failed",
+                "failed to assign task - task not ready",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "task_id": task_id.as_str(),
+                    "reason": "task_not_ready_or_not_found",
+                }),
+            );
             return Err(format!(
                 "Task {} cannot be assigned (not found or not ready)",
                 task_id.as_str()
@@ -373,10 +556,35 @@ impl AgentPool {
         let slot = self
             .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
-        slot.assign_task(task_id.clone())?;
+        let codename = slot.codename().clone();
+        slot.assign_task(task_id.clone()).map_err(|e| {
+            logging::debug_event(
+                "pool.task.assign.failed",
+                "failed to assign task",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "codename": codename.as_str(),
+                    "task_id": task_id.as_str(),
+                    "reason": e,
+                }),
+            );
+            e
+        })?;
 
         // Update backlog status
         backlog.start_task(task_id.as_str());
+
+        logging::debug_event(
+            "pool.task.assign",
+            "assigned task with backlog update",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "task_id": task_id.as_str(),
+                "old_status": "ready",
+                "new_status": "running",
+            }),
+        );
 
         Ok(())
     }
@@ -402,8 +610,10 @@ impl AgentPool {
             .cloned()
             .ok_or_else(|| format!("Agent {} has no assigned task", agent_id.as_str()))?;
 
+        let codename = slot.codename().clone();
+
         // Update backlog based on result
-        match result {
+        match &result {
             TaskCompletionResult::Success => {
                 backlog.complete_task(
                     task_id.as_str(),
@@ -411,12 +621,31 @@ impl AgentPool {
                 );
             }
             TaskCompletionResult::Failure { error } => {
-                backlog.fail_task(task_id.as_str(), error);
+                backlog.fail_task(task_id.as_str(), error.clone());
             }
         }
 
         // Clear assignment
         slot.clear_task();
+
+        logging::debug_event(
+            "pool.task.complete",
+            "completed task",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "task_id": task_id.as_str(),
+                "result": match result {
+                    TaskCompletionResult::Success => "success",
+                    TaskCompletionResult::Failure { .. } => "failure",
+                },
+                "old_status": "running",
+                "new_status": match result {
+                    TaskCompletionResult::Success => "done",
+                    TaskCompletionResult::Failure { .. } => "failed",
+                },
+            }),
+        );
 
         Ok(task_id)
     }
@@ -450,9 +679,35 @@ impl AgentPool {
         let task_id = TaskId::new(&task_id_str);
 
         // Attempt assignment
-        self.assign_task_with_backlog(&agent_id, task_id.clone(), backlog)
-            .ok()
-            .map(|_| (agent_id, task_id))
+        match self.assign_task_with_backlog(&agent_id, task_id.clone(), backlog) {
+            Ok(()) => {
+                logging::debug_event(
+                    "pool.task.auto_assign",
+                    "auto-assigned task to idle agent",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "task_id": task_id.as_str(),
+                    }),
+                );
+                Some((agent_id, task_id))
+            }
+            Err(e) => {
+                let available_agents = self.slots.iter().filter(|s| *s.status() == AgentSlotStatus::Idle).count();
+                let ready_count = backlog.ready_tasks().len();
+                logging::debug_event(
+                    "pool.task.auto_assign.failed",
+                    "auto-assign failed",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "task_id": task_id.as_str(),
+                        "reason": e,
+                        "available_agents": available_agents,
+                        "ready_tasks": ready_count,
+                    }),
+                );
+                None
+            }
+        }
     }
 
     /// Check if any agent is active (responding or executing)
