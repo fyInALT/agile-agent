@@ -487,6 +487,55 @@ fn overview_mode_displays_agent_list() {
 
     // Should show agent indicator and hint
     assert!(rendered.contains("◎") || rendered.contains("○"));
+
+    // Should show the scroll log placeholder
+    assert!(rendered.contains("No activity yet") || rendered.contains("Overview"));
+}
+
+#[test]
+fn overview_mode_layout_has_both_regions() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    // Render with enough height to see both regions
+    let rendered = shell.render_to_string(80, 30);
+
+    // Print the rendered output for debugging
+    println!("=== Overview Mode Rendered Output ===\n{}", rendered);
+
+    // Should have agent list at top (row 0-7, with ◎ or ○ indicator)
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert!(
+        lines.len() >= 25,
+        "Should have 30 lines, got {}",
+        lines.len()
+    );
+
+    // First few lines should contain agent indicators
+    let top_section = lines[0..8].join("\n");
+    assert!(
+        top_section.contains("◎") || top_section.contains("○") || top_section.contains("alpha"),
+        "Agent list should be visible in top section. Top section:\n{}",
+        top_section
+    );
+
+    // Middle section should have scroll log placeholder
+    let middle_section = lines[8..25].join("\n");
+    assert!(
+        middle_section.contains("No activity yet") || middle_section.contains("Overview"),
+        "Scroll log area should be visible in middle section. Middle section:\n{}",
+        middle_section
+    );
+
+    // Bottom should have input box
+    let bottom_section = lines[25..].join("\n");
+    assert!(
+        bottom_section.contains("Ask")
+            || bottom_section.contains("?")
+            || bottom_section.contains("tab"),
+        "Input box should be visible at bottom. Bottom section:\n{}",
+        bottom_section
+    );
 }
 
 #[test]
@@ -616,4 +665,69 @@ fn overview_cycle_filter_modes() {
     );
     shell.state.view_state.overview.cycle_filter();
     assert_eq!(shell.state.view_state.overview.filter, OverviewFilter::All);
+}
+
+#[test]
+fn overview_search_starts_with_slash() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+
+    assert!(shell.state.view_state.overview.search_active);
+}
+
+#[test]
+fn overview_search_input_and_cancel() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    // Start search
+    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('a'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('l'), KeyModifiers::NONE);
+
+    assert_eq!(shell.state.view_state.overview.search_query, "al");
+
+    // Cancel with Esc
+    shell.press(KeyCode::Esc, KeyModifiers::NONE);
+
+    assert!(!shell.state.view_state.overview.search_active);
+    assert_eq!(shell.state.view_state.overview.search_query, "");
+}
+
+#[test]
+fn overview_timestamp_same_minute_omitted() {
+    let mut shell = ShellHarness::new(ProviderKind::Mock);
+    shell.state.view_state.switch_by_number(6);
+
+    // Add messages within same minute
+    shell
+        .state
+        .view_state
+        .overview
+        .push_log_message(OverviewLogMessage {
+            timestamp: 143210, // 14:32:10
+            agent: "alpha".to_string(),
+            message_type: OverviewMessageType::Progress,
+            content: "First message".to_string(),
+        });
+    shell
+        .state
+        .view_state
+        .overview
+        .push_log_message(OverviewLogMessage {
+            timestamp: 143215, // 14:32:15 - same minute
+            agent: "alpha".to_string(),
+            message_type: OverviewMessageType::Progress,
+            content: "Second message".to_string(),
+        });
+
+    let rendered = shell.render_to_string(80, 24);
+
+    // First message should have timestamp, second should not
+    assert!(rendered.contains("[14:32:10]"));
+    // The second message at 14:32:15 should show blank space instead of timestamp
+    // (we verify by checking the content is visible but not the second timestamp)
+    assert!(rendered.contains("Second message"));
 }

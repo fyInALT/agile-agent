@@ -414,6 +414,37 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         InputOutcome::OverviewPageDown => {
                             state.view_state.overview.page_down(1);
                         }
+                        InputOutcome::OverviewSearchStart => {
+                            state.view_state.overview.search_active = true;
+                            state.view_state.overview.search_query.clear();
+                            state
+                                .app_mut()
+                                .push_status_message("search: type agent name, Enter to select");
+                        }
+                        InputOutcome::OverviewSearchCancel => {
+                            state.view_state.overview.search_active = false;
+                            state.view_state.overview.search_query.clear();
+                            state.app_mut().push_status_message("search cancelled");
+                        }
+                        InputOutcome::OverviewSearchSelect(agent_name) => {
+                            // Find agent by name and focus it
+                            let statuses = state.agent_statuses();
+                            if let Some(index) = statuses
+                                .iter()
+                                .position(|s| s.codename.as_str() == agent_name)
+                            {
+                                state.view_state.overview.focused_agent_index = index;
+                                state.view_state.overview.search_active = false;
+                                state.view_state.overview.search_query.clear();
+                                state
+                                    .app_mut()
+                                    .push_status_message(format!("focused {}", agent_name));
+                            } else {
+                                state
+                                    .app_mut()
+                                    .push_status_message(format!("agent {} not found", agent_name));
+                            }
+                        }
                         InputOutcome::Quit => {
                             state.session.workplace_mut().loop_control.signal_quit();
                         }
@@ -460,6 +491,52 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     }
                 }
                 Event::Paste(text) => handle_paste_event(&mut state, &text),
+                Event::Mouse(mouse_event) => {
+                    // Handle mouse click in Overview mode for agent selection
+                    if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                        use crossterm::event::MouseEventKind;
+                        if let MouseEventKind::Down(crossterm::event::MouseButton::Left) =
+                            mouse_event.kind
+                        {
+                            // Calculate which agent row was clicked
+                            let agent_list_height =
+                                state.view_state.overview.agent_list_rows as u16;
+                            let click_row = mouse_event.row;
+
+                            // Click within agent list area
+                            if click_row < agent_list_height {
+                                let statuses = state.agent_statuses();
+                                let filter = state.view_state.overview.filter;
+
+                                // Apply filter to get visible agents
+                                let filtered: Vec<_> = statuses
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, s)| match filter {
+                                        crate::overview_state::OverviewFilter::All => true,
+                                        crate::overview_state::OverviewFilter::BlockedOnly => {
+                                            s.status.is_blocked()
+                                        }
+                                        crate::overview_state::OverviewFilter::RunningOnly => {
+                                            s.status.is_active()
+                                        }
+                                    })
+                                    .collect();
+
+                                // Select clicked agent
+                                let clicked_index = click_row as usize;
+                                if clicked_index < filtered.len() {
+                                    let (original_index, snapshot) = filtered[clicked_index];
+                                    state.view_state.overview.focused_agent_index = clicked_index;
+                                    state.app_mut().push_status_message(format!(
+                                        "focused {}",
+                                        snapshot.codename.as_str()
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
                 Event::Resize(_, _) => {}
                 _ => {}
             }

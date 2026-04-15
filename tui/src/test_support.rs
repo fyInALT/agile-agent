@@ -227,6 +227,25 @@ impl ShellHarness {
             InputOutcome::OverviewPageDown => {
                 self.state.view_state.overview.page_down(1);
             }
+            InputOutcome::OverviewSearchStart => {
+                self.state.view_state.overview.search_active = true;
+                self.state.view_state.overview.search_query.clear();
+            }
+            InputOutcome::OverviewSearchCancel => {
+                self.state.view_state.overview.search_active = false;
+                self.state.view_state.overview.search_query.clear();
+            }
+            InputOutcome::OverviewSearchSelect(agent_name) => {
+                let statuses = self.state.agent_statuses();
+                if let Some(index) = statuses
+                    .iter()
+                    .position(|s| s.codename.as_str() == agent_name)
+                {
+                    self.state.view_state.overview.focused_agent_index = index;
+                    self.state.view_state.overview.search_active = false;
+                    self.state.view_state.overview.search_query.clear();
+                }
+            }
         }
     }
 }

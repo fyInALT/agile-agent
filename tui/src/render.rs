@@ -386,9 +386,12 @@ fn render_overview_scroll_log(frame: &mut Frame<'_>, state: &mut TuiState, area:
     let log_buffer = &state.view_state.overview.log_buffer;
     let scroll_offset = state.view_state.overview.log_scroll_offset;
 
-    // Build log lines
+    // Build log lines with timestamp optimization (same minute omission)
     let mut lines = Vec::new();
+    let mut last_minute: Option<u32> = None; // Track last displayed minute
+
     for msg in log_buffer.iter().skip(scroll_offset) {
+        let msg_minute = msg.timestamp / 100; // Extract minute (HH:MM)
         let timestamp_str = format_time_from_u32(msg.timestamp);
         let indicator = msg.message_type.indicator();
 
@@ -399,11 +402,19 @@ fn render_overview_scroll_log(frame: &mut Frame<'_>, state: &mut TuiState, area:
             _ => Color::Gray,
         };
 
-        lines.push(Line::from(vec![
+        // Omit timestamp if same minute as previous message
+        let timestamp_span = if last_minute == Some(msg_minute) {
+            Span::styled("      ", Style::default().fg(Color::DarkGray)) // Blank space
+        } else {
+            last_minute = Some(msg_minute);
             Span::styled(
                 format!("[{}]", timestamp_str),
                 Style::default().fg(Color::DarkGray),
-            ),
+            )
+        };
+
+        lines.push(Line::from(vec![
+            timestamp_span,
             Span::raw(" "),
             Span::styled(indicator, Style::default().fg(color)),
             Span::raw(" "),

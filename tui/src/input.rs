@@ -74,6 +74,12 @@ pub enum InputOutcome {
     OverviewPageUp,
     /// Overview: page down in agent list
     OverviewPageDown,
+    /// Overview: start search mode
+    OverviewSearchStart,
+    /// Overview: cancel search mode
+    OverviewSearchCancel,
+    /// Overview: select search result
+    OverviewSearchSelect(String),
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -116,6 +122,50 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
 
     if state.is_overlay_open() {
         return InputOutcome::None;
+    }
+
+    // Overview search mode: handle character input and Enter/Esc
+    if state.view_state.mode == crate::view_mode::ViewMode::Overview
+        && state.view_state.overview.search_active
+    {
+        return match key_event.code {
+            KeyCode::Esc => InputOutcome::OverviewSearchCancel,
+            KeyCode::Enter => {
+                let query = state.view_state.overview.search_query.clone();
+                // Find matching agent (partial match)
+                let statuses = state.agent_statuses();
+                let matched = statuses
+                    .iter()
+                    .find(|s| s.codename.as_str().starts_with(&query));
+                if let Some(agent) = matched {
+                    InputOutcome::OverviewSearchSelect(agent.codename.as_str().to_string())
+                } else if query.is_empty() {
+                    InputOutcome::OverviewSearchCancel
+                } else {
+                    InputOutcome::None // No match, stay in search mode
+                }
+            }
+            KeyCode::Backspace => {
+                state.view_state.overview.search_query.pop();
+                InputOutcome::None
+            }
+            KeyCode::Char(c) => {
+                state.view_state.overview.search_query.push(c);
+                // Auto-select if query matches exactly one agent
+                let query = &state.view_state.overview.search_query;
+                let statuses = state.agent_statuses();
+                let matches: Vec<_> = statuses
+                    .iter()
+                    .filter(|s| s.codename.as_str().starts_with(query))
+                    .collect();
+                if matches.len() == 1 {
+                    InputOutcome::OverviewSearchSelect(matches[0].codename.as_str().to_string())
+                } else {
+                    InputOutcome::None
+                }
+            }
+            _ => InputOutcome::None,
+        };
     }
 
     match key_event {
@@ -403,6 +453,30 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
         {
             InputOutcome::OverviewPageDown
+        }
+
+        // Overview: search mode (/ key)
+        KeyEvent {
+            code: KeyCode::Char('/'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.composer.is_empty()
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
+        {
+            InputOutcome::OverviewSearchStart
+        }
+
+        // Overview: cancel search mode (Esc)
+        KeyEvent {
+            code: KeyCode::Esc,
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::NONE)
+            && state.view_state.mode == crate::view_mode::ViewMode::Overview
+            && state.view_state.overview.search_active =>
+        {
+            InputOutcome::OverviewSearchCancel
         }
 
         // Agent focus switching (Ctrl+1-9 for direct selection)
@@ -1051,6 +1125,48 @@ mod tests {
         );
 
         assert!(matches!(outcome, InputOutcome::OverviewPageDown));
+    }
+
+    #[test]
+    fn overview_search_start_with_slash() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::OverviewSearchStart));
+    }
+
+    #[test]
+    fn overview_search_cancel_with_esc() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+        state.view_state.overview.search_active = true;
+
+        let outcome = handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::OverviewSearchCancel));
+    }
+
+    #[test]
+    fn overview_search_input_adds_to_query() {
+        let app = AppState::new(ProviderKind::Mock);
+        let mut state = state_from_app(app);
+        state.view_state.switch_by_number(6);
+        state.view_state.overview.search_active = true;
+
+        let outcome = handle_key_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        );
+
+        assert!(matches!(outcome, InputOutcome::None));
+        assert_eq!(state.view_state.overview.search_query, "a");
     }
 
     #[test]
