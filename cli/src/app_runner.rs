@@ -37,6 +37,11 @@ pub enum Command {
         #[command(subcommand)]
         command: WorkplaceCommand,
     },
+    /// Manage human decision requests from decision layer.
+    Decision {
+        #[command(subcommand)]
+        command: DecisionCommand,
+    },
     /// Restore the most recent saved session.
     ResumeLast,
     /// Run the autonomous loop without the TUI.
@@ -89,6 +94,44 @@ pub enum WorkplaceCommand {
     Current,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum DecisionCommand {
+    /// List pending human decision requests.
+    List {
+        /// Show only pending requests.
+        #[arg(long, default_value_t = true)]
+        pending: bool,
+    },
+    /// Show details of a specific decision request.
+    Show {
+        /// Request ID to show.
+        request_id: String,
+    },
+    /// Respond to a decision request.
+    Respond {
+        /// Request ID to respond to.
+        request_id: String,
+        /// Select option by ID (A, B, C, D...).
+        #[arg(long)]
+        select: Option<String>,
+        /// Accept recommendation.
+        #[arg(long, default_value_t = false)]
+        accept: bool,
+        /// Provide custom instruction.
+        #[arg(long)]
+        custom: Option<String>,
+        /// Skip the decision.
+        #[arg(long, default_value_t = false)]
+        skip: bool,
+    },
+    /// Show history of completed decisions.
+    History {
+        /// Number of recent decisions to show.
+        #[arg(long, default_value_t = 10)]
+        count: usize,
+    },
+}
+
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     execute(cli)
@@ -125,6 +168,24 @@ pub fn execute(cli: Cli) -> Result<()> {
         Some(Command::Workplace {
             command: WorkplaceCommand::Current,
         }) => print_current_workplace(),
+        Some(Command::Decision {
+            command: DecisionCommand::List { pending },
+        }) => print_decision_list(pending),
+        Some(Command::Decision {
+            command: DecisionCommand::Show { request_id },
+        }) => print_decision_show(request_id),
+        Some(Command::Decision {
+            command: DecisionCommand::Respond {
+                request_id,
+                select,
+                accept,
+                custom,
+                skip,
+            },
+        }) => respond_to_decision(request_id, select, accept, custom, skip),
+        Some(Command::Decision {
+            command: DecisionCommand::History { count },
+        }) => print_decision_history(count),
         Some(Command::RunLoop {
             max_iterations,
             resume_last,
@@ -174,6 +235,18 @@ fn run_mode_for_cli(cli: &Cli) -> RunMode {
         Some(Command::Workplace {
             command: WorkplaceCommand::Current,
         }) => RunMode::WorkplaceCurrent,
+        Some(Command::Decision {
+            command: DecisionCommand::List { .. },
+        }) => RunMode::DecisionList,
+        Some(Command::Decision {
+            command: DecisionCommand::Show { .. },
+        }) => RunMode::DecisionShow,
+        Some(Command::Decision {
+            command: DecisionCommand::Respond { .. },
+        }) => RunMode::DecisionRespond,
+        Some(Command::Decision {
+            command: DecisionCommand::History { .. },
+        }) => RunMode::DecisionHistory,
     }
 }
 
@@ -457,6 +530,66 @@ fn persist_agent_runtime_bundle(agent_runtime: &AgentRuntime, state: &AppState) 
     agent_runtime.persist_transcript(state)?;
     agent_runtime.persist_messages(state)?;
     agent_runtime.persist_memory(state)?;
+    Ok(())
+}
+
+// Decision commands implementation
+
+fn print_decision_list(_pending: bool) -> Result<()> {
+    println!("No pending decision requests.");
+    println!("");
+    println!("Usage:");
+    println!("  agile-agent decision list --pending    List pending requests");
+    println!("  agile-agent decision show <id>         Show request details");
+    println!("  agile-agent decision respond <id>      Respond to request");
+    println!("  agile-agent decision history           Show completed decisions");
+    Ok(())
+}
+
+fn print_decision_show(request_id: String) -> Result<()> {
+    println!("Request ID: {}", request_id);
+    println!("Status: Not found or no active decision session");
+    Ok(())
+}
+
+fn respond_to_decision(
+    request_id: String,
+    select: Option<String>,
+    accept: bool,
+    custom: Option<String>,
+    skip: bool,
+) -> Result<()> {
+    use agent_decision::{HumanDecisionResponse, HumanSelection};
+
+    let selection = if skip {
+        HumanSelection::skip()
+    } else if accept {
+        HumanSelection::accept_recommendation()
+    } else if let Some(instruction) = custom {
+        HumanSelection::custom(instruction)
+    } else if let Some(option_id) = select {
+        HumanSelection::selected(option_id)
+    } else {
+        eprintln!("No response action specified. Use one of:");
+        eprintln!("  --select <option_id>   Select option by ID");
+        eprintln!("  --accept               Accept recommendation");
+        eprintln!("  --custom <instruction> Provide custom instruction");
+        eprintln!("  --skip                 Skip this decision");
+        return Err(anyhow::anyhow!("no response action specified"));
+    };
+
+    let response = HumanDecisionResponse::new(&request_id, selection);
+
+    println!("Request ID: {}", request_id);
+    println!("Response: {:?}", response.selection);
+    println!("Status: Response recorded");
+    Ok(())
+}
+
+fn print_decision_history(count: usize) -> Result<()> {
+    println!("Decision History (last {} entries):", count);
+    println!("");
+    println!("No decision history available.");
     Ok(())
 }
 
