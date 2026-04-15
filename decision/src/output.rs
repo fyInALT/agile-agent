@@ -233,6 +233,6 @@ mod tests {
 
         assert_eq!(record.decision_id, "dec-1");
         assert_eq!(record.situation_type, SituationType::new("waiting_for_choice"));
-        assert_eq!(record.engine_type, DecisionEngineType::Mock);
+        assert!(record.engine_type.is_mock());
     }
 }

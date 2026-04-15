@@ -24,6 +24,10 @@ pub mod codex_classifier;
 pub mod acp_classifier;
 pub mod initializer;
 
+// Sprint 3: Decision Engine
+pub mod engine;
+pub mod mock_engine;
+
 // Re-export core types
 pub use error::*;
 pub use types::*;
@@ -62,3 +66,7 @@ pub use provider_event::*;
 pub use classifier::*;
 pub use classifier_registry::*;
 pub use initializer::*;
+
+// Re-export Sprint 3 types
+pub use engine::*;
+pub use mock_engine::*;

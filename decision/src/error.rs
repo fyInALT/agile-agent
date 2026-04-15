@@ -33,3 +33,6 @@ pub enum DecisionError {
     #[error("Blocking resolution failed: {0}")]
     BlockingError(String),
 }
+
+/// Result type alias for decision layer
+pub type Result<T> = std::result::Result<T, DecisionError>;

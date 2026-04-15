@@ -110,23 +110,50 @@ impl fmt::Display for UrgencyLevel {
 /// Decision engine type identifier
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionEngineType {
-    LLM,
-    CLI,
+    /// LLM-based engine with provider
+    LLM { provider: crate::provider_kind::ProviderKind },
+    /// CLI-based engine with provider
+    CLI { provider: crate::provider_kind::ProviderKind },
+    /// Rule-based engine
     RuleBased,
+    /// Mock engine for testing
     Mock,
-    Tiered,
+    /// Custom engine
+    Custom { name: String },
+}
+
+impl DecisionEngineType {
+    /// Check if this is an LLM engine
+    pub fn is_llm(&self) -> bool {
+        matches!(self, DecisionEngineType::LLM { .. })
+    }
+
+    /// Check if this is a CLI engine
+    pub fn is_cli(&self) -> bool {
+        matches!(self, DecisionEngineType::CLI { .. })
+    }
+
+    /// Check if this is a mock engine
+    pub fn is_mock(&self) -> bool {
+        matches!(self, DecisionEngineType::Mock)
+    }
 }
 
 impl fmt::Display for DecisionEngineType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DecisionEngineType::LLM => write!(f, "llm"),
-            DecisionEngineType::CLI => write!(f, "cli"),
+            DecisionEngineType::LLM { provider } => write!(f, "llm:{}", provider),
+            DecisionEngineType::CLI { provider } => write!(f, "cli:{}", provider),
             DecisionEngineType::RuleBased => write!(f, "rule_based"),
             DecisionEngineType::Mock => write!(f, "mock"),
-            DecisionEngineType::Tiered => write!(f, "tiered"),
+            DecisionEngineType::Custom { name } => write!(f, "custom:{}", name),
         }
     }
+}
+
+/// Generate a unique ID with prefix
+pub fn generate_id(prefix: &str) -> String {
+    format!("{}-{}", prefix, chrono::Utc::now().timestamp_millis())
 }
 
 #[cfg(test)]
