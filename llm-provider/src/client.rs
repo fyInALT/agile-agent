@@ -137,7 +137,7 @@ impl LlmClient {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(LlmError::Api(format!("HTTP {}: {}", status, error_text)));
+            return Err(LlmError::Api(format!("HTTP {}: {}", status, error_text)).into());
         }
 
         let mut stream = response.bytes_stream();
@@ -160,7 +160,7 @@ impl LlmClient {
                         }
                     }
                 }
-                Err(e) => return Err(LlmError::Network(e)),
+                Err(e) => return Err(LlmError::Network(e).into()),
             }
         }
 
