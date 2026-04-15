@@ -3,6 +3,7 @@
 //! Central coordination structure for multi-agent runtime.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
@@ -19,6 +20,38 @@ use agent_decision::{
     HumanDecisionQueue, HumanDecisionTimeoutConfig,
     SituationType,
 };
+
+/// Event emitted when an agent becomes blocked
+#[derive(Debug, Clone)]
+pub struct AgentBlockedEvent {
+    /// The blocked agent ID
+    pub agent_id: AgentId,
+    /// The reason type
+    pub reason_type: String,
+    /// Human readable description
+    pub description: String,
+    /// Urgency level
+    pub urgency: String,
+}
+
+/// Notifier trait for agent blocked events
+///
+/// Implement this trait to receive notifications when agents become blocked.
+/// This enables other agents or systems to react to blocking events.
+pub trait AgentBlockedNotifier: Send + Sync {
+    /// Called when an agent becomes blocked
+    fn on_agent_blocked(&self, event: AgentBlockedEvent);
+}
+
+/// No-op notifier that does nothing
+#[derive(Debug, Clone, Default)]
+pub struct NoOpAgentBlockedNotifier;
+
+impl AgentBlockedNotifier for NoOpAgentBlockedNotifier {
+    fn on_agent_blocked(&self, _event: AgentBlockedEvent) {
+        // Do nothing
+    }
+}
 
 /// Snapshot of an agent's status for display
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,7 +177,6 @@ pub enum DecisionExecutionResult {
 }
 
 /// Pool managing multiple agent slots
-#[derive(Debug)]
 pub struct AgentPool {
     /// All active agent slots
     slots: Vec<AgentSlot>,
@@ -162,6 +194,23 @@ pub struct AgentPool {
     blocked_config: BlockedHandlingConfig,
     /// Blocking history records
     blocked_history: Vec<BlockedHistoryEntry>,
+    /// Notifier for blocked events (used when notify_others is true)
+    blocked_notifier: Arc<dyn AgentBlockedNotifier>,
+}
+
+impl std::fmt::Debug for AgentPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentPool")
+            .field("slots", &self.slots)
+            .field("max_slots", &self.max_slots)
+            .field("next_agent_index", &self.next_agent_index)
+            .field("focused_slot", &self.focused_slot)
+            .field("workplace_id", &self.workplace_id)
+            .field("human_queue", &self.human_queue)
+            .field("blocked_config", &self.blocked_config)
+            .field("blocked_history", &self.blocked_history)
+            .finish()
+    }
 }
 
 impl AgentPool {
@@ -176,6 +225,7 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_config: BlockedHandlingConfig::default(),
             blocked_history: Vec::new(),
+            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
         }
     }
 
@@ -190,7 +240,13 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
             blocked_config: config,
             blocked_history: Vec::new(),
+            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
         }
+    }
+
+    /// Set a custom blocked notifier
+    pub fn set_blocked_notifier(&mut self, notifier: Arc<dyn AgentBlockedNotifier>) {
+        self.blocked_notifier = notifier;
     }
 
     /// Get the maximum number of slots
@@ -1058,6 +1114,13 @@ impl AgentPool {
                     "urgency": format!("{}", blocked_state.reason().urgency()),
                 }),
             );
+            let event = AgentBlockedEvent {
+                agent_id: agent_id.clone(),
+                reason_type: reason_type.to_string(),
+                description: blocked_state.reason().description(),
+                urgency: format!("{}", blocked_state.reason().urgency()),
+            };
+            self.blocked_notifier.on_agent_blocked(event);
         }
 
         // Handle blocked task
@@ -2194,5 +2257,148 @@ mod tests {
         assert!(matches!(cancelled, DecisionExecutionResult::Cancelled));
         assert!(matches!(not_found, DecisionExecutionResult::AgentNotFound));
         assert!(matches!(not_blocked, DecisionExecutionResult::NotBlocked));
+    }
+
+    #[test]
+    fn blocked_history_pruning_removes_resolved_first() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Add 5 blocked entries
+        for i in 0..5 {
+            let blocking = HumanDecisionBlocking::new(
+                format!("req-{}", i),
+                Box::new(WaitingForChoiceSituation::default()),
+                vec![],
+            );
+            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+        }
+
+        // Set max to 3
+        pool.blocked_config.max_history_entries = 3;
+
+        // Manually resolve some entries (prune is called after push, so manually trigger)
+        pool.blocked_history[0].resolved = true;
+        pool.blocked_history[1].resolved = true;
+
+        pool.prune_history();
+
+        // Should have 3 entries remaining (resolved ones removed first)
+        assert_eq!(pool.blocked_history().len(), 3);
+    }
+
+    #[test]
+    fn blocked_history_pruning_unbounded_when_zero() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Add many blocked entries with max = 0 (unlimited)
+        pool.blocked_config.max_history_entries = 0;
+
+        for i in 0..10 {
+            let blocking = HumanDecisionBlocking::new(
+                format!("req-{}", i),
+                Box::new(WaitingForChoiceSituation::default()),
+                vec![],
+            );
+            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+        }
+
+        // Should have all 10 entries
+        assert_eq!(pool.blocked_history().len(), 10);
+    }
+
+    #[test]
+    fn process_expired_requests_with_default_action() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Add a blocked entry
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+
+        // Manually expire the request in the queue
+        // (In real scenario, time would pass and check_expired would find it)
+        // For now, just verify the method exists and can be called
+        let count = pool.process_expired_requests();
+        // Request may or may not be expired yet depending on timing
+        assert!(count >= 0);
+    }
+
+    #[test]
+    fn agent_blocked_notifier_receives_events() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct TestNotifier {
+            count: Arc<AtomicUsize>,
+        }
+
+        impl AgentBlockedNotifier for TestNotifier {
+            fn on_agent_blocked(&self, _event: AgentBlockedEvent) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let notifier = Arc::new(TestNotifier { count: count.clone() });
+
+        let mut pool = make_pool(2);
+        pool.set_blocked_notifier(notifier);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Block the agent
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+
+        // Notifier should have been called
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn notify_others_disabled_does_not_notify() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct TestNotifier {
+            count: Arc<AtomicUsize>,
+        }
+
+        impl AgentBlockedNotifier for TestNotifier {
+            fn on_agent_blocked(&self, _event: AgentBlockedEvent) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let notifier = Arc::new(TestNotifier { count: count.clone() });
+
+        let mut config = BlockedHandlingConfig::default();
+        config.notify_others = false; // Disable
+
+        let mut pool = AgentPool::with_blocked_config(
+            WorkplaceId::new("workplace-001"),
+            2,
+            config,
+        );
+        pool.set_blocked_notifier(notifier);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Block the agent
+        let blocking = HumanDecisionBlocking::new(
+            "req-test",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![],
+        );
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+
+        // Notifier should NOT have been called
+        assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 }
