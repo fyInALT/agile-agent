@@ -27,7 +27,8 @@ pub fn resolve_agent_target(
         statuses
             .iter()
             .find(|status| {
-                status.codename.as_str() == explicit || status.agent_id.as_str() == explicit
+                status.codename.as_str().eq_ignore_ascii_case(explicit)
+                    || status.agent_id.as_str().eq_ignore_ascii_case(explicit)
             })
             .ok_or_else(|| anyhow!("agent target `{explicit}` not found"))?
     } else {
@@ -243,6 +244,13 @@ mod tests {
     fn resolves_agent_target_to_overview_in_overview_context() {
         let shell = ShellHarness::new_with_overview(ProviderKind::Mock);
         let resolved = resolve_agent_target(&shell.state, None).expect("target");
+        assert_eq!(resolved.codename, "OVERVIEW");
+    }
+
+    #[test]
+    fn resolves_explicit_overview_target_case_insensitively() {
+        let shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+        let resolved = resolve_agent_target(&shell.state, Some("overview")).expect("target");
         assert_eq!(resolved.codename, "OVERVIEW");
     }
 

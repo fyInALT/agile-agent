@@ -77,6 +77,39 @@ pub fn command_spec(
         .find(|spec| spec.namespace == namespace && spec.path == path)
 }
 
+pub fn namespace_path_heads(namespace: CommandNamespace) -> Vec<&'static str> {
+    COMMAND_SPECS
+        .iter()
+        .filter(|spec| spec.namespace == namespace && !spec.path.is_empty())
+        .map(|spec| spec.path[0])
+        .collect()
+}
+
+pub fn longest_registered_path_prefix(
+    namespace: CommandNamespace,
+    tokens: &[String],
+) -> Option<Vec<String>> {
+    COMMAND_SPECS
+        .iter()
+        .filter(|spec| spec.namespace == namespace && !spec.path.is_empty())
+        .filter_map(|spec| {
+            if spec.path.len() > tokens.len() {
+                return None;
+            }
+            let matches = spec
+                .path
+                .iter()
+                .zip(tokens.iter())
+                .all(|(expected, actual)| expected == &actual.as_str());
+            if matches {
+                Some(spec.path.iter().map(|segment| segment.to_string()).collect::<Vec<_>>())
+            } else {
+                None
+            }
+        })
+        .max_by_key(|path| path.len())
+}
+
 pub fn render_local_help_lines() -> Vec<String> {
     vec![
         "available slash commands:".to_string(),

@@ -919,7 +919,7 @@ fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
     );
 
     if let Some(agent_id) = focused_id {
-        if !start_multi_agent_provider_request_for_agent(state, agent_id, prompt) {
+        if !start_multi_agent_provider_request_for_agent(state, agent_id, prompt, true) {
             task_engine::handle_provider_start_failure(
                 state.app_mut(),
                 "failed to start provider for agent".to_string(),
@@ -932,6 +932,7 @@ fn start_multi_agent_provider_request_for_agent(
     state: &mut TuiState,
     agent_id: agent_core::agent_runtime::AgentId,
     prompt: String,
+    inject_mail: bool,
 ) -> bool {
     let provider_label = state
         .agent_pool
@@ -940,7 +941,11 @@ fn start_multi_agent_provider_request_for_agent(
         .map(|slot| slot.provider_type().label().to_string())
         .unwrap_or_else(|| state.app().selected_provider.label().to_string());
 
-    let event_rx = state.start_provider_for_agent(&agent_id, prompt);
+    let event_rx = if inject_mail {
+        state.start_provider_for_agent(&agent_id, prompt)
+    } else {
+        state.start_raw_provider_for_agent(&agent_id, prompt)
+    };
     if let Some(rx) = event_rx {
         state.register_agent_channel(agent_id.clone(), rx);
         state.app_mut().push_status_message(format!(
@@ -1060,10 +1065,15 @@ fn execute_provider_invocation(state: &mut TuiState, invocation: CommandInvocati
     });
     let raw_tail = invocation.raw_tail.as_deref().unwrap_or("");
     let request = crate::command_runtime::execute_provider_command(state, explicit_target, raw_tail)?;
+    state.append_status_to_agent_transcript(
+        &request.agent_id,
+        format!("provider command: {}", request.raw_tail),
+    );
     if !start_multi_agent_provider_request_for_agent(
         state,
         request.agent_id.clone(),
         request.raw_tail.clone(),
+        false,
     ) {
         task_engine::handle_provider_start_failure(
             state.app_mut(),
@@ -1151,7 +1161,12 @@ fn handle_multi_agent_submission(state: &mut TuiState, user_input: String) -> bo
             match resolve_agent_target_ids(state, &[agent]) {
                 Ok(agent_ids) => {
                     for agent_id in agent_ids {
-                        start_multi_agent_provider_request_for_agent(state, agent_id, prompt.clone());
+                        start_multi_agent_provider_request_for_agent(
+                            state,
+                            agent_id,
+                            prompt.clone(),
+                            true,
+                        );
                     }
                 }
                 Err(error) => state.app_mut().push_error_message(error),
@@ -1163,7 +1178,12 @@ fn handle_multi_agent_submission(state: &mut TuiState, user_input: String) -> bo
             match resolve_agent_target_ids(state, &agents) {
                 Ok(agent_ids) => {
                     for agent_id in agent_ids {
-                        start_multi_agent_provider_request_for_agent(state, agent_id, prompt.clone());
+                        start_multi_agent_provider_request_for_agent(
+                            state,
+                            agent_id,
+                            prompt.clone(),
+                            true,
+                        );
                     }
                 }
                 Err(error) => state.app_mut().push_error_message(error),
@@ -1612,7 +1632,9 @@ fn current_time_as_u32() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec};
     use super::event_poll_timeout;
+    use super::execute_provider_invocation;
     use super::handle_command_submission;
     use super::shutdown_tui_state;
     use super::handle_agent_provider_event;
@@ -2034,6 +2056,42 @@ mod tests {
         assert!(handled);
         assert!(state.app().transcript.iter().all(|entry| {
             !matches!(entry, TranscriptEntry::User(text) if text == "/provider /status")
+        }));
+    }
+
+    #[test]
+    fn provider_passthrough_adds_provider_command_label_to_agent_transcript() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().selected_provider = ProviderKind::Codex;
+        state.ensure_overview_agent();
+        let overview_id = state.focused_agent_id().expect("overview id");
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&overview_id)
+        {
+            slot.set_session_handle(agent_core::provider::SessionHandle::CodexThread {
+                thread_id: "thr-provider".to_string(),
+            });
+        }
+
+        let invocation = CommandInvocation {
+            namespace: CommandNamespace::Provider,
+            target: Some(CommandTargetSpec::AgentName("overview".to_string())),
+            path: vec![],
+            args: vec![],
+            raw_tail: Some("/status".to_string()),
+        };
+        execute_provider_invocation(&mut state, invocation).expect("provider command");
+
+        let slot = state
+            .agent_pool
+            .as_ref()
+            .and_then(|pool| pool.get_slot_by_id(&overview_id))
+            .expect("slot");
+        assert!(slot.transcript().iter().any(|entry| {
+            matches!(entry, TranscriptEntry::Status(text) if text == "provider command: /status")
         }));
     }
 

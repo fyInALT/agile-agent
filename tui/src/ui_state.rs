@@ -699,6 +699,14 @@ impl TuiState {
             .is_some()
     }
 
+    pub fn append_status_to_agent_transcript(&mut self, agent_id: &AgentId, text: String) {
+        if let Some(pool) = self.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(agent_id)
+        {
+            slot.append_transcript(TranscriptEntry::Status(text));
+        }
+    }
+
     pub fn create_shutdown_snapshot(&self, reason: ShutdownReason) -> ShutdownSnapshot {
         let agents = if let Some(pool) = self.agent_pool.as_ref() {
             pool.slots()
@@ -864,6 +872,24 @@ impl TuiState {
         self.mailbox.mark_all_read(agent_id);
     }
 
+    pub fn build_provider_prompt_for_agent(
+        &self,
+        agent_id: &AgentId,
+        prompt: String,
+        inject_mail: bool,
+    ) -> Option<String> {
+        if !inject_mail {
+            return Some(prompt);
+        }
+
+        let mail_prefix = self.unread_mail_for_agent(agent_id);
+        if mail_prefix.is_empty() {
+            Some(prompt)
+        } else {
+            Some(format!("{}{}", mail_prefix, prompt))
+        }
+    }
+
     /// Start provider request for focused agent in pool
     ///
     /// Creates provider thread and registers event channel with AgentSlot.
@@ -889,13 +915,29 @@ impl TuiState {
         agent_id: &AgentId,
         prompt: String,
     ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
-        let mail_prefix = self.unread_mail_for_agent(agent_id);
-        let augmented_prompt = if mail_prefix.is_empty() {
-            prompt.clone()
-        } else {
-            format!("{}{}", mail_prefix, prompt)
-        };
-        self.mark_agent_mail_read(agent_id);
+        self.start_provider_for_agent_with_mode(agent_id, prompt, true, true)
+    }
+
+    pub fn start_raw_provider_for_agent(
+        &mut self,
+        agent_id: &AgentId,
+        prompt: String,
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+        self.start_provider_for_agent_with_mode(agent_id, prompt, false, false)
+    }
+
+    fn start_provider_for_agent_with_mode(
+        &mut self,
+        agent_id: &AgentId,
+        prompt: String,
+        inject_mail: bool,
+        record_user_prompt: bool,
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+        let augmented_prompt =
+            self.build_provider_prompt_for_agent(agent_id, prompt.clone(), inject_mail)?;
+        if inject_mail {
+            self.mark_agent_mail_read(agent_id);
+        }
 
         let (provider_kind, session_handle, busy_codename) = {
             let pool = self.agent_pool.as_ref()?;
@@ -939,7 +981,9 @@ impl TuiState {
                 let (event_rx, join_handle) = handle.into_parts();
                 let pool = self.agent_pool.as_mut()?;
                 let slot = pool.get_slot_mut_by_id(agent_id)?;
-                slot.append_transcript(TranscriptEntry::User(prompt));
+                if record_user_prompt {
+                    slot.append_transcript(TranscriptEntry::User(prompt));
+                }
                 if let Some(jh) = join_handle {
                     slot.set_thread_handle(jh);
                 }
@@ -3574,6 +3618,38 @@ mod tests {
         assert!(augmented.contains("=== Incoming Messages ==="));
         assert!(augmented.contains("Write tests for feature X"));
         assert!(augmented.starts_with("\n=== Incoming Messages ==="));
+    }
+
+    #[test]
+    fn raw_provider_prompt_preview_does_not_inject_or_consume_mail() {
+        use agent_core::agent_mail::{AgentMail, MailBody, MailSubject, MailTarget};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        state.focus_agent(&agent_id);
+
+        let mail = AgentMail::new(
+            AgentId::new("helper"),
+            MailTarget::Direct(agent_id.clone()),
+            MailSubject::InfoRequest {
+                query: "What is the status?".to_string(),
+            },
+            MailBody::Text("Please respond".to_string()),
+        );
+        state.mailbox.send_mail(mail);
+        state.mailbox.process_pending();
+        assert_eq!(state.focused_unread_mail_count(), 1);
+
+        let preview = state
+            .build_provider_prompt_for_agent(&agent_id, "/status".to_string(), false)
+            .expect("preview");
+
+        assert_eq!(preview, "/status");
+        assert_eq!(state.focused_unread_mail_count(), 1);
     }
 
     #[test]
