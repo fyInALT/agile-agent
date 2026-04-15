@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::logging;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TodoStatus {
     Candidate,
@@ -98,48 +100,165 @@ impl BacklogState {
 
     /// Mark task as running (assigned to agent)
     pub fn start_task(&mut self, task_id: &str) -> bool {
+        let task_info = self.find_task(task_id).map(|t| {
+            serde_json::json!({
+                "todo_id": t.todo_id,
+                "objective": t.objective,
+            })
+        });
+
+        logging::debug_event(
+            "backlog.task.start",
+            "task status transition to Running",
+            serde_json::json!({
+                "task_id": task_id,
+                "old_status": "Ready",
+                "new_status": "Running",
+                "task_info": task_info,
+            }),
+        );
+
         if let Some(task) = self.find_task_mut(task_id)
             && task.status == TaskStatus::Ready
         {
             task.status = TaskStatus::Running;
+            logging::debug_event(
+                "backlog.task.start.complete",
+                "task started successfully",
+                serde_json::json!({
+                    "task_id": task_id,
+                }),
+            );
             return true;
         }
+        logging::debug_event(
+            "backlog.task.start.failed",
+            "task start failed - task not in Ready status",
+            serde_json::json!({
+                "task_id": task_id,
+                "current_status": self.find_task(task_id).map(|t| format!("{:?}", t.status)),
+            }),
+        );
         false
     }
 
     /// Mark task as done (completed successfully)
     pub fn complete_task(&mut self, task_id: &str, summary: Option<String>) -> bool {
+        let old_status = self.find_task(task_id).map(|t| t.status);
+
+        logging::debug_event(
+            "backlog.task.complete",
+            "task completion requested",
+            serde_json::json!({
+                "task_id": task_id,
+                "old_status": old_status.map(|s| format!("{:?}", s)),
+                "new_status": "Done",
+                "summary": summary,
+            }),
+        );
+
         if let Some(task) = self.find_task_mut(task_id)
             && (task.status == TaskStatus::Running || task.status == TaskStatus::Verifying)
         {
             task.status = TaskStatus::Done;
             task.result_summary = summary;
+            logging::debug_event(
+                "backlog.task.complete.complete",
+                "task completed successfully",
+                serde_json::json!({
+                    "task_id": task_id,
+                }),
+            );
             return true;
         }
+        logging::debug_event(
+            "backlog.task.complete.failed",
+            "task completion failed",
+            serde_json::json!({
+                "task_id": task_id,
+                "current_status": old_status.map(|s| format!("{:?}", s)),
+            }),
+        );
         false
     }
 
     /// Mark task as failed
     pub fn fail_task(&mut self, task_id: &str, error: String) -> bool {
+        let old_status = self.find_task(task_id).map(|t| t.status);
+
+        logging::debug_event(
+            "backlog.task.fail",
+            "task failure recorded",
+            serde_json::json!({
+                "task_id": task_id,
+                "old_status": old_status.map(|s| format!("{:?}", s)),
+                "new_status": "Failed",
+                "error": error,
+            }),
+        );
+
         if let Some(task) = self.find_task_mut(task_id)
             && task.status == TaskStatus::Running
         {
             task.status = TaskStatus::Failed;
             task.result_summary = Some(error);
+            logging::debug_event(
+                "backlog.task.fail.complete",
+                "task marked as failed",
+                serde_json::json!({
+                    "task_id": task_id,
+                }),
+            );
             return true;
         }
+        logging::debug_event(
+            "backlog.task.fail.failed",
+            "task fail marking failed",
+            serde_json::json!({
+                "task_id": task_id,
+                "current_status": old_status.map(|s| format!("{:?}", s)),
+            }),
+        );
         false
     }
 
     /// Mark task as blocked
     pub fn block_task(&mut self, task_id: &str, reason: String) -> bool {
+        let old_status = self.find_task(task_id).map(|t| t.status);
+
+        logging::debug_event(
+            "backlog.task.block",
+            "task blocked",
+            serde_json::json!({
+                "task_id": task_id,
+                "old_status": old_status.map(|s| format!("{:?}", s)),
+                "new_status": "Blocked",
+                "reason": reason,
+            }),
+        );
+
         if let Some(task) = self.find_task_mut(task_id)
             && task.status == TaskStatus::Running
         {
             task.status = TaskStatus::Blocked;
             task.result_summary = Some(reason);
+            logging::debug_event(
+                "backlog.task.block.complete",
+                "task marked as blocked",
+                serde_json::json!({
+                    "task_id": task_id,
+                }),
+            );
             return true;
         }
+        logging::debug_event(
+            "backlog.task.block.failed",
+            "task block marking failed",
+            serde_json::json!({
+                "task_id": task_id,
+                "current_status": old_status.map(|s| format!("{:?}", s)),
+            }),
+        );
         false
     }
 

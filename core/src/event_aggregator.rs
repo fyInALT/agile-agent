@@ -42,6 +42,7 @@ use std::time::{Duration, Instant};
 
 use crate::agent_runtime::AgentId;
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId, ThreadOutcome};
+use crate::logging;
 use crate::provider::ProviderEvent;
 
 /// Agent event wrapping provider events with agent context
@@ -170,6 +171,14 @@ impl EventAggregator {
 
     /// Add a receiver for an agent
     pub fn add_receiver(&mut self, agent_id: AgentId, receiver: Receiver<ProviderEvent>) {
+        logging::debug_event(
+            "aggregator.receiver.add",
+            "added event receiver for agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "receiver_count": self.receivers.len() + 1,
+            }),
+        );
         self.receivers.insert(agent_id, receiver);
     }
 
@@ -177,6 +186,14 @@ impl EventAggregator {
     ///
     /// Returns the removed receiver if it existed.
     pub fn remove_receiver(&mut self, agent_id: &AgentId) -> Option<Receiver<ProviderEvent>> {
+        logging::debug_event(
+            "aggregator.receiver.remove",
+            "removed event receiver for agent",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "receiver_count": self.receivers.len().saturating_sub(1),
+            }),
+        );
         self.receivers.remove(agent_id)
     }
 
@@ -198,11 +215,27 @@ impl EventAggregator {
         let mut empty_channels = Vec::new();
         let mut disconnected_channels = Vec::new();
 
+        logging::debug_event(
+            "aggregator.poll.start",
+            "starting poll of all agent channels",
+            serde_json::json!({
+                "receiver_count": self.receivers.len(),
+            }),
+        );
+
         for (agent_id, receiver) in &self.receivers {
             loop {
                 match receiver.try_recv() {
                     Ok(event) => {
-                        events.push(AgentEvent::from_provider(agent_id.clone(), event));
+                        events.push(AgentEvent::from_provider(agent_id.clone(), event.clone()));
+                        logging::debug_event(
+                            "aggregator.event.received",
+                            "received event from agent",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "event_type": format!("{:?}", event),
+                            }),
+                        );
                     }
                     Err(TryRecvError::Empty) => {
                         empty_channels.push(agent_id.clone());
@@ -210,11 +243,28 @@ impl EventAggregator {
                     }
                     Err(TryRecvError::Disconnected) => {
                         disconnected_channels.push(agent_id.clone());
+                        logging::debug_event(
+                            "aggregator.channel.disconnected",
+                            "agent channel disconnected",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                            }),
+                        );
                         break;
                     }
                 }
             }
         }
+
+        logging::debug_event(
+            "aggregator.poll.complete",
+            "poll completed",
+            serde_json::json!({
+                "events_collected": events.len(),
+                "empty_channels": empty_channels.len(),
+                "disconnected_channels": disconnected_channels.len(),
+            }),
+        );
 
         PollResult {
             events,
