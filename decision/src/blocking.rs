@@ -1139,4 +1139,59 @@ mod tests {
         let parsed: HumanDecisionResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp.request_id, parsed.request_id);
     }
+
+    #[test]
+    fn test_human_decision_queue_index_lookup() {
+        // Test that id_index is properly maintained for O(1) lookup
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+
+        // Add requests at different urgency levels
+        queue.push(HumanDecisionRequest::new(
+            "req-critical",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::Critical,
+            900000,
+        ));
+        queue.push(HumanDecisionRequest::new(
+            "req-high",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::High,
+            1800000,
+        ));
+
+        // Complete should use index for O(1) removal
+        let resp = HumanDecisionResponse::new("req-high", HumanSelection::selected("A"));
+        assert!(queue.complete(resp));
+
+        // Only critical should remain
+        assert_eq!(queue.total_pending(), 1);
+        assert_eq!(queue.critical_count(), 1);
+        assert_eq!(queue.high_count(), 0);
+    }
+
+    #[test]
+    fn test_human_decision_queue_pop_removes_from_index() {
+        let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
+
+        queue.push(HumanDecisionRequest::new(
+            "req-1",
+            "agent-1",
+            crate::types::SituationType::new("test"),
+            vec![],
+            UrgencyLevel::High,
+            1800000,
+        ));
+
+        assert_eq!(queue.total_pending(), 1);
+
+        // Pop should remove from index
+        let popped = queue.pop();
+        assert!(popped.is_some());
+        assert_eq!(popped.unwrap().id, "req-1");
+        assert_eq!(queue.total_pending(), 0);
+    }
 }
