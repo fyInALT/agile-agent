@@ -285,7 +285,7 @@ fn parse_item_event(
         .map(ToOwned::to_owned);
 
     match (method, item_type) {
-        ("item.started" | "item/started", "commandExecution") => {
+        ("item.started" | "item/started", "command_execution" | "commandExecution") => {
             let command = item
                 .get("command")
                 .and_then(|value| value.as_str())
@@ -300,16 +300,22 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item.completed" | "item/completed", "commandExecution") => {
+        ("item.completed" | "item/completed", "command_execution" | "commandExecution") => {
+            // Support both snake_case (exec) and camelCase (app-server)
             let output = item
-                .get("aggregatedOutput")
+                .get("aggregated_output")
+                .or_else(|| item.get("aggregatedOutput"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
             let exit_code = item
-                .get("exitCode")
+                .get("exit_code")
+                .or_else(|| item.get("exitCode"))
                 .and_then(|value| value.as_i64())
                 .and_then(|value| i32::try_from(value).ok());
-            let duration_ms = item.get("durationMs").and_then(|value| value.as_u64());
+            let duration_ms = item
+                .get("duration_ms")
+                .or_else(|| item.get("durationMs"))
+                .and_then(|value| value.as_u64());
             let source = item
                 .get("source")
                 .and_then(|value| value.as_str())
@@ -323,16 +329,16 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item.started" | "item/started", "fileChange") => vec![ProviderEvent::PatchApplyStarted {
+        ("item.started" | "item/started", "file_change" | "fileChange") => vec![ProviderEvent::PatchApplyStarted {
             call_id: item_id,
             changes: parse_patch_changes(item),
         }],
-        ("item.completed" | "item/completed", "fileChange") => vec![ProviderEvent::PatchApplyFinished {
+        ("item.completed" | "item/completed", "file_change" | "fileChange") => vec![ProviderEvent::PatchApplyFinished {
             call_id: item_id,
             changes: parse_patch_changes(item),
             status: parse_patch_apply_status(item),
         }],
-        ("item.started" | "item/started", "webSearch") => item
+        ("item.started" | "item/started", "web_search" | "webSearch") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -342,7 +348,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "webSearch") => item
+        ("item.completed" | "item/completed", "web_search" | "webSearch") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -353,7 +359,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "imageView") => item
+        ("item.completed" | "item/completed", "image_view" | "imageView") => item
             .get("path")
             .and_then(|value| value.as_str())
             .map(|path| {
@@ -363,10 +369,11 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
+        ("item.completed" | "item/completed", "image_generation" | "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
             call_id: item_id,
             revised_prompt: item
-                .get("revisedPrompt")
+                .get("revised_prompt")
+                .or_else(|| item.get("revisedPrompt"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
             result: item
@@ -374,11 +381,12 @@ fn parse_item_event(
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
             saved_path: item
-                .get("savedPath")
+                .get("saved_path")
+                .or_else(|| item.get("savedPath"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
         }],
-        ("item.started" | "item/started", "mcpToolCall") => {
+        ("item.started" | "item/started", "mcp_tool_call" | "mcpToolCall") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 vec![ProviderEvent::McpToolCallStarted {
                     call_id: item_id,
@@ -386,7 +394,7 @@ fn parse_item_event(
                 }]
             })
         }
-        ("item.completed" | "item/completed", "mcpToolCall") => {
+        ("item.completed" | "item/completed", "mcp_tool_call" | "mcpToolCall") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 let (result_blocks, error, is_error) = parse_mcp_tool_call_result(item);
                 vec![ProviderEvent::McpToolCallFinished {
@@ -399,8 +407,8 @@ fn parse_item_event(
                 }]
             })
         }
-        (_, "userMessage") => Vec::new(),
-        ("item.completed" | "item/completed", "agentMessage") => item
+        (_, "user_message" | "userMessage") => Vec::new(),
+        ("item.completed" | "item/completed", "agent_message" | "agentMessage") => item
             .get("text")
             .and_then(|value| value.as_str())
             .filter(|text| {
@@ -432,7 +440,7 @@ fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
     {
         "failed" => PatchApplyStatus::Failed,
         "declined" => PatchApplyStatus::Declined,
-        "inProgress" => PatchApplyStatus::InProgress,
+        "in_progress" | "inProgress" => PatchApplyStatus::InProgress,
         _ => PatchApplyStatus::Completed,
     }
 }
@@ -444,7 +452,7 @@ fn parse_mcp_tool_call_status(item: &serde_json::Value) -> McpToolCallStatus {
         .unwrap_or("completed")
     {
         "failed" => McpToolCallStatus::Failed,
-        "inProgress" => McpToolCallStatus::InProgress,
+        "in_progress" | "inProgress" => McpToolCallStatus::InProgress,
         _ => McpToolCallStatus::Completed,
     }
 }
@@ -606,7 +614,7 @@ fn parse_content_blocks(
         .get("type")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if item_type == "userMessage" {
+    if item_type == "user_message" || item_type == "userMessage" {
         return events;
     }
 
