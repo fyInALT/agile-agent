@@ -735,22 +735,28 @@ impl PromptBuilder {
         situation_type: &str,
         variables: &PromptVariables,
     ) -> String {
+        // Check custom prompts FIRST (including claims_completion custom)
+        if let Some(custom) = self.config.custom_prompts.get(situation_type) {
+            return custom.clone();
+        }
+
         // Special handling for claims_completion with reflection rounds
         if situation_type == "claims_completion" {
             let round = variables.reflection_round.unwrap_or(1);
-            if round == 1 {
-                return self.config.reflection_prompt_1.clone();
-            } else if round == 2 {
-                return self.config.reflection_prompt_2.clone();
+            let max_rounds = self.config.max_reflection_rounds;
+
+            if round <= max_rounds {
+                // Within configured reflection rounds
+                if round == 1 {
+                    return self.config.reflection_prompt_1.clone();
+                } else {
+                    // Round 2+ use reflection_prompt_2
+                    return self.config.reflection_prompt_2.clone();
+                }
             } else {
-                // Round 3+ use verification prompt
+                // Exceeded max reflection rounds -> verify
                 return self.config.verify_prompt.clone();
             }
-        }
-
-        // Check custom prompts
-        if let Some(custom) = self.config.custom_prompts.get(situation_type) {
-            return custom.clone();
         }
 
         // Standard situation prompts
@@ -946,9 +952,23 @@ impl CriticalityCriteria {
         score
     }
 
+    /// Check if decision type is in the always-report list
+    pub fn is_always_report_type(&self, decision_type: &str) -> bool {
+        self.always_report_types.iter().any(|t| t == decision_type)
+    }
+
     /// Check if decision should be escalated to human
     pub fn should_escalate(&self, threshold: u8) -> bool {
         self.calculate_score() >= threshold
+    }
+
+    /// Check if decision should be escalated, considering decision type
+    pub fn should_escalate_with_type(&self, threshold: u8, decision_type: &str) -> bool {
+        // Always escalate if decision type is in always_report_types
+        if self.is_always_report_type(decision_type) {
+            return true;
+        }
+        self.should_escalate(threshold)
     }
 
     /// Get description of critical factors
@@ -1041,8 +1061,6 @@ mod tests {
     #[test]
     fn test_prompt_builder_reflection_rounds() {
         let builder = PromptBuilder::new();
-        let variables = PromptVariables::new()
-            .with_completion_summary("Task done".to_string());
 
         // Round 1
         let vars1 = PromptVariables::new().with_reflection_round(1);
@@ -1144,5 +1162,74 @@ mod tests {
         // Should have placeholders filled with defaults
         assert!(!prompt.contains("{situation_text}")); // All placeholders should be resolved
         assert!(!prompt.contains("{options_text}"));
+    }
+
+    #[test]
+    fn test_custom_prompts_override_claims_completion() {
+        // Test that custom prompts work for claims_completion
+        let mut config = PromptConfig::default();
+        config.add_custom_prompt(
+            "claims_completion".to_string(),
+            "Custom claims completion prompt with {completion_summary}".to_string(),
+        );
+
+        let builder = PromptBuilder::with_config(config);
+        let variables = PromptVariables::new()
+            .with_completion_summary("Task done".to_string())
+            .with_reflection_round(1);
+
+        let prompt = builder.build("claims_completion", &variables);
+        // Should use custom prompt, not the default round-based logic
+        assert!(prompt.contains("Custom claims completion prompt"));
+    }
+
+    #[test]
+    fn test_max_reflection_rounds_config() {
+        // Test max_reflection_rounds = 1
+        let config = PromptConfig {
+            max_reflection_rounds: 1,
+            ..Default::default()
+        };
+        let builder = PromptBuilder::with_config(config);
+
+        // Round 1 should use reflection_prompt_1
+        let vars1 = PromptVariables::new().with_reflection_round(1);
+        let prompt1 = builder.build("claims_completion", &vars1);
+        assert!(prompt1.contains("Reflection Round 1"));
+
+        // Round 2 should jump to verify (since max is 1)
+        let vars2 = PromptVariables::new().with_reflection_round(2);
+        let prompt2 = builder.build("claims_completion", &vars2);
+        assert!(prompt2.contains("Final Completion Verification"));
+    }
+
+    #[test]
+    fn test_always_report_types() {
+        let criteria = CriticalityCriteria::default();
+
+        // Default types should be in always_report_types
+        assert!(criteria.is_always_report_type("pr_merge"));
+        assert!(criteria.is_always_report_type("deploy"));
+        assert!(criteria.is_always_report_type("database_migration"));
+
+        // Non-always types
+        assert!(!criteria.is_always_report_type("file_read"));
+        assert!(!criteria.is_always_report_type("test_run"));
+    }
+
+    #[test]
+    fn test_should_escalate_with_type() {
+        let criteria = CriticalityCriteria {
+            irreversible: false,
+            high_risk: false,
+            ..Default::default()
+        };
+
+        // Score is 0, threshold is 5 - normally wouldn't escalate
+        assert!(!criteria.should_escalate(5));
+
+        // But pr_merge is in always_report_types, so should escalate
+        assert!(criteria.should_escalate_with_type(5, "pr_merge"));
+        assert!(criteria.should_escalate_with_type(5, "deploy"));
     }
 }
