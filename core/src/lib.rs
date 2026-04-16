@@ -20,6 +20,7 @@ pub mod decision_kanban;
 pub mod escalation;
 pub mod event;
 pub mod event_aggregator;
+pub mod global_config;
 pub mod logging;
 pub mod loop_runner;
 pub mod mock_provider;
