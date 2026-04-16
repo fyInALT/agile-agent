@@ -8,6 +8,9 @@ use std::collections::HashMap;
 
 use crate::error::{DecisionError, Result};
 
+// Import DecisionContext for conversion (avoid circular dependency by not importing full module)
+// The conversion function will be implemented in a separate extension
+
 // ============================================================================
 // Default Prompt Templates
 // ============================================================================
@@ -407,6 +410,12 @@ fn default_max_reflection_rounds() -> u8 {
     2
 }
 
+/// Minimum valid reflection rounds
+const MIN_REFLECTION_ROUNDS: u8 = 1;
+
+/// Maximum valid reflection rounds
+const MAX_REFLECTION_ROUNDS: u8 = 5;
+
 impl Default for PromptConfig {
     fn default() -> Self {
         Self {
@@ -471,6 +480,44 @@ impl PromptConfig {
     /// Add a custom prompt for a situation type
     pub fn add_custom_prompt(&mut self, situation_type: String, prompt: String) {
         self.custom_prompts.insert(situation_type, prompt);
+    }
+
+    /// Validate configuration
+    ///
+    /// Returns error if configuration values are invalid.
+    pub fn validate(&self) -> Result<()> {
+        // Validate max_reflection_rounds
+        if self.max_reflection_rounds < MIN_REFLECTION_ROUNDS {
+            return Err(DecisionError::ConfigError(format!(
+                "max_reflection_rounds ({}) must be at least {}",
+                self.max_reflection_rounds, MIN_REFLECTION_ROUNDS
+            )));
+        }
+        if self.max_reflection_rounds > MAX_REFLECTION_ROUNDS {
+            return Err(DecisionError::ConfigError(format!(
+                "max_reflection_rounds ({}) must be at most {}",
+                self.max_reflection_rounds, MAX_REFLECTION_ROUNDS
+            )));
+        }
+
+        // Validate that custom prompts contain at least one placeholder
+        for (situation_type, prompt) in &self.custom_prompts {
+            if !prompt.contains('{') || !prompt.contains('}') {
+                return Err(DecisionError::ConfigError(format!(
+                    "Custom prompt for '{}' must contain at least one placeholder like {{situation_text}}",
+                    situation_type
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load from file with validation
+    pub fn from_file_validated(path: &std::path::Path) -> Result<Self> {
+        let config = Self::from_file(path)?;
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -678,6 +725,43 @@ impl PromptVariables {
     pub fn with_retry_info(mut self, count: u32, max: u32) -> Self {
         self.retry_count = Some(count);
         self.max_retries = Some(max);
+        self
+    }
+
+    /// Set file changes summary
+    pub fn with_file_changes(mut self, changes: String) -> Self {
+        self.file_changes = Some(changes);
+        self
+    }
+
+    /// Set task requirements
+    pub fn with_task_requirements(mut self, requirements: String) -> Self {
+        self.task_requirements = Some(requirements);
+        self
+    }
+
+    /// Set work summary
+    pub fn with_work_summary(mut self, summary: String) -> Self {
+        self.work_summary = Some(summary);
+        self
+    }
+
+    /// Format decision history from records
+    ///
+    /// Takes a list of (situation_name, action_name, confidence) tuples
+    /// and formats them for the prompt.
+    pub fn with_formatted_history(mut self, records: &[(String, String, f64)]) -> Self {
+        if records.is_empty() {
+            self.decision_history = "No previous decisions.".to_string();
+        } else {
+            let entries: Vec<String> = records
+                .iter()
+                .rev()
+                .take(5)
+                .map(|(sit, act, conf)| format!("- {} -> {} (confidence: {:.2})", sit, act, conf))
+                .collect();
+            self.decision_history = entries.join("\n");
+        }
         self
     }
 }
@@ -1231,5 +1315,77 @@ mod tests {
         // But pr_merge is in always_report_types, so should escalate
         assert!(criteria.should_escalate_with_type(5, "pr_merge"));
         assert!(criteria.should_escalate_with_type(5, "deploy"));
+    }
+
+    #[test]
+    fn test_config_validation_valid() {
+        let config = PromptConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_min_reflection_rounds() {
+        let config = PromptConfig {
+            max_reflection_rounds: 0,
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("must be at least"));
+    }
+
+    #[test]
+    fn test_config_validation_max_reflection_rounds() {
+        let config = PromptConfig {
+            max_reflection_rounds: 10,
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("must be at most"));
+    }
+
+    #[test]
+    fn test_config_validation_custom_prompt_no_placeholder() {
+        let mut config = PromptConfig::default();
+        config.add_custom_prompt(
+            "test_situation".to_string(),
+            "This prompt has no placeholders".to_string(),
+        );
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("must contain at least one placeholder"));
+    }
+
+    #[test]
+    fn test_config_validation_custom_prompt_valid() {
+        let mut config = PromptConfig::default();
+        config.add_custom_prompt(
+            "test_situation".to_string(),
+            "Prompt with {situation_text} placeholder".to_string(),
+        );
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_prompt_variables_with_formatted_history() {
+        let records = vec![
+            ("waiting_for_choice".to_string(), "select_option".to_string(), 0.85),
+            ("claims_completion".to_string(), "confirm_completion".to_string(), 0.90),
+        ];
+        let vars = PromptVariables::new().with_formatted_history(&records);
+        assert!(vars.decision_history.contains("waiting_for_choice"));
+        assert!(vars.decision_history.contains("select_option"));
+        assert!(vars.decision_history.contains("0.85"));
+    }
+
+    #[test]
+    fn test_prompt_variables_with_formatted_history_empty() {
+        let records: Vec<(String, String, f64)> = vec![];
+        let vars = PromptVariables::new().with_formatted_history(&records);
+        assert_eq!(vars.decision_history, "No previous decisions.");
     }
 }

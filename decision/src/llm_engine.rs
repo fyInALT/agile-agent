@@ -2,6 +2,7 @@
 //!
 //! Sprint 3.2: Uses actual LLM provider for decision making.
 //! Sprint 3.3: Added LLMCaller trait for provider integration.
+//! Sprint 3.4: Added optional PromptBuilder integration.
 
 use crate::action::DecisionAction;
 use crate::action_registry::ActionRegistry;
@@ -10,6 +11,7 @@ use crate::engine::{DecisionEngine, SessionHandle};
 use crate::error::DecisionError;
 use crate::llm_caller::{LLMCaller, MockLLMCaller};
 use crate::output::DecisionOutput;
+use crate::prompts::{PromptBuilder, PromptConfig, PromptVariables};
 use crate::provider_kind::ProviderKind;
 use crate::situation::DecisionSituation;
 use crate::types::{ActionType, DecisionEngineType, SituationType};
@@ -68,6 +70,13 @@ pub struct LLMDecisionEngine {
     /// LLM caller for making provider calls (optional)
     /// If not set, uses built-in mock caller
     llm_caller: Option<Arc<dyn LLMCaller>>,
+
+    /// Optional prompt builder for customizable prompts
+    /// If not set, uses built-in prompt generation
+    prompt_builder: Option<PromptBuilder>,
+
+    /// Reflection round counter (for claims_completion)
+    reflection_round: u8,
 }
 
 /// Decision record for LLM history
@@ -102,6 +111,8 @@ impl LLMDecisionEngine {
             history: Vec::new(),
             healthy: true,
             llm_caller: None,
+            prompt_builder: None,
+            reflection_round: 0,
         }
     }
 
@@ -114,6 +125,8 @@ impl LLMDecisionEngine {
             history: Vec::new(),
             healthy: true,
             llm_caller: None,
+            prompt_builder: None,
+            reflection_round: 0,
         }
     }
 
@@ -126,6 +139,8 @@ impl LLMDecisionEngine {
             history: Vec::new(),
             healthy: true,
             llm_caller: None,
+            prompt_builder: None,
+            reflection_round: 0,
         }
     }
 
@@ -140,6 +155,8 @@ impl LLMDecisionEngine {
             history: Vec::new(),
             healthy: true,
             llm_caller: Some(caller),
+            prompt_builder: None,
+            reflection_round: 0,
         }
     }
 
@@ -156,7 +173,24 @@ impl LLMDecisionEngine {
             history: Vec::new(),
             healthy: true,
             llm_caller: Some(caller),
+            prompt_builder: None,
+            reflection_round: 0,
         }
+    }
+
+    /// Create with custom prompt configuration
+    pub fn with_prompt_config(provider: ProviderKind, prompt_config: PromptConfig) -> crate::error::Result<Self> {
+        prompt_config.validate()?;
+        Ok(Self {
+            provider,
+            session: None,
+            config: LLMEngineConfig::default(),
+            history: Vec::new(),
+            healthy: true,
+            llm_caller: None,
+            prompt_builder: Some(PromptBuilder::with_config(prompt_config)),
+            reflection_round: 0,
+        })
     }
 
     /// Set the LLM caller after creation
@@ -164,8 +198,83 @@ impl LLMDecisionEngine {
         self.llm_caller = Some(caller);
     }
 
-    /// Build prompt from context
+    /// Set the prompt builder after creation
+    pub fn set_prompt_builder(&mut self, builder: PromptBuilder) {
+        self.prompt_builder = Some(builder);
+    }
+
+    /// Get the current reflection round
+    pub fn reflection_round(&self) -> u8 {
+        self.reflection_round
+    }
+
+    /// Increment reflection round (for claims_completion)
+    pub fn increment_reflection_round(&mut self) {
+        self.reflection_round += 1;
+    }
+
+    /// Reset reflection round (for new task)
+    pub fn reset_reflection_round(&mut self) {
+        self.reflection_round = 0;
+    }
+
+    /// Build prompt from context using PromptBuilder if available
     fn build_prompt_internal(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
+        // If PromptBuilder is configured, use it
+        if let Some(builder) = &self.prompt_builder {
+            return self.build_prompt_with_builder(builder, context, action_registry);
+        }
+
+        // Otherwise, use legacy prompt generation
+        self.build_prompt_legacy(context, action_registry)
+    }
+
+    /// Build prompt using PromptBuilder (new configurable system)
+    fn build_prompt_with_builder(
+        &self,
+        builder: &PromptBuilder,
+        context: &DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> String {
+        let situation_type = context.trigger_situation.situation_type().name;
+
+        // Build options text from available actions
+        let available_actions = context.trigger_situation.available_actions();
+        let action_formats: Vec<String> = available_actions
+            .iter()
+            .filter_map(|action_type| {
+                action_registry
+                    .get(&action_type)
+                    .map(|action| action.to_prompt_format())
+            })
+            .collect();
+
+        // Build history from recent records
+        let history_records: Vec<(String, String, f64)> = self.history
+            .iter()
+            .rev()
+            .take(5)
+            .map(|r| (r.situation_type.name.clone(), r.action_type.name.clone(), r.confidence))
+            .collect();
+
+        // Build PromptVariables
+        let variables = PromptVariables::new()
+            .with_situation(context.trigger_situation.to_prompt_text())
+            .with_options(action_formats.join("\n\n---\n\n"))
+            .with_project_rules(context.project_rules.summary())
+            .with_task_info(context.current_task_id
+                .as_ref()
+                .map(|id| format!("Task ID: {}", id))
+                .unwrap_or_else(|| "No task assigned".to_string()))
+            .with_running_context(context.running_context.summary())
+            .with_formatted_history(&history_records)
+            .with_reflection_round(self.reflection_round);
+
+        builder.build(&situation_type, &variables)
+    }
+
+    /// Build prompt using legacy format (fallback)
+    fn build_prompt_legacy(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
         let situation_text = context.trigger_situation.to_prompt_text();
         let available_actions = context.trigger_situation.available_actions();
 
@@ -502,6 +611,7 @@ impl DecisionEngine for LLMDecisionEngine {
         self.history.clear();
         self.session = None;
         self.healthy = true;
+        self.reflection_round = 0;
         Ok(())
     }
 }
@@ -693,6 +803,59 @@ mod tests {
 
         assert!(engine.history.is_empty());
         assert!(engine.session.is_none());
+        assert_eq!(engine.reflection_round(), 0);
+    }
+
+    #[test]
+    fn test_llm_with_prompt_config() {
+        let prompt_config = PromptConfig::default();
+        let engine = LLMDecisionEngine::with_prompt_config(ProviderKind::Claude, prompt_config).unwrap();
+        assert!(engine.prompt_builder.is_some());
+    }
+
+    #[test]
+    fn test_llm_with_invalid_prompt_config() {
+        let prompt_config = PromptConfig {
+            max_reflection_rounds: 0,
+            ..Default::default()
+        };
+        let result = LLMDecisionEngine::with_prompt_config(ProviderKind::Claude, prompt_config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_llm_reflection_round_tracking() {
+        let mut engine = LLMDecisionEngine::new(ProviderKind::Claude);
+
+        assert_eq!(engine.reflection_round(), 0);
+
+        engine.increment_reflection_round();
+        assert_eq!(engine.reflection_round(), 1);
+
+        engine.increment_reflection_round();
+        assert_eq!(engine.reflection_round(), 2);
+
+        engine.reset_reflection_round();
+        assert_eq!(engine.reflection_round(), 0);
+    }
+
+    #[test]
+    fn test_llm_prompt_builder_integration() {
+        let mut config = PromptConfig::default();
+        config.add_custom_prompt(
+            "waiting_for_choice".to_string(),
+            "CUSTOM PROMPT TEMPLATE: {situation_text}".to_string(),
+        );
+
+        let mut engine = LLMDecisionEngine::new(ProviderKind::Claude);
+        engine.set_prompt_builder(PromptBuilder::with_config(config));
+
+        let context = make_test_context("waiting_for_choice");
+        let registry = make_test_registry();
+
+        let prompt = engine.build_prompt(&context, &registry);
+        // Should use custom prompt from PromptBuilder
+        assert!(prompt.contains("CUSTOM PROMPT TEMPLATE"));
     }
 
     #[test]
