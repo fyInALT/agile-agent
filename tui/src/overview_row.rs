@@ -104,7 +104,10 @@ impl OverviewAgentRow {
         };
 
         if !task.is_empty() {
-            let truncated_task = fit_segment(task, max_width.saturating_sub(unicode_width_str(&indicator_name_status) + 1));
+            let truncated_task = fit_segment(
+                task,
+                max_width.saturating_sub(unicode_width_str(&indicator_name_status) + 1),
+            );
             if !truncated_task.is_empty() {
                 self.truncated = format!("{} {}", indicator_name_status, truncated_task);
                 self.unicode_width = unicode_width_str(&self.truncated);
@@ -120,8 +123,10 @@ impl OverviewAgentRow {
             return;
         }
 
-        let truncated_status =
-            fit_segment(status, max_width.saturating_sub(unicode_width_str(&indicator_name) + 1));
+        let truncated_status = fit_segment(
+            status,
+            max_width.saturating_sub(unicode_width_str(&indicator_name) + 1),
+        );
         if !truncated_status.is_empty() {
             self.truncated = format!("{} {}", indicator_name, truncated_status);
             self.unicode_width = unicode_width_str(&self.truncated);
@@ -151,6 +156,7 @@ impl OverviewAgentRow {
         match status {
             AgentSlotStatus::Responding { .. } | AgentSlotStatus::ToolExecuting { .. } => "●",
             AgentSlotStatus::Idle => "○",
+            AgentSlotStatus::Paused { .. } => "◈", // Paused with worktree preserved
             AgentSlotStatus::Stopped { .. } => "◌",
             AgentSlotStatus::Blocked { .. } => "🔶",
             AgentSlotStatus::BlockedForDecision { .. } => "🔶",
@@ -165,6 +171,7 @@ impl OverviewAgentRow {
             AgentSlotStatus::Responding { .. } => "run",
             AgentSlotStatus::ToolExecuting { .. } => "run",
             AgentSlotStatus::Idle => "idle",
+            AgentSlotStatus::Paused { .. } => "pause",
             AgentSlotStatus::Blocked { .. } => "blk",
             AgentSlotStatus::BlockedForDecision { .. } => "dec",
             AgentSlotStatus::Stopped { .. } => "stop",
@@ -177,11 +184,35 @@ impl OverviewAgentRow {
 
     fn task_description(snapshot: &AgentStatusSnapshot) -> String {
         match &snapshot.status {
-            AgentSlotStatus::Idle => "Waiting for task".to_string(),
+            AgentSlotStatus::Idle => {
+                if snapshot.has_worktree {
+                    if let Some(branch) = &snapshot.worktree_branch {
+                        format!("wt:{}", branch)
+                    } else {
+                        "wt:detached".to_string()
+                    }
+                } else {
+                    "Waiting for task".to_string()
+                }
+            }
+            AgentSlotStatus::Paused { reason } => {
+                if let Some(branch) = &snapshot.worktree_branch {
+                    format!("wt:{} ({})", branch, reason)
+                } else {
+                    format!("paused ({})", reason)
+                }
+            }
             AgentSlotStatus::Blocked { reason } => reason.clone(),
             AgentSlotStatus::Responding { .. } | AgentSlotStatus::ToolExecuting { .. } => {
-                // Would need task info from snapshot
-                "Working".to_string()
+                if snapshot.has_worktree {
+                    if let Some(branch) = &snapshot.worktree_branch {
+                        format!("Working [wt:{}]", branch)
+                    } else {
+                        "Working".to_string()
+                    }
+                } else {
+                    "Working".to_string()
+                }
             }
             _ => String::new(),
         }
@@ -246,6 +277,23 @@ mod tests {
             role: AgentRole::Developer,
             status,
             assigned_task_id: None,
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
+        }
+    }
+
+    fn make_snapshot_with_worktree(status: AgentSlotStatus, branch: Option<String>, exists: bool) -> AgentStatusSnapshot {
+        AgentStatusSnapshot {
+            agent_id: AgentId::new("agent_001"),
+            codename: AgentCodename::new("alpha"),
+            provider_type: ProviderType::Mock,
+            role: AgentRole::Developer,
+            status,
+            assigned_task_id: None,
+            worktree_branch: branch,
+            has_worktree: true,
+            worktree_exists: exists,
         }
     }
 
@@ -325,5 +373,48 @@ mod tests {
     fn unicode_width_unicode() {
         assert_eq!(unicode_width_str("🔶"), 2);
         assert_eq!(unicode_width_str("◎"), 2);
+    }
+
+    #[test]
+    fn row_format_paused_agent() {
+        let snapshot = make_snapshot_with_worktree(
+            AgentSlotStatus::paused("worktree preserved"),
+            Some("feature/test".to_string()),
+            true,
+        );
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        assert!(row.full.contains("◈")); // Paused indicator
+        assert!(row.full.contains("pause"));
+        assert!(row.full.contains("wt:feature/test"));
+    }
+
+    #[test]
+    fn row_format_agent_with_worktree_shows_branch() {
+        let snapshot = make_snapshot_with_worktree(
+            AgentSlotStatus::Idle,
+            Some("feature/my-task".to_string()),
+            true,
+        );
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        assert!(row.full.contains("wt:feature/my-task"));
+    }
+
+    #[test]
+    fn row_format_agent_without_worktree_waiting() {
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        assert!(row.full.contains("Waiting for task"));
+        assert!(!row.full.contains("wt:"));
+    }
+
+    #[test]
+    fn row_format_working_agent_with_worktree() {
+        let snapshot = make_snapshot_with_worktree(
+            AgentSlotStatus::Responding { started_at: std::time::Instant::now() },
+            Some("dev/123".to_string()),
+            true,
+        );
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        assert!(row.full.contains("[wt:dev/123]"));
     }
 }

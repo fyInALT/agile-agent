@@ -169,6 +169,20 @@ impl ShellHarness {
                 let codename = self.state.focused_agent_codename().to_string();
                 self.state.open_stop_confirmation(&codename);
             }
+            InputOutcome::PauseFocusedAgent => {
+                if self.state.pause_focused_agent().is_some() {
+                    self.state.app_mut().push_status_message("Agent paused with worktree preserved".to_string());
+                } else {
+                    self.state.app_mut().push_status_message("Failed to pause agent".to_string());
+                }
+            }
+            InputOutcome::ResumeFocusedAgent => {
+                if self.state.resume_focused_agent().is_some() {
+                    self.state.app_mut().push_status_message("Agent resumed".to_string());
+                } else {
+                    self.state.app_mut().push_status_message("Failed to resume agent (not paused?)".to_string());
+                }
+            }
             InputOutcome::Submit(text) => {
                 self.state.app_mut().push_user_message(text);
             }

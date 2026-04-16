@@ -189,6 +189,9 @@ fn daily_standup_generation() {
             role: AgentRole::Developer,
             status: AgentSlotStatus::idle(),
             assigned_task_id: Some(TaskId::new("task-001")),
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
         },
         AgentStatusSnapshot {
             agent_id: AgentId::new("agent-002"),
@@ -197,6 +200,9 @@ fn daily_standup_generation() {
             role: AgentRole::Developer,
             status: AgentSlotStatus::idle(),
             assigned_task_id: Some(TaskId::new("task-002")),
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
         },
     ];
 
@@ -230,6 +236,9 @@ fn blocker_escalation_detection() {
         role: AgentRole::Developer,
         status: AgentSlotStatus::idle(),
         assigned_task_id: Some(TaskId::new("task-001")),
+        worktree_branch: None,
+        has_worktree: false,
+        worktree_exists: false,
     }];
 
     let escalations = tracker.detect_blocked_agents(&statuses, &backlog);
@@ -263,6 +272,9 @@ fn blocker_escalation_resolution() {
         role: AgentRole::Developer,
         status: AgentSlotStatus::idle(),
         assigned_task_id: Some(TaskId::new("task-001")),
+        worktree_branch: None,
+        has_worktree: false,
+        worktree_exists: false,
     }];
 
     tracker.detect_blocked_agents(&statuses, &backlog);
@@ -289,6 +301,9 @@ fn find_scrum_master_role() {
             role: AgentRole::Developer,
             status: AgentSlotStatus::idle(),
             assigned_task_id: None,
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
         },
         AgentStatusSnapshot {
             agent_id: AgentId::new("agent-002"),
@@ -297,6 +312,9 @@ fn find_scrum_master_role() {
             role: AgentRole::ScrumMaster,
             status: AgentSlotStatus::idle(),
             assigned_task_id: None,
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
         },
     ];
 

@@ -176,6 +176,12 @@ pub struct AgentStatusSnapshot {
     pub role: AgentRole,
     pub status: AgentSlotStatus,
     pub assigned_task_id: Option<TaskId>,
+    /// Worktree branch name (if agent has worktree)
+    pub worktree_branch: Option<String>,
+    /// Whether agent has a worktree
+    pub has_worktree: bool,
+    /// Whether worktree directory exists on disk
+    pub worktree_exists: bool,
 }
 
 /// Per-agent task assignment info for visualization
@@ -1361,6 +1367,9 @@ impl AgentPool {
                 role: slot.role(),
                 status: slot.status().clone(),
                 assigned_task_id: slot.assigned_task_id().cloned(),
+                worktree_branch: slot.worktree_branch().cloned(),
+                has_worktree: slot.has_worktree(),
+                worktree_exists: slot.has_worktree() && slot.cwd().exists(),
             })
             .collect()
     }

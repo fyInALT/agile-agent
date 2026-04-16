@@ -1,9 +1,11 @@
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
 use agent_core::app::LoopPhase;
-use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec, ParsedSlashCommand};
-use agent_core::command_bus::parse::parse_slash_command;
 use agent_core::app::TranscriptEntry;
+use agent_core::command_bus::model::{
+    CommandInvocation, CommandNamespace, CommandTargetSpec, ParsedSlashCommand,
+};
+use agent_core::command_bus::parse::parse_slash_command;
 use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_legacy_alias;
 use agent_core::logging;
@@ -34,13 +36,13 @@ use crate::input::handle_paste_event;
 use crate::launch_config_overlay::LaunchConfigOverlayCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
 use crate::render::render_app;
-use crate::ui_state::AtCommandResult;
 use crate::resume_overlay::{ResumeCommand, ResumeOverlay};
 use crate::terminal::AppTerminal;
 use crate::transcript::overlay::OverlayCommand;
 use crate::tui_snapshot::clear_resume_snapshot;
 use crate::tui_snapshot::load_resume_snapshot;
 use crate::tui_snapshot::save_resume_snapshot;
+use crate::ui_state::AtCommandResult;
 use crate::ui_state::TuiState;
 use crate::ui_state::parse_at_command;
 
@@ -114,52 +116,61 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         // Decision agent polling - process decision requests and responses
         if last_decision_poll.elapsed() >= DECISION_POLL_INTERVAL {
             // Collect responses first, preserving output details for transcript
-            let decision_results: Vec<(agent_core::agent_runtime::AgentId, agent_core::agent_pool::DecisionExecutionResult, Option<DecisionOutputInfo>)> = {
+            let decision_results: Vec<(
+                agent_core::agent_runtime::AgentId,
+                agent_core::agent_pool::DecisionExecutionResult,
+                Option<DecisionOutputInfo>,
+            )> = {
                 if let Some(pool) = state.agent_pool.as_mut() {
                     let responses = pool.poll_decision_agents();
-                    responses.into_iter().filter_map(|(agent_id, response)| {
-                        if response.is_success() && response.output().is_some() {
-                            let output = response.output().unwrap();
-                            let action_name = output.actions.first()
-                                .map(|a| a.action_type().name.clone())
-                                .unwrap_or_else(|| "none".to_string());
+                    responses
+                        .into_iter()
+                        .filter_map(|(agent_id, response)| {
+                            if response.is_success() && response.output().is_some() {
+                                let output = response.output().unwrap();
+                                let action_name = output
+                                    .actions
+                                    .first()
+                                    .map(|a| a.action_type().name.clone())
+                                    .unwrap_or_else(|| "none".to_string());
 
-                            // Extract decision output info for transcript display
-                            let output_info = DecisionOutputInfo {
-                                situation_type: "auto_detected".to_string(), // TODO: get from request
-                                action_type: action_name.clone(),
-                                reasoning: output.reasoning.clone(),
-                                confidence: output.confidence,
-                                tier: "auto".to_string(), // TODO: get from engine
-                            };
+                                // Extract decision output info for transcript display
+                                let output_info = DecisionOutputInfo {
+                                    situation_type: "auto_detected".to_string(), // TODO: get from request
+                                    action_type: action_name.clone(),
+                                    reasoning: output.reasoning.clone(),
+                                    confidence: output.confidence,
+                                    tier: "auto".to_string(), // TODO: get from engine
+                                };
 
-                            logging::debug_event(
-                                "app_loop.decision_response",
-                                "received decision response",
-                                serde_json::json!({
-                                    "agent_id": agent_id.as_str(),
-                                    "action": action_name,
-                                    "reasoning": output.reasoning,
-                                    "confidence": output.confidence,
-                                }),
-                            );
-                            // Execute decision action
-                            let result = pool.execute_decision_action(&agent_id, output);
-                            Some((agent_id, result, Some(output_info)))
-                        } else if response.is_error() {
-                            logging::warn_event(
-                                "app_loop.decision_error",
-                                "decision agent error",
-                                serde_json::json!({
-                                    "agent_id": agent_id.as_str(),
-                                    "error": response.error_message().unwrap_or("unknown"),
-                                }),
-                            );
-                            None
-                        } else {
-                            None
-                        }
-                    }).collect()
+                                logging::debug_event(
+                                    "app_loop.decision_response",
+                                    "received decision response",
+                                    serde_json::json!({
+                                        "agent_id": agent_id.as_str(),
+                                        "action": action_name,
+                                        "reasoning": output.reasoning,
+                                        "confidence": output.confidence,
+                                    }),
+                                );
+                                // Execute decision action
+                                let result = pool.execute_decision_action(&agent_id, output);
+                                Some((agent_id, result, Some(output_info)))
+                            } else if response.is_error() {
+                                logging::warn_event(
+                                    "app_loop.decision_error",
+                                    "decision agent error",
+                                    serde_json::json!({
+                                        "agent_id": agent_id.as_str(),
+                                        "error": response.error_message().unwrap_or("unknown"),
+                                    }),
+                                );
+                                None
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
                 } else {
                     Vec::new()
                 }
@@ -180,9 +191,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 info.tier,
                             );
                         }
-                        state.app_mut().push_status_message(
-                            format!("🧠 {}: decision executed ({})", agent_id.as_str(), option_id)
-                        );
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: decision executed ({})",
+                            agent_id.as_str(),
+                            option_id
+                        ));
                     }
                     agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
                         if let Some(info) = output_info {
@@ -195,11 +208,14 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 info.tier,
                             );
                         }
-                        state.app_mut().push_status_message(
-                            format!("🧠 {}: recommendation accepted", agent_id.as_str())
-                        );
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: recommendation accepted",
+                            agent_id.as_str()
+                        ));
                     }
-                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction { instruction: _ } => {
+                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
+                        instruction: _,
+                    } => {
                         if let Some(info) = output_info {
                             state.app_mut().push_decision(
                                 agent_id.as_str().to_string(),
@@ -210,20 +226,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 info.tier,
                             );
                         }
-                        state.app_mut().push_status_message(
-                            format!("🧠 {}: custom instruction sent", agent_id.as_str())
-                        );
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: custom instruction sent",
+                            agent_id.as_str()
+                        ));
                         // TODO: Send custom instruction to provider
                     }
                     agent_core::agent_pool::DecisionExecutionResult::Skipped => {
-                        state.app_mut().push_status_message(
-                            format!("🧠 {}: decision skipped", agent_id.as_str())
-                        );
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: decision skipped",
+                            agent_id.as_str()
+                        ));
                     }
                     agent_core::agent_pool::DecisionExecutionResult::Cancelled => {
-                        state.app_mut().push_status_message(
-                            format!("🧠 {}: decision cancelled", agent_id.as_str())
-                        );
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: decision cancelled",
+                            agent_id.as_str()
+                        ));
                     }
                     agent_core::agent_pool::DecisionExecutionResult::AgentNotFound
                     | agent_core::agent_pool::DecisionExecutionResult::NotBlocked => {}
@@ -452,6 +471,20 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             let codename = state.focused_agent_codename().to_string();
                             state.open_stop_confirmation(&codename);
                         }
+                        InputOutcome::PauseFocusedAgent => {
+                            if state.pause_focused_agent().is_some() {
+                                state.app_mut().push_status_message("Agent paused with worktree preserved".to_string());
+                            } else {
+                                state.app_mut().push_status_message("Failed to pause agent".to_string());
+                            }
+                        }
+                        InputOutcome::ResumeFocusedAgent => {
+                            if state.resume_focused_agent().is_some() {
+                                state.app_mut().push_status_message("Agent resumed".to_string());
+                            } else {
+                                state.app_mut().push_status_message("Failed to resume agent (not paused?)".to_string());
+                            }
+                        }
                         InputOutcome::SwitchViewMode(n) => {
                             state.view_state.switch_by_number(n);
                             let label = state.view_state.mode.label();
@@ -638,7 +671,10 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.app_mut().push_status_message("search cancelled");
                         }
                         InputOutcome::OverviewSearchSelect(agent_name) => {
-                            if state.focus_overview_agent_by_codename(&agent_name).is_some() {
+                            if state
+                                .focus_overview_agent_by_codename(&agent_name)
+                                .is_some()
+                            {
                                 state.view_state.overview.search_active = false;
                                 state.view_state.overview.search_query.clear();
                                 state
@@ -654,7 +690,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.session.workplace_mut().loop_control.signal_quit();
                         }
                         InputOutcome::Submit(user_input) => {
-                            if handle_command_submission(&mut state, user_input.clone(), &mut provider_rx)? {
+                            if handle_command_submission(
+                                &mut state,
+                                user_input.clone(),
+                                &mut provider_rx,
+                            )? {
                                 continue;
                             }
 
@@ -702,7 +742,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 // Select clicked agent
                                 let clicked_index = click_row as usize;
                                 if let Some(original_index) = visible.get(clicked_index).copied()
-                                    && let Some(snapshot) = state.focus_agent_by_index(original_index)
+                                    && let Some(snapshot) =
+                                        state.focus_agent_by_index(original_index)
                                 {
                                     state.app_mut().push_status_message(format!(
                                         "focused {}",
@@ -1215,7 +1256,8 @@ fn execute_agent_invocation(state: &mut TuiState, invocation: CommandInvocation)
         .iter()
         .map(|value| value.as_str())
         .collect::<Vec<_>>();
-    let lines = crate::command_runtime::execute_agent_command(state, explicit_target, &path, &args)?;
+    let lines =
+        crate::command_runtime::execute_agent_command(state, explicit_target, &path, &args)?;
     for line in lines {
         state.app_mut().push_status_message(line);
     }
@@ -1227,7 +1269,8 @@ fn execute_provider_invocation(state: &mut TuiState, invocation: CommandInvocati
         CommandTargetSpec::AgentName(value) => value.as_str(),
     });
     let raw_tail = invocation.raw_tail.as_deref().unwrap_or("");
-    let request = crate::command_runtime::execute_provider_command(state, explicit_target, raw_tail)?;
+    let request =
+        crate::command_runtime::execute_provider_command(state, explicit_target, raw_tail)?;
     state.append_status_to_agent_transcript(
         &request.agent_id,
         format!("provider command: {}", request.raw_tail),
@@ -1252,7 +1295,11 @@ fn execute_provider_invocation(state: &mut TuiState, invocation: CommandInvocati
 }
 
 fn legacy_local_command_from_invocation(invocation: &CommandInvocation) -> Option<LocalCommand> {
-    let path = invocation.path.iter().map(|value| value.as_str()).collect::<Vec<_>>();
+    let path = invocation
+        .path
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
     match path.as_slice() {
         ["legacy", "provider"] => Some(LocalCommand::Provider),
         ["legacy", "skills"] => Some(LocalCommand::Skills),
@@ -1260,11 +1307,7 @@ fn legacy_local_command_from_invocation(invocation: &CommandInvocation) -> Optio
         ["legacy", "run-once"] => Some(LocalCommand::RunOnce),
         ["legacy", "run-loop"] => Some(LocalCommand::RunLoop),
         ["legacy", "quit"] => Some(LocalCommand::Quit),
-        ["legacy", "todo-add"] => invocation
-            .args
-            .first()
-            .cloned()
-            .map(LocalCommand::TodoAdd),
+        ["legacy", "todo-add"] => invocation.args.first().cloned().map(LocalCommand::TodoAdd),
         _ => None,
     }
 }
@@ -1278,7 +1321,8 @@ fn shutdown_tui_state(state: &mut TuiState) -> Result<()> {
     };
 
     let summary = state.create_shutdown_snapshot(reason.clone());
-    state.session
+    state
+        .session
         .agent_runtime
         .workplace()
         .save_shutdown_snapshot(&summary)?;
@@ -1297,9 +1341,10 @@ fn resolve_agent_target_ids(
     let mut resolved = Vec::with_capacity(agents.len());
 
     for agent in agents {
-        let Some(status) = statuses.iter().find(|status| {
-            status.codename.as_str() == agent || status.agent_id.as_str() == agent
-        }) else {
+        let Some(status) = statuses
+            .iter()
+            .find(|status| status.codename.as_str() == agent || status.agent_id.as_str() == agent)
+        else {
             return Err(format!("agent {} not found", agent));
         };
         resolved.push(status.agent_id.clone());
@@ -1558,10 +1603,15 @@ fn latest_assistant_summary_for_agent(
         .as_ref()
         .and_then(|pool| pool.get_slot_by_id(agent_id))
         .and_then(|slot| {
-            slot.transcript().iter().rev().find_map(|entry| match entry {
-                TranscriptEntry::Assistant(text) if !text.trim().is_empty() => Some(text.as_str()),
-                _ => None,
-            })
+            slot.transcript()
+                .iter()
+                .rev()
+                .find_map(|entry| match entry {
+                    TranscriptEntry::Assistant(text) if !text.trim().is_empty() => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
         })?;
 
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1857,12 +1907,9 @@ fn handle_agent_provider_event(
             saved_path,
         } => {
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
-                state.app_mut().push_image_generation(
-                    call_id,
-                    revised_prompt,
-                    result,
-                    saved_path,
-                );
+                state
+                    .app_mut()
+                    .push_image_generation(call_id, revised_prompt, result, saved_path);
             }
         }
     }
@@ -1881,7 +1928,8 @@ fn handle_agent_provider_event(
                 let situation = components.situation_registry.build(situation_type.clone());
                 let context = DecisionContext::new(situation, agent_id.as_str());
 
-                let request = DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
+                let request =
+                    DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
 
                 // Send decision request to decision agent
                 if let Some(pool) = state.agent_pool.as_mut() {
@@ -1930,9 +1978,8 @@ fn handle_agent_thread_finished(
             }
             agent_core::agent_slot::ThreadOutcome::ErrorExit { error } => {
                 if !slot.status().is_blocked() {
-                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::blocked(
-                        error,
-                    ));
+                    let _ =
+                        slot.transition_to(agent_core::agent_slot::AgentSlotStatus::blocked(error));
                 }
             }
             agent_core::agent_slot::ThreadOutcome::Cancelled => {
@@ -1980,18 +2027,18 @@ fn current_time_as_u32() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec};
     use super::event_poll_timeout;
     use super::execute_provider_invocation;
-    use super::handle_command_submission;
-    use super::shutdown_tui_state;
-    use super::handle_agent_provider_event;
     use super::handle_agent_channel_disconnect;
+    use super::handle_agent_provider_event;
+    use super::handle_command_submission;
     use super::handle_multi_agent_submission;
     use super::handle_provider_terminal_error;
+    use super::shutdown_tui_state;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
+    use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec};
     use agent_core::provider::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
     use std::time::Duration;
@@ -2216,13 +2263,9 @@ mod tests {
             .and_then(|pool| pool.get_slot_by_id(&agent_id))
             .expect("slot");
         assert!(slot.status().is_blocked());
-        assert!(state
-            .view_state
-            .overview
-            .log_buffer
-            .back()
-            .is_some_and(|msg| msg.message_type
-                == crate::overview_state::OverviewMessageType::Blocked));
+        assert!(state.view_state.overview.log_buffer.back().is_some_and(
+            |msg| msg.message_type == crate::overview_state::OverviewMessageType::Blocked
+        ));
     }
 
     #[test]
@@ -2256,12 +2299,14 @@ mod tests {
             agent_core::provider::ProviderEvent::Finished,
         );
 
-        assert!(state
-            .view_state
-            .overview
-            .log_buffer
-            .iter()
-            .any(|msg| msg.content.contains("Overview reply content")));
+        assert!(
+            state
+                .view_state
+                .overview
+                .log_buffer
+                .iter()
+                .any(|msg| msg.content.contains("Overview reply content"))
+        );
     }
 
     #[test]
@@ -2444,9 +2489,11 @@ mod tests {
         let workplace =
             agent_core::workplace_store::WorkplaceStore::for_cwd(temp.path()).expect("workplace");
         assert!(workplace.has_shutdown_snapshot());
-        assert!(crate::tui_snapshot::load_resume_snapshot(&workplace)
-            .expect("load tui snapshot")
-            .is_some());
+        assert!(
+            crate::tui_snapshot::load_resume_snapshot(&workplace)
+                .expect("load tui snapshot")
+                .is_some()
+        );
     }
 
     #[test]
@@ -2475,9 +2522,12 @@ mod tests {
         state.ensure_overview_agent();
         let mut provider_rx = None;
 
-        let handled =
-            handle_command_submission(&mut state, "/provider /status".to_string(), &mut provider_rx)
-                .expect("ok");
+        let handled = handle_command_submission(
+            &mut state,
+            "/provider /status".to_string(),
+            &mut provider_rx,
+        )
+        .expect("ok");
         assert!(handled);
         assert!(state.app().transcript.iter().all(|entry| {
             !matches!(entry, TranscriptEntry::User(text) if text == "/provider /status")

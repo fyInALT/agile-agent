@@ -422,6 +422,9 @@ mod tests {
             role,
             status: AgentSlotStatus::idle(),
             assigned_task_id: task_id.map(|t| TaskId::new(t)),
+            worktree_branch: None,
+            has_worktree: false,
+            worktree_exists: false,
         }
     }
 
