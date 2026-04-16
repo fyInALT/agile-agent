@@ -663,7 +663,7 @@ impl AgentPool {
         agent_id: &AgentId,
     ) -> Result<(), AgentPoolWorktreeError> {
         // Check worktree support is available
-        if self.worktree_state_store.is_none() {
+        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
@@ -675,7 +675,16 @@ impl AgentPool {
             return Err(AgentPoolWorktreeError::NoWorktree(agent_id.as_str().to_string()));
         }
 
+        // Get the actual worktree path from slot (most current)
+        let worktree_path = slot.cwd();
+
+        // Check if worktree still exists on disk
+        if !worktree_path.exists() {
+            return Err(AgentPoolWorktreeError::WorktreeNotFound(worktree_path));
+        }
+
         let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+        let worktree_manager = self.worktree_manager.as_ref().unwrap();
 
         // Load existing worktree state
         let mut worktree_state = worktree_state_store
@@ -683,18 +692,18 @@ impl AgentPool {
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?
             .ok_or_else(|| AgentPoolWorktreeError::StateNotFound(agent_id.as_str().to_string()))?;
 
-        // Update state before pause
+        // Update state with current path (in case it changed)
+        worktree_state.path = worktree_path.clone();
         worktree_state.touch();
 
         // Check for uncommitted changes
-        let worktree_manager = self.worktree_manager.as_ref().unwrap();
         let has_changes = worktree_manager
-            .has_uncommitted_changes(&worktree_state.path)
+            .has_uncommitted_changes(&worktree_path)
             .map_err(AgentPoolWorktreeError::WorktreeError)?;
         worktree_state.has_uncommitted_changes = has_changes;
 
         // Get current HEAD
-        if let Some(head) = worktree_manager.get_head_commit(&worktree_state.path) {
+        if let Some(head) = worktree_manager.get_head_commit(&worktree_path) {
             worktree_state.head_commit = Some(head);
         }
 
@@ -716,7 +725,7 @@ impl AgentPool {
             serde_json::json!({
                 "agent_id": agent_id.as_str(),
                 "has_uncommitted_changes": has_changes,
-                "worktree_path": worktree_state.path.to_string_lossy(),
+                "worktree_path": worktree_path.to_string_lossy(),
             }),
         );
 
@@ -726,7 +735,7 @@ impl AgentPool {
     /// Resume an agent with worktree verification
     ///
     /// Loads the saved worktree state, verifies the worktree still exists
-    /// (or recreates it if needed), and transitions the agent to running.
+    /// (or recreates it if needed), and transitions the agent to idle (ready to work).
     pub fn resume_agent_with_worktree(
         &mut self,
         agent_id: &AgentId,
@@ -740,35 +749,10 @@ impl AgentPool {
         let worktree_manager = self.worktree_manager.as_ref().unwrap();
 
         // Load saved worktree state
-        let worktree_state = worktree_state_store
+        let mut worktree_state = worktree_state_store
             .load(agent_id.as_str())
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?
             .ok_or_else(|| AgentPoolWorktreeError::StateNotFound(agent_id.as_str().to_string()))?;
-
-        // Verify worktree exists
-        if !worktree_state.exists() {
-            // Worktree was deleted externally - recreate it
-            let options = WorktreeCreateOptions {
-                path: worktree_manager.worktrees_dir().join(&worktree_state.worktree_id),
-                branch: worktree_state.branch.clone(),
-                create_branch: worktree_state.branch.is_some(),
-                base: Some(worktree_state.base_commit.clone()),
-                lock_reason: None,
-            };
-
-            let _worktree_info = worktree_manager
-                .create(&worktree_state.worktree_id, options)
-                .map_err(AgentPoolWorktreeError::WorktreeError)?;
-
-            logging::debug_event(
-                "pool.agent.resume.recreated_worktree",
-                "worktree recreated during resume",
-                serde_json::json!({
-                    "agent_id": agent_id.as_str(),
-                    "worktree_id": worktree_state.worktree_id,
-                }),
-            );
-        }
 
         // Get the slot and verify it's paused
         let slot = self.get_slot_by_id(agent_id)
@@ -778,19 +762,70 @@ impl AgentPool {
             return Err(AgentPoolWorktreeError::AgentNotPaused(agent_id.as_str().to_string()));
         }
 
-        // Transition to idle (ready to resume work)
-        let slot_mut = self.get_slot_mut_by_id(agent_id)
-            .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
-        slot_mut
-            .transition_to(AgentSlotStatus::idle())
-            .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
+        // Verify worktree exists or recreate it
+        let actual_worktree_path = if worktree_state.exists() {
+            worktree_state.path.clone()
+        } else {
+            // Worktree was deleted externally - recreate it
+            let options = WorktreeCreateOptions {
+                path: worktree_manager.worktrees_dir().join(&worktree_state.worktree_id),
+                branch: worktree_state.branch.clone(),
+                create_branch: worktree_state.branch.is_some(),
+                base: Some(worktree_state.base_commit.clone()),
+                lock_reason: None,
+            };
+
+            let worktree_info = worktree_manager
+                .create(&worktree_state.worktree_id, options)
+                .map_err(AgentPoolWorktreeError::WorktreeError)?;
+
+            // Update worktree_state with new path
+            worktree_state.path = worktree_info.path.clone();
+
+            // Save updated state
+            worktree_state_store
+                .save(agent_id.as_str(), &worktree_state)
+                .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+            logging::debug_event(
+                "pool.agent.resume.recreated_worktree",
+                "worktree recreated during resume",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "worktree_id": worktree_state.worktree_id,
+                    "new_path": worktree_info.path.to_string_lossy(),
+                }),
+            );
+
+            worktree_info.path
+        };
+
+        // Update slot's worktree path if it differs from current
+        {
+            let slot_mut = self.get_slot_mut_by_id(agent_id)
+                .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+
+            // Sync the slot's worktree info with actual state
+            if slot_mut.worktree_path() != Some(&actual_worktree_path) {
+                slot_mut.set_worktree(
+                    actual_worktree_path.clone(),
+                    worktree_state.branch.clone(),
+                    worktree_state.worktree_id.clone(),
+                );
+            }
+
+            // Transition to idle (ready to resume work)
+            slot_mut
+                .transition_to(AgentSlotStatus::idle())
+                .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
+        }
 
         logging::debug_event(
             "pool.agent.resume_with_worktree",
             "resumed agent with worktree",
             serde_json::json!({
                 "agent_id": agent_id.as_str(),
-                "worktree_path": worktree_state.path.to_string_lossy(),
+                "worktree_path": actual_worktree_path.to_string_lossy(),
             }),
         );
 
@@ -2591,6 +2626,9 @@ pub enum AgentPoolWorktreeError {
 
     #[error("agent has no worktree: {0}")]
     NoWorktree(String),
+
+    #[error("worktree directory not found on disk: {0}")]
+    WorktreeNotFound(PathBuf),
 
     #[error("worktree state not found: {0}")]
     StateNotFound(String),
