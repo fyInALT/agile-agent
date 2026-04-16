@@ -35,6 +35,7 @@
 //! DecisionAgentSlot is owned by the main thread (TUI loop).
 //! The decision provider thread sends events through the channel.
 
+use std::sync::Arc;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
@@ -48,6 +49,7 @@ use agent_decision::action_registry::ActionRegistry;
 use agent_decision::builtin_actions::register_action_builtins;
 use agent_decision::engine::DecisionEngine;
 use agent_decision::initializer::DecisionLayerComponents;
+use agent_decision::llm_caller::LLMCaller;
 use agent_decision::tiered_engine::{TieredDecisionEngine, TieredEngineConfig};
 use agent_decision::llm_engine::LLMEngineConfig;
 use agent_decision::provider_kind::ProviderKind as DecisionProviderKind;
@@ -427,6 +429,21 @@ impl DecisionAgentSlot {
                 }),
             );
         }
+    }
+
+    /// Set LLM caller for real provider calls
+    ///
+    /// This injects a real provider caller into the decision engine,
+    /// replacing the mock caller used in tests.
+    pub fn set_llm_caller(&mut self, caller: Arc<dyn LLMCaller>) {
+        self.engine.set_llm_caller(caller);
+        logging::debug_event(
+            "decision_agent.llm_caller_set",
+            "LLM caller injected into decision engine",
+            serde_json::json!({
+                "agent_id": self.agent_id,
+            }),
+        );
     }
 
     /// Get last activity timestamp

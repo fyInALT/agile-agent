@@ -8,6 +8,7 @@ use crate::action_registry::ActionRegistry;
 use crate::cli_engine::CLIDecisionEngine;
 use crate::context::DecisionContext;
 use crate::engine::DecisionEngine;
+use crate::llm_caller::LLMCaller;
 use crate::llm_engine::{LLMDecisionEngine, LLMEngineConfig};
 use crate::mock_engine::MockDecisionEngine;
 use crate::output::DecisionOutput;
@@ -16,6 +17,7 @@ use crate::rule_engine::RuleBasedDecisionEngine;
 use crate::situation::DecisionSituation;
 use crate::types::{DecisionEngineType, SituationType};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Tier level for engine selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +192,13 @@ impl TieredDecisionEngine {
             ..TieredEngineConfig::default()
         };
         Self::new(config)
+    }
+
+    /// Set custom LLM caller for the LLM engine
+    ///
+    /// This allows injecting a real provider caller instead of using the mock.
+    pub fn set_llm_caller(&mut self, caller: Arc<dyn LLMCaller>) {
+        self.llm_engine.set_llm_caller(caller);
     }
 
     /// Select tier for situation

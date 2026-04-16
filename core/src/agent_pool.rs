@@ -13,7 +13,7 @@ use crate::backlog::{BacklogState, TaskStatus};
 use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
 use crate::decision_mail::{DecisionMail, DecisionRequest, DecisionResponse, DecisionMailSender};
 use crate::logging;
-use crate::provider::ProviderKind;
+use crate::provider::{ProviderKind, ProviderEvent};
 
 // Decision layer imports
 use agent_decision::{
@@ -24,8 +24,101 @@ use agent_decision::{
     SituationType,
     classifier::ClassifyResult,
     initializer::{DecisionLayerComponents, initialize_decision_layer},
-    provider_event::ProviderEvent,
+    provider_event::ProviderEvent as DecisionProviderEvent,
 };
+
+/// Convert core ProviderEvent to decision layer ProviderEvent
+fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) -> DecisionProviderEvent {
+    match event {
+        crate::provider::ProviderEvent::Finished => {
+            DecisionProviderEvent::Finished { summary: None }
+        }
+        crate::provider::ProviderEvent::Error(msg) => {
+            DecisionProviderEvent::Error {
+                message: msg.clone(),
+                error_type: None,
+            }
+        }
+        crate::provider::ProviderEvent::Status(text) => {
+            DecisionProviderEvent::StatusUpdate { status: text.clone() }
+        }
+        crate::provider::ProviderEvent::AssistantChunk(text) => {
+            DecisionProviderEvent::ClaudeAssistantChunk { text: text.clone() }
+        }
+        crate::provider::ProviderEvent::ThinkingChunk(text) => {
+            DecisionProviderEvent::ClaudeThinkingChunk { text: text.clone() }
+        }
+        crate::provider::ProviderEvent::SessionHandle(handle) => {
+            DecisionProviderEvent::SessionHandle {
+                session_id: match handle {
+                    crate::provider::SessionHandle::ClaudeSession { session_id } => session_id.clone(),
+                    crate::provider::SessionHandle::CodexThread { thread_id } => thread_id.clone(),
+                },
+                info: None,
+            }
+        }
+        crate::provider::ProviderEvent::ExecCommandStarted { input_preview, .. } => {
+            DecisionProviderEvent::ClaudeToolCallStarted {
+                name: "exec".to_string(),
+                input: input_preview.clone(),
+            }
+        }
+        crate::provider::ProviderEvent::ExecCommandFinished { output_preview, status, .. } => {
+            DecisionProviderEvent::ClaudeToolCallFinished {
+                name: "exec".to_string(),
+                output: output_preview.clone(),
+                success: matches!(status, crate::tool_calls::ExecCommandStatus::Completed),
+            }
+        }
+        crate::provider::ProviderEvent::GenericToolCallStarted { name, input_preview, .. } => {
+            DecisionProviderEvent::ClaudeToolCallStarted {
+                name: name.clone(),
+                input: input_preview.clone(),
+            }
+        }
+        crate::provider::ProviderEvent::GenericToolCallFinished { name, output_preview, success, .. } => {
+            DecisionProviderEvent::ClaudeToolCallFinished {
+                name: name.clone(),
+                output: output_preview.clone(),
+                success: *success,
+            }
+        }
+        crate::provider::ProviderEvent::PatchApplyStarted { .. } => {
+            DecisionProviderEvent::CodexPatchApplyStarted { path: "".to_string() }
+        }
+        crate::provider::ProviderEvent::PatchApplyFinished { status, .. } => {
+            DecisionProviderEvent::StatusUpdate {
+                status: match status {
+                    crate::tool_calls::PatchApplyStatus::Completed => "patch completed".to_string(),
+                    crate::tool_calls::PatchApplyStatus::Failed => "patch failed".to_string(),
+                    crate::tool_calls::PatchApplyStatus::Declined => "patch declined".to_string(),
+                    crate::tool_calls::PatchApplyStatus::InProgress => "patch in progress".to_string(),
+                },
+            }
+        }
+        crate::provider::ProviderEvent::McpToolCallStarted { .. } => {
+            DecisionProviderEvent::ClaudeToolCallStarted {
+                name: "mcp".to_string(),
+                input: None,
+            }
+        }
+        crate::provider::ProviderEvent::McpToolCallFinished { error, .. } => {
+            DecisionProviderEvent::ClaudeToolCallFinished {
+                name: "mcp".to_string(),
+                output: error.clone(),
+                success: error.is_none(),
+            }
+        }
+        crate::provider::ProviderEvent::WebSearchStarted { .. }
+        | crate::provider::ProviderEvent::WebSearchFinished { .. }
+        | crate::provider::ProviderEvent::ViewImage { .. }
+        | crate::provider::ProviderEvent::ImageGenerationFinished { .. }
+        | crate::provider::ProviderEvent::ExecCommandOutputDelta { .. }
+        | crate::provider::ProviderEvent::PatchApplyOutputDelta { .. } => {
+            DecisionProviderEvent::StatusUpdate { status: "running".to_string() }
+        }
+    }
+}
 
 /// Event emitted when an agent becomes blocked
 #[derive(Debug, Clone)]
@@ -492,13 +585,19 @@ impl AgentPool {
         let (sender, receiver) = mail.split();
 
         // Create decision agent slot
-        let decision_agent = DecisionAgentSlot::new(
+        let mut decision_agent = DecisionAgentSlot::new(
             work_agent_id.as_str().to_string(),
             provider_kind,
             receiver,
             self.cwd.clone(),
             &self.decision_components,
         );
+
+        // Inject ProviderLLMCaller for real LLM calls
+        use crate::llm_caller::ProviderLLMCaller;
+        use std::sync::Arc;
+        let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
+        decision_agent.set_llm_caller(llm_caller);
 
         // Store the decision agent and mail sender
         self.decision_agents.insert(work_agent_id.clone(), decision_agent);
@@ -561,8 +660,11 @@ impl AgentPool {
                     ProviderKind::Mock => agent_decision::provider_kind::ProviderKind::Unknown,
                 };
 
+                // Convert core ProviderEvent to decision ProviderEvent
+                let decision_event = convert_provider_event_to_decision(event);
+
                 // Use classifier registry to classify the event
-                self.decision_components.classifier_registry.classify(event, decision_provider)
+                self.decision_components.classifier_registry.classify(&decision_event, decision_provider)
             } else {
                 // No ProviderKind mapping, return Running result
                 ClassifyResult::running(None)
@@ -650,6 +752,127 @@ impl AgentPool {
         stats
     }
 
+    /// Execute a decision action on a work agent
+    ///
+    /// Takes a decision output and executes the actions on the specified work agent.
+    pub fn execute_decision_action(
+        &mut self,
+        work_agent_id: &AgentId,
+        output: &agent_decision::output::DecisionOutput,
+    ) -> DecisionExecutionResult {
+        // Find the work agent
+        let slot_index = match self.find_slot_index(work_agent_id) {
+            Ok(idx) => idx,
+            Err(_) => return DecisionExecutionResult::AgentNotFound,
+        };
+
+        let slot = &mut self.slots[slot_index];
+
+        // Check if agent is blocked (most decisions require blocked state)
+        // Allow idle state too for some decisions
+        if !slot.status().is_blocked() && !slot.status().is_idle() {
+            return DecisionExecutionResult::NotBlocked;
+        }
+
+        // Execute the first action from the output
+        if let Some(action) = output.actions.first() {
+            let action_type = action.action_type().name.clone();
+            let params_str = action.serialize_params();
+
+            logging::debug_event(
+                "pool.decision_action.execute",
+                "executing decision action",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                    "action_type": action_type,
+                    "params": params_str,
+                }),
+            );
+
+            match action_type.as_str() {
+                "select_option" => {
+                    // Parse params to get option_id
+                    let params: serde_json::Value = serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let option_id = params["option_id"].as_str().unwrap_or("a").to_string();
+
+                    // Execute the selection - find pending request for this agent
+                    // The human_queue stores requests with agent_id in the context
+                    let pending_request = self.human_queue.peek();
+                    if let Some(request) = pending_request {
+                        // Create response with the selection
+                        let selection = HumanSelection::selected(option_id.clone());
+                        let response = HumanDecisionResponse::new(request.id.clone(), selection);
+                        let result = self.process_human_response(response);
+
+                        match result {
+                            Ok(DecisionExecutionResult::Executed { .. }) => {
+                                DecisionExecutionResult::Executed { option_id }
+                            }
+                            Ok(other) => other,
+                            Err(e) => {
+                                logging::warn_event(
+                                    "pool.decision_action.process_failed",
+                                    "failed to process human response",
+                                    serde_json::json!({ "error": e }),
+                                );
+                                DecisionExecutionResult::Cancelled
+                            }
+                        }
+                    } else {
+                        // No pending request - agent might not be blocked
+                        DecisionExecutionResult::NotBlocked
+                    }
+                }
+                "skip" => {
+                    // Skip the current task
+                    let pending_request = self.human_queue.peek();
+                    if let Some(request) = pending_request {
+                        let response = HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
+                        let _ = self.process_human_response(response);
+                    }
+                    DecisionExecutionResult::Skipped
+                }
+                "request_human" => {
+                    // Already in human decision queue - nothing additional to do
+                    DecisionExecutionResult::AcceptedRecommendation
+                }
+                "custom_instruction" => {
+                    // Parse params to get instruction
+                    let params: serde_json::Value = serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let instruction = params["instruction"].as_str().unwrap_or("").to_string();
+
+                    // Store instruction for the agent to use in next turn
+                    if !instruction.is_empty() {
+                        slot.append_transcript(crate::app::TranscriptEntry::User(instruction.clone()));
+                    }
+                    DecisionExecutionResult::CustomInstruction { instruction }
+                }
+                "continue" => {
+                    // Continue with normal processing - agent should transition to idle
+                    if slot.status().is_blocked() {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    }
+                    DecisionExecutionResult::AcceptedRecommendation
+                }
+                _ => {
+                    // Unknown action type
+                    logging::warn_event(
+                        "pool.decision_action.unknown",
+                        "unknown decision action type",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "action_type": action_type,
+                        }),
+                    );
+                    DecisionExecutionResult::Cancelled
+                }
+            }
+        } else {
+            // No actions in output - nothing to execute
+            DecisionExecutionResult::Cancelled
+        }
+    }
+
     /// Stop a specific agent by ID
     ///
     /// Returns the slot index that was stopped.
@@ -660,6 +883,9 @@ impl AgentPool {
         let reason = "user requested";
         slot.transition_to(AgentSlotStatus::stopped(reason))
             .map_err(|e| format!("Failed to stop agent: {}", e))?;
+
+        // Also stop the decision agent for this work agent
+        self.stop_decision_agent_for(agent_id)?;
 
         logging::debug_event(
             "pool.agent.stop",
@@ -697,6 +923,10 @@ impl AgentPool {
         }
         let codename = slot.codename().clone();
         self.slots.remove(index);
+
+        // Also remove the decision agent for this work agent
+        self.decision_agents.remove(agent_id);
+        self.decision_mail_senders.remove(agent_id);
 
         logging::debug_event(
             "pool.agent.remove",

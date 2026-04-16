@@ -46,6 +46,9 @@ use crate::ui_state::parse_at_command;
 /// Interval for periodic persistence flush
 const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Interval for decision agent polling
+const DECISION_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
 
@@ -81,6 +84,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
     let mut last_flush = Instant::now();
+    let mut last_decision_poll = Instant::now();
 
     loop {
         terminal.draw(|frame| render_app(frame, &mut state))?;
@@ -93,6 +97,85 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         if last_flush.elapsed() >= PERSISTENCE_FLUSH_INTERVAL {
             state.persist_if_changed()?;
             last_flush = Instant::now();
+        }
+
+        // Decision agent polling - process decision requests and responses
+        if last_decision_poll.elapsed() >= DECISION_POLL_INTERVAL {
+            // Collect responses first
+            let decision_results: Vec<(agent_core::agent_runtime::AgentId, agent_core::agent_pool::DecisionExecutionResult)> = {
+                if let Some(pool) = state.agent_pool.as_mut() {
+                    let responses = pool.poll_decision_agents();
+                    responses.into_iter().filter_map(|(agent_id, response)| {
+                        if response.is_success() && response.output().is_some() {
+                            let output = response.output().unwrap();
+                            let action_name = output.actions.first()
+                                .map(|a| a.action_type().name.clone())
+                                .unwrap_or_else(|| "none".to_string());
+
+                            logging::debug_event(
+                                "app_loop.decision_response",
+                                "received decision response",
+                                serde_json::json!({
+                                    "agent_id": agent_id.as_str(),
+                                    "action": action_name,
+                                }),
+                            );
+                            // Execute decision action
+                            let result = pool.execute_decision_action(&agent_id, output);
+                            Some((agent_id, result))
+                        } else if response.is_error() {
+                            logging::warn_event(
+                                "app_loop.decision_error",
+                                "decision agent error",
+                                serde_json::json!({
+                                    "agent_id": agent_id.as_str(),
+                                    "error": response.error_message().unwrap_or("unknown"),
+                                }),
+                            );
+                            None
+                        } else {
+                            None
+                        }
+                    }).collect()
+                } else {
+                    Vec::new()
+                }
+            };
+
+            // Process results after releasing pool borrow
+            for (agent_id, result) in decision_results {
+                match result {
+                    agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
+                        state.app_mut().push_status_message(
+                            format!("{}: decision executed ({})", agent_id.as_str(), option_id)
+                        );
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
+                        state.app_mut().push_status_message(
+                            format!("{}: recommendation accepted", agent_id.as_str())
+                        );
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction { instruction: _ } => {
+                        state.app_mut().push_status_message(
+                            format!("{}: custom instruction sent", agent_id.as_str())
+                        );
+                        // TODO: Send custom instruction to provider
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::Skipped => {
+                        state.app_mut().push_status_message(
+                            format!("{}: decision skipped", agent_id.as_str())
+                        );
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::Cancelled => {
+                        state.app_mut().push_status_message(
+                            format!("{}: decision cancelled", agent_id.as_str())
+                        );
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::AgentNotFound
+                    | agent_core::agent_pool::DecisionExecutionResult::NotBlocked => {}
+                }
+            }
+            last_decision_poll = Instant::now();
         }
 
         if state.workplace().loop_control.loop_run_active
@@ -1478,6 +1561,9 @@ fn handle_agent_provider_event(
     agent_id: agent_core::agent_runtime::AgentId,
     event: ProviderEvent,
 ) {
+    // Clone event for decision layer classification before processing
+    let event_for_classification = event.clone();
+
     if let Some(msg) = generate_overview_log_message(&event, &agent_id, state) {
         state.view_state.overview.push_log_message(msg);
     }
@@ -1550,6 +1636,39 @@ fn handle_agent_provider_event(
             }
         }
         _ => {}
+    }
+
+    // Decision layer integration: classify event and send decision request if needed
+    if let Some(pool) = state.agent_pool.as_ref() {
+        let classify_result = pool.classify_event(&agent_id, &event_for_classification);
+        if classify_result.is_needs_decision() {
+            // Build decision context from current agent state
+            if let Some(situation_type) = classify_result.situation_type() {
+                use agent_core::decision_mail::DecisionRequest;
+                use agent_decision::context::DecisionContext;
+
+                // Create minimal context for the decision
+                let components = agent_decision::initializer::initialize_decision_layer();
+                let situation = components.situation_registry.build(situation_type.clone());
+                let context = DecisionContext::new(situation, agent_id.as_str());
+
+                let request = DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
+
+                // Send decision request to decision agent
+                if let Some(pool) = state.agent_pool.as_mut() {
+                    if let Err(e) = pool.send_decision_request(&agent_id, request) {
+                        logging::warn_event(
+                            "app_loop.decision_request_failed",
+                            "failed to send decision request",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "error": e,
+                            }),
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
