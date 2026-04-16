@@ -473,7 +473,7 @@ fn parse_exec_command_status(
         }) {
         "declined" => ExecCommandStatus::Declined,
         "failed" => ExecCommandStatus::Failed,
-        "inProgress" => ExecCommandStatus::InProgress,
+        "in_progress" | "inProgress" => ExecCommandStatus::InProgress,
         _ => ExecCommandStatus::Completed,
     }
 }
@@ -1112,6 +1112,69 @@ mod tests {
                 result: Some("image.png".to_string()),
                 saved_path: Some("/tmp/ig-1.png".to_string()),
             }]
+        );
+    }
+
+    // Snake_case format tests (exec mode output format)
+    #[test]
+    fn parses_command_execution_with_snake_case_format() {
+        let item = serde_json::json!({
+            "id": "exec-1",
+            "type": "command_execution",
+            "aggregated_output": "done",
+            "exit_code": 0,
+            "duration_ms": 100,
+            "status": "completed"
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::ExecCommandFinished {
+                call_id: Some("exec-1".to_string()),
+                output_preview: Some("done".to_string()),
+                status: crate::tool_calls::ExecCommandStatus::Completed,
+                exit_code: Some(0),
+                duration_ms: Some(100),
+                source: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_agent_message_with_snake_case_format() {
+        let item = serde_json::json!({
+            "id": "msg-1",
+            "type": "agent_message",
+            "text": "hello from exec mode"
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events,
+            vec![ProviderEvent::AssistantChunk("hello from exec mode".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_command_execution_in_progress_with_snake_case() {
+        let item = serde_json::json!({
+            "id": "exec-1",
+            "type": "command_execution",
+            "command": "ls -la",
+            "aggregated_output": "",
+            "exit_code": null,
+            "status": "in_progress"
+        });
+
+        let events = parse_item_event("item.started", &item, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::ExecCommandStarted {
+                call_id: Some("exec-1".to_string()),
+                input_preview: Some("ls -la".to_string()),
+                source: None,
+            }
         );
     }
 }
