@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::Utc;
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
@@ -790,6 +791,195 @@ impl AgentPool {
         );
 
         Ok(())
+    }
+
+    /// Recover orphaned worktree states from previous session
+    ///
+    /// Called at startup to detect worktree states that exist in the store
+    /// but whose worktrees may have been deleted externally. This method:
+    /// 1. Lists all persisted worktree states
+    /// 2. Checks if the worktree path still exists
+    /// 3. For missing worktrees, either recreates them or cleans up the state
+    ///
+    /// Returns a summary of recovered and cleaned up worktrees.
+    pub fn recover_orphaned_worktrees(
+        &mut self,
+        recreate_missing: bool,
+    ) -> Result<WorktreeRecoveryReport, AgentPoolWorktreeError> {
+        // Check worktree support is available
+        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+
+        let all_states = worktree_state_store
+            .list_all()
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+        let mut recovered = Vec::new();
+        let mut cleaned_up = Vec::new();
+
+        for (agent_id, state) in all_states {
+            // Check if this agent is already in the pool
+            if self.get_slot_by_id(&AgentId::new(&agent_id)).is_some() {
+                // Agent already exists, skip
+                continue;
+            }
+
+            // Check if worktree exists
+            if state.exists() {
+                // Worktree exists but agent doesn't - this is an orphan
+                // We could restore it as a paused agent, but for now we just log it
+                logging::debug_event(
+                    "worktree.orphan_found",
+                    "found orphaned worktree state",
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "worktree_id": state.worktree_id,
+                        "path": state.path.to_string_lossy(),
+                    }),
+                );
+                // For orphan worktrees that still exist, we preserve them
+                // They can be manually recovered later
+            } else if recreate_missing {
+                // Worktree missing, recreate it
+                let options = WorktreeCreateOptions {
+                    path: worktree_manager.worktrees_dir().join(&state.worktree_id),
+                    branch: state.branch.clone(),
+                    create_branch: state.branch.is_some(),
+                    base: Some(state.base_commit.clone()),
+                    lock_reason: None,
+                };
+
+                match worktree_manager.create(&state.worktree_id, options) {
+                    Ok(_) => {
+                        recovered.push((agent_id.clone(), state.worktree_id.clone()));
+                        logging::debug_event(
+                            "worktree.recovered",
+                            "recovered missing worktree",
+                            serde_json::json!({
+                                "agent_id": agent_id,
+                                "worktree_id": state.worktree_id,
+                            }),
+                        );
+                    }
+                    Err(e) => {
+                        // Failed to recreate, clean up the state
+                        worktree_state_store
+                            .delete(&agent_id)
+                            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+                        cleaned_up.push((agent_id.clone(), e.to_string()));
+                        logging::debug_event(
+                            "worktree.cleanup_failed_recreate",
+                            "cleaned up worktree state after failed recreation",
+                            serde_json::json!({
+                                "agent_id": agent_id,
+                                "error": e.to_string(),
+                            }),
+                        );
+                    }
+                }
+            } else {
+                // Not recreating, clean up the stale state
+                worktree_state_store
+                    .delete(&agent_id)
+                    .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+                cleaned_up.push((agent_id.clone(), "worktree missing, state deleted".to_string()));
+            }
+        }
+
+        Ok(WorktreeRecoveryReport {
+            recovered,
+            cleaned_up,
+        })
+    }
+
+    /// Auto cleanup idle worktrees
+    ///
+    /// Checks for worktrees that have been idle for longer than the specified
+    /// duration and have no commits/uncommitted changes. Cleans up both the
+    /// worktree directory and the persisted state.
+    ///
+    /// Returns a list of cleaned up worktree IDs.
+    pub fn auto_cleanup_idle_worktrees(
+        &mut self,
+        idle_duration: chrono::Duration,
+    ) -> Result<Vec<String>, AgentPoolWorktreeError> {
+        // Check worktree support is available first
+        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        // Get all states first (this borrows the store)
+        let all_states = self.worktree_state_store.as_ref().unwrap()
+            .list_all()
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+        // First pass: collect worktrees to clean up and their info
+        let mut to_cleanup: Vec<(String, WorktreeState, bool)> = Vec::new();
+
+        for (agent_id, state) in &all_states {
+            // Check if agent is in pool and is idle
+            let slot = self.get_slot_by_id(&AgentId::new(agent_id));
+            let is_pool_idle = slot.map_or(false, |s| {
+                s.status().is_idle() || s.status().is_paused()
+            });
+
+            // Skip if agent is active (not idle/paused)
+            if slot.is_some() && !is_pool_idle {
+                continue;
+            }
+
+            // Check if worktree is idle and empty
+            if state.is_idle_longer_than(idle_duration) && state.is_empty() {
+                to_cleanup.push((agent_id.clone(), state.clone(), slot.is_some()));
+            }
+        }
+
+        // Release the borrow by taking ownership of the cleanup list
+        let cleanup_list = to_cleanup;
+
+        let mut cleaned_up = Vec::new();
+
+        // Second pass: do the cleanup
+        for (agent_id, state, in_pool) in cleanup_list {
+            // Remove worktree if it exists
+            if state.exists() {
+                if let Some(wm) = &self.worktree_manager {
+                    wm.remove(&state.worktree_id, true)
+                        .map_err(AgentPoolWorktreeError::WorktreeError)?;
+                }
+            }
+
+            // Delete state
+            if let Some(store) = &self.worktree_state_store {
+                store.delete(&agent_id)
+                    .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+            }
+
+            // Clear worktree from slot if agent is in pool
+            if in_pool {
+                if let Some(slot) = self.get_slot_mut_by_id(&AgentId::new(&agent_id)) {
+                    slot.clear_worktree();
+                }
+            }
+
+            cleaned_up.push(state.worktree_id.clone());
+
+            logging::debug_event(
+                "worktree.auto_cleanup",
+                "cleaned up idle worktree",
+                serde_json::json!({
+                    "agent_id": &agent_id,
+                    "worktree_id": &state.worktree_id,
+                    "idle_seconds": (Utc::now() - state.last_active_at).num_seconds(),
+                }),
+            );
+        }
+
+        Ok(cleaned_up)
     }
 
     /// Spawn the OVERVIEW agent (ProductOwner role) at the top of the pool
@@ -2338,6 +2528,15 @@ pub struct DecisionAgentStats {
     pub total_errors: u64,
 }
 
+/// Report of worktree recovery operations
+#[derive(Debug, Clone)]
+pub struct WorktreeRecoveryReport {
+    /// Successfully recovered worktrees (agent_id, worktree_id)
+    pub recovered: Vec<(String, String)>,
+    /// Cleaned up stale worktree states (agent_id, reason)
+    pub cleaned_up: Vec<(String, String)>,
+}
+
 /// Errors for AgentPool worktree operations
 #[derive(Debug, thiserror::Error)]
 pub enum AgentPoolWorktreeError {
@@ -3841,5 +4040,102 @@ mod tests {
         // Verify slot is stopped
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
         assert!(slot.status().is_terminal());
+    }
+
+    // ============== Crash Recovery Tests ==============
+
+    #[test]
+    fn recover_orphaned_worktrees_with_missing_worktree_cleans_state() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        // Create a worktree state for a non-existent agent
+        let store = WorktreeStateStore::new(state_dir.clone());
+        let fake_worktree_path = PathBuf::from("/nonexistent/worktree/path");
+        let state = WorktreeState::new(
+            "wt-orphan".to_string(),
+            fake_worktree_path,
+            Some("feature/orphan".to_string()),
+            "abc123".to_string(),
+            Some("task-orphan".to_string()),
+            "agent_orphan".to_string(),
+        );
+        store.save("agent_orphan", &state).unwrap();
+
+        // Create pool and recover
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir.clone(),
+        ).unwrap();
+
+        // Recover without recreating
+        let report = pool.recover_orphaned_worktrees(false).unwrap();
+        assert_eq!(report.cleaned_up.len(), 1);
+        assert_eq!(report.recovered.len(), 0);
+
+        // State should be deleted
+        let loaded = store.load("agent_orphan").unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn recover_orphaned_worktrees_empty_store() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        let report = pool.recover_orphaned_worktrees(true).unwrap();
+        assert_eq!(report.recovered.len(), 0);
+        assert_eq!(report.cleaned_up.len(), 0);
+    }
+
+    #[test]
+    fn recover_skips_agents_in_pool() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir.clone(),
+        ).unwrap();
+
+        // Spawn an agent with worktree
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/active".to_string()),
+            None,
+        ).unwrap();
+
+        // The state is created by spawn, so it exists
+        // Recovery should not affect it since agent is in pool
+        let report = pool.recover_orphaned_worktrees(false).unwrap();
+        assert_eq!(report.recovered.len(), 0);
+        assert_eq!(report.cleaned_up.len(), 0);
+
+        // State should still exist
+        let store = WorktreeStateStore::new(state_dir);
+        let loaded = store.load(agent_id.as_str()).unwrap();
+        assert!(loaded.is_some());
+    }
+
+    #[test]
+    fn recover_fails_without_worktree_support() {
+        let mut pool = AgentPool::new(WorkplaceId::new("workplace-001"), 4);
+        let result = pool.recover_orphaned_worktrees(true);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
     }
 }
