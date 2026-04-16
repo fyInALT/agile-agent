@@ -80,6 +80,10 @@ pub enum InputOutcome {
     OverviewSearchCancel,
     /// Overview: select search result
     OverviewSearchSelect(String),
+    /// Pause focused agent with worktree preservation
+    PauseFocusedAgent,
+    /// Resume paused agent
+    ResumeFocusedAgent,
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -548,6 +552,24 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             ..
         } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
             InputOutcome::StopFocusedAgent
+        }
+        // Ctrl+Shift+P to pause focused agent with worktree preservation
+        KeyEvent {
+            code: KeyCode::Char('P'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL)
+            && modifiers.contains(KeyModifiers::SHIFT)
+            && state.app().status == AppStatus::Idle => {
+            InputOutcome::PauseFocusedAgent
+        }
+        // Ctrl+R to resume paused agent
+        KeyEvent {
+            code: KeyCode::Char('r'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
+            InputOutcome::ResumeFocusedAgent
         }
         KeyEvent {
             code: KeyCode::Tab, ..

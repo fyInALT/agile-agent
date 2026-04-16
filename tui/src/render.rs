@@ -311,7 +311,10 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
 
     let statuses = state.agent_statuses();
     let visible = state.overview_visible_agent_indices();
-    let focused_index = state.agent_pool.as_ref().map(|pool| pool.focused_slot_index());
+    let focused_index = state
+        .agent_pool
+        .as_ref()
+        .map(|pool| pool.focused_slot_index());
 
     // Build lines for each agent row
     let mut lines = Vec::new();
@@ -834,13 +837,18 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         Span::styled("Request: ", Style::default().fg(Color::Gray)),
         Span::styled(
             overlay.request.id.clone(),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ),
     ]));
 
     lines.push(Line::from(vec![
         Span::styled("Agent: ", Style::default().fg(Color::Gray)),
-        Span::styled(overlay.request.agent_id.clone(), Style::default().fg(Color::White)),
+        Span::styled(
+            overlay.request.agent_id.clone(),
+            Style::default().fg(Color::White),
+        ),
     ]));
 
     lines.push(Line::from(vec![
@@ -885,7 +893,12 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     lines.push(Line::from(""));
 
     // Options header
-    lines.push(Line::from(Span::styled("Options:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Options:",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )));
 
     // Options list
     for (i, option) in overlay.request.options.iter().enumerate() {
@@ -900,11 +913,14 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
         lines.push(Line::from(vec![
             Span::styled(format!(" [{}] ", letter), option_style),
-            Span::styled(option.label.clone(), if is_selected {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::White)
-            }),
+            Span::styled(
+                option.label.clone(),
+                if is_selected {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
         ]));
     }
 
@@ -919,7 +935,9 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Recommendation:",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(vec![
             Span::styled(
@@ -944,13 +962,18 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Custom Instruction:",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             overlay.custom_input.clone(),
             Style::default().fg(Color::Yellow),
         )));
-        lines.push(Line::from(Span::styled("_", Style::default().fg(Color::Yellow))));
+        lines.push(Line::from(Span::styled(
+            "_",
+            Style::default().fg(Color::Yellow),
+        )));
     }
 
     // Key hints
@@ -1560,11 +1583,15 @@ fn render_agent_card(
         "●"
     } else if status.status.is_idle() {
         "○"
+    } else if status.status.is_paused() {
+        "◈"
     } else {
         "◌"
     };
     let status_color = if status.status.is_active() {
         Color::Green
+    } else if status.status.is_paused() {
+        Color::Magenta
     } else {
         Color::Gray
     };
@@ -1576,8 +1603,8 @@ fn render_agent_card(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Card content
-    let lines = vec![
+    // Card content - base lines
+    let mut lines = vec![
         Line::from(vec![
             Span::styled(indicator, Style::default().fg(status_color)),
             Span::raw(" "),
@@ -1601,6 +1628,27 @@ fn render_agent_card(
             Style::default().fg(status_color),
         )]),
     ];
+
+    // Add worktree info if present
+    if status.has_worktree {
+        let branch_info = if let Some(branch) = &status.worktree_branch {
+            format!("wt:{}", branch)
+        } else {
+            "wt:detached".to_string()
+        };
+
+        // Show existence status with visual indicator
+        let (prefix, branch_style) = if status.worktree_exists {
+            ("├ ", Style::default().fg(Color::Yellow))
+        } else {
+            ("⚠ ", Style::default().fg(Color::Red)) // Warning: worktree missing
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+            Span::styled(branch_info, branch_style),
+        ]));
+    }
 
     frame.render_widget(Paragraph::new(lines), inner);
 }

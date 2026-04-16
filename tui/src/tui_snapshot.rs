@@ -91,6 +91,7 @@ pub enum PersistedAgentStatus {
     Idle,
     Active,
     Blocked { reason: String },
+    Paused { reason: String },
     Stopped { reason: String },
     Error { message: String },
 }
@@ -229,6 +230,7 @@ impl PersistedAgentSnapshot {
             PersistedAgentStatus::Idle => AgentSlotStatus::idle(),
             PersistedAgentStatus::Active => AgentSlotStatus::idle(),
             PersistedAgentStatus::Blocked { reason } => AgentSlotStatus::blocked(reason.clone()),
+            PersistedAgentStatus::Paused { reason } => AgentSlotStatus::paused(reason.clone()),
             PersistedAgentStatus::Stopped { reason } => AgentSlotStatus::stopped(reason.clone()),
             PersistedAgentStatus::Error { message } => AgentSlotStatus::error(message.clone()),
         }
@@ -263,6 +265,9 @@ impl PersistedAgentStatus {
             },
             AgentSlotStatus::BlockedForDecision { blocked_state } => Self::Blocked {
                 reason: blocked_state.reason().description(),
+            },
+            AgentSlotStatus::Paused { reason } => Self::Paused {
+                reason: reason.clone(),
             },
             AgentSlotStatus::Starting
             | AgentSlotStatus::Responding { .. }

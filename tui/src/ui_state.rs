@@ -39,9 +39,9 @@ use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
-use crate::tui_snapshot::TuiResumeSnapshot;
 use crate::transcript::cells;
 use crate::transcript::overlay::TranscriptOverlayState;
+use crate::tui_snapshot::TuiResumeSnapshot;
 use crate::view_mode::TuiViewState;
 
 /// Per-agent transcript view state
@@ -285,6 +285,9 @@ impl TuiState {
                     role: focused.role(),
                     status: focused.status().clone(),
                     assigned_task_id: focused.assigned_task_id().cloned(),
+                    worktree_branch: focused.worktree_branch().cloned(),
+                    has_worktree: focused.has_worktree(),
+                    worktree_exists: focused.has_worktree() && focused.cwd().exists(),
                 }),
                 focused.agent_id().as_str().to_string(),
             )
@@ -335,6 +338,9 @@ impl TuiState {
                     role: focused.role(),
                     status: focused.status().clone(),
                     assigned_task_id: focused.assigned_task_id().cloned(),
+                    worktree_branch: focused.worktree_branch().cloned(),
+                    has_worktree: focused.has_worktree(),
+                    worktree_exists: focused.has_worktree() && focused.cwd().exists(),
                 }),
                 focused.agent_id().as_str().to_string(),
             )
@@ -377,6 +383,9 @@ impl TuiState {
                     role: focused.role(),
                     status: focused.status().clone(),
                     assigned_task_id: focused.assigned_task_id().cloned(),
+                    worktree_branch: focused.worktree_branch().cloned(),
+                    has_worktree: focused.has_worktree(),
+                    worktree_exists: focused.has_worktree() && focused.cwd().exists(),
                 }),
                 focused.agent_id().as_str().to_string(),
             )
@@ -506,6 +515,9 @@ impl TuiState {
             role: focused.role(),
             status: focused.status().clone(),
             assigned_task_id: focused.assigned_task_id().cloned(),
+            worktree_branch: focused.worktree_branch().cloned(),
+            has_worktree: focused.has_worktree(),
+            worktree_exists: focused.has_worktree() && focused.cwd().exists(),
         })
     }
 
@@ -648,7 +660,9 @@ impl TuiState {
             }
 
             let worker_rows = rows.saturating_sub(1).max(1);
-            if let Some(worker_position) = filtered[1..].iter().position(|index| *index == focused_index)
+            if let Some(worker_position) = filtered[1..]
+                .iter()
+                .position(|index| *index == focused_index)
             {
                 self.view_state.overview.page_offset = worker_position / worker_rows;
             }
@@ -687,12 +701,9 @@ impl TuiState {
         &mut self,
         codename: &str,
     ) -> Option<AgentStatusSnapshot> {
-        let index = self
-            .agent_statuses()
-            .iter()
-            .position(|status| {
-                status.codename.as_str() == codename || status.agent_id.as_str() == codename
-            })?;
+        let index = self.agent_statuses().iter().position(|status| {
+            status.codename.as_str() == codename || status.agent_id.as_str() == codename
+        })?;
         let snapshot = self.focus_agent_by_index(index)?;
         self.sync_overview_page_to_focus();
         Some(snapshot)
@@ -730,6 +741,30 @@ impl TuiState {
         }
     }
 
+    /// Pause the focused agent with worktree preservation
+    pub fn pause_focused_agent(&mut self) -> Option<String> {
+        if let Some(pool) = self.agent_pool.as_mut() {
+            let focused = pool.focused_slot()?;
+            let agent_id = focused.agent_id().clone();
+            pool.pause_agent_with_worktree(&agent_id).ok()?;
+            Some(agent_id.as_str().to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Resume the paused focused agent
+    pub fn resume_focused_agent(&mut self) -> Option<String> {
+        if let Some(pool) = self.agent_pool.as_mut() {
+            let focused = pool.focused_slot()?;
+            let agent_id = focused.agent_id().clone();
+            pool.resume_agent_with_worktree(&agent_id).ok()?;
+            Some(agent_id.as_str().to_string())
+        } else {
+            None
+        }
+    }
+
     /// Get all agent statuses from the pool
     pub fn agent_statuses(&self) -> Vec<AgentStatusSnapshot> {
         self.agent_pool
@@ -750,6 +785,9 @@ impl TuiState {
                 role: s.role(),
                 status: s.status().clone(),
                 assigned_task_id: s.assigned_task_id().cloned(),
+                worktree_branch: s.worktree_branch().cloned(),
+                has_worktree: s.has_worktree(),
+                worktree_exists: s.has_worktree() && s.cwd().exists(),
             })
     }
 
@@ -836,7 +874,9 @@ impl TuiState {
 
                     AgentShutdownSnapshot {
                         meta,
-                        assigned_task_id: slot.assigned_task_id().map(|task| task.as_str().to_string()),
+                        assigned_task_id: slot
+                            .assigned_task_id()
+                            .map(|task| task.as_str().to_string()),
                         was_active: slot.status().is_active(),
                         had_error: matches!(
                             slot.status(),
@@ -936,8 +976,9 @@ impl TuiState {
                 .and_then(|pool| pool.get_slot_by_id(&status.agent_id))
                 .map(|slot| slot.transcript().to_vec())
                 .unwrap_or_default();
-            self.app_mut().active_task_id =
-                status.assigned_task_id.map(|task| task.as_str().to_string());
+            self.app_mut().active_task_id = status
+                .assigned_task_id
+                .map(|task| task.as_str().to_string());
             self.app_mut().status = match self
                 .agent_pool
                 .as_ref()
@@ -1044,7 +1085,10 @@ impl TuiState {
         let (provider_kind, session_handle, busy_codename) = {
             let pool = self.agent_pool.as_ref()?;
             let slot = pool.get_slot_by_id(agent_id)?;
-            if slot.has_provider_thread() || slot.status().is_stopping() || slot.status().is_active() {
+            if slot.has_provider_thread()
+                || slot.status().is_stopping()
+                || slot.status().is_active()
+            {
                 (
                     slot.provider_type()
                         .to_provider_kind()
@@ -1199,10 +1243,7 @@ impl TuiState {
     }
 
     /// Open human decision overlay for decision request
-    pub fn open_human_decision_overlay(
-        &mut self,
-        request: agent_decision::HumanDecisionRequest,
-    ) {
+    pub fn open_human_decision_overlay(&mut self, request: agent_decision::HumanDecisionRequest) {
         self.human_decision_overlay = Some(HumanDecisionOverlay::new(request));
     }
 
