@@ -34,3 +34,4 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 uuid = { version = "1", features = ["v4"] }
 which = "8"
+pathdiff = "0.2"

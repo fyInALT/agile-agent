@@ -47,3 +47,6 @@ pub mod task_engine;
 pub mod tool_calls;
 pub mod verification;
 pub mod workplace_store;
+pub mod worktree_manager;
+pub mod worktree_state;
+pub mod worktree_state_store;
