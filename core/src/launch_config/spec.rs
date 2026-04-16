@@ -15,6 +15,17 @@ pub enum LaunchSourceMode {
     CommandFragment,
 }
 
+impl LaunchSourceMode {
+    /// Get display label for this mode
+    pub fn label(&self) -> &'static str {
+        match self {
+            LaunchSourceMode::HostDefault => "default",
+            LaunchSourceMode::EnvOnly => "env-only",
+            LaunchSourceMode::CommandFragment => "command",
+        }
+    }
+}
+
 /// Specifies where the launch config originated from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LaunchSourceOrigin {

@@ -54,6 +54,10 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         render_provider_selection_overlay(frame, state);
     }
 
+    if state.is_launch_config_overlay_open() {
+        render_launch_config_overlay(frame, state);
+    }
+
     if state.is_confirmation_overlay_open() {
         render_confirmation_overlay(frame, state);
     }
@@ -737,6 +741,152 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
     let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
     frame.render_widget(paragraph, inner_area);
+}
+
+/// Render launch config overlay for agent creation
+fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    use crate::launch_config_overlay::LaunchConfigFocus;
+
+    let overlay = state
+        .launch_config_overlay
+        .as_ref()
+        .expect("overlay should be open");
+    let area = centered_rect(60, 50, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let title = format!(" Launch Config - {} ", overlay.provider_label());
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Create layout for config fields
+    let config_areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Work config header
+            Constraint::Length(3), // Work config input
+            Constraint::Length(1), // Work preview
+            Constraint::Length(1), // Decision config header
+            Constraint::Length(3), // Decision config input
+            Constraint::Length(1), // Decision preview
+            Constraint::Length(1), // Error message
+            Constraint::Length(2), // Confirm button
+            Constraint::Length(1), // Hint
+        ])
+        .split(inner_area);
+
+    // Work config header
+    let work_header_style = if overlay.focus == LaunchConfigFocus::WorkConfig {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("Work Agent Config:", work_header_style)))
+            .alignment(ratatui::layout::Alignment::Left),
+        config_areas[0],
+    );
+
+    // Work config input
+    let work_input_style = if overlay.focus == LaunchConfigFocus::WorkConfig {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    frame.render_widget(
+        Paragraph::new(overlay.work_config_text.clone()).style(work_input_style),
+        config_areas[1],
+    );
+
+    // Work preview
+    let work_preview = format!(
+        "Mode: {} | Env: {} | Args: {}",
+        overlay.work_preview.source_mode.label(),
+        overlay.work_preview.env_count,
+        overlay.work_preview.arg_count
+    );
+    let work_preview_style = if overlay.work_preview.is_valid() {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+    frame.render_widget(
+        Paragraph::new(work_preview).style(work_preview_style),
+        config_areas[2],
+    );
+
+    // Decision config header
+    let decision_header_style = if overlay.focus == LaunchConfigFocus::DecisionConfig {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("Decision Agent Config:", decision_header_style)))
+            .alignment(ratatui::layout::Alignment::Left),
+        config_areas[3],
+    );
+
+    // Decision config input
+    let decision_input_style = if overlay.focus == LaunchConfigFocus::DecisionConfig {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    frame.render_widget(
+        Paragraph::new(overlay.decision_config_text.clone()).style(decision_input_style),
+        config_areas[4],
+    );
+
+    // Decision preview
+    let decision_preview = format!(
+        "Mode: {} | Env: {} | Args: {}",
+        overlay.decision_preview.source_mode.label(),
+        overlay.decision_preview.env_count,
+        overlay.decision_preview.arg_count
+    );
+    let decision_preview_style = if overlay.decision_preview.is_valid() {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+    frame.render_widget(
+        Paragraph::new(decision_preview).style(decision_preview_style),
+        config_areas[5],
+    );
+
+    // Error message (if any)
+    if let Some(error) = &overlay.error_message {
+        frame.render_widget(
+            Paragraph::new(error.clone()).style(Style::default().fg(Color::Red)),
+            config_areas[6],
+        );
+    }
+
+    // Confirm button
+    let confirm_style = if overlay.focus == LaunchConfigFocus::Confirm {
+        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("[ Confirm ]", confirm_style)))
+            .alignment(ratatui::layout::Alignment::Center),
+        config_areas[7],
+    );
+
+    // Hint
+    frame.render_widget(
+        Paragraph::new("Tab: cycle  Up/Down: navigate  Ctrl+S: confirm  Esc: cancel")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(ratatui::layout::Alignment::Center),
+        config_areas[8],
+    );
 }
 
 /// Render confirmation overlay for agent stop

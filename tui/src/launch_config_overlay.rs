@@ -198,8 +198,25 @@ impl LaunchConfigOverlayState {
                 };
                 None
             }
-            KeyCode::Char(c) => {
-                // Add character to focused field
+            KeyCode::Char('s')
+                if key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                // Ctrl+S to confirm early
+                self.update_previews();
+                if self.work_preview.is_valid() && self.decision_preview.is_valid() {
+                    Some(LaunchConfigOverlayCommand::Confirm {
+                        work_config: self.work_config_text.clone(),
+                        decision_config: self.decision_config_text.clone(),
+                    })
+                } else {
+                    self.error_message = Some("Invalid configuration".to_string());
+                    None
+                }
+            }
+            KeyCode::Char(c) if !key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                // Add character to focused field (no Ctrl modifier)
                 match self.focus {
                     LaunchConfigFocus::WorkConfig => {
                         self.work_config_text.push(c);
@@ -242,23 +259,6 @@ impl LaunchConfigOverlayState {
                     LaunchConfigFocus::Confirm => {}
                 }
                 None
-            }
-            KeyCode::Char('s')
-                if key_event
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                // Ctrl+S to confirm early
-                self.update_previews();
-                if self.work_preview.is_valid() && self.decision_preview.is_valid() {
-                    Some(LaunchConfigOverlayCommand::Confirm {
-                        work_config: self.work_config_text.clone(),
-                        decision_config: self.decision_config_text.clone(),
-                    })
-                } else {
-                    self.error_message = Some("Invalid configuration".to_string());
-                    None
-                }
             }
             _ => None,
         }
