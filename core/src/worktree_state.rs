@@ -155,6 +155,17 @@ impl WorktreeState {
     pub fn needs_recreation(&self) -> bool {
         !self.exists() && self.branch.is_some()
     }
+
+    /// Check if worktree is idle for longer than given duration
+    pub fn is_idle_longer_than(&self, duration: chrono::Duration) -> bool {
+        let now = Utc::now();
+        now.signed_duration_since(self.last_active_at) > duration
+    }
+
+    /// Check if worktree has no meaningful content (no commits, no uncommitted changes)
+    pub fn is_empty(&self) -> bool {
+        self.commits.is_empty() && !self.has_uncommitted_changes
+    }
 }
 
 /// Result of a worktree resume operation

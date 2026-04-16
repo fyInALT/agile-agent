@@ -16,7 +16,5 @@ tempfile.workspace = true
 thiserror.workspace = true
 which.workspace = true
 uuid.workspace = true
-pathdiff.workspace = true
-thiserror.workspace = true
 agent-kanban = { path = "../kanban" }
 agent-decision = { path = "../decision" }
