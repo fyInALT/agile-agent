@@ -742,18 +742,57 @@ impl TuiState {
     }
 
     /// Pause the focused agent with worktree preservation
+    /// Pause the focused agent with worktree preservation
+    ///
+    /// This properly stops the provider thread before pausing to avoid
+    /// resource leaks and ensure clean state preservation.
     pub fn pause_focused_agent(&mut self) -> Option<String> {
-        if let Some(pool) = self.agent_pool.as_mut() {
+        // Get agent_id and check worktree requirement first
+        let agent_id = {
+            let pool = self.agent_pool.as_ref()?;
             let focused = pool.focused_slot()?;
-            let agent_id = focused.agent_id().clone();
-            pool.pause_agent_with_worktree(&agent_id).ok()?;
-            Some(agent_id.as_str().to_string())
-        } else {
-            None
+
+            // Check if agent has a worktree (required for pause)
+            if !focused.has_worktree() {
+                self.app_mut().push_error_message("Cannot pause agent without worktree");
+                return None;
+            }
+
+            focused.agent_id().clone()
+        };
+
+        // First, unregister the event channel to signal thread to stop
+        // The thread will detect channel disconnect and exit
+        self.unregister_agent_channel(&agent_id);
+
+        // Get and join the thread handle, then clear provider thread state
+        {
+            let pool = self.agent_pool.as_mut()?;
+            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                // Take thread handle
+                let thread_handle = slot.take_thread_handle();
+
+                // Wait for thread to finish (best effort)
+                if let Some(handle) = thread_handle {
+                    let _ = handle.join(); // Don't block forever
+                }
+
+                // Clear provider thread state
+                slot.clear_provider_thread();
+            }
         }
+
+        // Now call pool to save worktree state and transition status
+        let pool = self.agent_pool.as_mut()?;
+        pool.pause_agent_with_worktree(&agent_id).ok()?;
+
+        Some(agent_id.as_str().to_string())
     }
 
     /// Resume the paused focused agent
+    ///
+    /// Transitions the agent to Idle status, ready to receive new prompts.
+    /// The provider thread needs to be started separately via a prompt.
     pub fn resume_focused_agent(&mut self) -> Option<String> {
         if let Some(pool) = self.agent_pool.as_mut() {
             let focused = pool.focused_slot()?;
