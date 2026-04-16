@@ -2,6 +2,7 @@
 //!
 //! Represents a single agent's runtime slot in the agent pool.
 
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -56,7 +57,7 @@ impl PartialEq for AgentSlotStatus {
             // BlockedForDecision compares by reason_type only
             (
                 Self::BlockedForDecision { blocked_state: a },
-                Self::BlockedForDecision { blocked_state: b }
+                Self::BlockedForDecision { blocked_state: b },
             ) => a.reason().reason_type() == b.reason().reason_type(),
             _ => false,
         }
@@ -324,8 +325,14 @@ pub struct AgentSlot {
     last_activity: Instant,
     /// Decision agent creation policy
     decision_policy: DecisionAgentCreationPolicy,
-    /// Launch configuration bundle (for resume/restore)
+/// Launch configuration bundle (for resume/restore)
     launch_bundle: Option<AgentLaunchBundle>,
+    /// Worktree path (if using independent worktree)
+    worktree_path: Option<PathBuf>,
+    /// Worktree branch name
+    worktree_branch: Option<String>,
+    /// Worktree unique ID
+    worktree_id: Option<String>,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -342,7 +349,10 @@ impl std::fmt::Debug for AgentSlot {
             .field("has_provider_thread", &self.has_provider_thread())
             .field("last_activity", &self.last_activity)
             .field("decision_policy", &self.decision_policy)
-            .field("launch_bundle", &self.launch_bundle.is_some())
+.field("launch_bundle", &self.launch_bundle.is_some())
+            .field("worktree_path", &self.worktree_path)
+            .field("worktree_branch", &self.worktree_branch)
+            .field("worktree_id", &self.worktree_id)
             .finish()
     }
 }
@@ -364,6 +374,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -388,6 +401,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -413,6 +429,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -439,6 +458,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -467,6 +489,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -492,6 +517,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy,
             launch_bundle: None,
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -517,8 +545,11 @@ impl AgentSlot {
 
     /// Set the agent's role
     pub fn set_role(&mut self, role: AgentRole) {
-        logging::debug_event("slot.role.change", "agent role changed",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_role": self.role.label(), "new_role": role.label()}));
+        logging::debug_event(
+            "slot.role.change",
+            "agent role changed",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_role": self.role.label(), "new_role": role.label()}),
+        );
         self.role = role;
         self.last_activity = Instant::now();
     }
@@ -532,6 +563,52 @@ impl AgentSlot {
     pub fn set_decision_policy(&mut self, policy: DecisionAgentCreationPolicy) {
         self.decision_policy = policy;
         self.last_activity = Instant::now();
+    }
+
+    // === Worktree Methods ===
+
+    /// Get the agent's working directory
+    ///
+    /// Returns the worktree path if set, otherwise the current directory.
+    pub fn cwd(&self) -> PathBuf {
+        self.worktree_path
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Set worktree information
+    pub fn set_worktree(&mut self, path: PathBuf, branch: Option<String>, worktree_id: String) {
+        self.worktree_path = Some(path);
+        self.worktree_branch = branch;
+        self.worktree_id = Some(worktree_id);
+        self.last_activity = Instant::now();
+    }
+
+    /// Clear worktree information
+    pub fn clear_worktree(&mut self) {
+        self.worktree_path = None;
+        self.worktree_branch = None;
+        self.worktree_id = None;
+    }
+
+    /// Get the worktree path
+    pub fn worktree_path(&self) -> Option<&PathBuf> {
+        self.worktree_path.as_ref()
+    }
+
+    /// Get the worktree branch name
+    pub fn worktree_branch(&self) -> Option<&String> {
+        self.worktree_branch.as_ref()
+    }
+
+    /// Get the worktree ID
+    pub fn worktree_id(&self) -> Option<&String> {
+        self.worktree_id.as_ref()
+    }
+
+    /// Check if agent has a worktree assigned
+    pub fn has_worktree(&self) -> bool {
+        self.worktree_path.is_some()
     }
 
     /// Check if decision agent should be created eagerly
@@ -606,8 +683,11 @@ impl AgentSlot {
         event_rx: Receiver<ProviderEvent>,
         thread_handle: JoinHandle<()>,
     ) {
-        logging::debug_event("slot.thread.set", "provider thread set",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label(), "new_status": "starting"}));
+        logging::debug_event(
+            "slot.thread.set",
+            "provider thread set",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label(), "new_status": "starting"}),
+        );
         self.event_rx = Some(event_rx);
         self.thread_handle = Some(thread_handle);
         self.status = AgentSlotStatus::starting();
@@ -616,8 +696,11 @@ impl AgentSlot {
 
     /// Set only the thread handle (event_rx managed separately by EventAggregator)
     pub fn set_thread_handle(&mut self, thread_handle: JoinHandle<()>) {
-        logging::debug_event("slot.thread.handle_only", "thread handle set (event_rx external)",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label(), "new_status": "starting"}));
+        logging::debug_event(
+            "slot.thread.handle_only",
+            "thread handle set (event_rx external)",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label(), "new_status": "starting"}),
+        );
         self.thread_handle = Some(thread_handle);
         self.status = AgentSlotStatus::starting();
         self.last_activity = Instant::now();
@@ -625,8 +708,11 @@ impl AgentSlot {
 
     /// Clear provider thread components (after join)
     pub fn clear_provider_thread(&mut self) {
-        logging::debug_event("slot.thread.clear", "provider thread cleared",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label()}));
+        logging::debug_event(
+            "slot.thread.clear",
+            "provider thread cleared",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label()}),
+        );
         self.event_rx = None;
         self.thread_handle = None;
     }
@@ -651,7 +737,11 @@ impl AgentSlot {
 
         logging::debug_event(
             "slot.transition",
-            if transition_valid { "attempting status transition" } else { "invalid status transition" },
+            if transition_valid {
+                "attempting status transition"
+            } else {
+                "invalid status transition"
+            },
             serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": old_status.label(), "new_status": new_status.label(), "transition_valid": transition_valid, "role": self.role.label()}),
         );
 
@@ -665,52 +755,79 @@ impl AgentSlot {
         self.status = new_status;
         self.last_activity = Instant::now();
 
-        logging::debug_event("slot.transition.complete", "status transition completed",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "new_status": self.status.label()}));
+        logging::debug_event(
+            "slot.transition.complete",
+            "status transition completed",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "new_status": self.status.label()}),
+        );
 
         Ok(())
     }
 
     /// Set the session handle
     pub fn set_session_handle(&mut self, handle: SessionHandle) {
-        logging::debug_event("slot.session_handle.set", "session handle set",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "handle_type": format!("{:?}", handle)}));
+        logging::debug_event(
+            "slot.session_handle.set",
+            "session handle set",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "handle_type": format!("{:?}", handle)}),
+        );
         self.session_handle = Some(handle);
         self.last_activity = Instant::now();
     }
 
     /// Clear the session handle
     pub fn clear_session_handle(&mut self) {
-        logging::debug_event("slot.session_handle.clear", "session handle cleared",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str()}));
+        logging::debug_event(
+            "slot.session_handle.clear",
+            "session handle cleared",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str()}),
+        );
         self.session_handle = None;
     }
 
     /// Assign a task to this agent
     pub fn assign_task(&mut self, task_id: TaskId) -> Result<(), String> {
-        logging::debug_event("slot.task.assign", "task assignment requested",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str(), "current_status": self.status.label()}));
+        logging::debug_event(
+            "slot.task.assign",
+            "task assignment requested",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str(), "current_status": self.status.label()}),
+        );
 
         if self.status != AgentSlotStatus::Idle {
-            let err = format!("Cannot assign task to agent with status {}", self.status.label());
-            logging::debug_event("slot.task.assign.failed", "task assignment failed",
-                serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str(), "error": err}));
+            let err = format!(
+                "Cannot assign task to agent with status {}",
+                self.status.label()
+            );
+            logging::debug_event(
+                "slot.task.assign.failed",
+                "task assignment failed",
+                serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str(), "error": err}),
+            );
             return Err(err);
         }
         self.assigned_task_id = Some(task_id.clone());
         self.last_activity = Instant::now();
 
-        logging::debug_event("slot.task.assign.complete", "task assigned",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str()}));
+        logging::debug_event(
+            "slot.task.assign.complete",
+            "task assigned",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id.as_str()}),
+        );
 
         Ok(())
     }
 
     /// Clear the assigned task
     pub fn clear_task(&mut self) {
-        let task_id = self.assigned_task_id.as_ref().map(|t| t.as_str().to_string());
-        logging::debug_event("slot.task.clear", "task cleared from agent",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id, "status": self.status.label()}));
+        let task_id = self
+            .assigned_task_id
+            .as_ref()
+            .map(|t| t.as_str().to_string());
+        logging::debug_event(
+            "slot.task.clear",
+            "task cleared from agent",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id, "status": self.status.label()}),
+        );
         self.assigned_task_id = None;
     }
 
@@ -1053,5 +1170,71 @@ mod tests {
     fn status_blocked_can_transition_to_responding() {
         let status = AgentSlotStatus::blocked("test");
         assert!(status.can_transition_to(&AgentSlotStatus::responding_now()));
+    }
+
+    // Worktree tests
+    #[test]
+    fn slot_new_has_no_worktree() {
+        let slot = make_slot();
+        assert!(!slot.has_worktree());
+        assert!(slot.worktree_path().is_none());
+        assert!(slot.worktree_branch().is_none());
+        assert!(slot.worktree_id().is_none());
+    }
+
+    #[test]
+    fn slot_set_worktree() {
+        let mut slot = make_slot();
+        slot.set_worktree(
+            PathBuf::from(".worktrees/agent-alpha"),
+            Some("agent/task-123".to_string()),
+            "wt-alpha-001".to_string(),
+        );
+
+        assert!(slot.has_worktree());
+        assert_eq!(
+            slot.worktree_path(),
+            Some(&PathBuf::from(".worktrees/agent-alpha"))
+        );
+        assert_eq!(slot.worktree_branch(), Some(&"agent/task-123".to_string()));
+        assert_eq!(slot.worktree_id(), Some(&"wt-alpha-001".to_string()));
+    }
+
+    #[test]
+    fn slot_cwd_returns_worktree_path() {
+        let mut slot = make_slot();
+        slot.set_worktree(
+            PathBuf::from(".worktrees/agent-alpha"),
+            Some("agent/task-123".to_string()),
+            "wt-alpha-001".to_string(),
+        );
+
+        assert_eq!(slot.cwd(), PathBuf::from(".worktrees/agent-alpha"));
+    }
+
+    #[test]
+    fn slot_cwd_returns_current_dir_without_worktree() {
+        let slot = make_slot();
+        let cwd = slot.cwd();
+        // Should return current directory or fallback
+        assert!(cwd.is_absolute() || cwd == PathBuf::from("."));
+    }
+
+    #[test]
+    fn slot_clear_worktree() {
+        let mut slot = make_slot();
+        slot.set_worktree(
+            PathBuf::from(".worktrees/agent-alpha"),
+            Some("agent/task-123".to_string()),
+            "wt-alpha-001".to_string(),
+        );
+
+        assert!(slot.has_worktree());
+
+        slot.clear_worktree();
+        assert!(!slot.has_worktree());
+        assert!(slot.worktree_path().is_none());
+        assert!(slot.worktree_branch().is_none());
+        assert!(slot.worktree_id().is_none());
     }
 }
