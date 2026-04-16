@@ -10,11 +10,13 @@ use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::launch_config::context::ProviderLaunchContext;
 use crate::logging;
 use crate::probe::CLAUDE_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
 
+/// Start Claude provider with legacy signature (backward compatibility).
 pub fn start(
     prompt: String,
     cwd: PathBuf,
@@ -36,6 +38,41 @@ pub fn start(
         .name("agent-claude-provider".to_string())
         .spawn(move || {
             let run_result = run_claude(prompt, cwd, session_handle, executable, &event_tx);
+            if let Err(err) = run_result {
+                let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+        })
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
+/// Start Claude provider with structured launch context.
+pub fn start_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: Sender<ProviderEvent>,
+) -> Result<()> {
+    let executable = &context.spec.resolved_executable_path;
+    let cwd = &context.cwd;
+    let session_handle = context.session_handle.clone();
+
+    logging::debug_event(
+        "provider.claude.start_with_context",
+        "spawning Claude provider with launch context",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "session_handle": format!("{:?}", session_handle),
+            "extra_args": context.spec.extra_args,
+            "env_count": context.spec.effective_env.len(),
+        }),
+    );
+
+    thread::Builder::new()
+        .name("agent-claude-provider".to_string())
+        .spawn(move || {
+            let run_result = run_claude_with_context(context, prompt, &event_tx);
             if let Err(err) = run_result {
                 let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
             }
@@ -94,6 +131,112 @@ fn run_claude(
             "payload": payload,
         }),
     );
+
+    thread::scope(|scope| -> Result<()> {
+        let write_handle = scope.spawn(|| -> Result<()> {
+            let mut stdin = stdin;
+            stdin
+                .write_all(payload.as_bytes())
+                .context("failed to write prompt to claude stdin")?;
+            stdin.flush().context("failed to flush claude stdin")?;
+            Ok(())
+        });
+
+        let stderr_handle = scope.spawn(|| read_stderr(stderr));
+        let stdout_handle = scope.spawn(|| -> Result<()> {
+            let _ = event_tx.send(ProviderEvent::Status("claude provider started".to_string()));
+            read_stdout(stdout, event_tx)
+        });
+
+        write_handle.join().expect("claude stdin thread panicked")?;
+        stdout_handle
+            .join()
+            .expect("claude stdout thread panicked")?;
+        let stderr_output = stderr_handle.join().expect("claude stderr thread panicked");
+
+        let status = child.wait().context("failed to wait on claude process")?;
+        if !status.success() {
+            let stderr_output = stderr_output.trim();
+            if stderr_output.is_empty() {
+                anyhow::bail!("claude exited with status {status}");
+            } else {
+                anyhow::bail!("claude exited with status {status}: {stderr_output}");
+            }
+        }
+
+        logging::debug_event(
+            "provider.claude.exit",
+            "Claude process exited successfully",
+            serde_json::json!({
+                "status": status.to_string(),
+            }),
+        );
+
+        Ok(())
+    })
+}
+
+/// Run Claude with structured launch context.
+fn run_claude_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: &Sender<ProviderEvent>,
+) -> Result<()> {
+    let spec = &context.spec;
+    let cwd = &context.cwd;
+
+    // Build protocol args first
+    let protocol_args = build_claude_args(context.session_handle.clone());
+
+    // Inject extra args BEFORE protocol args
+    let full_args: Vec<String> = spec.extra_args.iter()
+        .chain(protocol_args.iter())
+        .cloned()
+        .collect();
+
+    let mut command = Command::new(&spec.resolved_executable_path);
+    command.args(&full_args);
+    command.current_dir(cwd);
+
+    // Use effective_env instead of implicit process environment
+    for (key, value) in &spec.effective_env {
+        command.env(key, value);
+    }
+
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let executable = &spec.resolved_executable_path;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to start claude executable `{executable}`"))?;
+
+    logging::debug_event(
+        "provider.claude.process_spawned_with_context",
+        "spawned Claude process with launch context",
+        serde_json::json!({
+            "executable": executable,
+            "cwd": cwd.display().to_string(),
+            "args": full_args,
+            "env_count": spec.effective_env.len(),
+        }),
+    );
+
+    let stdin = child
+        .stdin
+        .take()
+        .context("claude stdin pipe unavailable")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("claude stdout pipe unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("claude stderr pipe unavailable")?;
+
+    let payload = build_claude_input(&prompt)?;
 
     thread::scope(|scope| -> Result<()> {
         let write_handle = scope.spawn(|| -> Result<()> {

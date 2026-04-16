@@ -15,6 +15,7 @@ use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::launch_config::context::ProviderLaunchContext;
 use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
@@ -48,6 +49,40 @@ pub fn start(
         .name("agent-codex-provider".to_string())
         .spawn(move || {
             let run_result = run_codex(prompt, cwd, session_handle, executable, &event_tx);
+            if let Err(err) = run_result {
+                let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+        })
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
+/// Start Codex provider with structured launch context.
+pub fn start_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: Sender<ProviderEvent>,
+) -> Result<()> {
+    let spec = &context.spec;
+    let cwd = &context.cwd;
+
+    logging::debug_event(
+        "provider.codex.start_with_context",
+        "spawning Codex provider with launch context",
+        serde_json::json!({
+            "executable": spec.resolved_executable_path,
+            "cwd": cwd.display().to_string(),
+            "session_handle": format!("{:?}", context.session_handle),
+            "extra_args": spec.extra_args,
+            "env_count": spec.effective_env.len(),
+        }),
+    );
+
+    thread::Builder::new()
+        .name("agent-codex-provider".to_string())
+        .spawn(move || {
+            let run_result = run_codex_with_context(context, prompt, &event_tx);
             if let Err(err) = run_result {
                 let _ = event_tx.send(ProviderEvent::Error(err.to_string()));
             }
@@ -178,6 +213,117 @@ fn resolve_codex_executable() -> Result<String> {
 fn resolve_codex_executable_from(configured: &str) -> Result<std::path::PathBuf> {
     which::which(configured)
         .with_context(|| format!("codex executable not found at `{configured}`"))
+}
+
+/// Run Codex with structured launch context.
+fn run_codex_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: &Sender<ProviderEvent>,
+) -> Result<()> {
+    let spec = &context.spec;
+    let cwd = &context.cwd;
+
+    let mut command = Command::new(&spec.resolved_executable_path);
+
+    // Build exec mode args
+    let mut args: Vec<String> = vec![
+        "exec".to_string(),
+        "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "--json".to_string(),
+    ];
+
+    // Inject extra args
+    args.extend(spec.extra_args.iter().cloned());
+
+    // Handle session resume
+    let thread_id_for_log = match context.session_handle.clone() {
+        Some(SessionHandle::CodexThread { thread_id }) => {
+            args.push("resume".to_string());
+            args.push(thread_id.clone());
+            Some(thread_id)
+        }
+        _ => None,
+    };
+
+    // Add prompt as final argument
+    args.push(prompt.clone());
+
+    command.args(&args);
+    command.current_dir(cwd);
+
+    // Use effective_env
+    for (key, value) in &spec.effective_env {
+        command.env(key, value);
+    }
+
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to start codex executable `{}`", spec.resolved_executable_path))?;
+
+    logging::debug_event(
+        "provider.codex.process_spawned_with_context",
+        "spawned Codex process with launch context",
+        serde_json::json!({
+            "executable": spec.resolved_executable_path,
+            "cwd": cwd.display().to_string(),
+            "args": args,
+            "env_count": spec.effective_env.len(),
+            "resuming_thread": thread_id_for_log,
+        }),
+    );
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("codex stdout pipe unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("codex stderr pipe unavailable")?;
+
+    let stderr_handle = thread::spawn(move || read_stderr(stderr));
+    let stdout_lines = BufReader::new(stdout).lines();
+
+    let _ = event_tx.send(ProviderEvent::Status("codex provider started".to_string()));
+
+    let mut streamed_agent_message_ids = HashSet::new();
+    for line in stdout_lines {
+        let line = line.context("failed to read line from codex stdout")?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        logging::debug_event(
+            "provider.codex.stdout_line",
+            "read raw Codex JSONL line",
+            serde_json::json!({
+                "line": trimmed,
+            }),
+        );
+
+        let event = parse_exec_event(trimmed)?;
+        if handle_exec_event(event, event_tx, &mut streamed_agent_message_ids)? {
+            break;
+        }
+    }
+
+    wait_for_child_shutdown(&mut child)?;
+
+    let stderr_output = stderr_handle.join().expect("codex stderr thread panicked");
+    if !stderr_output.trim().is_empty() {
+        let _ = event_tx.send(ProviderEvent::Status(format!(
+            "codex stderr: {}",
+            stderr_output.trim()
+        )));
+    }
+
+    Ok(())
 }
 
 fn wait_for_child_shutdown(child: &mut Child) -> Result<()> {
