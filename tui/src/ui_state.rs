@@ -1082,7 +1082,7 @@ impl TuiState {
             self.mark_agent_mail_read(agent_id);
         }
 
-        let (provider_kind, session_handle, busy_codename) = {
+        let (provider_kind, session_handle, cwd, busy_codename) = {
             let pool = self.agent_pool.as_ref()?;
             let slot = pool.get_slot_by_id(agent_id)?;
             if slot.has_provider_thread()
@@ -1094,6 +1094,7 @@ impl TuiState {
                         .to_provider_kind()
                         .unwrap_or(self.session.app.selected_provider),
                     slot.session_handle().cloned(),
+                    slot.cwd(),
                     Some(slot.codename().as_str().to_string()),
                 )
             } else {
@@ -1102,6 +1103,7 @@ impl TuiState {
                         .to_provider_kind()
                         .unwrap_or(self.session.app.selected_provider),
                     slot.session_handle().cloned(),
+                    slot.cwd(),
                     None,
                 )
             }
@@ -1112,7 +1114,6 @@ impl TuiState {
             return None;
         }
 
-        let cwd = self.session.app.cwd.clone();
         let thread_name = format!("agent-{}-provider", agent_id.as_str());
         let thread_handle = agent_core::provider::start_provider_with_handle(
             provider_kind,
