@@ -34,6 +34,7 @@ use crate::composer::textarea::TextArea;
 use crate::composer::textarea::TextAreaState;
 use crate::confirmation_overlay::ConfirmationOverlay;
 use crate::human_decision_overlay::HumanDecisionOverlay;
+use crate::launch_config_overlay::{LaunchConfigOverlayCommand, LaunchConfigOverlayState};
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
@@ -100,6 +101,8 @@ pub struct TuiState {
     pub confirmation_overlay: Option<ConfirmationOverlay>,
     /// Human decision overlay (for decision layer)
     pub human_decision_overlay: Option<HumanDecisionOverlay>,
+    /// Launch config overlay (for work/decision agent configuration)
+    pub launch_config_overlay: Option<LaunchConfigOverlayState>,
 }
 
 impl TuiState {
@@ -129,6 +132,7 @@ impl TuiState {
             provider_overlay: None,
             confirmation_overlay: None,
             human_decision_overlay: None,
+            launch_config_overlay: None,
         }
     }
 
@@ -409,6 +413,71 @@ impl TuiState {
             if let Some(pool) = self.agent_pool.as_mut() {
                 if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
                     // Log warning but don't fail the work agent spawn
+                    logging::warn_event(
+                        "decision_agent.spawn_failed",
+                        "failed to spawn decision agent",
+                        serde_json::json!({
+                            "work_agent_id": agent_id.as_str(),
+                            "error": e,
+                        }),
+                    );
+                }
+            }
+        }
+
+        Some(agent_id)
+    }
+
+    /// Spawn a new agent with launch configuration
+    pub fn spawn_agent_with_launch_config(
+        &mut self,
+        provider: ProviderKind,
+        work_config: &str,
+        decision_config: &str,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
+        use agent_core::launch_config::parse;
+        use agent_core::launch_config::resolve_bundle;
+
+        // Create agent pool if it doesn't exist
+        if self.agent_pool.is_none() {
+            let workplace_id = self.session.workplace().workplace_id.clone();
+            let cwd = self.session.app.cwd.clone();
+            let mut pool = AgentPool::with_cwd(workplace_id, 10, cwd);
+
+            // Always create OVERVIEW agent first (at index 0)
+            let overview_provider = self.session.app.selected_provider;
+            pool.spawn_overview_agent(overview_provider).ok();
+
+            self.agent_pool = Some(pool);
+        }
+
+        // Parse launch configs
+        let work_input = parse(provider, work_config).ok()?;
+        let decision_input = parse(provider, decision_config).ok()?;
+
+        // Resolve to get bundle
+        let (work_resolved, decision_resolved) = resolve_bundle(work_input.clone(), decision_input.clone()).ok()?;
+
+        let bundle = agent_core::launch_config::AgentLaunchBundle::asymmetric(
+            work_input,
+            work_resolved,
+            decision_input,
+            decision_resolved,
+        );
+
+        let agent_id = self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+
+        // Attach launch bundle to the slot
+        if let Some(pool) = self.agent_pool.as_mut() {
+            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                slot.set_launch_bundle(bundle);
+            }
+        }
+
+        // Spawn decision agent for the work agent (if provider supports it)
+        if provider != ProviderKind::Mock {
+            if let Some(pool) = self.agent_pool.as_mut() {
+                if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
                     logging::warn_event(
                         "decision_agent.spawn_failed",
                         "failed to spawn decision agent",
@@ -821,7 +890,7 @@ impl TuiState {
         let workplace_id = self.session.workplace().workplace_id.clone();
         let mut pool = AgentPool::new(workplace_id, 10);
         for agent in snapshot.agents {
-            let restored_slot = agent_core::agent_slot::AgentSlot::restored(
+            let mut restored_slot = agent_core::agent_slot::AgentSlot::restored(
                 agent.agent_id.clone(),
                 agent.codename.clone(),
                 agent.provider_type,
@@ -831,6 +900,19 @@ impl TuiState {
                 agent.transcript.clone(),
                 agent.assigned_task_id.clone(),
             );
+            // Attach launch bundle if available
+            if let Some(bundle) = agent.launch_bundle {
+                restored_slot.set_launch_bundle(bundle);
+                agent_core::logging::debug_event(
+                    "launch_config.restore",
+                    "agent restored with launch bundle",
+                    serde_json::json!({
+                        "agent_id": agent.agent_id.as_str(),
+                        "provider": agent.provider_type,
+                        "source": "snapshot",
+                    }),
+                );
+            }
             pool.restore_slot(restored_slot)
                 .map_err(|error| anyhow::anyhow!(error))?;
         }
@@ -1077,12 +1159,28 @@ impl TuiState {
         self.provider_overlay.is_some()
     }
 
+    /// Open launch config overlay for selected provider
+    pub fn open_launch_config_overlay(&mut self, provider: ProviderKind) {
+        self.launch_config_overlay = Some(LaunchConfigOverlayState::new(provider));
+    }
+
+    /// Close launch config overlay
+    pub fn close_launch_config_overlay(&mut self) {
+        self.launch_config_overlay = None;
+    }
+
+    /// Check if launch config overlay is open
+    pub fn is_launch_config_overlay_open(&self) -> bool {
+        self.launch_config_overlay.is_some()
+    }
+
     /// Check if any overlay is open (transcript or provider)
     pub fn is_any_overlay_open(&self) -> bool {
         self.is_overlay_open()
             || self.is_provider_overlay_open()
             || self.is_confirmation_overlay_open()
             || self.is_human_decision_overlay_open()
+            || self.is_launch_config_overlay_open()
     }
 
     /// Open confirmation overlay for stopping agent

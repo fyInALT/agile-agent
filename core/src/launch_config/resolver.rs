@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::provider::ProviderKind;
 
@@ -59,7 +60,7 @@ pub fn resolve_executable_path(
 ) -> anyhow::Result<String> {
     // If a custom path is provided and it's an absolute path, use it directly
     if let Some(req) = requested {
-        if req.starts_with('/') || req.contains(std::path::MAIN_SEPARATOR) {
+        if Path::new(req).is_absolute() {
             return Ok(req.to_string());
         }
     }
@@ -77,6 +78,10 @@ pub fn resolve_executable_path(
 
     let resolved = if let Some(custom_path) = env_override {
         custom_path
+    } else if provider == ProviderKind::Mock {
+        // Mock provider doesn't need a real executable
+        // Return a placeholder path that will be validated differently
+        format!("/usr/bin/{}", executable_name)
     } else {
         // Use which crate to find the executable
         which::which(executable_name)?.display().to_string()
@@ -194,6 +199,32 @@ mod tests {
         let result = resolve_executable_path(ProviderKind::Codex, Some("/usr/local/bin/codex"));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "/usr/local/bin/codex");
+    }
+
+    #[test]
+    fn test_resolve_executable_path_mock() {
+        // Mock provider should return a placeholder path without calling which::which
+        let result = resolve_executable_path(ProviderKind::Mock, None);
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.contains("mock"));
+    }
+
+    #[test]
+    fn test_resolve_executable_path_windows_style() {
+        // On Windows, C:\Users\... is absolute; on Linux it won't be recognized
+        // This test verifies the function doesn't panic and handles the input gracefully
+        let result = resolve_executable_path(ProviderKind::Claude, Some("C:\\Users\\test\\claude.exe"));
+        // On Linux this returns an error from which::which since the path is not absolute there
+        // On Windows it would return the path directly since Path::is_absolute() would be true
+        if cfg!(windows) {
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "C:\\Users\\test\\claude.exe");
+        } else {
+            // On Linux, C:\... is not an absolute path, so it tries which::which which fails
+            // This is expected behavior since the path isn't valid on Linux
+            assert!(result.is_err() || result.unwrap().contains("Users"));
+        }
     }
 
     #[test]

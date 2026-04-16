@@ -14,6 +14,7 @@ mod exec_semantics;
 mod history_cell;
 mod human_decision_overlay;
 mod input;
+mod launch_config_overlay;
 mod markdown;
 mod markdown_stream;
 mod overview_row;
