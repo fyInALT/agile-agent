@@ -444,7 +444,7 @@ fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
     {
         "failed" => PatchApplyStatus::Failed,
         "declined" => PatchApplyStatus::Declined,
-        "in_progress" => PatchApplyStatus::InProgress,
+        "in_progress" | "inProgress" => PatchApplyStatus::InProgress,
         _ => PatchApplyStatus::Completed,
     }
 }
@@ -456,7 +456,7 @@ fn parse_mcp_tool_call_status(item: &serde_json::Value) -> McpToolCallStatus {
         .unwrap_or("completed")
     {
         "failed" => McpToolCallStatus::Failed,
-        "in_progress" => McpToolCallStatus::InProgress,
+        "in_progress" | "inProgress" => McpToolCallStatus::InProgress,
         _ => McpToolCallStatus::Completed,
     }
 }
@@ -507,7 +507,12 @@ fn parse_mcp_tool_call_result(
         .unwrap_or_default();
     let is_error = item
         .get("result")
-        .and_then(|result| result.get("is_error").and_then(|value| value.as_bool()))
+        .and_then(|result| {
+            result
+                .get("isError")
+                .or_else(|| result.get("is_error"))
+                .and_then(|value| value.as_bool())
+        })
         .unwrap_or(false);
     let error = item
         .get("error")
@@ -1065,6 +1070,42 @@ mod tests {
                 result: Some("generated.png".to_string()),
                 saved_path: Some("/tmp/generated.png".to_string()),
             }]
+        );
+    }
+
+    #[test]
+    fn parses_mcp_tool_call_with_camel_case_is_error() {
+        let completed = serde_json::json!({
+            "id": "mcp-1",
+            "type": "mcp_tool_call",
+            "server": "search",
+            "tool": "find_docs",
+            "status": "completed",
+            "arguments": { "query": "test" },
+            "result": {
+                "content": [{ "type": "text", "text": "error result" }],
+                "isError": true
+            }
+        });
+
+        let events = parse_item_event("item.completed", &completed, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::McpToolCallFinished {
+                call_id: Some("mcp-1".to_string()),
+                invocation: crate::tool_calls::McpInvocation {
+                    server: "search".to_string(),
+                    tool: "find_docs".to_string(),
+                    arguments: Some(serde_json::json!({ "query": "test" })),
+                },
+                result_blocks: vec![serde_json::json!({
+                    "type": "text",
+                    "text": "error result"
+                })],
+                error: None,
+                status: crate::tool_calls::McpToolCallStatus::Completed,
+                is_error: true,
+            }
         );
     }
 }
