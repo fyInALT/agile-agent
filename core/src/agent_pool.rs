@@ -480,6 +480,11 @@ impl AgentPool {
         &self.workplace_id
     }
 
+    /// Check if pool has worktree support enabled
+    pub fn has_worktree_support(&self) -> bool {
+        self.worktree_manager.is_some() && self.worktree_state_store.is_some()
+    }
+
     /// Generate a new unique agent ID
     fn generate_agent_id(&mut self) -> AgentId {
         let id = AgentId::new(format!("agent_{:03}", self.next_agent_index));

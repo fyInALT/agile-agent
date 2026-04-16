@@ -25,6 +25,7 @@ use agent_core::tool_calls::McpToolCallStatus;
 use agent_core::tool_calls::PatchApplyStatus;
 use agent_core::tool_calls::PatchChange;
 use agent_core::tool_calls::WebSearchAction;
+use agent_core::workplace_store::WorkplaceStore;
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::mpsc::Receiver;
@@ -398,26 +399,42 @@ impl TuiState {
     }
 
     /// Spawn a new agent in the pool
+    ///
+    /// If the pool has worktree support, the agent will be created with an
+    /// isolated git worktree. Otherwise, falls back to regular agent creation.
     pub fn spawn_agent(
         &mut self,
         provider: ProviderKind,
     ) -> Option<agent_core::agent_runtime::AgentId> {
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
-            let workplace_id = self.session.workplace().workplace_id.clone();
-            let cwd = self.session.app.cwd.clone();
-            let mut pool = AgentPool::with_cwd(workplace_id, 10, cwd);
-
-            // Always create OVERVIEW agent first (at index 0)
-            let overview_provider = self.session.app.selected_provider;
-            pool.spawn_overview_agent(overview_provider).ok();
-
-            self.agent_pool = Some(pool);
+            self.ensure_overview_agent();
         }
 
-        let agent_id = self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+        let pool = self.agent_pool.as_mut()?;
+        let has_worktree_support = pool.has_worktree_support();
+
+        let agent_id = if has_worktree_support {
+            // Use worktree-enabled spawn
+            pool.spawn_agent_with_worktree(provider, None, None)
+                .map_err(|e| {
+                    logging::warn_event(
+                        "tui.agent.spawn_worktree_failed",
+                        "failed to spawn agent with worktree",
+                        serde_json::json!({
+                            "error": e.to_string(),
+                        }),
+                    );
+                    e
+                })
+                .ok()
+        } else {
+            // Fallback to regular spawn
+            pool.spawn_agent(provider).ok()
+        }?;
 
         // Spawn decision agent for the work agent (if provider supports it)
+        // Decision agents don't need worktrees - they only analyze output
         if provider != ProviderKind::Mock {
             if let Some(pool) = self.agent_pool.as_mut() {
                 if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
@@ -438,6 +455,9 @@ impl TuiState {
     }
 
     /// Spawn a new agent with launch configuration
+    ///
+    /// If the pool has worktree support, the agent will be created with an
+    /// isolated git worktree. Otherwise, falls back to regular agent creation.
     pub fn spawn_agent_with_launch_config(
         &mut self,
         provider: ProviderKind,
@@ -449,15 +469,7 @@ impl TuiState {
 
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
-            let workplace_id = self.session.workplace().workplace_id.clone();
-            let cwd = self.session.app.cwd.clone();
-            let mut pool = AgentPool::with_cwd(workplace_id, 10, cwd);
-
-            // Always create OVERVIEW agent first (at index 0)
-            let overview_provider = self.session.app.selected_provider;
-            pool.spawn_overview_agent(overview_provider).ok();
-
-            self.agent_pool = Some(pool);
+            self.ensure_overview_agent();
         }
 
         // Parse launch configs
@@ -474,7 +486,27 @@ impl TuiState {
             decision_resolved,
         );
 
-        let agent_id = self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+        let pool = self.agent_pool.as_mut()?;
+        let has_worktree_support = pool.has_worktree_support();
+
+        let agent_id = if has_worktree_support {
+            // Use worktree-enabled spawn
+            pool.spawn_agent_with_worktree(provider, None, None)
+                .map_err(|e| {
+                    logging::warn_event(
+                        "tui.agent.spawn_worktree_failed",
+                        "failed to spawn agent with worktree",
+                        serde_json::json!({
+                            "error": e.to_string(),
+                        }),
+                    );
+                    e
+                })
+                .ok()
+        } else {
+            // Fallback to regular spawn
+            pool.spawn_agent(provider).ok()
+        }?;
 
         // Attach launch bundle to the slot
         if let Some(pool) = self.agent_pool.as_mut() {
@@ -484,6 +516,7 @@ impl TuiState {
         }
 
         // Spawn decision agent for the work agent (if provider supports it)
+        // Decision agents don't need worktrees - they only analyze output
         if provider != ProviderKind::Mock {
             if let Some(pool) = self.agent_pool.as_mut() {
                 if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
@@ -713,9 +746,51 @@ impl TuiState {
     pub fn ensure_overview_agent(&mut self) {
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
-            let mut pool = AgentPool::new(workplace_id, 10);
+            let cwd = self.session.app.cwd.clone();
 
-            // Create OVERVIEW agent with the current provider
+            // Get workplace store to access the workplace path (for worktree state storage)
+            let workplace_store = WorkplaceStore::for_cwd(&cwd).ok();
+            let workplace_path = workplace_store.as_ref().map(|w| w.path().to_path_buf());
+
+            // Try to create pool with worktree support first
+            let pool = if let Some(wp_path) = workplace_path {
+                AgentPool::new_with_worktrees(
+                    workplace_id.clone(),
+                    10,
+                    cwd.clone(),
+                    wp_path,
+                )
+            } else {
+                // Can't get workplace path, use regular pool
+                Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
+            };
+
+            let mut pool = match pool {
+                Ok(p) => {
+                    logging::debug_event(
+                        "tui.pool.worktree_enabled",
+                        "created agent pool with worktree support",
+                        serde_json::json!({
+                            "cwd": cwd.display().to_string(),
+                        }),
+                    );
+                    p
+                }
+                Err(e) => {
+                    // Fallback to regular pool if worktree creation fails (e.g., not a git repo)
+                    logging::warn_event(
+                        "tui.pool.worktree_fallback",
+                        "worktree pool creation failed, using regular pool",
+                        serde_json::json!({
+                            "error": e.to_string(),
+                            "cwd": cwd.display().to_string(),
+                        }),
+                    );
+                    AgentPool::with_cwd(workplace_id, 10, cwd)
+                }
+            };
+
+            // Create OVERVIEW agent with the current provider (OVERVIEW doesn't need worktree)
             let overview_provider = self.session.app.selected_provider;
             pool.spawn_overview_agent(overview_provider).ok();
 
