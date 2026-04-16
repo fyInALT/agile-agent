@@ -13,6 +13,7 @@ use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use agent_core::agent_slot::{AgentSlotStatus, TaskId};
 use agent_core::app::TranscriptEntry;
 use agent_core::backlog::BacklogState;
+use agent_core::launch_config::AgentLaunchBundle;
 use agent_core::provider::{ProviderKind, SessionHandle};
 use agent_core::shutdown_snapshot::ShutdownReason;
 use agent_core::workplace_store::WorkplaceStore;
@@ -40,6 +41,9 @@ pub struct TuiShutdownSnapshot {
 /// Complete TUI resume snapshot for restoring a multi-agent TUI session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TuiResumeSnapshot {
+    /// Snapshot version for migration support (V2 adds launch_bundle).
+    #[serde(default = "default_snapshot_version")]
+    pub version: String,
     /// Timestamp when the snapshot was captured.
     pub captured_at: String,
     /// Why the session was shut down.
@@ -60,6 +64,10 @@ pub struct TuiResumeSnapshot {
     pub view_state: TuiShutdownSnapshot,
 }
 
+fn default_snapshot_version() -> String {
+    "v2".to_string()
+}
+
 /// Persisted view of one TUI agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PersistedAgentSnapshot {
@@ -71,6 +79,9 @@ pub struct PersistedAgentSnapshot {
     pub provider_session_id: Option<String>,
     pub transcript: Vec<TranscriptEntry>,
     pub assigned_task_id: Option<TaskId>,
+    /// Launch configuration bundle for this agent (added in V2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_bundle: Option<AgentLaunchBundle>,
 }
 
 /// Serializable snapshot of a live agent status.
@@ -181,6 +192,7 @@ impl TuiResumeSnapshot {
             .unwrap_or_default();
 
         Self {
+            version: default_snapshot_version(),
             captured_at: chrono::Utc::now().to_rfc3339(),
             shutdown_reason: reason,
             composer_text: state.composer.text().to_string(),
@@ -208,6 +220,7 @@ impl PersistedAgentSnapshot {
             }),
             transcript: slot.transcript().to_vec(),
             assigned_task_id: slot.assigned_task_id().cloned(),
+            launch_bundle: None,
         }
     }
 
@@ -282,9 +295,38 @@ pub fn load_resume_snapshot(workplace: &WorkplaceStore) -> Result<Option<TuiResu
     }
     let payload =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let snapshot = serde_json::from_str(&payload)
+    let snapshot = deserialize_with_migration(&payload)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(snapshot))
+}
+
+/// Deserialize with migration support for older snapshot versions.
+///
+/// V1 snapshots (before launch_bundle field) are migrated to V2 by adding
+/// default launch_bundle: None to all agents.
+fn deserialize_with_migration(json: &str) -> Result<TuiResumeSnapshot> {
+    // First, parse as generic JSON to check version
+    let value: serde_json::Value = serde_json::from_str(json)?;
+
+    // Check if version field exists
+    let version = value.get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("v1");
+
+    if version == "v1" {
+        // Migration needed: add version field and launch_bundle fields
+        let mut migrated: TuiResumeSnapshot = serde_json::from_str(json)?;
+
+        // The serde default will already handle launch_bundle being None
+        // Just need to ensure version is set
+        migrated.version = "v2".to_string();
+
+        // Note: V1 snapshots are migrated to V2 with empty launch bundles
+        Ok(migrated)
+    } else {
+        // Already v2 or later, parse normally
+        serde_json::from_str(json).map_err(Into::into)
+    }
 }
 
 pub fn clear_resume_snapshot(workplace: &WorkplaceStore) -> Result<()> {
