@@ -767,11 +767,20 @@ impl AgentPool {
             worktree_state.path.clone()
         } else {
             // Worktree was deleted externally - recreate it
+            // Check if branch still exists - if so, use existing branch, don't create new
+            let branch_exists = worktree_state.branch.as_ref()
+                .map(|b| worktree_manager.branch_exists(b).unwrap_or(false))
+                .unwrap_or(false);
+
             let options = WorktreeCreateOptions {
                 path: worktree_manager.worktrees_dir().join(&worktree_state.worktree_id),
                 branch: worktree_state.branch.clone(),
-                create_branch: worktree_state.branch.is_some(),
-                base: Some(worktree_state.base_commit.clone()),
+                create_branch: !branch_exists && worktree_state.branch.is_some(),
+                base: if branch_exists {
+                    None  // Use existing branch, no base needed
+                } else {
+                    Some(worktree_state.base_commit.clone())
+                },
                 lock_reason: None,
             };
 
