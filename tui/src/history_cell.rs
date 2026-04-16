@@ -161,6 +161,21 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             text: text.clone(),
             style: Style::default().fg(Color::Red),
         }),
+        TranscriptEntry::Decision {
+            agent_id,
+            situation_type,
+            action_type,
+            reasoning,
+            confidence,
+            tier,
+        } => Box::new(DecisionHistoryCell {
+            agent_id: agent_id.clone(),
+            situation_type: situation_type.clone(),
+            action_type: action_type.clone(),
+            reasoning: reasoning.clone(),
+            confidence: *confidence,
+            tier: tier.clone(),
+        }),
     }
 }
 
@@ -572,6 +587,73 @@ impl HistoryCell for McpToolCallHistoryCell {
                     width as usize,
                 ));
             }
+        }
+
+        lines
+    }
+}
+
+/// Decision layer output cell
+///
+/// Displays decision agent outputs with special formatting to distinguish
+/// from work agent outputs. Uses a purple/magenta theme for visual distinction.
+#[derive(Debug)]
+struct DecisionHistoryCell {
+    agent_id: String,
+    situation_type: String,
+    action_type: String,
+    reasoning: String,
+    confidence: u8,
+    tier: String,
+}
+
+impl HistoryCell for DecisionHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let width_usize = width as usize;
+
+        // Decision header with special styling (purple/magenta for decision layer)
+        let decision_color = Color::Magenta;
+        let header: &str = "🧠 Decision";
+
+        lines.push(Line::from(vec![
+            Span::styled("• ", Style::default().fg(decision_color).add_modifier(Modifier::BOLD)),
+            Span::styled(header.to_string(), Style::default().fg(decision_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" [", Style::default().fg(decision_color)),
+            Span::styled(self.tier.clone(), Style::default().fg(decision_color).add_modifier(Modifier::DIM)),
+            Span::styled("]", Style::default().fg(decision_color)),
+        ]));
+
+        // Agent and situation info
+        lines.push(Line::from(vec![
+            Span::styled("  Agent: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(self.agent_id.clone(), Style::default().fg(Color::Cyan)),
+            Span::styled(" │ Situation: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(self.situation_type.clone(), Style::default().fg(Color::Yellow)),
+        ]));
+
+        // Action taken
+        lines.push(Line::from(vec![
+            Span::styled("  Action: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(self.action_type.clone(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(" │ Confidence: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(
+                format!("{}%", self.confidence),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+
+        // Reasoning (wrapped if needed)
+        if !self.reasoning.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("  Reasoning: ", Style::default().add_modifier(Modifier::DIM)),
+            ]));
+            lines.extend(wrap_prefixed(
+                "    ",
+                &self.reasoning,
+                Style::default().fg(Color::DarkGray),
+                width_usize,
+            ));
         }
 
         lines

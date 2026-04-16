@@ -18,6 +18,7 @@ pub enum AgentMessageKind {
     Assistant,
     Thinking,
     ToolCall,
+    Decision,
     Status,
     Error,
 }
@@ -389,6 +390,37 @@ fn map_entry(
                     .map(|value| value.to_string())
                     .as_deref()
                     .unwrap_or(""),
+            ),
+            created_at: captured_at,
+        },
+        TranscriptEntry::Decision {
+            agent_id,
+            situation_type,
+            action_type,
+            reasoning,
+            confidence,
+            tier,
+        } => AgentMessageEnvelope {
+            sequence,
+            direction: AgentMessageDirection::Internal,
+            channel: AgentMessageChannel::Runtime,
+            sender: AgentMessageEndpoint {
+                kind: AgentMessageEndpointKind::Agent,
+                id: format!("decision-{}", agent_id),
+            },
+            recipient: AgentMessageEndpoint {
+                kind: AgentMessageEndpointKind::Agent,
+                id: agent_id.clone(),
+            },
+            kind: AgentMessageKind::Decision,
+            correlation_id: None,
+            summary: format!(
+                "decision:{}:{}:{}:{}%:{}",
+                tier,
+                situation_type,
+                action_type,
+                confidence,
+                reasoning
             ),
             created_at: captured_at,
         },

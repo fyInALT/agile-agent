@@ -49,6 +49,17 @@ const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// Interval for decision agent polling
 const DECISION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Decision output info for transcript display
+///
+/// Captures decision details for showing in TUI with special formatting.
+struct DecisionOutputInfo {
+    situation_type: String,
+    action_type: String,
+    reasoning: String,
+    confidence: f64,
+    tier: String,
+}
+
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
 
@@ -101,8 +112,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
         // Decision agent polling - process decision requests and responses
         if last_decision_poll.elapsed() >= DECISION_POLL_INTERVAL {
-            // Collect responses first
-            let decision_results: Vec<(agent_core::agent_runtime::AgentId, agent_core::agent_pool::DecisionExecutionResult)> = {
+            // Collect responses first, preserving output details for transcript
+            let decision_results: Vec<(agent_core::agent_runtime::AgentId, agent_core::agent_pool::DecisionExecutionResult, Option<DecisionOutputInfo>)> = {
                 if let Some(pool) = state.agent_pool.as_mut() {
                     let responses = pool.poll_decision_agents();
                     responses.into_iter().filter_map(|(agent_id, response)| {
@@ -112,17 +123,28 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 .map(|a| a.action_type().name.clone())
                                 .unwrap_or_else(|| "none".to_string());
 
+                            // Extract decision output info for transcript display
+                            let output_info = DecisionOutputInfo {
+                                situation_type: "auto_detected".to_string(), // TODO: get from request
+                                action_type: action_name.clone(),
+                                reasoning: output.reasoning.clone(),
+                                confidence: output.confidence,
+                                tier: "auto".to_string(), // TODO: get from engine
+                            };
+
                             logging::debug_event(
                                 "app_loop.decision_response",
                                 "received decision response",
                                 serde_json::json!({
                                     "agent_id": agent_id.as_str(),
                                     "action": action_name,
+                                    "reasoning": output.reasoning,
+                                    "confidence": output.confidence,
                                 }),
                             );
                             // Execute decision action
                             let result = pool.execute_decision_action(&agent_id, output);
-                            Some((agent_id, result))
+                            Some((agent_id, result, Some(output_info)))
                         } else if response.is_error() {
                             logging::warn_event(
                                 "app_loop.decision_error",
@@ -143,32 +165,63 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             };
 
             // Process results after releasing pool borrow
-            for (agent_id, result) in decision_results {
+            for (agent_id, result, output_info) in decision_results {
                 match result {
                     agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
+                        // Push decision entry to transcript for detailed display
+                        if let Some(info) = output_info {
+                            state.app_mut().push_decision(
+                                agent_id.as_str().to_string(),
+                                info.situation_type,
+                                format!("{} → {}", info.action_type, option_id),
+                                info.reasoning,
+                                info.confidence,
+                                info.tier,
+                            );
+                        }
                         state.app_mut().push_status_message(
-                            format!("{}: decision executed ({})", agent_id.as_str(), option_id)
+                            format!("🧠 {}: decision executed ({})", agent_id.as_str(), option_id)
                         );
                     }
                     agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
+                        if let Some(info) = output_info {
+                            state.app_mut().push_decision(
+                                agent_id.as_str().to_string(),
+                                info.situation_type,
+                                info.action_type,
+                                info.reasoning,
+                                info.confidence,
+                                info.tier,
+                            );
+                        }
                         state.app_mut().push_status_message(
-                            format!("{}: recommendation accepted", agent_id.as_str())
+                            format!("🧠 {}: recommendation accepted", agent_id.as_str())
                         );
                     }
                     agent_core::agent_pool::DecisionExecutionResult::CustomInstruction { instruction: _ } => {
+                        if let Some(info) = output_info {
+                            state.app_mut().push_decision(
+                                agent_id.as_str().to_string(),
+                                info.situation_type,
+                                "custom_instruction".to_string(),
+                                info.reasoning,
+                                info.confidence,
+                                info.tier,
+                            );
+                        }
                         state.app_mut().push_status_message(
-                            format!("{}: custom instruction sent", agent_id.as_str())
+                            format!("🧠 {}: custom instruction sent", agent_id.as_str())
                         );
                         // TODO: Send custom instruction to provider
                     }
                     agent_core::agent_pool::DecisionExecutionResult::Skipped => {
                         state.app_mut().push_status_message(
-                            format!("{}: decision skipped", agent_id.as_str())
+                            format!("🧠 {}: decision skipped", agent_id.as_str())
                         );
                     }
                     agent_core::agent_pool::DecisionExecutionResult::Cancelled => {
                         state.app_mut().push_status_message(
-                            format!("{}: decision cancelled", agent_id.as_str())
+                            format!("🧠 {}: decision cancelled", agent_id.as_str())
                         );
                     }
                     agent_core::agent_pool::DecisionExecutionResult::AgentNotFound

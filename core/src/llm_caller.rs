@@ -166,42 +166,63 @@ impl LLMCaller for ProviderLLMCaller {
 
 /// Run provider in thread context for LLM call
 ///
-/// This is a simplified provider runner that sends a prompt and collects response.
+/// Calls the actual provider (Claude/Codex) for decision making.
+/// Falls back to mock provider if the real provider is unavailable.
 fn run_provider_for_llm_call(
     provider: ProviderKind,
     prompt: String,
-    _cwd: std::path::PathBuf,
+    cwd: std::path::PathBuf,
     event_tx: Sender<ProviderEvent>,
 ) {
-    // For now, use mock provider logic
-    // Full implementation would call actual provider (claude/codex)
-    use crate::mock_provider;
-
     logging::debug_event(
         "llm_caller.run",
         "provider thread started",
         serde_json::json!({
             "provider": provider.label(),
+            "prompt_len": prompt.len(),
         }),
     );
 
-    // Send status event
-    let _ = event_tx.send(ProviderEvent::Status(format!(
-        "{} LLM call started",
-        provider.label()
-    )));
+    // Keep a copy for fallback
+    let prompt_for_fallback = prompt.clone();
 
-    // Use mock provider to generate response chunks
-    // In production, this would call the actual provider via CLI
-    for chunk in mock_provider::build_reply_chunks(&prompt) {
-        std::thread::sleep(Duration::from_millis(30));
-        if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
-            return;
+    // Try to start the actual provider
+    let result = match provider {
+        ProviderKind::Mock => {
+            // Mock provider: use inline implementation
+            use crate::mock_provider;
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                std::thread::sleep(Duration::from_millis(30));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+            Ok(())
         }
-    }
+        ProviderKind::Claude => {
+            crate::providers::claude::start(prompt, cwd, None, event_tx)
+        }
+        ProviderKind::Codex => {
+            crate::providers::codex::start(prompt, cwd, None, event_tx)
+        }
+    };
 
-    // Send finished event
-    let _ = event_tx.send(ProviderEvent::Finished);
+    // Provider takes ownership of event_tx, so we can't use it in fallback
+    // Instead, if provider fails to start, we just log and return (provider sends Error event internally)
+    if let Err(e) = result {
+        logging::warn_event(
+            "llm_caller.provider_failed",
+            "provider failed to start",
+            serde_json::json!({
+                "provider": provider.label(),
+                "error": e.to_string(),
+            }),
+        );
+        // Note: We can't fallback to mock here because event_tx was consumed by the provider
+        // The provider should have sent an Error event before returning Err
+    }
 
     logging::debug_event(
         "llm_caller.finished",

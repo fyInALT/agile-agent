@@ -40,6 +40,21 @@ pub enum TranscriptEntry {
     User(String),
     Assistant(String),
     Thinking(String),
+    /// Decision layer output - shows decision reasoning and action
+    Decision {
+        /// Agent ID that received the decision
+        agent_id: String,
+        /// Situation type that triggered the decision
+        situation_type: String,
+        /// Action selected by decision engine
+        action_type: String,
+        /// Decision reasoning from the engine
+        reasoning: String,
+        /// Confidence level (0-100 as u8 for Eq compatibility)
+        confidence: u8,
+        /// Tier used (Simple/Medium/Complex/Critical)
+        tier: String,
+    },
     ExecCommand {
         call_id: Option<String>,
         source: Option<String>,
@@ -627,6 +642,30 @@ impl AppState {
 
     pub fn push_error_message(&mut self, text: impl Into<String>) {
         self.transcript.push(TranscriptEntry::Error(text.into()));
+    }
+
+    /// Push a decision entry to transcript
+    ///
+    /// Used to display decision layer outputs with special formatting.
+    pub fn push_decision(
+        &mut self,
+        agent_id: String,
+        situation_type: String,
+        action_type: String,
+        reasoning: String,
+        confidence: f64,
+        tier: String,
+    ) {
+        // Convert confidence from f64 (0.0-1.0) to u8 (0-100)
+        let confidence_u8 = (confidence * 100.0).clamp(0.0, 100.0) as u8;
+        self.transcript.push(TranscriptEntry::Decision {
+            agent_id,
+            situation_type,
+            action_type,
+            reasoning,
+            confidence: confidence_u8,
+            tier,
+        });
     }
 
     pub fn current_session_handle(&self) -> Option<SessionHandle> {
