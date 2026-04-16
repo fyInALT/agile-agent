@@ -853,3 +853,140 @@ fn overview_timestamp_same_minute_omitted() {
     // (we verify by checking the content is visible but not the second timestamp)
     assert!(rendered.contains("Second message"));
 }
+
+// Tests for Ctrl+N agent creation flow
+
+#[test]
+fn ctrl_n_opens_provider_overlay() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Press Ctrl+N
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+
+    // Provider overlay should be open
+    assert!(shell.state.is_provider_overlay_open());
+
+    let rendered = shell.render_to_string(80, 24);
+    assert!(rendered.contains("New Agent"), "Should show provider overlay. Got:\n{}", rendered);
+}
+
+#[test]
+fn provider_selection_for_claude_opens_launch_config_overlay() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Press Ctrl+N
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert!(shell.state.is_provider_overlay_open());
+
+    // Select Claude provider (index 0)
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+
+    // Launch config overlay should be open (Claude/Codex need config, Mock skips)
+    assert!(shell.state.is_launch_config_overlay_open());
+
+    let rendered = shell.render_to_string(80, 24);
+    assert!(
+        rendered.contains("Launch Config") || rendered.contains("claude"),
+        "Should show launch config overlay. Got:\n{}",
+        rendered
+    );
+}
+
+#[test]
+fn provider_selection_for_mock_skips_launch_config_overlay() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Press Ctrl+N
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert!(shell.state.is_provider_overlay_open());
+
+    // Move down to Mock provider (index 2)
+    shell.press(KeyCode::Down, KeyModifiers::NONE);
+    shell.press(KeyCode::Down, KeyModifiers::NONE);
+
+    // Select Mock provider
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+
+    // Mock should skip config overlay and spawn directly
+    assert!(!shell.state.is_launch_config_overlay_open());
+    assert!(!shell.state.is_provider_overlay_open());
+
+    // Check that new agent was spawned
+    let statuses = shell.state.agent_statuses();
+    assert!(statuses.len() >= 2, "Should have at least 2 agents (OVERVIEW + new). Got: {}", statuses.len());
+}
+
+#[test]
+fn launch_config_overlay_can_input_env_vars() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Open provider overlay and select Claude
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+
+    assert!(shell.state.is_launch_config_overlay_open());
+
+    // Type env var KEY=value
+    shell.press(KeyCode::Char('K'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('E'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('Y'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('='), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('v'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('a'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('l'), KeyModifiers::NONE);
+
+    let overlay = shell.state.launch_config_overlay.as_ref().expect("overlay");
+    assert_eq!(overlay.work_config_text, "KEY=val");
+    assert_eq!(overlay.work_preview.env_count, 1);
+
+    let rendered = shell.render_to_string(80, 24);
+    // Preview should show env-only mode
+    assert!(
+        rendered.contains("env-only") || rendered.contains("Env:"),
+        "Should show env count in preview. Got:\n{}",
+        rendered
+    );
+}
+
+#[test]
+fn launch_config_overlay_tab_cycles_focus() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Open and select Claude
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+
+    let overlay = shell.state.launch_config_overlay.as_ref().expect("overlay");
+    use crate::launch_config_overlay::LaunchConfigFocus;
+    assert_eq!(overlay.focus, LaunchConfigFocus::WorkConfig);
+
+    // Tab to decision config
+    shell.press(KeyCode::Tab, KeyModifiers::NONE);
+    let overlay = shell.state.launch_config_overlay.as_ref().expect("overlay");
+    assert_eq!(overlay.focus, LaunchConfigFocus::DecisionConfig);
+
+    // Tab to confirm
+    shell.press(KeyCode::Tab, KeyModifiers::NONE);
+    let overlay = shell.state.launch_config_overlay.as_ref().expect("overlay");
+    assert_eq!(overlay.focus, LaunchConfigFocus::Confirm);
+}
+
+#[test]
+fn launch_config_overlay_esc_closes() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Open provider overlay and select Claude
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(shell.state.is_launch_config_overlay_open());
+
+    // Press Esc to close
+    shell.press(KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!shell.state.is_launch_config_overlay_open());
+}

@@ -88,7 +88,64 @@ impl ShellHarness {
     }
 
     pub(crate) fn press(&mut self, key_code: KeyCode, modifiers: KeyModifiers) {
-        let outcome = handle_key_event(&mut self.state, KeyEvent::new(key_code, modifiers));
+        let key_event = KeyEvent::new(key_code, modifiers);
+
+        // Handle provider overlay key events directly (like app_loop does)
+        if self.state.is_provider_overlay_open() {
+            if let Some(overlay) = self.state.provider_overlay.as_mut()
+                && let Some(command) = overlay.handle_key_event(key_event)
+            {
+                use crate::provider_overlay::ProviderSelectionCommand;
+                match command {
+                    ProviderSelectionCommand::Close => {
+                        self.state.close_provider_overlay();
+                    }
+                    ProviderSelectionCommand::Select(provider) => {
+                        self.state.close_provider_overlay();
+                        if provider == agent_core::provider::ProviderKind::Mock {
+                            if let Some(agent_id) = self.state.spawn_agent(provider) {
+                                self.state.app_mut().push_status_message(format!(
+                                    "spawned {} with {}",
+                                    agent_id.as_str(),
+                                    provider.label()
+                                ));
+                            }
+                        } else {
+                            self.state.open_launch_config_overlay(provider);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // Handle launch config overlay key events directly
+        if self.state.is_launch_config_overlay_open() {
+            if let Some(overlay) = self.state.launch_config_overlay.as_mut()
+                && let Some(command) = overlay.handle_key_event(key_event)
+            {
+                use crate::launch_config_overlay::LaunchConfigOverlayCommand;
+                match command {
+                    LaunchConfigOverlayCommand::Close => {
+                        self.state.close_launch_config_overlay();
+                    }
+                    LaunchConfigOverlayCommand::Confirm { work_config, decision_config } => {
+                        let provider = overlay.provider;
+                        self.state.close_launch_config_overlay();
+                        if let Some(agent_id) = self.state.spawn_agent_with_launch_config(provider, &work_config, &decision_config) {
+                            self.state.app_mut().push_status_message(format!(
+                                "spawned {} with {}",
+                                agent_id.as_str(),
+                                provider.label()
+                            ));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        let outcome = handle_key_event(&mut self.state, key_event);
         self.apply_input_outcome(outcome);
     }
 
