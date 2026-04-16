@@ -392,7 +392,8 @@ impl TuiState {
         // Create agent pool if it doesn't exist
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
-            let mut pool = AgentPool::new(workplace_id, 10);
+            let cwd = self.session.app.cwd.clone();
+            let mut pool = AgentPool::with_cwd(workplace_id, 10, cwd);
 
             // Always create OVERVIEW agent first (at index 0)
             let overview_provider = self.session.app.selected_provider;
@@ -401,7 +402,26 @@ impl TuiState {
             self.agent_pool = Some(pool);
         }
 
-        self.agent_pool.as_mut()?.spawn_agent(provider).ok()
+        let agent_id = self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+
+        // Spawn decision agent for the work agent (if provider supports it)
+        if provider != ProviderKind::Mock {
+            if let Some(pool) = self.agent_pool.as_mut() {
+                if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
+                    // Log warning but don't fail the work agent spawn
+                    logging::warn_event(
+                        "decision_agent.spawn_failed",
+                        "failed to spawn decision agent",
+                        serde_json::json!({
+                            "work_agent_id": agent_id.as_str(),
+                            "error": e,
+                        }),
+                    );
+                }
+            }
+        }
+
+        Some(agent_id)
     }
 
     /// Focus a specific agent by ID
