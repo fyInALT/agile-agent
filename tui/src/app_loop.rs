@@ -1603,6 +1603,10 @@ fn handle_agent_provider_event(
         }
         ProviderEvent::Finished => {
             push_overview_assistant_summary(state, &agent_id);
+            // Flush active entries when focused agent finishes
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.flush_active_entries_to_transcript();
+            }
             if let Some(pool) = state.agent_pool.as_mut()
                 && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
                 && slot.status().is_active()
@@ -1623,6 +1627,10 @@ fn handle_agent_provider_event(
                     error.clone(),
                 ));
             }
+            // Finalize active entries when focused agent has error
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finalize_active_entries_after_failure(Some(&error));
+            }
             state.unregister_agent_channel(&agent_id);
             state
                 .app_mut()
@@ -1635,7 +1643,148 @@ fn handle_agent_provider_event(
                 slot.set_session_handle(handle);
             }
         }
-        _ => {}
+        // Tool call events - only update active_entries when focused on this agent
+        ProviderEvent::ExecCommandStarted {
+            call_id,
+            input_preview,
+            source,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.push_active_exec_started(call_id, input_preview, source);
+            }
+        }
+        ProviderEvent::ExecCommandFinished {
+            call_id,
+            output_preview,
+            status,
+            exit_code,
+            duration_ms,
+            source,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finish_active_exec(
+                    call_id,
+                    output_preview,
+                    status,
+                    exit_code,
+                    duration_ms,
+                    source,
+                );
+            }
+        }
+        ProviderEvent::ExecCommandOutputDelta { call_id, delta } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.append_active_exec_output(call_id, &delta);
+            }
+        }
+        ProviderEvent::GenericToolCallStarted {
+            name,
+            call_id,
+            input_preview,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.push_active_generic_tool_call_started(name, call_id, input_preview);
+            }
+        }
+        ProviderEvent::GenericToolCallFinished {
+            name,
+            call_id,
+            output_preview,
+            success,
+            exit_code,
+            duration_ms,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finish_active_generic_tool_call(
+                    name,
+                    call_id,
+                    output_preview,
+                    success,
+                    exit_code,
+                    duration_ms,
+                );
+            }
+        }
+        ProviderEvent::WebSearchStarted { call_id, query } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.push_active_web_search_started(call_id, query);
+            }
+        }
+        ProviderEvent::WebSearchFinished {
+            call_id,
+            query,
+            action,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finish_active_web_search(call_id, query, action);
+            }
+        }
+        ProviderEvent::McpToolCallStarted {
+            call_id,
+            invocation,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.push_active_mcp_tool_call_started(call_id, invocation);
+            }
+        }
+        ProviderEvent::McpToolCallFinished {
+            call_id,
+            invocation,
+            result_blocks,
+            error,
+            status,
+            is_error,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finish_active_mcp_tool_call(
+                    call_id,
+                    invocation,
+                    result_blocks,
+                    error,
+                    status,
+                    is_error,
+                );
+            }
+        }
+        ProviderEvent::PatchApplyStarted { call_id, changes } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.push_active_patch_apply_started(call_id, changes);
+            }
+        }
+        ProviderEvent::PatchApplyOutputDelta { call_id, delta } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.append_active_patch_apply_output(call_id, &delta);
+            }
+        }
+        ProviderEvent::PatchApplyFinished {
+            call_id,
+            changes,
+            status,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.finish_active_patch_apply(call_id, changes, status);
+            }
+        }
+        ProviderEvent::ViewImage { call_id, path } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.app_mut().push_view_image(call_id, path);
+            }
+        }
+        ProviderEvent::ImageGenerationFinished {
+            call_id,
+            revised_prompt,
+            result,
+            saved_path,
+        } => {
+            if state.focused_agent_id().as_ref() == Some(&agent_id) {
+                state.app_mut().push_image_generation(
+                    call_id,
+                    revised_prompt,
+                    result,
+                    saved_path,
+                );
+            }
+        }
     }
 
     // Decision layer integration: classify event and send decision request if needed
@@ -2089,6 +2238,83 @@ mod tests {
             .filter(|msg| msg.content.contains("I’m loading"))
             .collect();
         assert_eq!(assistant_logs.len(), 1);
+    }
+
+    #[test]
+    fn focused_work_agent_routes_exec_events_through_codex_style_active_and_history_views() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Codex, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        let agent_id = state.spawn_agent(ProviderKind::Codex).expect("spawn alpha");
+        state.focus_agent(&agent_id);
+        state.view_state.switch_by_number(1); // Focused mode
+
+        handle_agent_provider_event(
+            &mut state,
+            agent_id.clone(),
+            agent_core::provider::ProviderEvent::ExecCommandStarted {
+                call_id: Some("call-1".to_string()),
+                input_preview: Some("git status".to_string()),
+                source: Some("agent".to_string()),
+            },
+        );
+
+        assert!(matches!(
+            state.active_entries_for_display().last(),
+            Some(TranscriptEntry::ExecCommand {
+                call_id,
+                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                ..
+            }) if call_id.as_deref() == Some("call-1")
+        ));
+
+        handle_agent_provider_event(
+            &mut state,
+            agent_id.clone(),
+            agent_core::provider::ProviderEvent::ExecCommandOutputDelta {
+                call_id: Some("call-1".to_string()),
+                delta: "On branch main".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            state.active_entries_for_display().last(),
+            Some(TranscriptEntry::ExecCommand {
+                output_preview,
+                ..
+            }) if output_preview.as_deref() == Some("On branch main")
+        ));
+
+        handle_agent_provider_event(
+            &mut state,
+            agent_id,
+            agent_core::provider::ProviderEvent::ExecCommandFinished {
+                call_id: Some("call-1".to_string()),
+                output_preview: None,
+                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                exit_code: Some(0),
+                duration_ms: Some(42),
+                source: Some("agent".to_string()),
+            },
+        );
+
+        assert!(state.active_entries_for_display().is_empty());
+        assert!(state.app().transcript.iter().any(|entry| {
+            matches!(
+                entry,
+                TranscriptEntry::ExecCommand {
+                    call_id,
+                    output_preview,
+                    status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                    exit_code: Some(0),
+                    duration_ms: Some(42),
+                    ..
+                } if call_id.as_deref() == Some("call-1")
+                    && output_preview.as_deref() == Some("On branch main")
+            )
+        }));
     }
 
     #[test]
