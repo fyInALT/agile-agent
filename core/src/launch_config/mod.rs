@@ -11,6 +11,7 @@
 //! - `persistence.rs` - JSON file save/load for launch configs
 //! - `error.rs` - ParseError, ValidationError types
 
+pub mod context;
 pub mod error;
 pub mod parser;
 pub mod persistence;
@@ -18,7 +19,7 @@ pub mod resolver;
 pub mod spec;
 pub mod validation;
 
-// Re-export commonly used types
+pub use context::ProviderLaunchContext;
 pub use error::{ParseError, ValidationError};
 pub use spec::{
     AgentLaunchBundle, LaunchInputSpec, LaunchSourceMode, LaunchSourceOrigin,

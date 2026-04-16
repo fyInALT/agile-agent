@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::launch_config::context::ProviderLaunchContext;
 use crate::logging;
 use crate::mock_provider;
 use crate::probe;
@@ -192,6 +193,108 @@ pub fn start_provider(
         }
         ProviderKind::Codex => {
             crate::providers::codex::start(prompt, cwd, session_handle, event_tx)
+        }
+    }
+}
+
+/// Start a provider with structured launch context.
+pub fn start_provider_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: Sender<ProviderEvent>,
+) -> Result<()> {
+    logging::debug_event(
+        "provider.start_with_context",
+        "starting provider with launch context",
+        serde_json::json!({
+            "provider": context.spec.provider.label(),
+            "cwd": context.cwd.display().to_string(),
+            "prompt": prompt,
+            "session_handle": format!("{:?}", context.session_handle),
+            "executable": context.spec.resolved_executable_path,
+            "extra_args": context.spec.extra_args,
+            "env_count": context.spec.effective_env.len(),
+        }),
+    );
+
+    match context.spec.provider {
+        ProviderKind::Mock => start_mock_provider(prompt, event_tx),
+        ProviderKind::Claude => {
+            crate::providers::claude::start_with_context(context, prompt, event_tx)
+        }
+        ProviderKind::Codex => {
+            crate::providers::codex::start_with_context(context, prompt, event_tx)
+        }
+    }
+}
+
+/// Start a provider with context and full thread lifecycle management.
+pub fn start_provider_with_handle_and_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    thread_name: String,
+) -> Result<ProviderThreadHandle> {
+    let (keepalive_tx, event_rx) = channel();
+    let thread_event_tx = keepalive_tx.clone();
+
+    logging::debug_event(
+        "provider.start_threaded_with_context",
+        "starting provider thread with launch context",
+        serde_json::json!({
+            "provider": context.spec.provider.label(),
+            "thread_name": thread_name,
+            "cwd": context.cwd.display().to_string(),
+            "session_handle": format!("{:?}", context.session_handle),
+            "executable": context.spec.resolved_executable_path,
+        }),
+    );
+
+    let handle: JoinHandle<()> = Builder::new().name(thread_name.clone()).spawn(move || {
+        run_provider_internal_with_context(context, prompt, thread_event_tx);
+    })?;
+
+    Ok(ProviderThreadHandle::new(
+        handle,
+        event_rx,
+        keepalive_tx,
+        thread_name,
+    ))
+}
+
+/// Internal provider runner with context for threaded execution
+fn run_provider_internal_with_context(
+    context: ProviderLaunchContext,
+    prompt: String,
+    event_tx: Sender<ProviderEvent>,
+) {
+    match context.spec.provider {
+        ProviderKind::Mock => {
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                thread::sleep(Duration::from_millis(60));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+        }
+        ProviderKind::Claude => {
+            if let Err(e) = crate::providers::claude::start_with_context(context, prompt, event_tx) {
+                logging::warn_event(
+                    "provider.claude.start_failed",
+                    "Claude provider failed to start",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+            }
+        }
+        ProviderKind::Codex => {
+            if let Err(e) = crate::providers::codex::start_with_context(context, prompt, event_tx) {
+                logging::warn_event(
+                    "provider.codex.start_failed",
+                    "Codex provider failed to start",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+            }
         }
     }
 }
