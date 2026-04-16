@@ -477,7 +477,7 @@ fn parse_exec_command_status(
         }) {
         "declined" => ExecCommandStatus::Declined,
         "failed" => ExecCommandStatus::Failed,
-        "in_progress" => ExecCommandStatus::InProgress,
+        "in_progress" | "inProgress" => ExecCommandStatus::InProgress,
         _ => ExecCommandStatus::Completed,
     }
 }
@@ -913,6 +913,63 @@ mod tests {
                 call_id: Some("exec-1".to_string()),
                 input_preview: Some("ls -la".to_string()),
                 source: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_command_execution_status_with_camel_case() {
+        let item = serde_json::json!({
+            "id": "exec-1",
+            "type": "command_execution",
+            "aggregated_output": "working",
+            "exit_code": null,
+            "status": "inProgress"
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::ExecCommandFinished {
+                call_id: Some("exec-1".to_string()),
+                output_preview: Some("working".to_string()),
+                status: crate::tool_calls::ExecCommandStatus::InProgress,
+                exit_code: None,
+                duration_ms: None,
+                source: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_file_change_status_with_camel_case() {
+        let item = serde_json::json!({
+            "id": "patch-1",
+            "type": "file_change",
+            "status": "inProgress",
+            "changes": [
+                {
+                    "path": "/repo/lib.rs",
+                    "kind": "update",
+                    "diff": "+fn new() {}"
+                }
+            ]
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::PatchApplyFinished {
+                call_id: Some("patch-1".to_string()),
+                changes: vec![crate::tool_calls::PatchChange {
+                    path: "/repo/lib.rs".to_string(),
+                    move_path: None,
+                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    diff: "+fn new() {}".to_string(),
+                    added: 1,
+                    removed: 0,
+                }],
+                status: crate::tool_calls::PatchApplyStatus::InProgress,
             }
         );
     }
