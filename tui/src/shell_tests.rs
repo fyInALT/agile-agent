@@ -990,3 +990,43 @@ fn launch_config_overlay_esc_closes() {
     shell.press(KeyCode::Esc, KeyModifiers::NONE);
     assert!(!shell.state.is_launch_config_overlay_open());
 }
+
+#[test]
+fn launch_config_overlay_ctrl_c_closes() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Open provider overlay and select Claude
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(shell.state.is_launch_config_overlay_open());
+
+    // Press Ctrl+C to close
+    shell.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(!shell.state.is_launch_config_overlay_open());
+}
+
+#[test]
+fn launch_config_overlay_supports_paste() {
+    let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
+    shell.state.app_mut().status = agent_core::app::AppStatus::Idle;
+
+    // Open provider overlay and select Claude
+    shell.press(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    shell.press(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(shell.state.is_launch_config_overlay_open());
+
+    // Paste env vars
+    shell.paste("KEY1=value1\nKEY2=value2");
+
+    let overlay = shell.state.launch_config_overlay.as_ref().expect("overlay");
+    assert_eq!(overlay.work_config_text, "KEY1=value1\nKEY2=value2");
+    assert_eq!(overlay.work_preview.env_count, 2);
+
+    let rendered = shell.render_to_string(80, 24);
+    assert!(
+        rendered.contains("env-only") || rendered.contains("Env: 2"),
+        "Should show env count after paste. Got:\n{}",
+        rendered
+    );
+}

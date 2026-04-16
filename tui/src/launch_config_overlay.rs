@@ -158,6 +158,13 @@ impl LaunchConfigOverlayState {
             self.update_previews();
         }
 
+        // Handle Ctrl+C as close (same as Esc)
+        if key_event.code == KeyCode::Char('c')
+            && key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+        {
+            return Some(LaunchConfigOverlayCommand::Close);
+        }
+
         match key_event.code {
             KeyCode::Esc => Some(LaunchConfigOverlayCommand::Close),
             KeyCode::Enter if self.focus == LaunchConfigFocus::Confirm => {
@@ -267,6 +274,25 @@ impl LaunchConfigOverlayState {
     /// Check if configuration is valid for confirmation
     pub fn is_valid(&self) -> bool {
         self.work_preview.is_valid() && self.decision_preview.is_valid()
+    }
+
+    /// Handle paste event - insert text into focused field
+    pub fn handle_paste(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
+        match self.focus {
+            LaunchConfigFocus::WorkConfig => {
+                self.work_config_text.push_str(text);
+                self.update_previews();
+            }
+            LaunchConfigFocus::DecisionConfig => {
+                self.decision_config_text.push_str(text);
+                self.update_previews();
+            }
+            LaunchConfigFocus::Confirm => {}
+        }
     }
 
     /// Get provider label

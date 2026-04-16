@@ -722,7 +722,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                     }
                 }
-                Event::Paste(text) => handle_paste_event(&mut state, &text),
+                Event::Paste(text) => {
+                    // Handle paste in launch config overlay
+                    if state.is_launch_config_overlay_open() {
+                        if let Some(overlay) = state.launch_config_overlay.as_mut() {
+                            overlay.handle_paste(&text);
+                        }
+                    } else {
+                        handle_paste_event(&mut state, &text);
+                    }
+                }
                 Event::Mouse(mouse_event) => {
                     // Handle mouse click in Overview mode for agent selection
                     if state.view_state.mode == crate::view_mode::ViewMode::Overview {

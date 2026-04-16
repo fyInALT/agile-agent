@@ -150,7 +150,14 @@ impl ShellHarness {
     }
 
     pub(crate) fn paste(&mut self, text: &str) {
-        handle_paste_event(&mut self.state, text);
+        // Handle paste in launch config overlay
+        if self.state.is_launch_config_overlay_open() {
+            if let Some(overlay) = self.state.launch_config_overlay.as_mut() {
+                overlay.handle_paste(text);
+            }
+        } else {
+            handle_paste_event(&mut self.state, text);
+        }
     }
 
     fn apply_input_outcome(&mut self, outcome: InputOutcome) {
