@@ -31,6 +31,7 @@ use crate::confirmation_overlay::ConfirmationCommand;
 use crate::input::InputOutcome;
 use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
+use crate::launch_config_overlay::LaunchConfigOverlayCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
 use crate::render::render_app;
 use crate::ui_state::AtCommandResult;
@@ -271,7 +272,42 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 }
                                 ProviderSelectionCommand::Select(provider) => {
                                     state.close_provider_overlay();
-                                    if let Some(agent_id) = state.spawn_agent(provider) {
+                                    // Mock provider skips config overlay (Story 3.9)
+                                    if provider == agent_core::provider::ProviderKind::Mock {
+                                        if let Some(agent_id) = state.spawn_agent(provider) {
+                                            state.app_mut().push_status_message(format!(
+                                                "spawned {} with {}",
+                                                agent_id.as_str(),
+                                                provider.label()
+                                            ));
+                                        } else {
+                                            state.app_mut().push_error_message(
+                                                "failed to spawn agent (pool full)",
+                                            );
+                                        }
+                                    } else {
+                                        // Claude/Codex: open launch config overlay
+                                        state.open_launch_config_overlay(provider);
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Handle launch config overlay
+                    if state.is_launch_config_overlay_open() {
+                        if let Some(overlay) = state.launch_config_overlay.as_mut()
+                            && let Some(command) = overlay.handle_key_event(key_event)
+                        {
+                            match command {
+                                LaunchConfigOverlayCommand::Close => {
+                                    state.close_launch_config_overlay();
+                                }
+                                LaunchConfigOverlayCommand::Confirm { work_config, decision_config } => {
+                                    let provider = overlay.provider;
+                                    state.close_launch_config_overlay();
+                                    if let Some(agent_id) = state.spawn_agent_with_launch_config(provider, &work_config, &decision_config) {
                                         state.app_mut().push_status_message(format!(
                                             "spawned {} with {}",
                                             agent_id.as_str(),

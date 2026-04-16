@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::agent_runtime::AgentId;
 use crate::agent_store::AgentStore;
 use crate::launch_config::AgentLaunchBundle;
+use crate::logging;
 
 /// File name for launch config in agent directory.
 pub const LAUNCH_CONFIG_FILENAME: &str = "launch-config.json";
@@ -34,6 +35,16 @@ pub fn save_launch_config(
         .context("failed to serialize launch config")?;
     fs::write(&path, json)
         .with_context(|| format!("failed to write launch config: {}", path.display()))?;
+
+    logging::debug_event(
+        "launch_config.persist",
+        "launch config bundle saved",
+        serde_json::json!({
+            "agent_id": agent_id.as_str(),
+            "provider": bundle.work_resolved.provider.label(),
+            "path": path.display().to_string(),
+        }),
+    );
 
     Ok(path)
 }

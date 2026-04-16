@@ -2,26 +2,33 @@
 //!
 //! Provides UI for collecting launch configuration input for Work and Decision agents.
 
-use std::collections::BTreeMap;
-
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 
-use agent_core::launch_config::{
-    LaunchInputSpec, LaunchSourceMode, ParseError, ParseResult, ProviderLaunchContext,
-};
+use agent_core::launch_config::LaunchSourceMode;
 use agent_core::provider::ProviderKind;
-use agent_core::resolve_launch_spec;
 
 /// Preview of parsed launch configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ConfigPreview {
     pub source_mode: LaunchSourceMode,
     pub env_count: usize,
     pub arg_count: usize,
     pub executable: Option<String>,
     pub error: Option<String>,
+}
+
+impl Default for ConfigPreview {
+    fn default() -> Self {
+        Self {
+            source_mode: LaunchSourceMode::HostDefault,
+            env_count: 0,
+            arg_count: 0,
+            executable: None,
+            error: None,
+        }
+    }
 }
 
 impl ConfigPreview {

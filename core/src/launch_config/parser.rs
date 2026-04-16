@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::error::{ParseError, ParseResult};
 use super::spec::{LaunchInputSpec, LaunchSourceMode, LaunchSourceOrigin};
+use crate::logging;
 use crate::provider::ProviderKind;
 
 /// Maximum line length for parser input.
@@ -204,6 +205,12 @@ pub fn parse_command_fragment(
 
         // This is the executable (first non-env token)
         if executable.is_none() {
+            // Reject executable names that start with '=' (malformed env var syntax)
+            if token.starts_with('=') {
+                return Err(ParseError::InvalidKeyFormat(
+                    format!("invalid token: {}", token),
+                ));
+            }
             executable = Some(token.clone());
         } else {
             extra_args.push(token.clone());
@@ -229,16 +236,55 @@ pub fn parse(
     provider: ProviderKind,
     input: &str,
 ) -> ParseResult<LaunchInputSpec> {
-    let mode = detect_source_mode(input);
+    let trimmed = input.trim();
+    let mode = detect_source_mode(trimmed);
 
-    match mode {
+    logging::debug_event(
+        "launch_config.parse.start",
+        "starting launch config parse",
+        serde_json::json!({
+            "provider": provider.label(),
+            "source_mode_guess": format!("{:?}", mode),
+            "input_length": trimmed.len(),
+        }),
+    );
+
+    let result = match mode {
         LaunchSourceMode::EnvOnly => parse_env_only(provider, input),
         LaunchSourceMode::CommandFragment => parse_command_fragment(provider, input),
         LaunchSourceMode::HostDefault => {
             // For host default, return empty spec
             Ok(LaunchInputSpec::new(provider))
         }
+    };
+
+    match &result {
+        Ok(spec) => {
+            logging::debug_event(
+                "launch_config.parse.success",
+                "launch config parsed successfully",
+                serde_json::json!({
+                    "provider": provider.label(),
+                    "source_mode": format!("{:?}", spec.source_mode),
+                    "executable": spec.requested_executable,
+                    "env_count": spec.env_overrides.len(),
+                    "arg_count": spec.extra_args.len(),
+                }),
+            );
+        }
+        Err(e) => {
+            logging::debug_event(
+                "launch_config.parse.failed",
+                "launch config parse failed",
+                serde_json::json!({
+                    "provider": provider.label(),
+                    "error": e.to_string(),
+                }),
+            );
+        }
     }
+
+    result
 }
 
 #[cfg(test)]

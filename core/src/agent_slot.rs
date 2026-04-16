@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
+use crate::launch_config::AgentLaunchBundle;
 use crate::logging;
 use crate::provider::{ProviderEvent, SessionHandle};
 use agent_decision::{BlockedState, BlockingReason, DecisionAgentCreationPolicy};
@@ -323,6 +324,8 @@ pub struct AgentSlot {
     last_activity: Instant,
     /// Decision agent creation policy
     decision_policy: DecisionAgentCreationPolicy,
+    /// Launch configuration bundle (for resume/restore)
+    launch_bundle: Option<AgentLaunchBundle>,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -339,6 +342,7 @@ impl std::fmt::Debug for AgentSlot {
             .field("has_provider_thread", &self.has_provider_thread())
             .field("last_activity", &self.last_activity)
             .field("decision_policy", &self.decision_policy)
+            .field("launch_bundle", &self.launch_bundle.is_some())
             .finish()
     }
 }
@@ -359,6 +363,7 @@ impl AgentSlot {
             thread_handle: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
+            launch_bundle: None,
         }
     }
 
@@ -382,6 +387,7 @@ impl AgentSlot {
             thread_handle: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
+            launch_bundle: None,
         }
     }
 
@@ -406,6 +412,7 @@ impl AgentSlot {
             thread_handle: Some(thread_handle),
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
+            launch_bundle: None,
         }
     }
 
@@ -431,6 +438,7 @@ impl AgentSlot {
             thread_handle: Some(thread_handle),
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
+            launch_bundle: None,
         }
     }
 
@@ -458,6 +466,7 @@ impl AgentSlot {
             thread_handle: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
+            launch_bundle: None,
         }
     }
 
@@ -482,6 +491,7 @@ impl AgentSlot {
             thread_handle: None,
             last_activity: Instant::now(),
             decision_policy,
+            launch_bundle: None,
         }
     }
 
@@ -527,6 +537,17 @@ impl AgentSlot {
     /// Check if decision agent should be created eagerly
     pub fn should_create_decision_agent_eagerly(&self) -> bool {
         self.decision_policy.is_eager()
+    }
+
+    /// Get the launch bundle (if any)
+    pub fn launch_bundle(&self) -> Option<&AgentLaunchBundle> {
+        self.launch_bundle.as_ref()
+    }
+
+    /// Set the launch bundle
+    pub fn set_launch_bundle(&mut self, bundle: AgentLaunchBundle) {
+        self.launch_bundle = Some(bundle);
+        self.last_activity = Instant::now();
     }
 
     /// Get the current status

@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::launch_config::spec::{AgentLaunchBundle, ResolvedLaunchSpec};
+use crate::logging;
 use crate::provider::ProviderKind;
 
 /// Errors that can occur during restore.
@@ -52,6 +53,15 @@ pub fn validate_bundle_executable(bundle: &AgentLaunchBundle) -> Result<(), Rest
 /// Check if restore is needed and validate bundle.
 pub fn check_restore_eligibility(bundle: &AgentLaunchBundle) -> Option<RestoreError> {
     if let Err(e) = validate_executable_exists(&bundle.work_resolved) {
+        logging::debug_event(
+            "launch_config.restore.failed",
+            "executable validation failed for restore",
+            serde_json::json!({
+                "agent_id": "unknown",
+                "error": e.to_string(),
+                "provider": bundle.work_resolved.provider.label(),
+            }),
+        );
         return Some(e);
     }
     None
