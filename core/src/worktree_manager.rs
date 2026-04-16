@@ -686,6 +686,7 @@ impl WorktreeManager {
     ///
     /// Returns None if unable to determine HEAD
     pub fn get_head_commit(&self, worktree_path: &Path) -> Option<String> {
+        let _lock = self.git_lock.lock().unwrap();
         let output = Command::new("git")
             .args(["rev-parse", "HEAD"])
             .current_dir(worktree_path)

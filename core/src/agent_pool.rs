@@ -604,12 +604,16 @@ impl AgentPool {
             .create(&worktree_id, options)
             .map_err(AgentPoolWorktreeError::WorktreeError)?;
 
+        // Get the base commit SHA before creating worktree state
+        let base_commit = worktree_manager.get_current_head()
+            .map_err(AgentPoolWorktreeError::WorktreeError)?;
+
         // Create worktree state
         let worktree_state = WorktreeState::new(
             worktree_id.clone(),
             worktree_info.path.clone(),
             Some(actual_branch.clone()),
-            worktree_manager.repo_root().to_string_lossy().to_string(),
+            base_commit,
             task_id,
             agent_id.as_str().to_string(),
         );
@@ -1460,20 +1464,56 @@ impl AgentPool {
             {
                 let wt_id = worktree_id.unwrap();
 
-                // Remove the worktree
-                let _ = worktree_manager.remove(&wt_id, true);
+                // Remove the worktree - log error if it fails but continue
+                let worktree_removed = match worktree_manager.remove(&wt_id, true) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        logging::debug_event(
+                            "pool.agent.stop.worktree_remove_failed",
+                            "worktree removal failed",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "worktree_id": wt_id,
+                                "error": e.to_string(),
+                            }),
+                        );
+                        false
+                    }
+                };
 
-                // Delete the worktree state
-                let _ = worktree_state_store.delete(agent_id.as_str());
+                // Delete the worktree state - only if worktree was removed successfully
+                // Otherwise, keep the state so it can be recovered manually
+                if worktree_removed {
+                    if let Err(e) = worktree_state_store.delete(agent_id.as_str()) {
+                        logging::debug_event(
+                            "pool.agent.stop.state_delete_failed",
+                            "worktree state deletion failed",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "error": e.to_string(),
+                            }),
+                        );
+                    }
 
-                logging::debug_event(
-                    "pool.agent.stop.cleanup_worktree",
-                    "worktree cleaned up",
-                    serde_json::json!({
-                        "agent_id": agent_id.as_str(),
-                        "worktree_id": wt_id,
-                    }),
-                );
+                    logging::debug_event(
+                        "pool.agent.stop.cleanup_worktree",
+                        "worktree cleaned up",
+                        serde_json::json!({
+                            "agent_id": agent_id.as_str(),
+                            "worktree_id": wt_id,
+                        }),
+                    );
+                } else {
+                    logging::debug_event(
+                        "pool.agent.stop.worktree_preserved",
+                        "worktree preserved due to removal failure",
+                        serde_json::json!({
+                            "agent_id": agent_id.as_str(),
+                            "worktree_id": wt_id,
+                            "note": "state kept for manual recovery",
+                        }),
+                    );
+                }
             }
         }
 
