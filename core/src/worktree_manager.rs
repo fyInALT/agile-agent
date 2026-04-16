@@ -657,6 +657,47 @@ impl WorktreeManager {
 
         Ok(worktrees)
     }
+
+    /// Check if a worktree has uncommitted changes
+    ///
+    /// Returns true if there are staged or unstaged changes
+    pub fn has_uncommitted_changes(&self, worktree_path: &Path) -> Result<bool, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Run git status --porcelain
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitCommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        // If output is empty, there are no changes
+        let status_output = String::from_utf8_lossy(&output.stdout);
+        Ok(!status_output.trim().is_empty())
+    }
+
+    /// Get the HEAD commit SHA for a worktree
+    ///
+    /// Returns None if unable to determine HEAD
+    pub fn get_head_commit(&self, worktree_path: &Path) -> Option<String> {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(worktree_path)
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

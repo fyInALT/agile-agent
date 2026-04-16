@@ -40,6 +40,8 @@ pub enum AgentSlotStatus {
     Blocked { reason: String },
     /// Agent is blocked with rich BlockedState from decision layer
     BlockedForDecision { blocked_state: BlockedState },
+    /// Agent is paused with worktree preservation
+    Paused { reason: String },
 }
 
 impl PartialEq for AgentSlotStatus {
@@ -59,6 +61,7 @@ impl PartialEq for AgentSlotStatus {
                 Self::BlockedForDecision { blocked_state: a },
                 Self::BlockedForDecision { blocked_state: b },
             ) => a.reason().reason_type() == b.reason().reason_type(),
+            (Self::Paused { reason: a }, Self::Paused { reason: b }) => a == b,
             _ => false,
         }
     }
@@ -122,6 +125,13 @@ impl AgentSlotStatus {
         }
     }
 
+    /// Create a new Paused status (worktree preserved)
+    pub fn paused(reason: impl Into<String>) -> Self {
+        Self::Paused {
+            reason: reason.into(),
+        }
+    }
+
     /// Create a new BlockedForDecision status with rich BlockedState
     pub fn blocked_for_decision(blocked_state: BlockedState) -> Self {
         Self::BlockedForDecision { blocked_state }
@@ -130,19 +140,21 @@ impl AgentSlotStatus {
     /// Check if agent can transition to a new status
     pub fn can_transition_to(&self, target: &AgentSlotStatus) -> bool {
         match (self, target) {
-            // Idle can go to Starting, Blocked, BlockedForDecision, or Stopped
+            // Idle can go to Starting, Blocked, BlockedForDecision, Stopped, or Paused
             (Self::Idle, Self::Starting) => true,
             (Self::Idle, Self::Blocked { .. }) => true,
             (Self::Idle, Self::BlockedForDecision { .. }) => true,
             (Self::Idle, Self::Stopped { .. }) => true,
-            // Starting can go to Idle, Responding, Stopping, Blocked, BlockedForDecision, or Error
+            (Self::Idle, Self::Paused { .. }) => true,
+            // Starting can go to Idle, Responding, Stopping, Blocked, BlockedForDecision, Error, or Paused
             (Self::Starting, Self::Idle) => true,
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Stopping) => true,
             (Self::Starting, Self::Blocked { .. }) => true,
             (Self::Starting, Self::BlockedForDecision { .. }) => true,
             (Self::Starting, Self::Error { .. }) => true,
-            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, BlockedForDecision, or Error
+            (Self::Starting, Self::Paused { .. }) => true,
+            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, BlockedForDecision, Error, or Paused
             (Self::Responding { .. }, Self::Idle) => true,
             (Self::Responding { .. }, Self::ToolExecuting { .. }) => true,
             (Self::Responding { .. }, Self::Finishing) => true,
@@ -150,7 +162,8 @@ impl AgentSlotStatus {
             (Self::Responding { .. }, Self::Blocked { .. }) => true,
             (Self::Responding { .. }, Self::BlockedForDecision { .. }) => true,
             (Self::Responding { .. }, Self::Error { .. }) => true,
-            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/BlockedForDecision/Error
+            (Self::Responding { .. }, Self::Paused { .. }) => true,
+            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/BlockedForDecision/Error/Paused
             (Self::ToolExecuting { .. }, Self::Idle) => true,
             (Self::ToolExecuting { .. }, Self::Responding { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Finishing) => true,
@@ -158,12 +171,14 @@ impl AgentSlotStatus {
             (Self::ToolExecuting { .. }, Self::Blocked { .. }) => true,
             (Self::ToolExecuting { .. }, Self::BlockedForDecision { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Error { .. }) => true,
-            // Finishing can go to Idle, Stopping, Blocked, BlockedForDecision, or Error
+            (Self::ToolExecuting { .. }, Self::Paused { .. }) => true,
+            // Finishing can go to Idle, Stopping, Blocked, BlockedForDecision, Error, or Paused
             (Self::Finishing, Self::Idle) => true,
             (Self::Finishing, Self::Stopping) => true,
             (Self::Finishing, Self::Blocked { .. }) => true,
             (Self::Finishing, Self::BlockedForDecision { .. }) => true,
             (Self::Finishing, Self::Error { .. }) => true,
+            (Self::Finishing, Self::Paused { .. }) => true,
             // Stopping can go to Stopped or Error
             (Self::Stopping, Self::Stopped { .. }) => true,
             (Self::Stopping, Self::Error { .. }) => true,
@@ -172,14 +187,19 @@ impl AgentSlotStatus {
             // Error can go to Idle (recovery) or Stopped
             (Self::Error { .. }, Self::Idle) => true,
             (Self::Error { .. }, Self::Stopped { .. }) => true,
-            // Blocked can go to Idle, Responding, or Stopped
+            // Blocked can go to Idle, Responding, Stopped, or Paused
             (Self::Blocked { .. }, Self::Idle) => true,
             (Self::Blocked { .. }, Self::Responding { .. }) => true,
             (Self::Blocked { .. }, Self::Stopped { .. }) => true,
-            // BlockedForDecision can go to Idle, Responding, or Stopped
+            (Self::Blocked { .. }, Self::Paused { .. }) => true,
+            // BlockedForDecision can go to Idle, Responding, Stopped, or Paused
             (Self::BlockedForDecision { .. }, Self::Idle) => true,
             (Self::BlockedForDecision { .. }, Self::Responding { .. }) => true,
             (Self::BlockedForDecision { .. }, Self::Stopped { .. }) => true,
+            (Self::BlockedForDecision { .. }, Self::Paused { .. }) => true,
+            // Paused can go to Idle (resume) or Stopped
+            (Self::Paused { .. }, Self::Idle) => true,
+            (Self::Paused { .. }, Self::Stopped { .. }) => true,
             // Same status is always valid
             (a, b) if a == b => true,
             // All other transitions are invalid
@@ -213,6 +233,11 @@ impl AgentSlotStatus {
     /// Check if agent is blocked
     pub fn is_blocked(&self) -> bool {
         matches!(self, Self::Blocked { .. } | Self::BlockedForDecision { .. })
+    }
+
+    /// Check if agent is paused
+    pub fn is_paused(&self) -> bool {
+        matches!(self, Self::Paused { .. })
     }
 
     /// Check if agent is blocked for human decision
@@ -257,6 +282,7 @@ impl AgentSlotStatus {
             Self::BlockedForDecision { blocked_state } => {
                 format!("blocked:{}", blocked_state.reason().reason_type())
             }
+            Self::Paused { reason } => format!("paused:{}", reason),
         }
     }
 }

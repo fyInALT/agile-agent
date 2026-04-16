@@ -11,37 +11,37 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
 use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
-use crate::decision_mail::{DecisionMail, DecisionRequest, DecisionResponse, DecisionMailSender};
+use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
 use crate::logging;
-use crate::provider::{ProviderKind, ProviderEvent};
+use crate::provider::{ProviderEvent, ProviderKind};
+use crate::worktree_manager::{WorktreeConfig, WorktreeManager, WorktreeError, WorktreeCreateOptions};
+use crate::worktree_state::WorktreeState;
+use crate::worktree_state_store::WorktreeStateStore;
 
 // Decision layer imports
 use agent_decision::{
-    AutoAction,
-    BlockedState,
-    HumanDecisionRequest, HumanDecisionResponse, HumanSelection,
-    HumanDecisionQueue, HumanDecisionTimeoutConfig,
-    SituationType,
+    AutoAction, BlockedState, HumanDecisionQueue, HumanDecisionRequest, HumanDecisionResponse,
+    HumanDecisionTimeoutConfig, HumanSelection, SituationType,
     classifier::ClassifyResult,
     initializer::{DecisionLayerComponents, initialize_decision_layer},
     provider_event::ProviderEvent as DecisionProviderEvent,
 };
 
 /// Convert core ProviderEvent to decision layer ProviderEvent
-fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) -> DecisionProviderEvent {
+fn convert_provider_event_to_decision(
+    event: &crate::provider::ProviderEvent,
+) -> DecisionProviderEvent {
     match event {
         crate::provider::ProviderEvent::Finished => {
             DecisionProviderEvent::Finished { summary: None }
         }
-        crate::provider::ProviderEvent::Error(msg) => {
-            DecisionProviderEvent::Error {
-                message: msg.clone(),
-                error_type: None,
-            }
-        }
-        crate::provider::ProviderEvent::Status(text) => {
-            DecisionProviderEvent::StatusUpdate { status: text.clone() }
-        }
+        crate::provider::ProviderEvent::Error(msg) => DecisionProviderEvent::Error {
+            message: msg.clone(),
+            error_type: None,
+        },
+        crate::provider::ProviderEvent::Status(text) => DecisionProviderEvent::StatusUpdate {
+            status: text.clone(),
+        },
         crate::provider::ProviderEvent::AssistantChunk(text) => {
             DecisionProviderEvent::ClaudeAssistantChunk { text: text.clone() }
         }
@@ -51,7 +51,9 @@ fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) ->
         crate::provider::ProviderEvent::SessionHandle(handle) => {
             DecisionProviderEvent::SessionHandle {
                 session_id: match handle {
-                    crate::provider::SessionHandle::ClaudeSession { session_id } => session_id.clone(),
+                    crate::provider::SessionHandle::ClaudeSession { session_id } => {
+                        session_id.clone()
+                    }
                     crate::provider::SessionHandle::CodexThread { thread_id } => thread_id.clone(),
                 },
                 info: None,
@@ -63,28 +65,37 @@ fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) ->
                 input: input_preview.clone(),
             }
         }
-        crate::provider::ProviderEvent::ExecCommandFinished { output_preview, status, .. } => {
-            DecisionProviderEvent::ClaudeToolCallFinished {
-                name: "exec".to_string(),
-                output: output_preview.clone(),
-                success: matches!(status, crate::tool_calls::ExecCommandStatus::Completed),
-            }
-        }
-        crate::provider::ProviderEvent::GenericToolCallStarted { name, input_preview, .. } => {
-            DecisionProviderEvent::ClaudeToolCallStarted {
-                name: name.clone(),
-                input: input_preview.clone(),
-            }
-        }
-        crate::provider::ProviderEvent::GenericToolCallFinished { name, output_preview, success, .. } => {
-            DecisionProviderEvent::ClaudeToolCallFinished {
-                name: name.clone(),
-                output: output_preview.clone(),
-                success: *success,
-            }
-        }
+        crate::provider::ProviderEvent::ExecCommandFinished {
+            output_preview,
+            status,
+            ..
+        } => DecisionProviderEvent::ClaudeToolCallFinished {
+            name: "exec".to_string(),
+            output: output_preview.clone(),
+            success: matches!(status, crate::tool_calls::ExecCommandStatus::Completed),
+        },
+        crate::provider::ProviderEvent::GenericToolCallStarted {
+            name,
+            input_preview,
+            ..
+        } => DecisionProviderEvent::ClaudeToolCallStarted {
+            name: name.clone(),
+            input: input_preview.clone(),
+        },
+        crate::provider::ProviderEvent::GenericToolCallFinished {
+            name,
+            output_preview,
+            success,
+            ..
+        } => DecisionProviderEvent::ClaudeToolCallFinished {
+            name: name.clone(),
+            output: output_preview.clone(),
+            success: *success,
+        },
         crate::provider::ProviderEvent::PatchApplyStarted { .. } => {
-            DecisionProviderEvent::CodexPatchApplyStarted { path: "".to_string() }
+            DecisionProviderEvent::CodexPatchApplyStarted {
+                path: "".to_string(),
+            }
         }
         crate::provider::ProviderEvent::PatchApplyFinished { status, .. } => {
             DecisionProviderEvent::StatusUpdate {
@@ -92,7 +103,9 @@ fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) ->
                     crate::tool_calls::PatchApplyStatus::Completed => "patch completed".to_string(),
                     crate::tool_calls::PatchApplyStatus::Failed => "patch failed".to_string(),
                     crate::tool_calls::PatchApplyStatus::Declined => "patch declined".to_string(),
-                    crate::tool_calls::PatchApplyStatus::InProgress => "patch in progress".to_string(),
+                    crate::tool_calls::PatchApplyStatus::InProgress => {
+                        "patch in progress".to_string()
+                    }
                 },
             }
         }
@@ -115,7 +128,9 @@ fn convert_provider_event_to_decision(event: &crate::provider::ProviderEvent) ->
         | crate::provider::ProviderEvent::ImageGenerationFinished { .. }
         | crate::provider::ProviderEvent::ExecCommandOutputDelta { .. }
         | crate::provider::ProviderEvent::PatchApplyOutputDelta { .. } => {
-            DecisionProviderEvent::StatusUpdate { status: "running".to_string() }
+            DecisionProviderEvent::StatusUpdate {
+                status: "running".to_string(),
+            }
         }
     }
 }
@@ -304,6 +319,10 @@ pub struct AgentPool {
     decision_components: DecisionLayerComponents,
     /// Working directory for decision agents
     cwd: PathBuf,
+    /// Worktree manager (optional, for isolated worktrees)
+    worktree_manager: Option<WorktreeManager>,
+    /// Worktree state store for persistence
+    worktree_state_store: Option<WorktreeStateStore>,
 }
 
 impl std::fmt::Debug for AgentPool {
@@ -338,11 +357,17 @@ impl AgentPool {
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            worktree_manager: None,
+            worktree_state_store: None,
         }
     }
 
     /// Create pool with custom blocked handling config
-    pub fn with_blocked_config(workplace_id: WorkplaceId, max_slots: usize, config: BlockedHandlingConfig) -> Self {
+    pub fn with_blocked_config(
+        workplace_id: WorkplaceId,
+        max_slots: usize,
+        config: BlockedHandlingConfig,
+    ) -> Self {
         Self {
             slots: Vec::new(),
             max_slots,
@@ -357,6 +382,8 @@ impl AgentPool {
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            worktree_manager: None,
+            worktree_state_store: None,
         }
     }
 
@@ -376,7 +403,39 @@ impl AgentPool {
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
             cwd,
+            worktree_manager: None,
+            worktree_state_store: None,
         }
+    }
+
+    /// Create pool with worktree support for isolated agent workspaces
+    pub fn new_with_worktrees(
+        workplace_id: WorkplaceId,
+        max_slots: usize,
+        repo_root: PathBuf,
+        state_dir: PathBuf,
+    ) -> Result<Self, WorktreeError> {
+        let config = WorktreeConfig::default();
+        let worktree_manager = WorktreeManager::new(repo_root.clone(), config)?;
+        let worktree_state_store = WorktreeStateStore::new(state_dir);
+
+        Ok(Self {
+            slots: Vec::new(),
+            max_slots,
+            next_agent_index: 1,
+            focused_slot: 0,
+            workplace_id,
+            human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
+            blocked_config: BlockedHandlingConfig::default(),
+            blocked_history: Vec::new(),
+            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            decision_agents: HashMap::new(),
+            decision_mail_senders: HashMap::new(),
+            decision_components: initialize_decision_layer(),
+            cwd: repo_root,
+            worktree_manager: Some(worktree_manager),
+            worktree_state_store: Some(worktree_state_store),
+        })
     }
 
     /// Set a custom blocked notifier
@@ -491,13 +550,253 @@ impl AgentPool {
         Ok(agent_id)
     }
 
+    /// Spawn a new agent with an isolated worktree workspace
+    ///
+    /// Creates a new git worktree for the agent and spawns the agent
+    /// configured to work in that isolated workspace.
+    pub fn spawn_agent_with_worktree(
+        &mut self,
+        provider_kind: ProviderKind,
+        branch_name: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<AgentId, AgentPoolWorktreeError> {
+        // Check worktree manager is available first (before any mutable borrows)
+        if self.worktree_manager.is_none() || self.worktree_state_store.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        // Check if pool has capacity
+        if !self.can_spawn() {
+            return Err(AgentPoolWorktreeError::PoolFull);
+        }
+
+        // Generate agent ID (this needs mutable borrow)
+        let agent_id = self.generate_agent_id();
+        let codename = Self::generate_codename(self.next_agent_index - 1);
+        let provider_type = ProviderType::from_provider_kind(provider_kind);
+
+        // Generate worktree ID and branch name
+        let worktree_id = format!("wt-{}", agent_id.as_str());
+        let actual_branch = branch_name.unwrap_or_else(|| {
+            format!("agent/{}", agent_id.as_str())
+        });
+
+        // Now get worktree_manager and state_store (immutable borrows)
+        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+
+        // Create worktree
+        let options = WorktreeCreateOptions {
+            path: worktree_manager.worktrees_dir().join(&worktree_id),
+            branch: Some(actual_branch.clone()),
+            create_branch: true,
+            base: None,
+            lock_reason: None,
+        };
+        let worktree_info = worktree_manager
+            .create(&worktree_id, options)
+            .map_err(AgentPoolWorktreeError::WorktreeError)?;
+
+        // Create worktree state
+        let worktree_state = WorktreeState::new(
+            worktree_id.clone(),
+            worktree_info.path.clone(),
+            Some(actual_branch.clone()),
+            worktree_manager.repo_root().to_string_lossy().to_string(),
+            task_id,
+            agent_id.as_str().to_string(),
+        );
+
+        // Save worktree state
+        worktree_state_store
+            .save(agent_id.as_str(), &worktree_state)
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+        // Create agent slot with worktree
+        let mut slot = AgentSlot::new(agent_id.clone(), codename.clone(), provider_type);
+        slot.set_worktree(
+            worktree_info.path.clone(),
+            Some(actual_branch.clone()),
+            worktree_id.clone(),
+        );
+
+        self.slots.push(slot);
+
+        logging::debug_event(
+            "pool.agent.spawn_with_worktree",
+            "spawned new agent with worktree",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "worktree_id": worktree_id,
+                "branch": actual_branch,
+                "path": worktree_info.path.to_string_lossy(),
+                "pool_size": self.slots.len(),
+            }),
+        );
+
+        // Focus on the newly spawned agent if this is the first one
+        if self.slots.len() == 1 {
+            self.focused_slot = 0;
+        }
+
+        Ok(agent_id)
+    }
+
+    /// Pause an agent with worktree state preservation
+    ///
+    /// Saves the current worktree state (uncommitted changes status, HEAD commit)
+    /// before pausing, allowing for seamless resume later.
+    pub fn pause_agent_with_worktree(
+        &mut self,
+        agent_id: &AgentId,
+    ) -> Result<(), AgentPoolWorktreeError> {
+        // Check worktree support is available
+        if self.worktree_state_store.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        let slot = self.get_slot_by_id(agent_id)
+            .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+
+        // Only pause if agent has worktree
+        if !slot.has_worktree() {
+            return Err(AgentPoolWorktreeError::NoWorktree(agent_id.as_str().to_string()));
+        }
+
+        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+
+        // Load existing worktree state
+        let mut worktree_state = worktree_state_store
+            .load(agent_id.as_str())
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?
+            .ok_or_else(|| AgentPoolWorktreeError::StateNotFound(agent_id.as_str().to_string()))?;
+
+        // Update state before pause
+        worktree_state.touch();
+
+        // Check for uncommitted changes
+        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+        let has_changes = worktree_manager
+            .has_uncommitted_changes(&worktree_state.path)
+            .map_err(AgentPoolWorktreeError::WorktreeError)?;
+        worktree_state.has_uncommitted_changes = has_changes;
+
+        // Get current HEAD
+        if let Some(head) = worktree_manager.get_head_commit(&worktree_state.path) {
+            worktree_state.head_commit = Some(head);
+        }
+
+        // Save updated state
+        worktree_state_store
+            .save(agent_id.as_str(), &worktree_state)
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+        // Transition slot to paused
+        let slot_mut = self.get_slot_mut_by_id(agent_id)
+            .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+        slot_mut
+            .transition_to(AgentSlotStatus::paused("worktree preserved"))
+            .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
+
+        logging::debug_event(
+            "pool.agent.pause_with_worktree",
+            "paused agent with worktree preservation",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "has_uncommitted_changes": has_changes,
+                "worktree_path": worktree_state.path.to_string_lossy(),
+            }),
+        );
+
+        Ok(())
+    }
+
+    /// Resume an agent with worktree verification
+    ///
+    /// Loads the saved worktree state, verifies the worktree still exists
+    /// (or recreates it if needed), and transitions the agent to running.
+    pub fn resume_agent_with_worktree(
+        &mut self,
+        agent_id: &AgentId,
+    ) -> Result<(), AgentPoolWorktreeError> {
+        // Check worktree support is available
+        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+
+        // Load saved worktree state
+        let worktree_state = worktree_state_store
+            .load(agent_id.as_str())
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?
+            .ok_or_else(|| AgentPoolWorktreeError::StateNotFound(agent_id.as_str().to_string()))?;
+
+        // Verify worktree exists
+        if !worktree_state.exists() {
+            // Worktree was deleted externally - recreate it
+            let options = WorktreeCreateOptions {
+                path: worktree_manager.worktrees_dir().join(&worktree_state.worktree_id),
+                branch: worktree_state.branch.clone(),
+                create_branch: worktree_state.branch.is_some(),
+                base: Some(worktree_state.base_commit.clone()),
+                lock_reason: None,
+            };
+
+            let _worktree_info = worktree_manager
+                .create(&worktree_state.worktree_id, options)
+                .map_err(AgentPoolWorktreeError::WorktreeError)?;
+
+            logging::debug_event(
+                "pool.agent.resume.recreated_worktree",
+                "worktree recreated during resume",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "worktree_id": worktree_state.worktree_id,
+                }),
+            );
+        }
+
+        // Get the slot and verify it's paused
+        let slot = self.get_slot_by_id(agent_id)
+            .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+
+        if !slot.status().is_paused() {
+            return Err(AgentPoolWorktreeError::AgentNotPaused(agent_id.as_str().to_string()));
+        }
+
+        // Transition to idle (ready to resume work)
+        let slot_mut = self.get_slot_mut_by_id(agent_id)
+            .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+        slot_mut
+            .transition_to(AgentSlotStatus::idle())
+            .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
+
+        logging::debug_event(
+            "pool.agent.resume_with_worktree",
+            "resumed agent with worktree",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "worktree_path": worktree_state.path.to_string_lossy(),
+            }),
+        );
+
+        Ok(())
+    }
+
     /// Spawn the OVERVIEW agent (ProductOwner role) at the top of the pool
     ///
     /// The OVERVIEW agent is a special coordination agent that always stays at index 0.
     /// Returns the agent ID on success, or error if pool is full or OVERVIEW already exists.
     pub fn spawn_overview_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
         // Check if OVERVIEW agent already exists
-        if self.slots.iter().any(|s| s.role() == AgentRole::ProductOwner) {
+        if self
+            .slots
+            .iter()
+            .any(|s| s.role() == AgentRole::ProductOwner)
+        {
             logging::debug_event(
                 "pool.agent.spawn.failed",
                 "failed to spawn OVERVIEW agent - already exists",
@@ -537,7 +836,12 @@ impl AgentPool {
             }),
         );
 
-        let slot = AgentSlot::with_role(agent_id.clone(), codename, provider_type, AgentRole::ProductOwner);
+        let slot = AgentSlot::with_role(
+            agent_id.clone(),
+            codename,
+            provider_type,
+            AgentRole::ProductOwner,
+        );
 
         // Insert at the beginning (always at index 0)
         self.slots.insert(0, slot);
@@ -561,7 +865,9 @@ impl AgentPool {
 
     /// Get the OVERVIEW agent slot (ProductOwner role)
     pub fn overview_agent(&self) -> Option<&AgentSlot> {
-        self.slots.iter().find(|s| s.role() == AgentRole::ProductOwner)
+        self.slots
+            .iter()
+            .find(|s| s.role() == AgentRole::ProductOwner)
     }
 
     // ===== Decision Agent Management =====
@@ -577,8 +883,12 @@ impl AgentPool {
         let provider_kind_opt = work_slot.provider_type().to_provider_kind();
 
         // Handle Opencode provider which doesn't have ProviderKind mapping
-        let provider_kind = provider_kind_opt
-            .ok_or_else(|| format!("Provider type {} doesn't have a ProviderKind mapping", work_slot.provider_type().label()))?;
+        let provider_kind = provider_kind_opt.ok_or_else(|| {
+            format!(
+                "Provider type {} doesn't have a ProviderKind mapping",
+                work_slot.provider_type().label()
+            )
+        })?;
 
         // Create decision mail channel
         let mail = DecisionMail::new();
@@ -600,8 +910,10 @@ impl AgentPool {
         decision_agent.set_llm_caller(llm_caller);
 
         // Store the decision agent and mail sender
-        self.decision_agents.insert(work_agent_id.clone(), decision_agent);
-        self.decision_mail_senders.insert(work_agent_id.clone(), sender);
+        self.decision_agents
+            .insert(work_agent_id.clone(), decision_agent);
+        self.decision_mail_senders
+            .insert(work_agent_id.clone(), sender);
 
         logging::debug_event(
             "pool.decision_agent.spawn",
@@ -664,7 +976,9 @@ impl AgentPool {
                 let decision_event = convert_provider_event_to_decision(event);
 
                 // Use classifier registry to classify the event
-                self.decision_components.classifier_registry.classify(&decision_event, decision_provider)
+                self.decision_components
+                    .classifier_registry
+                    .classify(&decision_event, decision_provider)
             } else {
                 // No ProviderKind mapping, return Running result
                 ClassifyResult::running(None)
@@ -678,7 +992,11 @@ impl AgentPool {
     /// Send a decision request to a decision agent
     ///
     /// Returns true if request was sent successfully.
-    pub fn send_decision_request(&self, work_agent_id: &AgentId, request: DecisionRequest) -> Result<(), String> {
+    pub fn send_decision_request(
+        &self,
+        work_agent_id: &AgentId,
+        request: DecisionRequest,
+    ) -> Result<(), String> {
         // Clone situation_type before sending for logging
         let situation_type_name = request.situation_type.name.clone();
 
@@ -706,7 +1024,10 @@ impl AgentPool {
 
             Ok(())
         } else {
-            Err(format!("No decision agent for work agent {}", work_agent_id.as_str()))
+            Err(format!(
+                "No decision agent for work agent {}",
+                work_agent_id.as_str()
+            ))
         }
     }
 
@@ -792,7 +1113,8 @@ impl AgentPool {
             match action_type.as_str() {
                 "select_option" => {
                     // Parse params to get option_id
-                    let params: serde_json::Value = serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
                     let option_id = params["option_id"].as_str().unwrap_or("a").to_string();
 
                     // Execute the selection - find pending request for this agent
@@ -827,7 +1149,8 @@ impl AgentPool {
                     // Skip the current task
                     let pending_request = self.human_queue.peek();
                     if let Some(request) = pending_request {
-                        let response = HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
+                        let response =
+                            HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
                         let _ = self.process_human_response(response);
                     }
                     DecisionExecutionResult::Skipped
@@ -838,12 +1161,15 @@ impl AgentPool {
                 }
                 "custom_instruction" => {
                     // Parse params to get instruction
-                    let params: serde_json::Value = serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
                     let instruction = params["instruction"].as_str().unwrap_or("").to_string();
 
                     // Store instruction for the agent to use in next turn
                     if !instruction.is_empty() {
-                        slot.append_transcript(crate::app::TranscriptEntry::User(instruction.clone()));
+                        slot.append_transcript(crate::app::TranscriptEntry::User(
+                            instruction.clone(),
+                        ));
                     }
                     DecisionExecutionResult::CustomInstruction { instruction }
                 }
@@ -895,6 +1221,75 @@ impl AgentPool {
                 "codename": codename.as_str(),
                 "slot_index": index,
                 "reason": reason,
+            }),
+        );
+
+        Ok(index)
+    }
+
+    /// Stop an agent and optionally cleanup its worktree
+    ///
+    /// # Arguments
+    /// * `agent_id` - The agent ID to stop
+    /// * `cleanup_worktree` - If true, remove the worktree and delete state; if false, preserve worktree
+    ///
+    /// # Returns
+    /// The slot index of the stopped agent
+    pub fn stop_agent_with_worktree_cleanup(
+        &mut self,
+        agent_id: &AgentId,
+        cleanup_worktree: bool,
+    ) -> Result<usize, AgentPoolWorktreeError> {
+        // First, transition the slot to stopped
+        let index = self.find_slot_index(agent_id)
+            .map_err(|e| AgentPoolWorktreeError::AgentNotFound(e))?;
+
+        let slot = &mut self.slots[index];
+        let codename = slot.codename().clone();
+        let has_worktree = slot.has_worktree();
+        let worktree_id = slot.worktree_id().map(|s| s.clone());
+
+        slot.transition_to(AgentSlotStatus::stopped("user requested"))
+            .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
+
+        // Also stop the decision agent for this work agent
+        self.stop_decision_agent_for(agent_id)
+            .map_err(|e| AgentPoolWorktreeError::SlotTransitionError(e))?;
+
+        // Handle worktree cleanup
+        if has_worktree && cleanup_worktree && worktree_id.is_some() {
+            // Get worktree manager and state store
+            if let (Some(worktree_manager), Some(worktree_state_store)) =
+                (&self.worktree_manager, &self.worktree_state_store)
+            {
+                let wt_id = worktree_id.unwrap();
+
+                // Remove the worktree
+                let _ = worktree_manager.remove(&wt_id, true);
+
+                // Delete the worktree state
+                let _ = worktree_state_store.delete(agent_id.as_str());
+
+                logging::debug_event(
+                    "pool.agent.stop.cleanup_worktree",
+                    "worktree cleaned up",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "worktree_id": wt_id,
+                    }),
+                );
+            }
+        }
+
+        logging::debug_event(
+            "pool.agent.stop_with_worktree",
+            "stopped agent with worktree handling",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "slot_index": index,
+                "has_worktree": has_worktree,
+                "cleanup_worktree": cleanup_worktree,
             }),
         );
 
@@ -1005,11 +1400,12 @@ impl AgentPool {
             );
             return Err("Agent pool is full".to_string());
         }
-        if self.slots.iter().any(|existing| existing.agent_id().as_str() == agent_id) {
-            let err = format!(
-                "Agent {} already exists in pool",
-                agent_id
-            );
+        if self
+            .slots
+            .iter()
+            .any(|existing| existing.agent_id().as_str() == agent_id)
+        {
+            let err = format!("Agent {} already exists in pool", agent_id);
             logging::debug_event(
                 "pool.slot.restore.failed",
                 "restore failed - agent already exists",
@@ -1083,8 +1479,14 @@ impl AgentPool {
             ));
         }
         let old_index = self.focused_slot;
-        let old_agent_id = self.slots.get(old_index).map(|s| s.agent_id().as_str().to_string());
-        let new_agent_id = self.slots.get(index).map(|s| s.agent_id().as_str().to_string());
+        let old_agent_id = self
+            .slots
+            .get(old_index)
+            .map(|s| s.agent_id().as_str().to_string());
+        let new_agent_id = self
+            .slots
+            .get(index)
+            .map(|s| s.agent_id().as_str().to_string());
         self.focused_slot = index;
 
         logging::debug_event(
@@ -1105,8 +1507,14 @@ impl AgentPool {
     pub fn focus_agent(&mut self, agent_id: &AgentId) -> Result<(), String> {
         let index = self.find_slot_index(agent_id)?;
         let old_index = self.focused_slot;
-        let old_agent_id = self.slots.get(old_index).map(|s| s.agent_id().as_str().to_string());
-        let new_codename = self.slots.get(index).map(|s| s.codename().as_str().to_string());
+        let old_agent_id = self
+            .slots
+            .get(old_index)
+            .map(|s| s.agent_id().as_str().to_string());
+        let new_codename = self
+            .slots
+            .get(index)
+            .map(|s| s.codename().as_str().to_string());
 
         logging::debug_event(
             "pool.focus.change.by_id",
@@ -1362,7 +1770,11 @@ impl AgentPool {
                 Some((agent_id, task_id))
             }
             Err(e) => {
-                let available_agents = self.slots.iter().filter(|s| *s.status() == AgentSlotStatus::Idle).count();
+                let available_agents = self
+                    .slots
+                    .iter()
+                    .filter(|s| *s.status() == AgentSlotStatus::Idle)
+                    .count();
                 let ready_count = backlog.ready_tasks().len();
                 logging::debug_event(
                     "pool.task.auto_assign.failed",
@@ -1507,7 +1919,10 @@ impl AgentPool {
 
     /// Count blocked agents
     pub fn blocked_count(&self) -> usize {
-        self.slots.iter().filter(|s| s.status().is_blocked()).count()
+        self.slots
+            .iter()
+            .filter(|s| s.status().is_blocked())
+            .count()
     }
 
     /// Process an agent becoming blocked
@@ -1583,10 +1998,17 @@ impl AgentPool {
     }
 
     /// Build human decision request from blocked state
-    fn build_human_request(&self, agent_id: &AgentId, blocked_state: &BlockedState) -> HumanDecisionRequest {
+    fn build_human_request(
+        &self,
+        agent_id: &AgentId,
+        blocked_state: &BlockedState,
+    ) -> HumanDecisionRequest {
         let reason = blocked_state.reason();
         let urgency = reason.urgency();
-        let timeout_ms = self.blocked_config.timeout_config.timeout_for_urgency(urgency);
+        let timeout_ms = self
+            .blocked_config
+            .timeout_config
+            .timeout_for_urgency(urgency);
 
         // Generate request ID
         let request_id = format!("req-{}-{}", agent_id.as_str(), uuid::Uuid::new_v4());
@@ -1618,13 +2040,15 @@ impl AgentPool {
                     // Try to find idle agent
                     if let Some(idle_agent) = self.find_idle_agent_id() {
                         // Check task exists and is Running (task was already assigned)
-                        let task_exists = backlog.find_task(task_id.as_str())
+                        let task_exists = backlog
+                            .find_task(task_id.as_str())
                             .map(|t| t.status == TaskStatus::Running)
                             .unwrap_or(false);
 
                         if task_exists {
                             // Try to assign to idle agent FIRST
-                            let reassignment_succeeded = self.get_slot_mut_by_id(&idle_agent)
+                            let reassignment_succeeded = self
+                                .get_slot_mut_by_id(&idle_agent)
                                 .map(|slot| slot.assign_task(task_id.clone()).is_ok())
                                 .unwrap_or(false);
 
@@ -1662,7 +2086,10 @@ impl AgentPool {
 
         // Complete in queue
         if !self.human_queue.complete(response.clone()) {
-            return Err(format!("Request {} not found in queue", response.request_id));
+            return Err(format!(
+                "Request {} not found in queue",
+                response.request_id
+            ));
         }
 
         // Get agent ID from response/request
@@ -1674,7 +2101,11 @@ impl AgentPool {
         );
 
         // Find and update history
-        if let Some(entry) = self.blocked_history.iter_mut().find(|e| e.agent_id == agent_id && !e.resolved) {
+        if let Some(entry) = self
+            .blocked_history
+            .iter_mut()
+            .find(|e| e.agent_id == agent_id && !e.resolved)
+        {
             entry.resolved = true;
             entry.resolution = Some(format!("{:?}", response.selection));
         }
@@ -1692,15 +2123,21 @@ impl AgentPool {
 
         // Transition to Responding (active state after unblock)
         use std::time::Instant;
-        slot.transition_to(AgentSlotStatus::Responding { started_at: Instant::now() })
-            .map_err(|e| format!("Failed to unblock agent: {}", e))?;
+        slot.transition_to(AgentSlotStatus::Responding {
+            started_at: Instant::now(),
+        })
+        .map_err(|e| format!("Failed to unblock agent: {}", e))?;
 
         // Execute decision
         self.execute_decision(&agent_id, response.selection)
     }
 
     /// Execute human selection on an agent
-    fn execute_decision(&mut self, agent_id: &AgentId, selection: HumanSelection) -> Result<DecisionExecutionResult, String> {
+    fn execute_decision(
+        &mut self,
+        agent_id: &AgentId,
+        selection: HumanSelection,
+    ) -> Result<DecisionExecutionResult, String> {
         let slot = self.get_slot_by_id(agent_id);
         if slot.is_none() {
             return Ok(DecisionExecutionResult::AgentNotFound);
@@ -1742,7 +2179,11 @@ impl AgentPool {
             if slot.status().is_blocked() {
                 // Record in history
                 if self.blocked_config.record_history {
-                    if let Some(entry) = self.blocked_history.iter_mut().find(|e| &e.agent_id == slot.agent_id() && !e.resolved) {
+                    if let Some(entry) = self
+                        .blocked_history
+                        .iter_mut()
+                        .find(|e| &e.agent_id == slot.agent_id() && !e.resolved)
+                    {
                         entry.resolved = true;
                         entry.resolution = Some("cleared_on_shutdown".to_string());
                     }
@@ -1777,7 +2218,11 @@ impl AgentPool {
             let agent_id = AgentId::new(request.agent_id.clone());
 
             // Find and update history
-            if let Some(entry) = self.blocked_history.iter_mut().find(|e| e.agent_id == agent_id && !e.resolved) {
+            if let Some(entry) = self
+                .blocked_history
+                .iter_mut()
+                .find(|e| e.agent_id == agent_id && !e.resolved)
+            {
                 entry.resolved = true;
                 entry.resolution = Some(format!("timeout: {:?}", selection));
             }
@@ -1814,7 +2259,9 @@ impl AgentPool {
             _ => {
                 // For other selections, just transition to responding
                 use std::time::Instant;
-                let _ = slot.transition_to(AgentSlotStatus::Responding { started_at: Instant::now() });
+                let _ = slot.transition_to(AgentSlotStatus::Responding {
+                    started_at: Instant::now(),
+                });
             }
         }
     }
@@ -1833,20 +2280,14 @@ impl AgentPool {
                     self.select_default_option(request)
                 }
             }
-            AutoAction::SelectDefault => {
-                self.select_default_option(request)
-            }
-            AutoAction::Cancel => {
-                HumanSelection::Cancelled
-            }
+            AutoAction::SelectDefault => self.select_default_option(request),
+            AutoAction::Cancel => HumanSelection::Cancelled,
             AutoAction::MarkTaskFailed => {
                 // Mark task as failed - this would require a new selection type
                 // For now, treat as cancelled
                 HumanSelection::Cancelled
             }
-            AutoAction::ReleaseResource => {
-                HumanSelection::Cancelled
-            }
+            AutoAction::ReleaseResource => HumanSelection::Cancelled,
         }
     }
 
@@ -1888,13 +2329,45 @@ pub struct DecisionAgentStats {
     pub total_errors: u64,
 }
 
+/// Errors for AgentPool worktree operations
+#[derive(Debug, thiserror::Error)]
+pub enum AgentPoolWorktreeError {
+    #[error("worktree support not enabled for this pool")]
+    WorktreeNotEnabled,
+
+    #[error("agent pool is full")]
+    PoolFull,
+
+    #[error("agent not found: {0}")]
+    AgentNotFound(String),
+
+    #[error("agent has no worktree: {0}")]
+    NoWorktree(String),
+
+    #[error("worktree state not found: {0}")]
+    StateNotFound(String),
+
+    #[error("agent is not paused: {0}")]
+    AgentNotPaused(String),
+
+    #[error("worktree error: {0}")]
+    WorktreeError(#[from] WorktreeError),
+
+    #[error("state store error: {0}")]
+    StateStoreError(String),
+
+    #[error("slot transition error: {0}")]
+    SlotTransitionError(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
+    use crate::worktree_state_store::WorktreeStateStore;
     use agent_decision::{
-        HumanDecisionBlocking, WaitingForChoiceSituation, ResourceBlocking,
-        BlockedState, HumanSelection,
+        BlockedState, HumanDecisionBlocking, HumanSelection, ResourceBlocking,
+        WaitingForChoiceSituation,
     };
 
     fn make_pool(max_slots: usize) -> AgentPool {
@@ -2393,7 +2866,10 @@ mod tests {
 
     #[test]
     fn blocked_task_policy_default() {
-        assert_eq!(BlockedTaskPolicy::default(), BlockedTaskPolicy::ReassignIfPossible);
+        assert_eq!(
+            BlockedTaskPolicy::default(),
+            BlockedTaskPolicy::ReassignIfPossible
+        );
     }
 
     #[test]
@@ -2421,12 +2897,11 @@ mod tests {
             record_history: false,
             max_history_entries: 100,
         };
-        let pool = AgentPool::with_blocked_config(
-            WorkplaceId::new("workplace-001"),
-            4,
-            config,
+        let pool = AgentPool::with_blocked_config(WorkplaceId::new("workplace-001"), 4, config);
+        assert_eq!(
+            pool.blocked_config().task_policy,
+            BlockedTaskPolicy::KeepAssigned
         );
-        assert_eq!(pool.blocked_config().task_policy, BlockedTaskPolicy::KeepAssigned);
         assert!(!pool.blocked_config().notify_others);
     }
 
@@ -2467,7 +2942,8 @@ mod tests {
         let blocked_state = BlockedState::new(Box::new(blocking));
 
         // Process blocked
-        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, None)
+            .unwrap();
 
         // Check human queue has request
         assert_eq!(pool.pending_human_decisions(), 1);
@@ -2487,7 +2963,8 @@ mod tests {
         let blocked_state = BlockedState::new(Box::new(blocking));
 
         // Process blocked
-        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, None)
+            .unwrap();
 
         // Check history recorded
         assert_eq!(pool.blocked_history().len(), 1);
@@ -2506,16 +2983,13 @@ mod tests {
             record_history: true,
             max_history_entries: 100,
         };
-        let mut pool = AgentPool::with_blocked_config(
-            WorkplaceId::new("workplace-001"),
-            2,
-            config,
-        );
+        let mut pool = AgentPool::with_blocked_config(WorkplaceId::new("workplace-001"), 2, config);
         let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task
-        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Create blocking and process
         let blocking = HumanDecisionBlocking::new(
@@ -2524,7 +2998,8 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog)).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog))
+            .unwrap();
 
         // Task should still be assigned to blocked agent
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
@@ -2539,7 +3014,8 @@ mod tests {
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task to blocked_agent
-        pool.assign_task_with_backlog(&blocked_agent, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&blocked_agent, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Create blocking and process
         let blocking = HumanDecisionBlocking::new(
@@ -2548,7 +3024,8 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&blocked_agent, blocked_state, Some(&mut backlog)).unwrap();
+        pool.process_agent_blocked(&blocked_agent, blocked_state, Some(&mut backlog))
+            .unwrap();
 
         // Task should be reassigned to idle agent (with ReassignIfPossible policy)
         let blocked_slot = pool.get_slot_by_id(&blocked_agent).unwrap();
@@ -2557,7 +3034,9 @@ mod tests {
         // Task is on idle agent now (or still on blocked if slot.assign_task failed due to status)
         // Note: idle_slot.assign_task would fail because the slot is Idle but we need Running
         // For now, check that blocked agent's task is cleared
-        assert!(blocked_slot.assigned_task_id().is_none() || idle_slot.assigned_task_id().is_some());
+        assert!(
+            blocked_slot.assigned_task_id().is_none() || idle_slot.assigned_task_id().is_some()
+        );
     }
 
     #[test]
@@ -2572,16 +3051,15 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, None)
+            .unwrap();
 
         // Get request from queue
         let request = pool.human_queue().peek().unwrap();
 
         // Create response
-        let response = HumanDecisionResponse::new(
-            request.id.clone(),
-            HumanSelection::selected("option-a"),
-        );
+        let response =
+            HumanDecisionResponse::new(request.id.clone(), HumanSelection::selected("option-a"));
 
         // Process response
         let result = pool.process_human_response(response);
@@ -2604,20 +3082,24 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, None)
+            .unwrap();
 
         // Get request from queue
         let request = pool.human_queue().peek().unwrap();
 
         // Create response with selection
-        let response = HumanDecisionResponse::new(
-            request.id.clone(),
-            HumanSelection::selected("option-a"),
-        );
+        let response =
+            HumanDecisionResponse::new(request.id.clone(), HumanSelection::selected("option-a"));
 
         // Process response
         let result = pool.process_human_response(response).unwrap();
-        assert_eq!(result, DecisionExecutionResult::Executed { option_id: "option-a".to_string() });
+        assert_eq!(
+            result,
+            DecisionExecutionResult::Executed {
+                option_id: "option-a".to_string()
+            }
+        );
     }
 
     #[test]
@@ -2627,7 +3109,8 @@ mod tests {
         let mut backlog = make_backlog_with_ready_task();
 
         // Assign task
-        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog).unwrap();
+        pool.assign_task_with_backlog(&agent_id, TaskId::new("task-001"), &mut backlog)
+            .unwrap();
 
         // Create blocking and process
         let blocking = HumanDecisionBlocking::new(
@@ -2636,16 +3119,14 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog)).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, Some(&mut backlog))
+            .unwrap();
 
         // Get request from queue
         let request = pool.human_queue().peek().unwrap();
 
         // Create response with skip
-        let response = HumanDecisionResponse::new(
-            request.id.clone(),
-            HumanSelection::skip(),
-        );
+        let response = HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
 
         // Process response
         let result = pool.process_human_response(response).unwrap();
@@ -2668,16 +3149,14 @@ mod tests {
             vec![],
         );
         let blocked_state = BlockedState::new(Box::new(blocking));
-        pool.process_agent_blocked(&agent_id, blocked_state, None).unwrap();
+        pool.process_agent_blocked(&agent_id, blocked_state, None)
+            .unwrap();
 
         // Get request from queue
         let request = pool.human_queue().peek().unwrap();
 
         // Create response with cancel
-        let response = HumanDecisionResponse::new(
-            request.id.clone(),
-            HumanSelection::cancel(),
-        );
+        let response = HumanDecisionResponse::new(request.id.clone(), HumanSelection::cancel());
 
         // Process response
         let result = pool.process_human_response(response).unwrap();
@@ -2700,14 +3179,16 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None).unwrap();
+        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None)
+            .unwrap();
 
         let blocking2 = HumanDecisionBlocking::new(
             "req-2",
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None).unwrap();
+        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None)
+            .unwrap();
 
         assert_eq!(pool.blocked_count(), 2);
 
@@ -2735,11 +3216,13 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None).unwrap();
+        pool.process_agent_blocked(&agent1, BlockedState::new(Box::new(blocking1)), None)
+            .unwrap();
 
         // Block agent2 with resource waiting
         let blocking2 = ResourceBlocking::new("file", "/tmp/lock", "waiting for file lock");
-        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None).unwrap();
+        pool.process_agent_blocked(&agent2, BlockedState::new(Box::new(blocking2)), None)
+            .unwrap();
 
         // Get blocked agents
         let blocked = pool.blocked_agents();
@@ -2749,17 +3232,27 @@ mod tests {
     #[test]
     fn decision_execution_result_variants() {
         // Test all variants are constructible
-        let executed = DecisionExecutionResult::Executed { option_id: "a".to_string() };
+        let executed = DecisionExecutionResult::Executed {
+            option_id: "a".to_string(),
+        };
         let accepted = DecisionExecutionResult::AcceptedRecommendation;
-        let custom = DecisionExecutionResult::CustomInstruction { instruction: "test".to_string() };
+        let custom = DecisionExecutionResult::CustomInstruction {
+            instruction: "test".to_string(),
+        };
         let skipped = DecisionExecutionResult::Skipped;
         let cancelled = DecisionExecutionResult::Cancelled;
         let not_found = DecisionExecutionResult::AgentNotFound;
         let not_blocked = DecisionExecutionResult::NotBlocked;
 
         assert!(matches!(executed, DecisionExecutionResult::Executed { .. }));
-        assert!(matches!(accepted, DecisionExecutionResult::AcceptedRecommendation));
-        assert!(matches!(custom, DecisionExecutionResult::CustomInstruction { .. }));
+        assert!(matches!(
+            accepted,
+            DecisionExecutionResult::AcceptedRecommendation
+        ));
+        assert!(matches!(
+            custom,
+            DecisionExecutionResult::CustomInstruction { .. }
+        ));
         assert!(matches!(skipped, DecisionExecutionResult::Skipped));
         assert!(matches!(cancelled, DecisionExecutionResult::Cancelled));
         assert!(matches!(not_found, DecisionExecutionResult::AgentNotFound));
@@ -2778,7 +3271,8 @@ mod tests {
                 Box::new(WaitingForChoiceSituation::default()),
                 vec![],
             );
-            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
+                .unwrap();
         }
 
         // Set max to 3
@@ -2808,7 +3302,8 @@ mod tests {
                 Box::new(WaitingForChoiceSituation::default()),
                 vec![],
             );
-            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
+                .unwrap();
         }
 
         // Should have all 10 entries
@@ -2826,7 +3321,8 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
+            .unwrap();
 
         // Manually expire the request in the queue
         // (In real scenario, time would pass and check_expired would find it)
@@ -2851,7 +3347,9 @@ mod tests {
         }
 
         let count = Arc::new(AtomicUsize::new(0));
-        let notifier = Arc::new(TestNotifier { count: count.clone() });
+        let notifier = Arc::new(TestNotifier {
+            count: count.clone(),
+        });
 
         let mut pool = make_pool(2);
         pool.set_blocked_notifier(notifier);
@@ -2863,7 +3361,8 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
+            .unwrap();
 
         // Notifier should have been called
         assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -2884,16 +3383,14 @@ mod tests {
         }
 
         let count = Arc::new(AtomicUsize::new(0));
-        let notifier = Arc::new(TestNotifier { count: count.clone() });
+        let notifier = Arc::new(TestNotifier {
+            count: count.clone(),
+        });
 
         let mut config = BlockedHandlingConfig::default();
         config.notify_others = false; // Disable
 
-        let mut pool = AgentPool::with_blocked_config(
-            WorkplaceId::new("workplace-001"),
-            2,
-            config,
-        );
+        let mut pool = AgentPool::with_blocked_config(WorkplaceId::new("workplace-001"), 2, config);
         pool.set_blocked_notifier(notifier);
         let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
 
@@ -2903,9 +3400,437 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None).unwrap();
+        pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
+            .unwrap();
 
         // Notifier should NOT have been called
         assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    // ============== Worktree Integration Tests ==============
+
+    fn setup_test_repo() -> (tempfile::TempDir, PathBuf) {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_path_buf();
+
+        // Initialize git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .output()
+            .expect("Failed to init git repo");
+
+        // Disable GPG signing for tests
+        std::process::Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(&repo_path)
+            .output()
+            .expect("Failed to disable GPG signing");
+
+        // Create initial commit
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "Initial commit"])
+            .current_dir(&repo_path)
+            .output()
+            .expect("Failed to create initial commit");
+
+        (temp_dir, repo_path)
+    }
+
+    #[test]
+    fn pool_new_with_worktrees_creates_pool() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        );
+
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
+        assert!(pool.worktree_manager.is_some());
+        assert!(pool.worktree_state_store.is_some());
+        assert_eq!(pool.max_slots(), 4);
+    }
+
+    #[test]
+    fn pool_without_worktrees_spawn_fails_without_worktree() {
+        let mut pool = make_pool(4);
+
+        // Attempt to spawn with worktree should fail
+        let result = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            None,
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_creates_worktree() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path.clone(),
+            state_dir,
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/test-branch".to_string()),
+            Some("task-001".to_string()),
+        ).unwrap();
+
+        // Check agent was created
+        assert_eq!(pool.active_count(), 1);
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.has_worktree());
+
+        // Check worktree path exists
+        let worktree_path = slot.cwd();
+        assert!(worktree_path.exists());
+
+        // Check worktree is a valid git worktree
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .current_dir(&worktree_path)
+            .output()
+            .expect("Failed to check git worktree");
+
+        assert!(output.status.success());
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_default_branch_name() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            None, // No custom branch name
+            None,
+        ).unwrap();
+
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.has_worktree());
+
+        // Should have default branch name pattern "agent/{agent_id}"
+        let output = std::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(slot.cwd())
+            .output()
+            .expect("Failed to check branch");
+
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert!(branch.starts_with("agent/"));
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_fails_when_pool_full() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            1, // Only 1 slot
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        // Spawn first agent - should succeed
+        let _ = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None).unwrap();
+
+        // Spawn second agent - should fail
+        let result = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::PoolFull));
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_persists_state() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir.clone(),
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/test".to_string()),
+            Some("task-001".to_string()),
+        ).unwrap();
+
+        // Verify state was persisted
+        let store = WorktreeStateStore::new(state_dir);
+        let loaded_state = store.load(agent_id.as_str()).unwrap();
+
+        assert!(loaded_state.is_some());
+        let state = loaded_state.unwrap();
+        assert_eq!(state.agent_id, agent_id.as_str());
+        assert_eq!(state.task_id, Some("task-001".to_string()));
+    }
+
+    #[test]
+    fn pause_agent_with_worktree_preserves_state() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir.clone(),
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/pause-test".to_string()),
+            None,
+        ).unwrap();
+
+        // Verify agent is running (idle after spawn)
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_idle());
+
+        // Pause the agent
+        pool.pause_agent_with_worktree(&agent_id).unwrap();
+
+        // Verify status is paused
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_paused());
+
+        // Verify worktree still exists
+        let worktree_path = slot.cwd();
+        assert!(worktree_path.exists());
+
+        // Verify state was updated
+        let store = WorktreeStateStore::new(state_dir);
+        let loaded_state = store.load(agent_id.as_str()).unwrap().unwrap();
+        assert!(loaded_state.last_active_at > loaded_state.created_at);
+    }
+
+    #[test]
+    fn resume_agent_with_worktree_restores_slot() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir.clone(),
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/resume-test".to_string()),
+            None,
+        ).unwrap();
+
+        // Pause the agent
+        pool.pause_agent_with_worktree(&agent_id).unwrap();
+        assert!(pool.get_slot_by_id(&agent_id).unwrap().status().is_paused());
+
+        // Resume the agent
+        pool.resume_agent_with_worktree(&agent_id).unwrap();
+
+        // Verify status is idle (ready to resume work)
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_idle());
+
+        // Verify worktree still exists
+        assert!(slot.cwd().exists());
+    }
+
+    #[test]
+    fn pause_fails_without_worktree_support() {
+        let mut pool = AgentPool::new(WorkplaceId::new("workplace-001"), 4);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Pause should fail because pool has no worktree support
+        let result = pool.pause_agent_with_worktree(&agent_id);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+    }
+
+    #[test]
+    fn pause_fails_for_agent_without_worktree() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        // Spawn agent without worktree (using regular spawn)
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Pause should fail because agent has no worktree
+        let result = pool.pause_agent_with_worktree(&agent_id);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::NoWorktree(_)));
+    }
+
+    #[test]
+    fn resume_fails_if_agent_not_paused() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/resume-fail".to_string()),
+            None,
+        ).unwrap();
+
+        // Agent is idle, not paused - resume should fail
+        let result = pool.resume_agent_with_worktree(&agent_id);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::AgentNotPaused(_)));
+    }
+
+    #[test]
+    fn stop_agent_with_cleanup_removes_worktree() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path.clone(),
+            state_dir.clone(),
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/stop-cleanup".to_string()),
+            None,
+        ).unwrap();
+
+        // Get worktree info before stop
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        let worktree_path = slot.cwd();
+
+        // Stop with cleanup
+        pool.stop_agent_with_worktree_cleanup(&agent_id, true).unwrap();
+
+        // Verify slot is stopped
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_terminal());
+
+        // Verify worktree was removed
+        assert!(!worktree_path.exists());
+
+        // Verify state was deleted
+        let store = WorktreeStateStore::new(state_dir);
+        let loaded_state = store.load(agent_id.as_str()).unwrap();
+        assert!(loaded_state.is_none());
+
+        // Verify worktree not in git list
+        let worktree_manager = WorktreeManager::new(repo_path, WorktreeConfig::default()).unwrap();
+        let worktrees = worktree_manager.list().unwrap();
+        let found = worktrees.iter().any(|wt| wt.path == worktree_path);
+        assert!(!found);
+    }
+
+    #[test]
+    fn stop_agent_preserve_keeps_worktree() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path.clone(),
+            state_dir.clone(),
+        ).unwrap();
+
+        let agent_id = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            Some("feature/stop-preserve".to_string()),
+            None,
+        ).unwrap();
+
+        // Get worktree info before stop
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        let worktree_path = slot.cwd();
+
+        // Stop with preserve (cleanup=false)
+        pool.stop_agent_with_worktree_cleanup(&agent_id, false).unwrap();
+
+        // Verify slot is stopped
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_terminal());
+
+        // Verify worktree still exists
+        assert!(worktree_path.exists());
+
+        // Verify state was preserved
+        let store = WorktreeStateStore::new(state_dir);
+        let loaded_state = store.load(agent_id.as_str()).unwrap();
+        assert!(loaded_state.is_some());
+    }
+
+    #[test]
+    fn stop_regular_agent_without_worktree_works() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path,
+            state_dir,
+        ).unwrap();
+
+        // Spawn agent without worktree (regular spawn)
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Stop with cleanup should still work
+        pool.stop_agent_with_worktree_cleanup(&agent_id, true).unwrap();
+
+        // Verify slot is stopped
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_terminal());
     }
 }
