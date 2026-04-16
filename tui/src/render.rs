@@ -769,10 +769,10 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Work config header
-            Constraint::Length(3), // Work config input
+            Constraint::Length(3), // Work config input (with border)
             Constraint::Length(1), // Work preview
             Constraint::Length(1), // Decision config header
-            Constraint::Length(3), // Decision config input
+            Constraint::Length(3), // Decision config input (with border)
             Constraint::Length(1), // Decision preview
             Constraint::Length(1), // Error message
             Constraint::Length(2), // Confirm button
@@ -792,15 +792,30 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         config_areas[0],
     );
 
-    // Work config input
-    let work_input_style = if overlay.focus == LaunchConfigFocus::WorkConfig {
-        Style::default().fg(Color::White).bg(Color::DarkGray)
+    // Work config input with border
+    let work_input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if overlay.focus == LaunchConfigFocus::WorkConfig {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    let work_input_inner = work_input_block.inner(config_areas[1]);
+    frame.render_widget(work_input_block, config_areas[1]);
+
+    // Work config text with cursor indicator
+    let work_text = if overlay.focus == LaunchConfigFocus::WorkConfig {
+        if overlay.work_config_text.is_empty() {
+            "│".to_string() // Cursor only
+        } else {
+            format!("{}│", overlay.work_config_text) // Cursor at end
+        }
     } else {
-        Style::default().fg(Color::Gray)
+        overlay.work_config_text.clone()
     };
     frame.render_widget(
-        Paragraph::new(overlay.work_config_text.clone()).style(work_input_style),
-        config_areas[1],
+        Paragraph::new(work_text).style(Style::default().fg(Color::White)),
+        work_input_inner,
     );
 
     // Work preview
@@ -832,15 +847,30 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         config_areas[3],
     );
 
-    // Decision config input
-    let decision_input_style = if overlay.focus == LaunchConfigFocus::DecisionConfig {
-        Style::default().fg(Color::White).bg(Color::DarkGray)
+    // Decision config input with border
+    let decision_input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if overlay.focus == LaunchConfigFocus::DecisionConfig {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    let decision_input_inner = decision_input_block.inner(config_areas[4]);
+    frame.render_widget(decision_input_block, config_areas[4]);
+
+    // Decision config text with cursor indicator
+    let decision_text = if overlay.focus == LaunchConfigFocus::DecisionConfig {
+        if overlay.decision_config_text.is_empty() {
+            "│".to_string() // Cursor only
+        } else {
+            format!("{}│", overlay.decision_config_text) // Cursor at end
+        }
     } else {
-        Style::default().fg(Color::Gray)
+        overlay.decision_config_text.clone()
     };
     frame.render_widget(
-        Paragraph::new(overlay.decision_config_text.clone()).style(decision_input_style),
-        config_areas[4],
+        Paragraph::new(decision_text).style(Style::default().fg(Color::White)),
+        decision_input_inner,
     );
 
     // Decision preview
