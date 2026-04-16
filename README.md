@@ -2,7 +2,7 @@
 
 `agile-agent` is a Rust workspace for building a local autonomous engineering agent on top of existing coding CLIs such as `claude` and `codex`.
 
-It combines a codex-style terminal UI, persisted workplace and agent state, a headless execution loop, a decision layer for ambiguous provider output, and multi-agent coordination foundations.
+It combines a codex-style terminal UI, persisted workplace and agent state, a headless execution loop, a decision layer for ambiguous provider output, and multi-agent coordination with git worktree isolation.
 
 ## Status
 
@@ -14,6 +14,9 @@ Implemented:
 - trait-based Kanban domain model with shared test support
 - multi-agent foundation with role-aware agents and Scrum-style coordination primitives
 - decision-layer foundation in `agent-decision` with classifier and engine building blocks
+- git worktree isolation for multi-agent development
+- launch configuration overlay for agent creation (Ctrl+N)
+- Overview mode for multi-agent activity monitoring
 
 In progress:
 
@@ -109,16 +112,22 @@ The TUI provides:
 - a local skill browser
 - multi-agent session state where provider switching creates a new agent identity
 - current agent identity in the footer
+- Overview mode for monitoring all agents at a glance
+- launch configuration overlay for customizing new agents (Ctrl+N)
+- git worktree isolation for parallel agent work
 
 Common keybindings:
 
 - `Enter`: submit
 - `Ctrl+J`: newline
-- `Tab`: create a new agent on the next provider
+- `Tab`: cycle to next agent (when multiple agents exist)
+- `Ctrl+N`: open launch config overlay to create a new agent
+- `Ctrl+P`: toggle/switch provider
 - `Ctrl+T`: open transcript overlay
 - `$`: open skill browser when the composer is empty
-- `Ctrl+C`: quit
+- `Ctrl+C`: quit (or close overlay when open)
 - `q`: quit when the composer is empty
+- `1-4`: switch view modes (Overview, Focused, Agents, Skills)
 
 Preferred namespaced slash commands:
 
@@ -200,6 +209,30 @@ The runtime currently persists:
 
 On startup from the same working directory, `agile-agent` restores the most recent agent for the derived workplace and reattaches provider session continuity when possible.
 When `resume-last` is used, it prefers the current agent's own `state.json` before falling back to older workplace-scoped session files.
+
+### Launch Configuration
+
+When creating a new agent (via Ctrl+N), the launch configuration overlay allows:
+
+- selecting the target provider (claude, codex, or mock)
+- configuring environment variable overrides (KEY=VALUE format)
+- specifying custom executable paths or command fragments
+- previewing parsed configuration before launch
+
+Launch modes:
+
+- `HostDefault`: use the provider's default executable and environment
+- `EnvOnly`: use default executable with custom environment variables
+- `CommandFragment`: specify full command with executable and arguments
+
+### Git Worktree Isolation
+
+Agents can operate in isolated git worktrees for parallel development:
+
+- each agent can have its own worktree with a dedicated branch
+- worktrees are created and managed automatically by the WorktreeManager
+- supports pause/resume of agents with worktree state preservation
+- enables safe parallel work on different features without conflicts
 
 ### Local Skills
 
