@@ -262,9 +262,6 @@ impl ShellHarness {
                     self.state.view_state.overview.search_query.clear();
                 }
             }
-            InputOutcome::OverviewFocusNumber(n) => {
-                let _ = self.state.focus_overview_agent_by_number(n);
-            }
         }
     }
 }

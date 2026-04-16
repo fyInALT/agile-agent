@@ -80,8 +80,6 @@ pub enum InputOutcome {
     OverviewSearchCancel,
     /// Overview: select search result
     OverviewSearchSelect(String),
-    /// Overview: focus visible agent by number key
-    OverviewFocusNumber(u8),
 }
 
 pub fn handle_paste_event(state: &mut TuiState, pasted_text: &str) {
@@ -479,19 +477,6 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             && state.view_state.overview.search_active =>
         {
             InputOutcome::OverviewSearchCancel
-        }
-
-        KeyEvent {
-            code: KeyCode::Char(c),
-            modifiers,
-            ..
-        } if modifiers.contains(KeyModifiers::NONE)
-            && state.composer.is_empty()
-            && state.view_state.mode == crate::view_mode::ViewMode::Overview
-            && c >= '1'
-            && c <= '9' =>
-        {
-            InputOutcome::OverviewFocusNumber(c.to_digit(10).unwrap_or(0) as u8)
         }
 
         // Agent focus switching (Ctrl+1-9 for direct selection)
@@ -1182,20 +1167,6 @@ mod tests {
 
         assert!(matches!(outcome, InputOutcome::None));
         assert_eq!(state.view_state.overview.search_query, "a");
-    }
-
-    #[test]
-    fn overview_number_key_selects_visible_agent() {
-        let app = AppState::new(ProviderKind::Mock);
-        let mut state = state_from_app(app);
-        state.view_state.switch_by_number(6);
-
-        let outcome = handle_key_event(
-            &mut state,
-            KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
-        );
-
-        assert!(matches!(outcome, InputOutcome::OverviewFocusNumber(1)));
     }
 
     #[test]

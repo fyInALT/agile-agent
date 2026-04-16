@@ -614,15 +614,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     .push_status_message(format!("agent {} not found", agent_name));
                             }
                         }
-                        InputOutcome::OverviewFocusNumber(n) => {
-                            if let Some(status) = state.focus_overview_agent_by_number(n) {
-                                state.app_mut().push_status_message(format!(
-                                    "focused {} ({})",
-                                    status.codename.as_str(),
-                                    status.status.label()
-                                ));
-                            }
-                        }
                         InputOutcome::Quit => {
                             state.session.workplace_mut().loop_control.signal_quit();
                         }
