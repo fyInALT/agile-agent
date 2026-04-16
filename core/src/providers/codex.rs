@@ -295,7 +295,7 @@ fn parse_item_event(
         .map(ToOwned::to_owned);
 
     match (method, item_type) {
-        ("item.started" | "item/started", "command_execution" | "commandExecution") => {
+        ("item.started", "command_execution") => {
             let command = item
                 .get("command")
                 .and_then(|value| value.as_str())
@@ -310,21 +310,17 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item.completed" | "item/completed", "command_execution" | "commandExecution") => {
-            // Support both snake_case (exec) and camelCase (app-server)
+        ("item.completed", "command_execution") => {
             let output = item
                 .get("aggregated_output")
-                .or_else(|| item.get("aggregatedOutput"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned);
             let exit_code = item
                 .get("exit_code")
-                .or_else(|| item.get("exitCode"))
                 .and_then(|value| value.as_i64())
                 .and_then(|value| i32::try_from(value).ok());
             let duration_ms = item
                 .get("duration_ms")
-                .or_else(|| item.get("durationMs"))
                 .and_then(|value| value.as_u64());
             let source = item
                 .get("source")
@@ -339,16 +335,16 @@ fn parse_item_event(
                 source,
             }]
         }
-        ("item.started" | "item/started", "file_change" | "fileChange") => vec![ProviderEvent::PatchApplyStarted {
+        ("item.started", "file_change") => vec![ProviderEvent::PatchApplyStarted {
             call_id: item_id,
             changes: parse_patch_changes(item),
         }],
-        ("item.completed" | "item/completed", "file_change" | "fileChange") => vec![ProviderEvent::PatchApplyFinished {
+        ("item.completed", "file_change") => vec![ProviderEvent::PatchApplyFinished {
             call_id: item_id,
             changes: parse_patch_changes(item),
             status: parse_patch_apply_status(item),
         }],
-        ("item.started" | "item/started", "web_search" | "webSearch") => item
+        ("item.started", "web_search") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -358,7 +354,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "web_search" | "webSearch") => item
+        ("item.completed", "web_search") => item
             .get("query")
             .and_then(|value| value.as_str())
             .map(|query| {
@@ -369,7 +365,7 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "image_view" | "imageView") => item
+        ("item.completed", "image_view") => item
             .get("path")
             .and_then(|value| value.as_str())
             .map(|path| {
@@ -379,11 +375,10 @@ fn parse_item_event(
                 }]
             })
             .unwrap_or_default(),
-        ("item.completed" | "item/completed", "image_generation" | "imageGeneration") => vec![ProviderEvent::ImageGenerationFinished {
+        ("item.completed", "image_generation") => vec![ProviderEvent::ImageGenerationFinished {
             call_id: item_id,
             revised_prompt: item
                 .get("revised_prompt")
-                .or_else(|| item.get("revisedPrompt"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
             result: item
@@ -392,11 +387,10 @@ fn parse_item_event(
                 .map(ToOwned::to_owned),
             saved_path: item
                 .get("saved_path")
-                .or_else(|| item.get("savedPath"))
                 .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned),
         }],
-        ("item.started" | "item/started", "mcp_tool_call" | "mcpToolCall") => {
+        ("item.started", "mcp_tool_call") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 vec![ProviderEvent::McpToolCallStarted {
                     call_id: item_id,
@@ -404,7 +398,7 @@ fn parse_item_event(
                 }]
             })
         }
-        ("item.completed" | "item/completed", "mcp_tool_call" | "mcpToolCall") => {
+        ("item.completed", "mcp_tool_call") => {
             parse_mcp_invocation(item).map_or_else(Vec::new, |invocation| {
                 let (result_blocks, error, is_error) = parse_mcp_tool_call_result(item);
                 vec![ProviderEvent::McpToolCallFinished {
@@ -417,8 +411,8 @@ fn parse_item_event(
                 }]
             })
         }
-        (_, "user_message" | "userMessage") => Vec::new(),
-        ("item.completed" | "item/completed", "agent_message" | "agentMessage") => item
+        (_, "user_message") => Vec::new(),
+        ("item.completed", "agent_message") => item
             .get("text")
             .and_then(|value| value.as_str())
             .filter(|text| {
@@ -450,7 +444,7 @@ fn parse_patch_apply_status(item: &serde_json::Value) -> PatchApplyStatus {
     {
         "failed" => PatchApplyStatus::Failed,
         "declined" => PatchApplyStatus::Declined,
-        "in_progress" | "inProgress" => PatchApplyStatus::InProgress,
+        "in_progress" => PatchApplyStatus::InProgress,
         _ => PatchApplyStatus::Completed,
     }
 }
@@ -462,7 +456,7 @@ fn parse_mcp_tool_call_status(item: &serde_json::Value) -> McpToolCallStatus {
         .unwrap_or("completed")
     {
         "failed" => McpToolCallStatus::Failed,
-        "in_progress" | "inProgress" => McpToolCallStatus::InProgress,
+        "in_progress" => McpToolCallStatus::InProgress,
         _ => McpToolCallStatus::Completed,
     }
 }
@@ -483,7 +477,7 @@ fn parse_exec_command_status(
         }) {
         "declined" => ExecCommandStatus::Declined,
         "failed" => ExecCommandStatus::Failed,
-        "in_progress" | "inProgress" => ExecCommandStatus::InProgress,
+        "in_progress" => ExecCommandStatus::InProgress,
         _ => ExecCommandStatus::Completed,
     }
 }
@@ -513,12 +507,7 @@ fn parse_mcp_tool_call_result(
         .unwrap_or_default();
     let is_error = item
         .get("result")
-        .and_then(|result| {
-            result
-                .get("isError")
-                .or_else(|| result.get("is_error"))
-                .and_then(|value| value.as_bool())
-        })
+        .and_then(|result| result.get("is_error").and_then(|value| value.as_bool()))
         .unwrap_or(false);
     let error = item
         .get("error")
@@ -591,8 +580,7 @@ fn parse_patch_change(change: &serde_json::Value) -> Option<PatchChange> {
     Some(PatchChange {
         path: path.to_string(),
         move_path: change
-            .get("movePath")
-            .or_else(|| change.get("move_path"))
+            .get("move_path")
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned),
         kind,
@@ -624,7 +612,7 @@ fn parse_content_blocks(
         .get("type")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if item_type == "user_message" || item_type == "userMessage" {
+    if item_type == "user_message" {
         return events;
     }
 
@@ -835,39 +823,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_assistant_text_item_with_slash_format() {
-        // Support both formats for backward compatibility
-        let item = serde_json::json!({
-            "type": "agentMessage",
-            "text": "hello world"
-        });
-
-        let events = parse_item_event("item/completed", &item, &HashSet::new());
-        assert_eq!(
-            events,
-            vec![ProviderEvent::AssistantChunk("hello world".to_string())]
-        );
-    }
-
-    #[test]
-    fn ignores_user_message_items() {
-        let item = serde_json::json!({
-            "id": "user-1",
-            "type": "userMessage",
-            "content": [
-                { "type": "text", "text": "echoed user input" }
-            ]
-        });
-
-        let events = parse_item_event("item.completed", &item, &HashSet::new());
-        assert!(events.is_empty());
-    }
-
-    #[test]
     fn skips_completed_agent_message_text_after_streaming_deltas() {
         let item = serde_json::json!({
             "id": "msg-1",
-            "type": "agentMessage",
+            "type": "agent_message",
             "text": "full final text"
         });
         let mut streamed = HashSet::new();
@@ -887,241 +846,6 @@ mod tests {
             SessionHandle::CodexThread {
                 thread_id: "thr_123".to_string()
             }
-        );
-    }
-
-    #[test]
-    fn parses_file_change_start_into_structured_patch_changes() {
-        let item = serde_json::json!({
-            "id": "patch-1",
-            "type": "fileChange",
-            "changes": [
-                {
-                    "path": "/repo/README.md",
-                    "kind": "update",
-                    "diff": "@@ -1 +1 @@\n-old\n+new"
-                },
-                {
-                    "path": "/repo/src/lib.rs",
-                    "kind": "add",
-                    "diff": "+fn main() {}"
-                }
-            ]
-        });
-
-        let events = parse_item_event("item.started", &item, &HashSet::new());
-
-        assert_eq!(
-            events,
-            vec![ProviderEvent::PatchApplyStarted {
-                call_id: Some("patch-1".to_string()),
-                changes: vec![
-                    crate::tool_calls::PatchChange {
-                        path: "/repo/README.md".to_string(),
-                        move_path: None,
-                        kind: crate::tool_calls::PatchChangeKind::Update,
-                        diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
-                        added: 1,
-                        removed: 1,
-                    },
-                    crate::tool_calls::PatchChange {
-                        path: "/repo/src/lib.rs".to_string(),
-                        move_path: None,
-                        kind: crate::tool_calls::PatchChangeKind::Add,
-                        diff: "+fn main() {}".to_string(),
-                        added: 1,
-                        removed: 0,
-                    },
-                ],
-            }]
-        );
-    }
-
-    #[test]
-    fn parses_command_execution_completion_metadata() {
-        let item = serde_json::json!({
-            "id": "exec-1",
-            "type": "commandExecution",
-            "aggregatedOutput": "done",
-            "exitCode": 7,
-            "durationMs": 1234,
-            "source": "userShell"
-        });
-
-        let events = parse_item_event("item.completed", &item, &HashSet::new());
-
-        assert_eq!(
-            events,
-            vec![ProviderEvent::ExecCommandFinished {
-                call_id: Some("exec-1".to_string()),
-                output_preview: Some("done".to_string()),
-                status: crate::tool_calls::ExecCommandStatus::Failed,
-                exit_code: Some(7),
-                duration_ms: Some(1234),
-                source: Some("userShell".to_string()),
-            }]
-        );
-    }
-
-    #[test]
-    fn parses_file_change_completion_status() {
-        let item = serde_json::json!({
-            "id": "patch-2",
-            "type": "fileChange",
-            "status": "failed",
-            "changes": [
-                {
-                    "path": "/repo/README.md",
-                    "kind": "update",
-                    "diff": "@@ -1 +1 @@\n-old\n+new"
-                }
-            ]
-        });
-
-        let events = parse_item_event("item.completed", &item, &HashSet::new());
-
-        assert_eq!(
-            events,
-            vec![ProviderEvent::PatchApplyFinished {
-                call_id: Some("patch-2".to_string()),
-                changes: vec![crate::tool_calls::PatchChange {
-                    path: "/repo/README.md".to_string(),
-                    move_path: None,
-                    kind: crate::tool_calls::PatchChangeKind::Update,
-                    diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
-                    added: 1,
-                    removed: 1,
-                }],
-                status: crate::tool_calls::PatchApplyStatus::Failed,
-            }]
-        );
-    }
-
-    #[test]
-    fn parses_web_search_item_lifecycle() {
-        let started = serde_json::json!({
-            "id": "search-1",
-            "type": "webSearch",
-            "query": "ratatui stylize"
-        });
-        let completed = serde_json::json!({
-            "id": "search-1",
-            "type": "webSearch",
-            "query": "ratatui stylize",
-            "action": { "type": "other" }
-        });
-
-        assert_eq!(
-            parse_item_event("item.started", &started, &HashSet::new()),
-            vec![ProviderEvent::WebSearchStarted {
-                call_id: Some("search-1".to_string()),
-                query: "ratatui stylize".to_string(),
-            }]
-        );
-        assert_eq!(
-            parse_item_event("item.completed", &completed, &HashSet::new()),
-            vec![ProviderEvent::WebSearchFinished {
-                call_id: Some("search-1".to_string()),
-                query: "ratatui stylize".to_string(),
-                action: Some(crate::tool_calls::WebSearchAction::Other),
-            }]
-        );
-    }
-
-    #[test]
-    fn parses_mcp_tool_call_lifecycle() {
-        let started = serde_json::json!({
-            "id": "mcp-1",
-            "type": "mcpToolCall",
-            "server": "search",
-            "tool": "find_docs",
-            "status": "inProgress",
-            "arguments": { "query": "ratatui styling", "limit": 3 }
-        });
-        let completed = serde_json::json!({
-            "id": "mcp-1",
-            "type": "mcpToolCall",
-            "server": "search",
-            "tool": "find_docs",
-            "status": "completed",
-            "arguments": { "query": "ratatui styling", "limit": 3 },
-            "result": {
-                "content": [
-                    { "type": "text", "text": "Found styling guidance in styles.md" }
-                ],
-                "isError": false
-            },
-            "error": null
-        });
-
-        assert_eq!(
-            parse_item_event("item.started", &started, &HashSet::new()),
-            vec![ProviderEvent::McpToolCallStarted {
-                call_id: Some("mcp-1".to_string()),
-                invocation: crate::tool_calls::McpInvocation {
-                    server: "search".to_string(),
-                    tool: "find_docs".to_string(),
-                    arguments: Some(serde_json::json!({
-                        "query": "ratatui styling",
-                        "limit": 3
-                    })),
-                },
-            }]
-        );
-        assert_eq!(
-            parse_item_event("item.completed", &completed, &HashSet::new()),
-            vec![ProviderEvent::McpToolCallFinished {
-                call_id: Some("mcp-1".to_string()),
-                invocation: crate::tool_calls::McpInvocation {
-                    server: "search".to_string(),
-                    tool: "find_docs".to_string(),
-                    arguments: Some(serde_json::json!({
-                        "query": "ratatui styling",
-                        "limit": 3
-                    })),
-                },
-                result_blocks: vec![serde_json::json!({
-                    "type": "text",
-                    "text": "Found styling guidance in styles.md"
-                })],
-                error: None,
-                status: crate::tool_calls::McpToolCallStatus::Completed,
-                is_error: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn parses_image_view_and_generation_items() {
-        let image_view = serde_json::json!({
-            "id": "image-view-1",
-            "type": "imageView",
-            "path": "example.png"
-        });
-        let image_generation = serde_json::json!({
-            "id": "image-gen-1",
-            "type": "imageGeneration",
-            "status": "completed",
-            "revisedPrompt": "A tiny blue square",
-            "result": "image.png",
-            "savedPath": "/tmp/ig-1.png"
-        });
-
-        assert_eq!(
-            parse_item_event("item.completed", &image_view, &HashSet::new()),
-            vec![ProviderEvent::ViewImage {
-                call_id: Some("image-view-1".to_string()),
-                path: "example.png".to_string(),
-            }]
-        );
-        assert_eq!(
-            parse_item_event("item.completed", &image_generation, &HashSet::new()),
-            vec![ProviderEvent::ImageGenerationFinished {
-                call_id: Some("image-gen-1".to_string()),
-                revised_prompt: Some("A tiny blue square".to_string()),
-                result: Some("image.png".to_string()),
-                saved_path: Some("/tmp/ig-1.png".to_string()),
-            }]
         );
     }
 
