@@ -44,6 +44,9 @@ pub mod recovery;
 pub mod metrics;
 pub mod concurrent;
 
+// Sprint 9: Configurable Prompts
+pub mod prompts;
+
 // Re-export core types
 pub use error::*;
 pub use types::*;
@@ -102,3 +105,6 @@ pub use recovery::*;
 // Re-export Sprint 8 types
 pub use metrics::*;
 pub use concurrent::*;
+
+// Re-export Sprint 9 types
+pub use prompts::*;

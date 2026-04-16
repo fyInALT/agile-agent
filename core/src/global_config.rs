@@ -281,6 +281,11 @@ impl GlobalConfigStore {
         self.path.join("multi_agent.json")
     }
 
+    /// Path to prompts config file
+    pub fn prompts_path(&self) -> PathBuf {
+        self.path.join("prompts.json")
+    }
+
     // ========================================================================
     // GlobalConfig Load/Save
     // ========================================================================
@@ -492,6 +497,59 @@ impl GlobalConfigStore {
         logging::debug_event(
             "global_config.save_multi_agent",
             "saved multi-agent config",
+            serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(())
+    }
+
+    // ========================================================================
+    // PromptsConfig Load/Save (for agent-decision crate)
+    // ========================================================================
+
+    /// Load prompts config JSON as raw value
+    ///
+    /// Returns raw JSON value that can be used to construct PromptConfig
+    /// in agent-decision crate.
+    pub fn load_prompts_config_raw(&self) -> Result<serde_json::Value> {
+        let path = self.prompts_path();
+        if !path.exists() {
+            logging::debug_event(
+                "global_config.load_prompts.not_found",
+                "prompts config not found, using defaults",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                }),
+            );
+            return Ok(serde_json::json!({}));
+        }
+
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let config: serde_json::Value = serde_json::from_str(&payload)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        logging::debug_event(
+            "global_config.load_prompts",
+            "loaded prompts config",
+            serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        );
+        Ok(config)
+    }
+
+    /// Save prompts config JSON
+    pub fn save_prompts_config_raw(&self, config: &serde_json::Value) -> Result<()> {
+        self.ensure()?;
+        let path = self.prompts_path();
+        let payload = serde_json::to_string_pretty(config)
+            .context("failed to serialize prompts config")?;
+        fs::write(&path, payload)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        logging::debug_event(
+            "global_config.save_prompts",
+            "saved prompts config",
             serde_json::json!({
                 "path": path.display().to_string(),
             }),
@@ -731,5 +789,36 @@ mod tests {
 
         let parsed: MultiAgentConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.default_role, AgentRole::ProductOwner);
+    }
+
+    #[test]
+    fn prompts_config_save_load_roundtrip() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+        store.ensure().expect("ensure");
+
+        let config = serde_json::json!({
+            "max_reflection_rounds": 3,
+            "custom_prompts": {
+                "custom_situation": "Custom prompt template"
+            }
+        });
+
+        store.save_prompts_config_raw(&config).expect("save");
+        let loaded = store.load_prompts_config_raw().expect("load");
+
+        assert_eq!(loaded["max_reflection_rounds"], 3);
+        assert!(loaded["custom_prompts"]["custom_situation"].is_string());
+    }
+
+    #[test]
+    fn prompts_config_missing_returns_empty() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+
+        // Don't create file
+        let loaded = store.load_prompts_config_raw().expect("load");
+        assert!(loaded.is_object());
+        assert!(loaded.as_object().unwrap().is_empty());
     }
 }
