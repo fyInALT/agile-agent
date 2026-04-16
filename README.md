@@ -2,59 +2,59 @@
 
 `agile-agent` is a Rust workspace for building a local autonomous engineering agent on top of existing coding CLIs such as `claude` and `codex`.
 
-Current product scope:
-
-- an interactive terminal UI
-- local skill discovery and prompt injection
-- persisted backlog, task, and session state
-- a persisted single-agent runtime identity
-- a single-agent autonomous execution loop
-- headless CLI execution for automation and experiments
-- extensible Kanban domain model with trait-based architecture
-- multi-agent coordination with Scrum-style roles (foundation implemented)
+It combines a codex-style terminal UI, persisted workplace and agent state, a headless execution loop, a decision layer for ambiguous provider output, and multi-agent coordination foundations.
 
 ## Status
 
 Implemented:
 
-- V1: interactive execution substrate
-- V2: single-agent autonomous execution loop
-- Kanban domain model with trait + registry pattern for extensibility
-- Multi-agent foundation: AgentRole, RuntimeMode, Data Migration, Scrum coordination
+- interactive TUI substrate with transcript/composer flow, tool rendering, and session restore
+- single-agent runtime identity, workplace persistence, and headless autonomous loop
+- local skill discovery and structured prompt injection
+- trait-based Kanban domain model with shared test support
+- multi-agent foundation with role-aware agents and Scrum-style coordination primitives
+- decision-layer foundation in `agent-decision` with classifier and engine building blocks
 
 In progress:
 
-- Decision layer for autonomous development (specification complete, implementation pending)
-- Full multi-agent parallel runtime with concurrent execution
+- decision-layer runtime integration and persistent human-decision workflows
+- full parallel multi-agent runtime across TUI and headless execution
+- OpenAI-backed LLM provider integration for decision support
 
 Not started yet:
 
-- Workflow self-improvement
+- workflow self-improvement
 
 ## Workspace
 
 ```text
 agile-agent/
-├── cli/   # `agile-agent` binary and subcommands
-├── core/  # providers, state, loop runner, persistence, verification
-├── docs/  # specs and superpowers artifacts
-├── kanban/  # trait-based Kanban domain model
-├── scripts/  # developer helper scripts
+├── cli/           # `agile-agent` binary and CLI integration tests
+├── core/          # runtime, providers, persistence, backlog, verification
+├── decision/      # decision layer, classifiers, engines, human-decision types
+├── docs/          # product specs, sprint specs, and superpowers artifacts
+├── kanban/        # trait-based Kanban domain model
+├── llm-provider/  # OpenAI client/provider abstraction for internal use
+├── scripts/       # developer helper scripts
 ├── test-support/  # shared test harnesses and fixtures
-└── tui/   # interactive terminal UI
+└── tui/           # terminal UI, rendering, transcript, overlays, command flow
 ```
 
 Workspace crates:
 
-- `agent-cli`: the `agile-agent` binary, TUI entrypoint, and CLI subcommands such as `doctor`, `probe`, `agent`, `workplace`, `resume-last`, and headless `run-loop`
-- `agent-core`: providers, backlog/task models, persistence, verification, and artifacts
-- `agent-tui`: codex-style terminal UI
-- `agent-kanban`: trait-based Kanban domain model with extensible types and registries
+- `agent-cli`: `agile-agent` binary, TUI entrypoint, and CLI subcommands
+- `agent-core`: providers, backlog/task models, runtime loop, persistence, verification, and artifacts
+- `agent-decision`: classifier, tiered decision engine, action/situation registry, and human decision types
+- `agent-tui`: codex-style terminal UI and slash-command routing
+- `agent-kanban`: extensible Kanban domain model with trait and registry architecture
+- `agent-llm-provider`: OpenAI client and provider abstraction used by decision-layer work
 - `agent-test-support`: shared test helpers for workspace crates
 
 Key docs:
 
 - `docs/plan/spec/`: implementation-facing product and sprint specs
+- `docs/plan/spec/decision-layer/`: decision-layer architecture and sprint specs
+- `docs/plan/spec/multi-agent/`: multi-agent sprint specs
 - `docs/superpowers/specs/`: superpowers design specs
 - `docs/superpowers/plans/`: superpowers implementation plans
 
@@ -82,30 +82,32 @@ Session continuity is reused when available:
 - Claude via `session_id`
 - Codex via `thread_id`
 
-### Execution Modes
+### CLI And Execution Modes
 
 - interactive TUI via `cargo run -p agent-cli`
 - TUI resume flow via `cargo run -p agent-cli -- resume-last`
 - headless autonomous loop via `cargo run -p agent-cli -- run-loop ...`
-- state inspection via `agent current`, `agent list`, `workplace current`, `doctor`, and `probe --json`
+- agent and workplace inspection via `cargo run -p agent-cli -- agent ...` and `cargo run -p agent-cli -- workplace current`
+- decision request inspection via `cargo run -p agent-cli -- decision ...`
+- structured environment probing via `cargo run -p agent-cli -- doctor` and `cargo run -p agent-cli -- probe --json`
+
+Current CLI limitations:
+
+- `agent stop` only records a stop request; fully stopping a live agent still requires the TUI session
+- `decision` commands are present, but the end-to-end persisted decision workflow is still being wired through
 
 ### TUI
 
 The TUI provides:
 
-- a codex-style transcript + composer layout
+- a codex-style transcript and composer layout
 - multiline editing and paste support
 - transcript paging and overlay browsing
 - width-aware Markdown rendering for assistant output
-- codex-style tool output with unified diff rendering
-- Edit tool diff display with colored backgrounds:
-  - added lines with dark green background
-  - removed lines with dark red background
-  - full diff content without truncation
-- exec command previews with streaming output
+- tool output rendering for exec, web, image, and patch events
 - patch summaries with file change statistics
 - a local skill browser
-- slash commands for provider inspection, backlog updates, and loop control
+- multi-agent session state where provider switching creates a new agent identity
 - current agent identity in the footer
 
 Common keybindings:
@@ -118,7 +120,20 @@ Common keybindings:
 - `Ctrl+C`: quit
 - `q`: quit when the composer is empty
 
-Local slash commands:
+Preferred namespaced slash commands:
+
+- `/local help`
+- `/local status`
+- `/local kanban list`
+- `/local config get <key>`
+- `/local config set <key> <value>`
+- `/agent status`
+- `/agent <target> status`
+- `/agent summary`
+- `/provider /status`
+- `/provider <target> /status`
+
+Legacy flat commands still accepted:
 
 - `/help`
 - `/provider`
@@ -132,6 +147,19 @@ Local slash commands:
 
 The TUI requires at least one real provider (`claude` or `codex`) to be installed.
 
+### Decision Layer
+
+The `agent-decision` crate currently includes:
+
+- provider-output classification by situation type
+- rule-based, LLM-backed, CLI, mock, and tiered decision engines
+- action and situation registries with built-in cases such as waiting-for-choice, claims-completion, partial-completion, and error recovery
+- human decision request and response types for escalation flows
+
+Current limitation:
+
+- the decision-layer crate is real and used by ongoing integration work, but the top-level CLI and TUI decision UX are still partial
+
 ### Autonomous Loop
 
 The current loop:
@@ -144,9 +172,15 @@ The current loop:
 6. marks the task `done`, `failed`, or `blocked`
 7. writes task artifacts and escalations when needed
 
+Default headless guardrails:
+
+- `max_iterations = 5`
+- `max_continuations_per_task = 3`
+- `max_verification_failures = 1`
+
 ### Agent Runtime
 
-The current runtime now treats one `agent` as a first-class object:
+The runtime treats one `agent` as a first-class object:
 
 - one agent maps to one long-lived runtime identity
 - one agent binds to one provider type
@@ -165,13 +199,7 @@ The runtime currently persists:
 - `status`
 
 On startup from the same working directory, `agile-agent` restores the most recent agent for the derived workplace and reattaches provider session continuity when possible.
-When `resume-last` is used, it now prefers the current agent's own `state.json` before falling back to older workplace-scoped session files.
-
-Default headless guardrails:
-
-- `max_iterations = 5`
-- `max_continuations_per_task = 3`
-- `max_verification_failures = 1`
+When `resume-last` is used, it prefers the current agent's own `state.json` before falling back to older workplace-scoped session files.
 
 ### Local Skills
 
@@ -184,6 +212,8 @@ Skills are discovered from:
 Each skill lives in its own directory and must contain a `SKILL.md`. Enabled skills are injected into the next provider prompt as structured context.
 
 ## Quick Start
+
+The examples below use `cargo run -p agent-cli -- ...`; the built binary name is `agile-agent`.
 
 Requirements:
 
@@ -228,10 +258,28 @@ Inspect the current or most recent agent:
 cargo run -p agent-cli -- agent current
 ```
 
-List known agents in the current workplace:
+List known agents in the current workplace, including stopped ones:
 
 ```bash
-cargo run -p agent-cli -- agent list
+cargo run -p agent-cli -- agent list --all
+```
+
+Show detailed status for a specific agent:
+
+```bash
+cargo run -p agent-cli -- agent status <agent-id>
+```
+
+Spawn a new agent on a specific provider:
+
+```bash
+cargo run -p agent-cli -- agent spawn codex
+```
+
+Inspect decision requests:
+
+```bash
+cargo run -p agent-cli -- decision list
 ```
 
 Run the autonomous loop headlessly:
@@ -246,6 +294,12 @@ Resume the most recent saved session before the headless loop starts:
 cargo run -p agent-cli -- run-loop --max-iterations 5 --resume-last
 ```
 
+Try the experimental multi-agent headless flag:
+
+```bash
+cargo run -p agent-cli -- run-loop --max-iterations 5 --multi-agent
+```
+
 Print structured probe output:
 
 ```bash
@@ -258,235 +312,3 @@ Developer checks:
 cargo check
 cargo test
 ```
-
-Coverage setup:
-
-```bash
-cargo install cargo-llvm-cov
-rustup component add llvm-tools-preview
-```
-
-Coverage report:
-
-```bash
-./scripts/coverage.sh
-```
-
-This prints a terminal coverage summary and writes `target/coverage/lcov.info`.
-
-## Provider Configuration
-
-Real providers are resolved through:
-
-- `AGILE_AGENT_CLAUDE_PATH`
-- `AGILE_AGENT_CODEX_PATH`
-
-If those variables are unset, `agile-agent` falls back to `claude` and `codex` from `PATH`.
-
-`doctor` reports:
-
-- resolved executable path
-- `--version` output
-- protocol
-- availability or probe errors
-
-## Verification
-
-Verification is intentionally simple today:
-
-- every verification plan checks that assistant output is non-empty
-- `cargo check` is added automatically when the working directory contains a `Cargo.toml`
-- verification results are recorded as `passed`, `failed`, or `not runnable`
-
-Verification evidence is stored with task artifacts so failed runs can be inspected later.
-
-## Kanban Domain Model
-
-The Kanban module provides a trait-based domain model for project management:
-
-### Architecture
-
-- **Trait + Registry Pattern**: Extensible types via traits rather than enums
-- **StatusType**: Trait-based status with `StatusRegistry` for discovery
-- **ElementTypeIdentifier**: Trait-based element types with `ElementTypeRegistry`
-- **KanbanElementTrait**: Full element trait with accessor methods
-- **TransitionRule**: Extensible transition validation with element context
-
-### Key Benefits
-
-- Adding new status: implement `KanbanStatus` trait + register
-- Adding new element type: implement `KanbanElementTrait` + register
-- Adding custom transition rules: implement `TransitionRule` + register
-- No core modifications needed for extensions
-
-### Serialization
-
-`ElementSerde` proxy struct enables serialization of trait objects for persistence.
-
-## Persistence
-
-Local state is stored under the platform-local data directory returned by `dirs::data_local_dir()`, inside an `agile-agent/` directory.
-
-Current files and folders include:
-
-- `backlog.json`
-- `recent-session.json`
-- `sessions/session-*.json`
-- `task-artifacts/*.json`
-- `escalations/*.json`
-
-Agent runtime state is stored separately under:
-
-- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/meta.json`
-- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/state.json`
-- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/transcript.json`
-- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/messages.json`
-- `~/.agile-agent/workplaces/{workplace_id}/agents/{agent_id}/memory.json`
-- `~/.agile-agent/workplaces/{workplace_id}/backlog.json`
-- `~/.agile-agent/workplaces/{workplace_id}/recent-session.json`
-- `~/.agile-agent/workplaces/{workplace_id}/sessions/session-*.json`
-
-Persisted state includes:
-
-- backlog todos and tasks
-- transcript history
-- selected provider
-- Claude session / Codex thread continuity
-- enabled skills
-- active task and loop state
-- agent identity and provider binding
-
-## Documentation
-
-Implementation-facing specs live under `docs/plan/spec/`:
-
-- `agent-runtime-phase-1-*.md`: agent identity, persistence, restore/reattach specs
-- `sprint-*.md`: TUI and loop implementation sprints
-- `tui-parity-with-codex-spec.md`: codex-style TUI features
-- `v2-sprint-*.md`: autonomous loop sprint specs
-- `kanban/`: trait-based Kanban domain model specs
-- `decision-layer/`: decision layer architecture for autonomous development
-- `multi-agent/`: multi-agent parallel development architecture specs
-
-## Debug Logging
-
-`agile-agent` writes structured debug logs for every run to support troubleshooting and observability.
-
-Log location:
-
-- `~/.agile-agent/workplaces/{workplace_id}/logs/`
-
-Each run creates one JSON Lines log file:
-
-- `{utc-timestamp}-{run-mode}-pid{pid}.jsonl`
-- Example: `2026-04-13T10-15-30Z-tui-pid43120.jsonl`
-
-A `latest-path.txt` file in the same directory points to the most recent log for quick discovery.
-
-Logged events include:
-
-- launch environment and workplace resolution
-- agent lifecycle: bootstrap, restore, persist, shutdown
-- provider communication: raw stdin/stdout for Claude, JSON-RPC traffic for Codex
-- loop and task execution: iterations, task creation, verification, escalation
-- persistence operations: file reads, writes, and missing-file fallbacks
-- TUI control flow: command execution, provider switches, loop control
-
-The default log level is `debug`. Logs are structured JSON Lines for easy filtering and analysis.
-
-Logging failures are non-fatal: the runtime continues even if logging encounters errors.
-
-## Multi-Agent Foundation
-
-Sprint 10-11 implemented foundational multi-agent coordination features:
-
-### Agent Roles
-
-Three Scrum-style roles for agent coordination:
-
-- **ProductOwner**: Focus on requirements, priorities, backlog grooming
-- **ScrumMaster**: Focus on process health, blocker resolution, coordination
-- **Developer**: Focus on implementation quality, testing coverage, delivery
-
-Each role has:
-- Role-specific prompt prefixes
-- Default skills relevant to role focus
-- Skill relevance filtering
-
-### Runtime Modes
-
-Two runtime modes for backward compatibility:
-
-- **SingleAgent**: Default mode, single agent execution (backward compatible)
-- **MultiAgent**: Multiple concurrent agents with shared workplace state
-
-Mode transition happens automatically when spawning second agent.
-
-### Scrum Coordination
-
-#### Sprint Planning
-
-- `SprintPlanningSession`: Story selection, effort estimation, goal definition
-- Story prioritization with add/remove/reorder
-- Sprint commitment tracking
-- Capacity calculation with buffer
-
-#### Daily Standup
-
-- `DailyStandupReport`: Per-agent status (completed, planned, blockers)
-- Task history tracking for yesterday's work
-- Blocker summary for standup display
-
-#### Blocker Escalation
-
-- `BlockerEscalation`: Detect blocked agents, escalate to ScrumMaster
-- Resolution time tracking
-- Escalation statistics
-
-### Data Migration
-
-Automatic migration from legacy single-agent format:
-
-- Detects legacy `meta.json`, `state.json`, `transcript.json` at workplace root
-- Moves files to `agents/agent_001/` subdirectory
-- Creates workplace-level `workplace_meta.json`
-- Preserves existing backlog
-- Rollback on failure
-
-### CLI Commands
-
-New multi-agent CLI commands:
-
-```bash
-# List all agents including stopped ones
-cargo run -p agent-cli -- agent list --all
-
-# Show detailed agent status
-cargo run -p agent-cli -- agent status <agent-id>
-
-# Spawn new agent with provider
-cargo run -p agent-cli -- agent spawn claude
-
-# Stop an agent
-cargo run -p agent-cli -- agent stop <agent-id>
-
-# Run loop with multi-agent flag (future)
-cargo run -p agent-cli -- run-loop --multi-agent --max-iterations 5
-```
-
-## Current Boundaries
-
-`agile-agent` is intentionally narrower than its long-term name suggests. Today it is:
-
-- a local TUI + CLI for driving existing AI coding tools
-- a persisted single-agent execution substrate
-- a small autonomous loop for repo-local engineering work
-- an extensible Kanban domain model with trait-based architecture
-
-It is not yet:
-
-- a multi-agent coordinator (specification in progress)
-- a decision layer for fully autonomous development (specification complete)
-- a Scrum automation engine
-- a self-improving workflow platform
-- a full project-management system
