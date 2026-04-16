@@ -8,8 +8,9 @@ use std::collections::HashMap;
 
 use crate::error::{DecisionError, Result};
 
-// Import DecisionContext for conversion (avoid circular dependency by not importing full module)
-// The conversion function will be implemented in a separate extension
+// Import for context conversion
+use crate::context::DecisionContext;
+use crate::action_registry::ActionRegistry;
 
 // ============================================================================
 // Default Prompt Templates
@@ -763,6 +764,80 @@ impl PromptVariables {
             self.decision_history = entries.join("\n");
         }
         self
+    }
+
+    /// Build PromptVariables from DecisionContext
+    ///
+    /// This is a convenience method that extracts relevant information
+    /// from a DecisionContext and action registry to populate variables.
+    pub fn from_decision_context(
+        context: &DecisionContext,
+        action_registry: &ActionRegistry,
+        reflection_round: u8,
+        history_records: &[(String, String, f64)],
+    ) -> Self {
+        let situation_type_name = context.trigger_situation.situation_type().name;
+
+        // Build options text from available actions
+        let available_actions = context.trigger_situation.available_actions();
+        let action_formats: Vec<String> = available_actions
+            .iter()
+            .filter_map(|action_type| {
+                action_registry
+                    .get(&action_type)
+                    .map(|action| action.to_prompt_format())
+            })
+            .collect();
+
+        // Build file changes summary
+        let file_changes_summary = if context.running_context.file_changes().is_empty() {
+            "No file changes recorded".to_string()
+        } else {
+            context.running_context.file_changes()
+                .iter()
+                .map(|fc| format!("{} ({})", fc.path, fc.change_type))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // Build completion summary from key outputs (for claims_completion)
+        let completion_summary = context.running_context.key_outputs()
+            .iter()
+            .rev()
+            .take(5)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Build task info
+        let task_info = context.current_task_id
+            .as_ref()
+            .map(|id| format!("Task ID: {}", id))
+            .unwrap_or_else(|| "No task assigned".to_string());
+
+        // Build variables based on situation type
+        let mut vars = PromptVariables::new()
+            .with_situation(context.trigger_situation.to_prompt_text())
+            .with_options(action_formats.join("\n\n---\n\n"))
+            .with_project_rules(context.project_rules.summary())
+            .with_task_info(task_info)
+            .with_running_context(context.running_context.summary())
+            .with_formatted_history(history_records)
+            .with_reflection_round(reflection_round)
+            .with_file_changes(file_changes_summary);
+
+        // Add situation-specific fields
+        if situation_type_name == "claims_completion" {
+            vars = vars
+                .with_completion_summary(if completion_summary.is_empty() {
+                    "Agent claims task completion".to_string()
+                } else {
+                    completion_summary
+                })
+                .with_work_summary(context.running_context.summary());
+        }
+
+        vars
     }
 }
 
