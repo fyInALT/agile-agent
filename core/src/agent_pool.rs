@@ -3,12 +3,15 @@
 //! Central coordination structure for multi-agent runtime.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
+use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
+use crate::decision_mail::{DecisionMail, DecisionRequest, DecisionResponse, DecisionMailSender};
 use crate::logging;
 use crate::provider::ProviderKind;
 
@@ -19,6 +22,9 @@ use agent_decision::{
     HumanDecisionRequest, HumanDecisionResponse, HumanSelection,
     HumanDecisionQueue, HumanDecisionTimeoutConfig,
     SituationType,
+    classifier::ClassifyResult,
+    initializer::{DecisionLayerComponents, initialize_decision_layer},
+    provider_event::ProviderEvent,
 };
 
 /// Event emitted when an agent becomes blocked
@@ -196,6 +202,15 @@ pub struct AgentPool {
     blocked_history: Vec<BlockedHistoryEntry>,
     /// Notifier for blocked events (used when notify_others is true)
     blocked_notifier: Arc<dyn AgentBlockedNotifier>,
+    /// Decision agent slots (keyed by work agent ID)
+    decision_agents: HashMap<AgentId, DecisionAgentSlot>,
+    /// Decision mail senders (keyed by work agent ID)
+    /// Used by work agents to send decision requests
+    decision_mail_senders: HashMap<AgentId, DecisionMailSender>,
+    /// Decision layer components (classifiers, etc.)
+    decision_components: DecisionLayerComponents,
+    /// Working directory for decision agents
+    cwd: PathBuf,
 }
 
 impl std::fmt::Debug for AgentPool {
@@ -226,6 +241,10 @@ impl AgentPool {
             blocked_config: BlockedHandlingConfig::default(),
             blocked_history: Vec::new(),
             blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            decision_agents: HashMap::new(),
+            decision_mail_senders: HashMap::new(),
+            decision_components: initialize_decision_layer(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         }
     }
 
@@ -241,6 +260,29 @@ impl AgentPool {
             blocked_config: config,
             blocked_history: Vec::new(),
             blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            decision_agents: HashMap::new(),
+            decision_mail_senders: HashMap::new(),
+            decision_components: initialize_decision_layer(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        }
+    }
+
+    /// Create pool with working directory for decision agents
+    pub fn with_cwd(workplace_id: WorkplaceId, max_slots: usize, cwd: PathBuf) -> Self {
+        Self {
+            slots: Vec::new(),
+            max_slots,
+            next_agent_index: 1,
+            focused_slot: 0,
+            workplace_id,
+            human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
+            blocked_config: BlockedHandlingConfig::default(),
+            blocked_history: Vec::new(),
+            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            decision_agents: HashMap::new(),
+            decision_mail_senders: HashMap::new(),
+            decision_components: initialize_decision_layer(),
+            cwd,
         }
     }
 
@@ -427,6 +469,185 @@ impl AgentPool {
     /// Get the OVERVIEW agent slot (ProductOwner role)
     pub fn overview_agent(&self) -> Option<&AgentSlot> {
         self.slots.iter().find(|s| s.role() == AgentRole::ProductOwner)
+    }
+
+    // ===== Decision Agent Management =====
+
+    /// Spawn a decision agent for a work agent
+    ///
+    /// Creates a decision agent that handles decision requests for the specified work agent.
+    /// The decision agent uses the same provider as the work agent.
+    pub fn spawn_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
+        // Find the work agent slot
+        let slot_index = self.find_slot_index(work_agent_id)?;
+        let work_slot = &self.slots[slot_index];
+        let provider_kind_opt = work_slot.provider_type().to_provider_kind();
+
+        // Handle Opencode provider which doesn't have ProviderKind mapping
+        let provider_kind = provider_kind_opt
+            .ok_or_else(|| format!("Provider type {} doesn't have a ProviderKind mapping", work_slot.provider_type().label()))?;
+
+        // Create decision mail channel
+        let mail = DecisionMail::new();
+        let (sender, receiver) = mail.split();
+
+        // Create decision agent slot
+        let decision_agent = DecisionAgentSlot::new(
+            work_agent_id.as_str().to_string(),
+            provider_kind,
+            receiver,
+            self.cwd.clone(),
+            &self.decision_components,
+        );
+
+        // Store the decision agent and mail sender
+        self.decision_agents.insert(work_agent_id.clone(), decision_agent);
+        self.decision_mail_senders.insert(work_agent_id.clone(), sender);
+
+        logging::debug_event(
+            "pool.decision_agent.spawn",
+            "spawned decision agent for work agent",
+            serde_json::json!({
+                "work_agent_id": work_agent_id.as_str(),
+                "provider_kind": provider_kind.label(),
+            }),
+        );
+
+        Ok(())
+    }
+
+    /// Stop the decision agent for a work agent
+    pub fn stop_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
+        if let Some(decision_agent) = self.decision_agents.get_mut(work_agent_id) {
+            decision_agent.stop("work agent stopping");
+            self.decision_agents.remove(work_agent_id);
+            self.decision_mail_senders.remove(work_agent_id);
+
+            logging::debug_event(
+                "pool.decision_agent.stop",
+                "stopped decision agent for work agent",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Get decision agent for a work agent
+    pub fn decision_agent_for(&self, work_agent_id: &AgentId) -> Option<&DecisionAgentSlot> {
+        self.decision_agents.get(work_agent_id)
+    }
+
+    /// Check if work agent has a decision agent
+    pub fn has_decision_agent(&self, work_agent_id: &AgentId) -> bool {
+        self.decision_agents.contains_key(work_agent_id)
+    }
+
+    /// Classify an event for a specific agent
+    ///
+    /// Uses the classifier registry to determine if the event needs a decision.
+    pub fn classify_event(&self, agent_id: &AgentId, event: &ProviderEvent) -> ClassifyResult {
+        // Find the work agent slot
+        if let Some(slot) = self.get_slot_by_id(agent_id) {
+            let provider_kind_opt = slot.provider_type().to_provider_kind();
+
+            // Handle providers without ProviderKind mapping
+            if let Some(provider_kind) = provider_kind_opt {
+                // Convert to decision ProviderKind
+                let decision_provider = match provider_kind {
+                    ProviderKind::Claude => agent_decision::provider_kind::ProviderKind::Claude,
+                    ProviderKind::Codex => agent_decision::provider_kind::ProviderKind::Codex,
+                    ProviderKind::Mock => agent_decision::provider_kind::ProviderKind::Unknown,
+                };
+
+                // Use classifier registry to classify the event
+                self.decision_components.classifier_registry.classify(event, decision_provider)
+            } else {
+                // No ProviderKind mapping, return Running result
+                ClassifyResult::running(None)
+            }
+        } else {
+            // Agent not found, return Running result
+            ClassifyResult::running(None)
+        }
+    }
+
+    /// Send a decision request to a decision agent
+    ///
+    /// Returns true if request was sent successfully.
+    pub fn send_decision_request(&self, work_agent_id: &AgentId, request: DecisionRequest) -> Result<(), String> {
+        // Clone situation_type before sending for logging
+        let situation_type_name = request.situation_type.name.clone();
+
+        if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
+            sender.send_request(request).map_err(|e| {
+                logging::warn_event(
+                    "pool.decision_request.send_failed",
+                    "failed to send decision request",
+                    serde_json::json!({
+                        "work_agent_id": work_agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+                e
+            })?;
+
+            logging::debug_event(
+                "pool.decision_request.sent",
+                "sent decision request",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                    "situation_type": situation_type_name,
+                }),
+            );
+
+            Ok(())
+        } else {
+            Err(format!("No decision agent for work agent {}", work_agent_id.as_str()))
+        }
+    }
+
+    /// Poll decision agents and process pending requests
+    ///
+    /// Returns responses from decision agents that have processed requests.
+    pub fn poll_decision_agents(&mut self) -> Vec<(AgentId, DecisionResponse)> {
+        let mut responses = Vec::new();
+
+        for (work_agent_id, decision_agent) in &mut self.decision_agents {
+            // Poll and process any pending requests
+            decision_agent.poll_and_process();
+
+            // Try to receive any responses that were generated
+            if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
+                while let Some(response) = sender.try_receive_response() {
+                    responses.push((work_agent_id.clone(), response));
+                }
+            }
+        }
+
+        responses
+    }
+
+    /// Get decision agent statistics
+    pub fn decision_agent_stats(&self) -> DecisionAgentStats {
+        let mut stats = DecisionAgentStats::default();
+
+        for (_, decision_agent) in &self.decision_agents {
+            stats.total_agents += 1;
+            stats.total_decisions += decision_agent.decision_count();
+            stats.total_errors += decision_agent.error_count();
+
+            match decision_agent.status() {
+                DecisionAgentStatus::Idle => stats.idle_agents += 1,
+                DecisionAgentStatus::Thinking { .. } => stats.thinking_agents += 1,
+                DecisionAgentStatus::Responding => stats.responding_agents += 1,
+                DecisionAgentStatus::Error { .. } => stats.error_agents += 1,
+                DecisionAgentStatus::Stopped { .. } => stats.stopped_agents += 1,
+            }
+        }
+
+        stats
     }
 
     /// Stop a specific agent by ID
@@ -1414,6 +1635,27 @@ impl AgentPool {
 
 fn parse_agent_index(agent_id: &str) -> Option<usize> {
     agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
+}
+
+/// Statistics for decision agents
+#[derive(Debug, Clone, Default)]
+pub struct DecisionAgentStats {
+    /// Total number of decision agents
+    pub total_agents: usize,
+    /// Number of idle decision agents
+    pub idle_agents: usize,
+    /// Number of thinking decision agents
+    pub thinking_agents: usize,
+    /// Number of responding decision agents
+    pub responding_agents: usize,
+    /// Number of decision agents with errors
+    pub error_agents: usize,
+    /// Number of stopped decision agents
+    pub stopped_agents: usize,
+    /// Total decisions made
+    pub total_decisions: u64,
+    /// Total errors encountered
+    pub total_errors: u64,
 }
 
 #[cfg(test)]
