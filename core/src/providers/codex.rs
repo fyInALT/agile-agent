@@ -66,7 +66,16 @@ fn run_codex(
 ) -> Result<()> {
     let mut command = Command::new(&executable);
 
-    // Build exec mode args - bypass sandbox to avoid bubblewrap permission issues
+    // Build exec mode args
+    // SECURITY NOTE: --dangerously-bypass-approvals-and-sandbox is required because:
+    // 1. codex app-server mode requires bubblewrap sandbox
+    // 2. bubblewrap needs unprivileged user namespace creation
+    // 3. Linux AppArmor blocks unprivileged user namespaces by default
+    // This flag bypasses all approvals AND sandbox isolation.
+    // Commands will execute without approval prompts.
+    // Production systems should either:
+    // - Use system-level fix: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+    // - Or ensure this flag is only used in trusted environments
     let mut args: Vec<String> = vec![
         "exec".to_string(),
         "--dangerously-bypass-approvals-and-sandbox".to_string(),
@@ -214,6 +223,7 @@ struct ExecEvent {
     #[serde(default)]
     item: Option<serde_json::Value>,
     #[serde(default)]
+    #[allow(dead_code)]
     usage: Option<serde_json::Value>,
 }
 
@@ -1175,6 +1185,162 @@ mod tests {
                 input_preview: Some("ls -la".to_string()),
                 source: None,
             }
+        );
+    }
+
+    #[test]
+    fn parses_file_change_with_snake_case_format() {
+        let item = serde_json::json!({
+            "id": "patch-1",
+            "type": "file_change",
+            "status": "completed",
+            "changes": [
+                {
+                    "path": "/repo/lib.rs",
+                    "kind": "update",
+                    "diff": "+fn new() {}",
+                    "move_path": null
+                }
+            ]
+        });
+
+        let events = parse_item_event("item.completed", &item, &HashSet::new());
+        assert_eq!(
+            events[0],
+            ProviderEvent::PatchApplyFinished {
+                call_id: Some("patch-1".to_string()),
+                changes: vec![crate::tool_calls::PatchChange {
+                    path: "/repo/lib.rs".to_string(),
+                    move_path: None,
+                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    diff: "+fn new() {}".to_string(),
+                    added: 1,
+                    removed: 0,
+                }],
+                status: crate::tool_calls::PatchApplyStatus::Completed,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_web_search_with_snake_case_format() {
+        let started = serde_json::json!({
+            "id": "search-1",
+            "type": "web_search",
+            "query": "rust tutorials"
+        });
+        let completed = serde_json::json!({
+            "id": "search-1",
+            "type": "web_search",
+            "query": "rust tutorials",
+            "action": { "type": "search", "query": "rust tutorials" }
+        });
+
+        assert_eq!(
+            parse_item_event("item.started", &started, &HashSet::new()),
+            vec![ProviderEvent::WebSearchStarted {
+                call_id: Some("search-1".to_string()),
+                query: "rust tutorials".to_string(),
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item.completed", &completed, &HashSet::new()),
+            vec![ProviderEvent::WebSearchFinished {
+                call_id: Some("search-1".to_string()),
+                query: "rust tutorials".to_string(),
+                action: Some(crate::tool_calls::WebSearchAction::Search {
+                    query: Some("rust tutorials".to_string()),
+                    queries: None,
+                }),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_mcp_tool_call_with_snake_case_format() {
+        let started = serde_json::json!({
+            "id": "mcp-1",
+            "type": "mcp_tool_call",
+            "server": "filesystem",
+            "tool": "read_file",
+            "status": "in_progress",
+            "arguments": { "path": "/tmp/test.txt" }
+        });
+        let completed = serde_json::json!({
+            "id": "mcp-1",
+            "type": "mcp_tool_call",
+            "server": "filesystem",
+            "tool": "read_file",
+            "status": "completed",
+            "arguments": { "path": "/tmp/test.txt" },
+            "result": {
+                "content": [{ "type": "text", "text": "file contents" }],
+                "is_error": false
+            }
+        });
+
+        assert_eq!(
+            parse_item_event("item.started", &started, &HashSet::new()),
+            vec![ProviderEvent::McpToolCallStarted {
+                call_id: Some("mcp-1".to_string()),
+                invocation: crate::tool_calls::McpInvocation {
+                    server: "filesystem".to_string(),
+                    tool: "read_file".to_string(),
+                    arguments: Some(serde_json::json!({ "path": "/tmp/test.txt" })),
+                },
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item.completed", &completed, &HashSet::new()),
+            vec![ProviderEvent::McpToolCallFinished {
+                call_id: Some("mcp-1".to_string()),
+                invocation: crate::tool_calls::McpInvocation {
+                    server: "filesystem".to_string(),
+                    tool: "read_file".to_string(),
+                    arguments: Some(serde_json::json!({ "path": "/tmp/test.txt" })),
+                },
+                result_blocks: vec![serde_json::json!({
+                    "type": "text",
+                    "text": "file contents"
+                })],
+                error: None,
+                status: crate::tool_calls::McpToolCallStatus::Completed,
+                is_error: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_image_types_with_snake_case_format() {
+        let image_view = serde_json::json!({
+            "id": "img-1",
+            "type": "image_view",
+            "path": "screenshot.png"
+        });
+        let image_generation = serde_json::json!({
+            "id": "img-gen-1",
+            "type": "image_generation",
+            "status": "completed",
+            "revised_prompt": "A colorful diagram",
+            "result": "generated.png",
+            "saved_path": "/tmp/generated.png"
+        });
+
+        assert_eq!(
+            parse_item_event("item.completed", &image_view, &HashSet::new()),
+            vec![ProviderEvent::ViewImage {
+                call_id: Some("img-1".to_string()),
+                path: "screenshot.png".to_string(),
+            }]
+        );
+        assert_eq!(
+            parse_item_event("item.completed", &image_generation, &HashSet::new()),
+            vec![ProviderEvent::ImageGenerationFinished {
+                call_id: Some("img-gen-1".to_string()),
+                revised_prompt: Some("A colorful diagram".to_string()),
+                result: Some("generated.png".to_string()),
+                saved_path: Some("/tmp/generated.png".to_string()),
+            }]
         );
     }
 }
