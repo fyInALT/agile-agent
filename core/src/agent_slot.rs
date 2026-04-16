@@ -595,11 +595,16 @@ impl AgentSlot {
 
     /// Get the agent's working directory
     ///
-    /// Returns the worktree path if set, otherwise the current directory.
+    /// Returns the worktree path if set, otherwise falls back to a reasonable default.
+    /// For agents without worktrees, this typically returns the project root.
     pub fn cwd(&self) -> PathBuf {
-        self.worktree_path
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        self.worktree_path.clone().unwrap_or_else(|| {
+            // Try current directory first, then home directory as fallback
+            std::env::current_dir()
+                .ok()
+                .or_else(|| std::env::var("HOME").ok().map(PathBuf::from))
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+        })
     }
 
     /// Set worktree information
