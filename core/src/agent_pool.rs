@@ -1109,6 +1109,21 @@ impl AgentPool {
             }),
         );
 
+        // Spawn decision agent for OVERVIEW (if provider supports it)
+        // All non-Mock agents should have decision layer support
+        if provider_kind != ProviderKind::Mock {
+            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                logging::warn_event(
+                    "pool.overview.decision_agent_failed",
+                    "failed to spawn decision agent for OVERVIEW",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+            }
+        }
+
         Ok(agent_id)
     }
 
