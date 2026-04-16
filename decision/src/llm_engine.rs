@@ -1,18 +1,21 @@
 //! LLM-based decision engine
 //!
 //! Sprint 3.2: Uses actual LLM provider for decision making.
+//! Sprint 3.3: Added LLMCaller trait for provider integration.
 
 use crate::action::DecisionAction;
 use crate::action_registry::ActionRegistry;
 use crate::context::DecisionContext;
 use crate::engine::{DecisionEngine, SessionHandle};
 use crate::error::DecisionError;
+use crate::llm_caller::{LLMCaller, MockLLMCaller};
 use crate::output::DecisionOutput;
 use crate::provider_kind::ProviderKind;
 use crate::situation::DecisionSituation;
 use crate::types::{ActionType, DecisionEngineType, SituationType};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
 
 /// LLM decision engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +64,10 @@ pub struct LLMDecisionEngine {
 
     /// Healthy flag
     healthy: bool,
+
+    /// LLM caller for making provider calls (optional)
+    /// If not set, uses built-in mock caller
+    llm_caller: Option<Arc<dyn LLMCaller>>,
 }
 
 /// Decision record for LLM history
@@ -94,6 +101,7 @@ impl LLMDecisionEngine {
             config: LLMEngineConfig::default(),
             history: Vec::new(),
             healthy: true,
+            llm_caller: None,
         }
     }
 
@@ -105,6 +113,7 @@ impl LLMDecisionEngine {
             config,
             history: Vec::new(),
             healthy: true,
+            llm_caller: None,
         }
     }
 
@@ -116,7 +125,43 @@ impl LLMDecisionEngine {
             config: LLMEngineConfig::default(),
             history: Vec::new(),
             healthy: true,
+            llm_caller: None,
         }
+    }
+
+    /// Create with custom LLM caller
+    ///
+    /// Use this to provide real provider integration.
+    pub fn with_llm_caller(provider: ProviderKind, caller: Arc<dyn LLMCaller>) -> Self {
+        Self {
+            provider,
+            session: None,
+            config: LLMEngineConfig::default(),
+            history: Vec::new(),
+            healthy: true,
+            llm_caller: Some(caller),
+        }
+    }
+
+    /// Create with custom configuration and LLM caller
+    pub fn with_config_and_caller(
+        provider: ProviderKind,
+        config: LLMEngineConfig,
+        caller: Arc<dyn LLMCaller>,
+    ) -> Self {
+        Self {
+            provider,
+            session: None,
+            config,
+            history: Vec::new(),
+            healthy: true,
+            llm_caller: Some(caller),
+        }
+    }
+
+    /// Set the LLM caller after creation
+    pub fn set_llm_caller(&mut self, caller: Arc<dyn LLMCaller>) {
+        self.llm_caller = Some(caller);
     }
 
     /// Build prompt from context
@@ -297,24 +342,21 @@ impl LLMDecisionEngine {
         }
     }
 
-    /// Simulate LLM call (placeholder - actual implementation would use provider)
+    /// Call LLM (uses LLMCaller if set, otherwise uses mock)
     fn call_llm(&mut self, prompt: &str) -> crate::error::Result<String> {
-        // This is a placeholder - in production, this would:
-        // 1. Get provider instance from session
-        // 2. Send prompt with timeout
-        // 3. Parse response
-
-        // For now, return a mock structured response based on prompt content
-        // Match both situation_type name and to_prompt_text format
-        if prompt.contains("waiting_for_choice") || prompt.contains("Waiting for choice") {
-            Ok("ACTION: select_option\nPARAMETERS: {\"option_id\": \"A\"}\nREASONING: First option is typically safest\nCONFIDENCE: 0.85".to_string())
-        } else if prompt.contains("claims_completion") || prompt.contains("Claims completion") {
-            Ok("ACTION: confirm_completion\nPARAMETERS: {}\nREASONING: Task appears complete based on output\nCONFIDENCE: 0.75".to_string())
-        } else if prompt.contains("error") || prompt.contains("Error") {
-            Ok("ACTION: retry\nPARAMETERS: {}\nREASONING: Retry may resolve transient error\nCONFIDENCE: 0.70".to_string())
-        } else {
-            Ok("ACTION: reflect\nPARAMETERS: {}\nREASONING: Need to analyze situation further\nCONFIDENCE: 0.60".to_string())
+        // If we have a custom LLM caller, use it
+        if let Some(caller) = &self.llm_caller {
+            if !caller.is_healthy() {
+                return Err(DecisionError::EngineError(
+                    format!("LLM caller {} is not healthy", caller.caller_id())
+                ));
+            }
+            return caller.call(prompt, self.config.timeout_seconds * 1000);
         }
+
+        // Otherwise, use the built-in mock caller for testing
+        let mock = MockLLMCaller::new("built-in-mock");
+        mock.call(prompt, self.config.timeout_seconds * 1000)
     }
 
     /// Call LLM with retry logic

@@ -1,5 +1,6 @@
 pub mod decision_agent_slot;
 pub mod decision_mail;
+pub mod llm_caller;
 pub mod agent_mail;
 pub mod agent_memory;
 pub mod agent_messages;
