@@ -1,6 +1,32 @@
 //! agent-decision crate
 //!
 //! Decision layer for autonomous development - monitors provider outputs and makes decisions.
+//!
+//! # Architecture Overview
+//!
+//! The decision layer uses a flexible `DecisionMaker` abstraction that allows
+//! different decision strategies to be plugged in:
+//!
+//! ```text
+//! ┌──────────────────┐    ┌──────────────────┐
+//! │ DecisionMaker    │    │ DecisionStrategy │
+//! │ (executes        │    │ (selects which   │
+//! │  decisions)      │    │  maker to use)   │
+//! └──────────────────┘    └──────────────────┘
+//!          │                       │
+//!          ▼                       ▼
+//! ┌─────────────────────────────────────────────┐
+//! │            DecisionPipeline                 │
+//! │  (orchestrates the decision flow)           │
+//! └─────────────────────────────────────────────┘
+//! ```
+//!
+//! # Extensibility
+//!
+//! - `DecisionMaker`: Implement custom decision execution logic
+//! - `DecisionStrategy`: Implement custom maker selection logic
+//! - `DecisionPreProcessor`: Pre-process context before decision
+//! - `DecisionPostProcessor`: Post-process output after decision
 
 pub mod action;
 pub mod action_registry;
@@ -47,6 +73,12 @@ pub mod metrics;
 // Sprint 9: Configurable Prompts
 pub mod prompts;
 
+// Sprint 10: Decision Maker Abstraction
+pub mod maker;
+pub mod maker_registry;
+pub mod pipeline;
+pub mod strategy;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -91,7 +123,11 @@ pub use llm_caller::*;
 pub use llm_engine::*;
 pub use mock_engine::*;
 pub use rule_engine::*;
-pub use tiered_engine::*;
+// Note: tiered_engine exports DecisionTier which conflicts with strategy::DecisionTier
+// We export specific types instead to avoid ambiguity
+pub use tiered_engine::{
+    TieredDecisionEngine, TieredEngineConfig, TieredDecisionRecord, TierStatistics,
+};
 
 // Re-export Sprint 4-5 types
 pub use lifecycle::*;
@@ -105,3 +141,9 @@ pub use metrics::*;
 
 // Re-export Sprint 9 types
 pub use prompts::*;
+
+// Re-export Sprint 10 types
+pub use maker::*;
+pub use maker_registry::*;
+pub use pipeline::*;
+pub use strategy::*;
