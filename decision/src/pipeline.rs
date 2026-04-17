@@ -201,11 +201,16 @@ impl DecisionPipeline {
         // 2. Strategy selection
         let selection = self.registry.select_maker(&processed_context);
 
-        // 3. Maker execution - use the selected maker
+        // 3. Maker execution - use the selected maker with stored registries
         let maker_type = selection.maker_type.clone();
-        let registries = DecisionRegistries::new();
 
-        let result = self.execute_maker(&selection.maker_type, processed_context, &registries);
+        // Get registries from the registry's stored registries and execute maker
+        // Note: We need to release the borrow before calling record_decision
+        let result = {
+            let registries_guard = self.registry.registries_ref().read().unwrap();
+            let registries = &*registries_guard;
+            self.execute_maker(&selection.maker_type, processed_context, registries)
+        };
 
         let output = match result {
             Ok(out) => out,
@@ -564,6 +569,7 @@ mod tests {
     use super::*;
     use crate::builtin_situations::WaitingForChoiceSituation;
     use crate::context::DecisionContext;
+    use crate::maker::DecisionRegistries;
     use crate::maker_registry::DecisionMakerRegistryBuilder;
     use crate::output::DecisionOutput;
 

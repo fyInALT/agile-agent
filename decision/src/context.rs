@@ -34,6 +34,21 @@ pub struct DecisionContext {
     pub metadata: HashMap<String, String>,
 }
 
+impl Clone for DecisionContext {
+    fn clone(&self) -> Self {
+        Self {
+            trigger_situation: self.trigger_situation.clone_boxed(),
+            main_agent_id: self.main_agent_id.clone(),
+            current_task_id: self.current_task_id.clone(),
+            current_story_id: self.current_story_id.clone(),
+            running_context: self.running_context.clone(),
+            project_rules: self.project_rules.clone(),
+            decision_history: self.decision_history.clone(),
+            metadata: self.metadata.clone(),
+        }
+    }
+}
+
 impl DecisionContext {
     pub fn new(situation: Box<dyn DecisionSituation>, main_agent_id: impl Into<String>) -> Self {
         Self {
