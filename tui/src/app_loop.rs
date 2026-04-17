@@ -252,13 +252,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }),
                         );
 
-                        // Check if agent slot is in responding state (ready for new request)
+                        // Check if agent slot is in a valid state for new provider request
+                        // Valid states: "responding" (already ready), "starting" (transitioned from idle)
+                        // Invalid states: "idle", "blocked", etc.
                         let slot_status = state.agent_pool.as_ref()
                             .and_then(|pool| pool.get_slot_by_id(&agent_id))
                             .map(|slot| slot.status().label());
 
                         if let Some(status) = slot_status {
-                            if status == "responding" {
+                            if status == "responding" || status == "starting" {
                                 // Agent is ready to process the instruction
                                 // Start provider request without injecting mail (instruction is the prompt)
                                 let _started = start_multi_agent_provider_request_for_agent(
@@ -270,10 +272,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             } else {
                                 logging::warn_event(
                                     "decision_layer.custom_instruction_skip",
-                                    "agent not in responding state, skipping provider request",
+                                    "agent not in valid state for provider request",
                                     serde_json::json!({
                                         "agent_id": agent_id.as_str(),
                                         "status": status,
+                                        "valid_states": ["responding", "starting"],
                                     }),
                                 );
                             }
