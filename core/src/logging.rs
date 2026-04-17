@@ -143,6 +143,26 @@ pub fn test_guard() -> MutexGuard<'static, ()> {
     TEST_GUARD.lock().expect("test guard lock poisoned")
 }
 
+/// Shutdown the logger and release file handles
+///
+/// This should be called before process exit to ensure clean shutdown.
+/// Particularly important in tests to prevent file handle leaks.
+pub fn shutdown() {
+    let Some(slot) = LOGGER.get() else {
+        return;
+    };
+    let Ok(mut guard) = slot.lock() else {
+        return;
+    };
+    if let Some(state) = guard.take() {
+        // Flush and drop the writer to close file handle
+        if let Ok(mut file) = state.writer.into_inner() {
+            let _ = file.flush();
+        }
+    }
+    debug_event("logging.shutdown", "logger shutdown complete", json!({}));
+}
+
 fn write_event(level: &str, event: &str, message: &str, fields: serde_json::Value) {
     let Some(slot) = LOGGER.get() else {
         return;

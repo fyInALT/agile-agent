@@ -805,9 +805,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path().to_path_buf();
 
-        // Initialize a git repo
+        // Initialize a git repo with explicit main branch
         Command::new("git")
-            .args(["init"])
+            .args(["init", "-b", "main"])
             .current_dir(&repo_path)
             .output()
             .expect("Failed to init git repo");
