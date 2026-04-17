@@ -312,7 +312,17 @@ impl WorktreeManager {
 
         args.push(path.to_str().unwrap_or(""));
 
-        if let Some(base) = &options.base {
+        // Add start-point for the worktree
+        // - For new branches: base commit is specified after path (already handled by -b flag above)
+        // - For existing branches: use the branch name as start-point
+        // - For detached HEAD: optionally specify commit
+        if let Some(branch) = &options.branch {
+            if !options.create_branch {
+                // Use existing branch as start-point
+                args.push(branch);
+            }
+        } else if let Some(base) = &options.base {
+            // Detached HEAD with specific base commit
             args.push(base);
         }
 
