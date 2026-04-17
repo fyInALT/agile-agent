@@ -35,7 +35,7 @@ use crate::composer::textarea::TextArea;
 use crate::composer::textarea::TextAreaState;
 use crate::confirmation_overlay::ConfirmationOverlay;
 use crate::human_decision_overlay::HumanDecisionOverlay;
-use crate::launch_config_overlay::{LaunchConfigOverlayCommand, LaunchConfigOverlayState};
+use crate::launch_config_overlay::LaunchConfigOverlayState;
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
@@ -1042,9 +1042,50 @@ impl TuiState {
         self.sync_app_input_from_composer();
 
         let workplace_id = self.session.workplace().workplace_id.clone();
-        let mut pool = AgentPool::new(workplace_id, 10);
+        let cwd = self.session.app.cwd.clone();
+
+        // Try to create pool with worktree support
+        let workplace_store = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd).ok();
+        let workplace_path = workplace_store.as_ref().map(|w| w.path().to_path_buf());
+
+        let pool = if let Some(wp_path) = workplace_path {
+            AgentPool::new_with_worktrees(
+                workplace_id.clone(),
+                10,
+                cwd.clone(),
+                wp_path,
+            )
+        } else {
+            Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
+        };
+
+        let mut pool = match pool {
+            Ok(p) => {
+                agent_core::logging::debug_event(
+                    "tui.restore.worktree_enabled",
+                    "restored agent pool with worktree support",
+                    serde_json::json!({
+                        "cwd": cwd.display().to_string(),
+                    }),
+                );
+                p
+            }
+            Err(e) => {
+                // Fallback to regular pool if worktree creation fails
+                agent_core::logging::warn_event(
+                    "tui.restore.worktree_fallback",
+                    "worktree pool creation failed, using regular pool",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                        "cwd": cwd.display().to_string(),
+                    }),
+                );
+                AgentPool::new(workplace_id, 10)
+            }
+        };
+
         for agent in snapshot.agents {
-            let mut restored_slot = agent_core::agent_slot::AgentSlot::restored(
+            let mut restored_slot = agent_core::agent_slot::AgentSlot::restored_with_worktree(
                 agent.agent_id.clone(),
                 agent.codename.clone(),
                 agent.provider_type,
@@ -1053,6 +1094,9 @@ impl TuiState {
                 agent.restore_session_handle(),
                 agent.transcript.clone(),
                 agent.assigned_task_id.clone(),
+                agent.worktree_path.clone(),
+                agent.worktree_branch.clone(),
+                agent.worktree_id.clone(),
             );
             // Attach launch bundle if available
             if let Some(bundle) = agent.launch_bundle {
@@ -1064,6 +1108,18 @@ impl TuiState {
                         "agent_id": agent.agent_id.as_str(),
                         "provider": agent.provider_type,
                         "source": "snapshot",
+                    }),
+                );
+            }
+            // Log worktree restoration
+            if let Some(wt_path) = &agent.worktree_path {
+                agent_core::logging::debug_event(
+                    "worktree.restore",
+                    "agent restored with worktree",
+                    serde_json::json!({
+                        "agent_id": agent.agent_id.as_str(),
+                        "worktree_path": wt_path.display().to_string(),
+                        "worktree_branch": agent.worktree_branch,
                     }),
                 );
             }

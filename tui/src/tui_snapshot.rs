@@ -65,7 +65,7 @@ pub struct TuiResumeSnapshot {
 }
 
 fn default_snapshot_version() -> String {
-    "v2".to_string()
+    "v3".to_string()
 }
 
 /// Persisted view of one TUI agent.
@@ -82,6 +82,15 @@ pub struct PersistedAgentSnapshot {
     /// Launch configuration bundle for this agent (added in V2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_bundle: Option<AgentLaunchBundle>,
+    /// Worktree path for isolated agent workspace (added in V3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<std::path::PathBuf>,
+    /// Worktree branch name (added in V3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_branch: Option<String>,
+    /// Worktree ID (added in V3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
 }
 
 /// Serializable snapshot of a live agent status.
@@ -223,6 +232,9 @@ impl PersistedAgentSnapshot {
             transcript: slot.transcript().to_vec(),
             assigned_task_id: slot.assigned_task_id().cloned(),
             launch_bundle: None,
+            worktree_path: slot.worktree_path().cloned(),
+            worktree_branch: slot.worktree_branch().cloned(),
+            worktree_id: slot.worktree_id().cloned(),
         }
     }
 
@@ -520,5 +532,38 @@ mod tests {
         assert!(alpha_slot.transcript().iter().any(|entry| {
             matches!(entry, agent_core::app::TranscriptEntry::Assistant(text) if text == "restored worker output")
         }));
+    }
+
+    #[test]
+    fn persisted_agent_snapshot_preserves_worktree_info() {
+        use agent_core::agent_slot::AgentSlot;
+        use agent_core::agent_runtime::{AgentId, AgentCodename, ProviderType};
+        use std::path::PathBuf;
+
+        // Create a slot with worktree info
+        let mut slot = AgentSlot::new(
+            AgentId::new("agent_001"),
+            AgentCodename::new("alpha"),
+            ProviderType::Claude,
+        );
+        slot.set_worktree(
+            PathBuf::from("/path/to/worktrees/wt-agent_001"),
+            Some("agent/agent_001".to_string()),
+            "wt-agent_001".to_string(),
+        );
+
+        // Convert to snapshot
+        let snapshot = PersistedAgentSnapshot::from_slot(&slot);
+
+        // Verify worktree info is captured
+        assert_eq!(snapshot.worktree_path, Some(PathBuf::from("/path/to/worktrees/wt-agent_001")));
+        assert_eq!(snapshot.worktree_branch, Some("agent/agent_001".to_string()));
+        assert_eq!(snapshot.worktree_id, Some("wt-agent_001".to_string()));
+
+        // Verify serialization includes worktree fields
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("worktree_path"));
+        assert!(json.contains("worktree_branch"));
+        assert!(json.contains("worktree_id"));
     }
 }

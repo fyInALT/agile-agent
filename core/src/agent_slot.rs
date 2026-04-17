@@ -526,6 +526,35 @@ impl AgentSlot {
         transcript: Vec<TranscriptEntry>,
         assigned_task_id: Option<TaskId>,
     ) -> Self {
+        Self::restored_with_worktree(
+            agent_id,
+            codename,
+            provider_type,
+            role,
+            status,
+            session_handle,
+            transcript,
+            assigned_task_id,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// Restore a slot from persisted state with worktree information.
+    pub fn restored_with_worktree(
+        agent_id: AgentId,
+        codename: AgentCodename,
+        provider_type: ProviderType,
+        role: AgentRole,
+        status: AgentSlotStatus,
+        session_handle: Option<SessionHandle>,
+        transcript: Vec<TranscriptEntry>,
+        assigned_task_id: Option<TaskId>,
+        worktree_path: Option<PathBuf>,
+        worktree_branch: Option<String>,
+        worktree_id: Option<String>,
+    ) -> Self {
         Self {
             agent_id,
             codename,
@@ -540,9 +569,9 @@ impl AgentSlot {
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
-            worktree_path: None,
-            worktree_branch: None,
-            worktree_id: None,
+            worktree_path,
+            worktree_branch,
+            worktree_id,
         }
     }
 
