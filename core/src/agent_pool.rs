@@ -1729,10 +1729,37 @@ impl AgentPool {
                     ));
 
                     // Transition agent to responding state so it processes the instruction
-                    // Bug fix: Use responding status instead of idle to trigger provider processing
-                    if slot.status().is_idle() || slot.status().is_blocked() || slot.status().is_waiting_for_input() {
-                        let _ = slot.transition_to(AgentSlotStatus::responding_now());
-                    }
+                    // NOTE: State transition rules:
+                    // - Blocked → Responding: VALID
+                    // - WaitingForInput → Responding: VALID
+                    // - Idle → Responding: INVALID (must go through Starting first)
+                    //
+                    // For Idle agents, we transition to Starting state instead.
+                    // The app_loop will handle the transition to Responding when
+                    // the provider thread starts (see start_multi_agent_provider_request_for_agent).
+                    let current_status = slot.status().clone();
+                    let transition_result = if current_status.is_blocked() || current_status.is_waiting_for_input() {
+                        slot.transition_to(AgentSlotStatus::responding_now())
+                    } else if current_status.is_idle() {
+                        // Idle cannot go directly to Responding - use Starting as intermediate
+                        slot.transition_to(AgentSlotStatus::starting())
+                    } else {
+                        // Already in valid state, no transition needed
+                        Ok(())
+                    };
+
+                    // Log transition result for debugging
+                    logging::debug_event(
+                        "decision_layer.continue_all_tasks_transition",
+                        "continue_all_tasks status transition",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "prompt_type": "continue_all_tasks",
+                            "instruction": instruction,
+                            "status_before": current_status.label(),
+                            "transition_result": transition_result.map(|_| "success").map_err(|e| e),
+                        }),
+                    );
 
                     // Log: Continue all tasks action
                     logging::debug_event(
@@ -1742,7 +1769,7 @@ impl AgentPool {
                             "work_agent_id": work_agent_id.as_str(),
                             "prompt_type": "continue_all_tasks",
                             "instruction": instruction,
-                            "agent_status_after": "responding",
+                            "agent_status_after": slot.status().label(),
                         }),
                     );
 
