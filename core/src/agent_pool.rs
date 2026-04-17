@@ -899,6 +899,28 @@ impl AgentPool {
                 .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
         }
 
+        // Ensure decision agent exists for this work agent
+        // It may have been stopped or lost during pause/crash
+        if !self.has_decision_agent(agent_id) {
+            if let Ok(slot_index) = self.find_slot_index(agent_id) {
+                let provider_kind_opt = self.slots[slot_index].provider_type().to_provider_kind();
+                if let Some(provider_kind) = provider_kind_opt {
+                    if provider_kind != ProviderKind::Mock {
+                        if let Err(e) = self.spawn_decision_agent_for(agent_id) {
+                            logging::warn_event(
+                                "pool.resume.decision_agent_failed",
+                                "failed to spawn decision agent for resumed agent",
+                                serde_json::json!({
+                                    "agent_id": agent_id.as_str(),
+                                    "error": e,
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         logging::debug_event(
             "pool.agent.resume_with_worktree",
             "resumed agent with worktree",
@@ -2078,16 +2100,18 @@ impl AgentPool {
         // All non-Mock agents should have decision layer support
         if let Ok(slot_index) = self.find_slot_index(&agent_id) {
             let provider_kind_opt = self.slots[slot_index].provider_type().to_provider_kind();
-            if provider_kind_opt.is_some() {
-                if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
-                    logging::warn_event(
-                        "pool.restore.decision_agent_failed",
-                        "failed to spawn decision agent for restored agent",
-                        serde_json::json!({
-                            "agent_id": agent_id.as_str(),
-                            "error": e,
-                        }),
-                    );
+            if let Some(provider_kind) = provider_kind_opt {
+                if provider_kind != ProviderKind::Mock {
+                    if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                        logging::warn_event(
+                            "pool.restore.decision_agent_failed",
+                            "failed to spawn decision agent for restored agent",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "error": e,
+                            }),
+                        );
+                    }
                 }
             }
         }
