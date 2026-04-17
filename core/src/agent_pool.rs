@@ -1334,14 +1334,16 @@ impl AgentPool {
     ) -> Result<(), String> {
         // Clone situation_type before sending for logging
         let situation_type_name = request.situation_type.name.clone();
+        let situation_prompt = request.context.trigger_situation.to_prompt_text();
 
         if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
             sender.send_request(request).map_err(|e| {
                 logging::warn_event(
-                    "pool.decision_request.send_failed",
-                    "failed to send decision request",
+                    "decision_layer.request_send_failed",
+                    "failed to send decision request to decision agent",
                     serde_json::json!({
                         "work_agent_id": work_agent_id.as_str(),
+                        "situation_type": situation_type_name,
                         "error": e,
                     }),
                 );
@@ -1349,16 +1351,24 @@ impl AgentPool {
             })?;
 
             logging::debug_event(
-                "pool.decision_request.sent",
-                "sent decision request",
+                "decision_layer.request_sent",
+                "decision request sent to decision agent",
                 serde_json::json!({
                     "work_agent_id": work_agent_id.as_str(),
                     "situation_type": situation_type_name,
+                    "situation_prompt": situation_prompt,
                 }),
             );
 
             Ok(())
         } else {
+            logging::warn_event(
+                "decision_layer.no_decision_agent",
+                "no decision agent available for work agent",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                }),
+            );
             Err(format!(
                 "No decision agent for work agent {}",
                 work_agent_id.as_str()
@@ -1435,13 +1445,16 @@ impl AgentPool {
             let action_type = action.action_type().name.clone();
             let params_str = action.serialize_params();
 
+            // Log: Decision action execution started
             logging::debug_event(
-                "pool.decision_action.execute",
-                "executing decision action",
+                "decision_layer.action_executing",
+                "executing decision action on work agent",
                 serde_json::json!({
                     "work_agent_id": work_agent_id.as_str(),
                     "action_type": action_type,
-                    "params": params_str,
+                    "action_params": params_str,
+                    "reasoning": output.reasoning,
+                    "confidence": output.confidence,
                 }),
             );
 
@@ -1459,7 +1472,7 @@ impl AgentPool {
                         // Verify this request belongs to our agent (double-check)
                         if request.agent_id != work_agent_id.as_str() {
                             logging::warn_event(
-                                "pool.decision_action.mismatch",
+                                "decision_layer.agent_mismatch",
                                 "request agent_id mismatch",
                                 serde_json::json!({
                                     "work_agent_id": work_agent_id.as_str(),
@@ -1476,14 +1489,27 @@ impl AgentPool {
 
                         match result {
                             Ok(DecisionExecutionResult::Executed { .. }) => {
+                                // Log: Selection executed
+                                logging::debug_event(
+                                    "decision_layer.action_completed",
+                                    "select_option action executed",
+                                    serde_json::json!({
+                                        "work_agent_id": work_agent_id.as_str(),
+                                        "action_type": "select_option",
+                                        "option_id": option_id,
+                                    }),
+                                );
                                 DecisionExecutionResult::Executed { option_id }
                             }
                             Ok(other) => other,
                             Err(e) => {
                                 logging::warn_event(
-                                    "pool.decision_action.process_failed",
+                                    "decision_layer.process_failed",
                                     "failed to process human response",
-                                    serde_json::json!({ "error": e }),
+                                    serde_json::json!({
+                                        "work_agent_id": work_agent_id.as_str(),
+                                        "error": e,
+                                    }),
                                 );
                                 DecisionExecutionResult::Cancelled
                             }
@@ -1491,7 +1517,7 @@ impl AgentPool {
                     } else {
                         // No pending request for this agent - might not be blocked correctly
                         logging::warn_event(
-                            "pool.decision_action.no_request",
+                            "decision_layer.no_pending_request",
                             "no pending request for this agent",
                             serde_json::json!({
                                 "work_agent_id": work_agent_id.as_str(),
@@ -1508,10 +1534,29 @@ impl AgentPool {
                             HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
                         let _ = self.process_human_response(response);
                     }
+                    // Log: Skip action executed
+                    logging::debug_event(
+                        "decision_layer.action_completed",
+                        "skip action executed",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "action_type": "skip",
+                        }),
+                    );
                     DecisionExecutionResult::Skipped
                 }
                 "request_human" => {
                     // Already in human decision queue - nothing additional to do
+                    // Log: Request human action
+                    logging::debug_event(
+                        "decision_layer.action_completed",
+                        "request_human action - awaiting human input",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "action_type": "request_human",
+                            "agent_status": "blocked_for_human",
+                        }),
+                    );
                     DecisionExecutionResult::AcceptedRecommendation
                 }
                 "custom_instruction" => {
@@ -1526,6 +1571,16 @@ impl AgentPool {
                             instruction.clone(),
                         ));
                     }
+                    // Log: Work agent prompt sent
+                    logging::debug_event(
+                        "decision_layer.work_agent_prompt",
+                        "custom instruction sent to work agent",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "prompt_type": "custom_instruction",
+                            "instruction": instruction,
+                        }),
+                    );
                     DecisionExecutionResult::CustomInstruction { instruction }
                 }
                 "continue" => {
@@ -1533,6 +1588,16 @@ impl AgentPool {
                     if slot.status().is_blocked() {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
+                    // Log: Continue action executed
+                    logging::debug_event(
+                        "decision_layer.action_completed",
+                        "continue action executed - agent transitioning to idle",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "action_type": "continue",
+                            "agent_status_after": "idle",
+                        }),
+                    );
                     DecisionExecutionResult::AcceptedRecommendation
                 }
                 "reflect" => {
@@ -1554,12 +1619,15 @@ impl AgentPool {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
 
+                    // Log: Work agent prompt sent
                     logging::debug_event(
-                        "pool.decision_action.reflect",
-                        "added reflection prompt for agent",
+                        "decision_layer.work_agent_prompt",
+                        "reflection prompt sent to work agent",
                         serde_json::json!({
                             "work_agent_id": work_agent_id.as_str(),
+                            "prompt_type": "reflect",
                             "prompt": prompt,
+                            "agent_status_after": "idle",
                         }),
                     );
 
@@ -1577,12 +1645,15 @@ impl AgentPool {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
 
+                    // Log: Completion confirmed
                     logging::debug_event(
-                        "pool.decision_action.confirm_completion",
-                        "task completion confirmed by decision",
+                        "decision_layer.action_completed",
+                        "task completion confirmed by decision layer",
                         serde_json::json!({
                             "work_agent_id": work_agent_id.as_str(),
+                            "action_type": "confirm_completion",
                             "task_id": slot.assigned_task_id().map(|t| t.as_str()).unwrap_or("none"),
+                            "agent_status_after": "idle",
                         }),
                     );
 
@@ -1607,12 +1678,15 @@ impl AgentPool {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
 
+                    // Log: Work agent prompt sent
                     logging::debug_event(
-                        "pool.decision_action.retry",
-                        "added retry prompt for agent",
+                        "decision_layer.work_agent_prompt",
+                        "retry prompt sent to work agent",
                         serde_json::json!({
                             "work_agent_id": work_agent_id.as_str(),
+                            "prompt_type": "retry",
                             "prompt": prompt,
+                            "agent_status_after": "idle",
                         }),
                     );
 
@@ -1621,11 +1695,12 @@ impl AgentPool {
                 _ => {
                     // Unknown action type
                     logging::warn_event(
-                        "pool.decision_action.unknown",
-                        "unknown decision action type",
+                        "decision_layer.unknown_action",
+                        "unknown decision action type - action cancelled",
                         serde_json::json!({
                             "work_agent_id": work_agent_id.as_str(),
                             "action_type": action_type,
+                            "action_params": params_str,
                         }),
                     );
                     DecisionExecutionResult::Cancelled
@@ -1633,6 +1708,14 @@ impl AgentPool {
             }
         } else {
             // No actions in output - nothing to execute
+            logging::warn_event(
+                "decision_layer.no_actions",
+                "decision output has no actions - nothing to execute",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                    "reasoning": output.reasoning,
+                }),
+            );
             DecisionExecutionResult::Cancelled
         }
     }

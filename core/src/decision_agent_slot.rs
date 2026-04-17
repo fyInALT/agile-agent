@@ -315,13 +315,43 @@ impl DecisionAgentSlot {
         self.status = DecisionAgentStatus::thinking_now();
         self.last_activity = Instant::now();
 
+        // Log: Decision triggered
+        let situation_prompt = request.context.trigger_situation.to_prompt_text();
+        let available_actions = request
+            .context
+            .trigger_situation
+            .available_actions()
+            .iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<_>>();
+
         logging::debug_event(
-            "decision_agent.processing",
-            "processing decision request",
+            "decision_layer.triggered",
+            "decision layer triggered by work agent event",
             serde_json::json!({
-                "agent_id": self.agent_id,
+                "decision_agent_id": self.agent_id,
                 "work_agent_id": request.work_agent_id.as_str(),
                 "situation_type": request.situation_type.name,
+                "situation_prompt": situation_prompt,
+                "available_actions": available_actions,
+                "requires_human": request.context.trigger_situation.requires_human(),
+            }),
+        );
+
+        // Build and log the prompt sent to decision engine
+        let decision_prompt = self.engine.build_prompt(&request.context, &self.action_registry);
+        logging::debug_event(
+            "decision_layer.prompt_sent",
+            "prompt sent to decision engine",
+            serde_json::json!({
+                "decision_agent_id": self.agent_id,
+                "work_agent_id": request.work_agent_id.as_str(),
+                "prompt_length": decision_prompt.len(),
+                "prompt_preview": if decision_prompt.len() > 500 {
+                    format!("{}...[truncated]", &decision_prompt[..500])
+                } else {
+                    decision_prompt.clone()
+                },
             }),
         );
 
@@ -333,14 +363,62 @@ impl DecisionAgentSlot {
                 self.decision_count += 1;
                 self.status = DecisionAgentStatus::responding();
 
+                // Log: Decision engine response
+                let action_types = output
+                    .actions
+                    .iter()
+                    .map(|a| a.action_type().name.clone())
+                    .collect::<Vec<_>>();
+                let action_params = output
+                    .actions
+                    .iter()
+                    .map(|a| a.serialize_params())
+                    .collect::<Vec<_>>();
+
+                logging::debug_event(
+                    "decision_layer.engine_response",
+                    "decision engine returned response",
+                    serde_json::json!({
+                        "decision_agent_id": self.agent_id,
+                        "work_agent_id": request.work_agent_id.as_str(),
+                        "action_types": action_types,
+                        "action_params": action_params,
+                        "reasoning": output.reasoning,
+                        "confidence": output.confidence,
+                        "tier": self.engine.tier_stats().total,
+                    }),
+                );
+
                 // Send success response
                 let response = DecisionResponse::success(request.work_agent_id.clone(), output);
 
                 if let Err(e) = self.mail_receiver.send_response(response.clone()) {
                     self.error_count += 1;
                     self.status = DecisionAgentStatus::error(e.clone());
+
+                    logging::warn_event(
+                        "decision_layer.response_send_failed",
+                        "failed to send decision response to work agent",
+                        serde_json::json!({
+                            "decision_agent_id": self.agent_id,
+                            "work_agent_id": request.work_agent_id.as_str(),
+                            "error": e,
+                        }),
+                    );
+
                     DecisionResponse::error(request.work_agent_id.clone(), e)
                 } else {
+                    // Log: Response sent to work agent
+                    logging::debug_event(
+                        "decision_layer.response_sent",
+                        "decision response sent to work agent",
+                        serde_json::json!({
+                            "decision_agent_id": self.agent_id,
+                            "work_agent_id": request.work_agent_id.as_str(),
+                            "status": "success",
+                        }),
+                    );
+
                     // Return to idle after successful send
                     self.status = DecisionAgentStatus::idle();
                     response
@@ -352,11 +430,13 @@ impl DecisionAgentSlot {
                 self.status = DecisionAgentStatus::error(error_msg.clone());
 
                 logging::warn_event(
-                    "decision_agent.error",
-                    "decision engine error",
+                    "decision_layer.engine_error",
+                    "decision engine returned error",
                     serde_json::json!({
-                        "agent_id": self.agent_id,
+                        "decision_agent_id": self.agent_id,
+                        "work_agent_id": request.work_agent_id.as_str(),
                         "error": error_msg,
+                        "situation_type": request.situation_type.name,
                     }),
                 );
 
@@ -395,6 +475,8 @@ impl DecisionAgentSlot {
     ///
     /// Gracefully shuts down any provider thread and marks as stopped.
     pub fn stop(&mut self, reason: impl Into<String>) {
+        let reason_str = reason.into();
+
         // Stop provider thread if running
         if let Some(thread) = self.provider_thread.take() {
             // Drop the thread handle - thread will clean up
@@ -402,15 +484,16 @@ impl DecisionAgentSlot {
             drop(thread);
         }
 
-        self.status = DecisionAgentStatus::stopped(reason);
+        self.status = DecisionAgentStatus::stopped(reason_str.clone());
 
         logging::debug_event(
-            "decision_agent.stopped",
-            "decision agent stopped",
+            "decision_layer.terminated",
+            "decision agent terminated",
             serde_json::json!({
-                "agent_id": self.agent_id,
-                "decision_count": self.decision_count,
-                "error_count": self.error_count,
+                "decision_agent_id": self.agent_id,
+                "reason": reason_str,
+                "total_decisions": self.decision_count,
+                "total_errors": self.error_count,
             }),
         );
     }
@@ -422,10 +505,10 @@ impl DecisionAgentSlot {
         if self.status.has_error() {
             self.status = DecisionAgentStatus::idle();
             logging::debug_event(
-                "decision_agent.reset",
-                "decision agent reset from error",
+                "decision_layer.reset",
+                "decision agent reset from error state",
                 serde_json::json!({
-                    "agent_id": self.agent_id,
+                    "decision_agent_id": self.agent_id,
                 }),
             );
         }
