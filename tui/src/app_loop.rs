@@ -222,7 +222,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         ));
                     }
                     agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
-                        instruction: _,
+                        instruction,
                     } => {
                         if let Some(info) = output_info {
                             state.app_mut().push_decision(
@@ -238,7 +238,45 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             "🧠 {}: custom instruction sent",
                             agent_id.as_str()
                         ));
-                        // TODO: Send custom instruction to provider
+
+                        // Trigger new provider request with the instruction
+                        // Use start_raw_provider_for_agent to avoid duplicate transcript entry
+                        // since instruction was already added in execute_decision_action
+                        logging::debug_event(
+                            "decision_layer.custom_instruction_trigger",
+                            "triggering provider request for custom instruction",
+                            serde_json::json!({
+                                "agent_id": agent_id.as_str(),
+                                "instruction": instruction,
+                            }),
+                        );
+
+                        // Check if agent slot is in responding state (ready for new request)
+                        let slot_status = state.agent_pool.as_ref()
+                            .and_then(|pool| pool.get_slot_by_id(&agent_id))
+                            .map(|slot| slot.status().label());
+
+                        if let Some(status) = slot_status {
+                            if status == "responding" {
+                                // Agent is ready to process the instruction
+                                // Start provider request without injecting mail (instruction is the prompt)
+                                let _started = start_multi_agent_provider_request_for_agent(
+                                    &mut state,
+                                    agent_id.clone(),
+                                    instruction.clone(),
+                                    false, // Don't inject mail, instruction is the prompt
+                                );
+                            } else {
+                                logging::warn_event(
+                                    "decision_layer.custom_instruction_skip",
+                                    "agent not in responding state, skipping provider request",
+                                    serde_json::json!({
+                                        "agent_id": agent_id.as_str(),
+                                        "status": status,
+                                    }),
+                                );
+                            }
+                        }
                     }
                     agent_core::agent_pool::DecisionExecutionResult::Skipped => {
                         state.app_mut().push_status_message(format!(
