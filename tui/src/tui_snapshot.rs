@@ -324,6 +324,8 @@ pub fn load_resume_snapshot(workplace: &WorkplaceStore) -> Result<Option<TuiResu
 ///
 /// V1 snapshots (before launch_bundle field) are migrated to V2 by adding
 /// default launch_bundle: None to all agents.
+/// V2 snapshots (before worktree fields) are migrated to V3 by adding
+/// default worktree fields to all agents.
 fn deserialize_with_migration(json: &str) -> Result<TuiResumeSnapshot> {
     // First, parse as generic JSON to check version
     let value: serde_json::Value = serde_json::from_str(json)?;
@@ -337,14 +339,37 @@ fn deserialize_with_migration(json: &str) -> Result<TuiResumeSnapshot> {
         // Migration needed: add version field and launch_bundle fields
         let mut migrated: TuiResumeSnapshot = serde_json::from_str(json)?;
 
-        // The serde default will already handle launch_bundle being None
-        // Just need to ensure version is set
-        migrated.version = "v2".to_string();
+        // The serde default will already handle launch_bundle and worktree being None
+        // Just need to ensure version is set to latest
+        migrated.version = default_snapshot_version();
 
-        // Note: V1 snapshots are migrated to V2 with empty launch bundles
+        agent_core::logging::debug_event(
+            "snapshot.migration.v1_to_v3",
+            "migrated v1 snapshot to v3",
+            serde_json::json!({
+                "agents_count": migrated.agents.len(),
+            }),
+        );
+
+        Ok(migrated)
+    } else if version == "v2" {
+        // Migration needed: add worktree fields
+        let mut migrated: TuiResumeSnapshot = serde_json::from_str(json)?;
+
+        // The serde default will already handle worktree fields being None
+        migrated.version = default_snapshot_version();
+
+        agent_core::logging::debug_event(
+            "snapshot.migration.v2_to_v3",
+            "migrated v2 snapshot to v3",
+            serde_json::json!({
+                "agents_count": migrated.agents.len(),
+            }),
+        );
+
         Ok(migrated)
     } else {
-        // Already v2 or later, parse normally
+        // Already v3 or later, parse normally
         serde_json::from_str(json).map_err(Into::into)
     }
 }

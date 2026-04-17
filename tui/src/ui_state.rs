@@ -1128,6 +1128,9 @@ impl TuiState {
         }
         self.agent_pool = Some(pool);
 
+        // Verify and recreate worktrees if needed
+        self.verify_restored_worktrees()?;
+
         if let Some(focused_id) = snapshot.focused_agent_id.as_ref() {
             let _ = self.focus_agent(focused_id);
         } else {
@@ -1159,6 +1162,157 @@ impl TuiState {
                 _ => AppStatus::Idle,
             };
         }
+
+        Ok(())
+    }
+
+    /// Verify worktrees exist for restored agents, recreate if missing
+    fn verify_restored_worktrees(&mut self) -> Result<()> {
+        let pool = self.agent_pool.as_mut().ok_or_else(|| anyhow::anyhow!("No agent pool"))?;
+        if !pool.has_worktree_support() {
+            return Ok(()); // No worktree support, nothing to verify
+        }
+
+        // Collect agents with worktrees that need verification
+        let agents_to_verify: Vec<(agent_core::agent_runtime::AgentId, std::path::PathBuf, Option<String>, String)> = pool
+            .slots()
+            .iter()
+            .filter_map(|slot| {
+                if slot.has_worktree() {
+                    let wt_path = slot.cwd();
+                    if !wt_path.exists() {
+                        // Worktree directory doesn't exist, needs recreation
+                        Some((
+                            slot.agent_id().clone(),
+                            wt_path,
+                            slot.worktree_branch().cloned(),
+                            slot.worktree_id().cloned().unwrap_or_default(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Recreate missing worktrees
+        for (agent_id, expected_path, branch, worktree_id) in agents_to_verify {
+            agent_core::logging::warn_event(
+                "worktree.restore.missing",
+                "worktree directory missing, will attempt recreation",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "expected_path": expected_path.display().to_string(),
+                    "branch": branch,
+                }),
+            );
+
+            // Use pool's worktree recreation logic
+            // Note: resume_agent_with_worktree requires paused state, so we need a different approach
+            // For now, we just clear the worktree info if we can't recreate
+            if let Err(e) = self.recreate_agent_worktree(&agent_id, &worktree_id, branch.as_deref()) {
+                agent_core::logging::warn_event(
+                    "worktree.restore.failed",
+                    "failed to recreate worktree, clearing worktree info",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": e.to_string(),
+                    }),
+                );
+                // Clear worktree info since we couldn't recreate
+                if let Some(pool) = self.agent_pool.as_mut() {
+                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                        slot.clear_worktree();
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recreate a worktree for an agent
+    fn recreate_agent_worktree(
+        &mut self,
+        agent_id: &agent_core::agent_runtime::AgentId,
+        worktree_id: &str,
+        branch: Option<&str>,
+    ) -> Result<()> {
+        use agent_core::worktree_manager::{WorktreeCreateOptions, WorktreeManager, WorktreeConfig};
+        use agent_core::worktree_state_store::WorktreeStateStore;
+        use agent_core::worktree_state::WorktreeState;
+
+        let cwd = self.session.app.cwd.clone();
+        let workplace_store = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd)?;
+        let workplace_path = workplace_store.path();
+
+        // Create worktree manager
+        let worktree_manager = WorktreeManager::new(cwd.clone(), WorktreeConfig::default())
+            .map_err(|e| anyhow::anyhow!("Failed to create worktree manager: {}", e))?;
+
+        // Check if branch exists
+        let branch_exists = branch
+            .map(|b| worktree_manager.branch_exists(b).unwrap_or(false))
+            .unwrap_or(false);
+
+        // Get base commit
+        let base_commit = worktree_manager.get_current_head()
+            .map_err(|e| anyhow::anyhow!("Failed to get HEAD: {}", e))?;
+
+        // Create worktree
+        let options = WorktreeCreateOptions {
+            path: worktree_manager.worktrees_dir().join(worktree_id),
+            branch: branch.map(|b| b.to_string()),
+            create_branch: !branch_exists && branch.is_some(),
+            base: if branch_exists {
+                None
+            } else {
+                Some(base_commit.clone())
+            },
+            lock_reason: None,
+        };
+
+        let worktree_info = worktree_manager
+            .create(worktree_id, options)
+            .map_err(|e| anyhow::anyhow!("Failed to create worktree: {}", e))?;
+
+        // Update slot's worktree info
+        if let Some(pool) = self.agent_pool.as_mut() {
+            if let Some(slot) = pool.get_slot_mut_by_id(agent_id) {
+                slot.set_worktree(
+                    worktree_info.path.clone(),
+                    worktree_info.branch.clone(),
+                    worktree_id.to_string(),
+                );
+            }
+        }
+
+        // Save worktree state
+        let worktree_state_store = WorktreeStateStore::new(workplace_path.to_path_buf());
+        let worktree_state = WorktreeState::new(
+            worktree_id.to_string(),
+            worktree_info.path.clone(),
+            worktree_info.branch.clone(),
+            base_commit,
+            None,
+            agent_id.as_str().to_string(),
+        );
+        worktree_state_store
+            .save(agent_id.as_str(), &worktree_state)
+            .map_err(|e| anyhow::anyhow!("Failed to save worktree state: {}", e))?;
+
+        agent_core::logging::debug_event(
+            "worktree.restore.recreated",
+            "worktree recreated successfully",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "worktree_id": worktree_id,
+                "path": worktree_info.path.display().to_string(),
+                "branch": worktree_info.branch,
+            }),
+        );
 
         Ok(())
     }
