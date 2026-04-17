@@ -2040,7 +2040,7 @@ impl AgentPool {
             return Err(err);
         }
 
-        if slot.role() == AgentRole::ProductOwner {
+        let agent_id = if slot.role() == AgentRole::ProductOwner {
             if self.overview_agent().is_some() {
                 let err = "OVERVIEW agent already exists".to_string();
                 logging::debug_event(
@@ -2053,9 +2053,11 @@ impl AgentPool {
                 return Err(err);
             }
             self.slots.insert(0, slot);
+            self.slots[0].agent_id().clone()
         } else {
             self.slots.push(slot);
-        }
+            self.slots.last().unwrap().agent_id().clone()
+        };
 
         if let Some(restored_index) = self
             .slots
@@ -2070,6 +2072,24 @@ impl AgentPool {
             .max()
         {
             self.next_agent_index = self.next_agent_index.max(restored_index + 1);
+        }
+
+        // Spawn decision agent for this restored work agent (if provider supports it)
+        // All non-Mock agents should have decision layer support
+        if let Ok(slot_index) = self.find_slot_index(&agent_id) {
+            let provider_kind_opt = self.slots[slot_index].provider_type().to_provider_kind();
+            if provider_kind_opt.is_some() {
+                if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                    logging::warn_event(
+                        "pool.restore.decision_agent_failed",
+                        "failed to spawn decision agent for restored agent",
+                        serde_json::json!({
+                            "agent_id": agent_id.as_str(),
+                            "error": e,
+                        }),
+                    );
+                }
+            }
         }
 
         logging::debug_event(
