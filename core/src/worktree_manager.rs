@@ -825,6 +825,13 @@ mod tests {
             .output()
             .expect("Failed to config git");
 
+        // Disable GPG signing for test repo
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(&repo_path)
+            .output()
+            .expect("Failed to disable GPG signing");
+
         // Create a file and commit
         std::fs::write(repo_path.join("README.md"), "# Test Repo\n").unwrap();
         Command::new("git")
