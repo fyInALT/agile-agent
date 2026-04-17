@@ -1535,6 +1535,89 @@ impl AgentPool {
                     }
                     DecisionExecutionResult::AcceptedRecommendation
                 }
+                "reflect" => {
+                    // Parse params to get reflection prompt
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let prompt = params["prompt"]
+                        .as_str()
+                        .unwrap_or("Please verify your work is complete.")
+                        .to_string();
+
+                    // Add reflection prompt as a user message to trigger verification
+                    slot.append_transcript(crate::app::TranscriptEntry::User(
+                        format!("Reflect: {}", prompt),
+                    ));
+
+                    // Transition agent back to idle so it can process the reflection prompt
+                    if slot.status().is_blocked() {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    }
+
+                    logging::debug_event(
+                        "pool.decision_action.reflect",
+                        "added reflection prompt for agent",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "prompt": prompt,
+                        }),
+                    );
+
+                    DecisionExecutionResult::CustomInstruction { instruction: prompt }
+                }
+                "confirm_completion" => {
+                    // Parse params
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let _submit_pr = params["submit_pr"].as_bool().unwrap_or(false);
+
+                    // Clear task assignment and transition agent to idle
+                    // Note: backlog completion should be handled externally via complete_task_with_backlog
+                    if slot.status().is_blocked() {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    }
+
+                    logging::debug_event(
+                        "pool.decision_action.confirm_completion",
+                        "task completion confirmed by decision",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "task_id": slot.assigned_task_id().map(|t| t.as_str()).unwrap_or("none"),
+                        }),
+                    );
+
+                    DecisionExecutionResult::Executed {
+                        option_id: "confirm_completion".to_string(),
+                    }
+                }
+                "retry" => {
+                    // Parse params to get retry prompt
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let prompt = params["prompt"]
+                        .as_str()
+                        .unwrap_or("Please retry the previous action.")
+                        .to_string();
+
+                    // Add retry prompt as a user message
+                    slot.append_transcript(crate::app::TranscriptEntry::User(prompt.clone()));
+
+                    // Transition agent back to idle so it can retry
+                    if slot.status().is_blocked() {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    }
+
+                    logging::debug_event(
+                        "pool.decision_action.retry",
+                        "added retry prompt for agent",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "prompt": prompt,
+                        }),
+                    );
+
+                    DecisionExecutionResult::CustomInstruction { instruction: prompt }
+                }
                 _ => {
                     // Unknown action type
                     logging::warn_event(
