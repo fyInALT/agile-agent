@@ -124,6 +124,31 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
         // Decision agent polling - process decision requests and responses
         if last_decision_poll.elapsed() >= DECISION_POLL_INTERVAL {
+            // First, check for pending decisions and show animated status
+            if let Some(pool) = state.agent_pool.as_ref() {
+                let pending_decisions = pool.agents_with_pending_decisions();
+                if !pending_decisions.is_empty() {
+                    // Show spinner animation for each pending decision
+                    for (agent_id, started_at) in pending_decisions {
+                        let elapsed_ms = started_at.elapsed().as_millis();
+                        let spinner = match (elapsed_ms / 400) % 4 {
+                            0 => "⠋",
+                            1 => "⠙",
+                            2 => "⠹",
+                            3 => "⠸",
+                            _ => "⠋",
+                        };
+                        let elapsed_secs = started_at.elapsed().as_secs();
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: {} Analyzing... ({:.0}s)",
+                            agent_id.as_str(),
+                            spinner,
+                            elapsed_secs as f32
+                        ));
+                    }
+                }
+            }
+
             // Collect responses first, preserving output details for transcript
             let decision_results: Vec<(
                 agent_core::agent_runtime::AgentId,
@@ -2237,7 +2262,17 @@ fn trigger_decision_for_idle_agent(
                     "error": e,
                 }),
             );
+            state.app_mut().push_error_message(format!(
+                "Decision trigger failed for {}: {}",
+                agent_id.as_str(),
+                e
+            ));
         } else {
+            // Show immediate status message to user that decision is being processed
+            state.app_mut().push_status_message(format!(
+                "🧠 {}: ⏳ Decision triggered, analyzing situation...",
+                agent_id.as_str()
+            ));
             logging::debug_event(
                 "decision_layer.idle_triggered",
                 "decision layer triggered for idle agent",

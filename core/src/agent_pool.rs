@@ -1312,6 +1312,22 @@ impl AgentPool {
         self.decision_agents.contains_key(work_agent_id)
     }
 
+    /// Get list of agents that have decision agents in Thinking status
+    /// Used for UI display of pending decisions
+    pub fn agents_with_pending_decisions(&self) -> Vec<(AgentId, std::time::Instant)> {
+        self.decision_agents
+            .iter()
+            .filter_map(|(work_agent_id, decision_agent)| {
+                match decision_agent.status() {
+                    DecisionAgentStatus::Thinking { started_at } => {
+                        Some((work_agent_id.clone(), *started_at))
+                    }
+                    _ => None
+                }
+            })
+            .collect()
+    }
+
     /// Classify an event for a specific agent
     ///
     /// Uses the classifier registry to determine if the event needs a decision.
