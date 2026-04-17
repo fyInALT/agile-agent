@@ -2044,10 +2044,15 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
     if let Some(pool) = state.agent_pool.as_mut() {
         // Collect agent IDs that need transition (can't modify during iteration)
         let agents_to_transition: Vec<agent_core::agent_runtime::AgentId> = pool
-            .agent_slots()
+            .slots()
             .iter()
-            .filter(|slot| slot.should_transition_to_waiting(RESPONDING_IDLE_TIMEOUT_SECS))
-            .map(|slot| slot.agent_id().clone())
+            .filter_map(|slot| {
+                if slot.should_transition_to_waiting(RESPONDING_IDLE_TIMEOUT_SECS) {
+                    Some(slot.agent_id().clone())
+                } else {
+                    None
+                }
+            })
             .collect();
 
         // Transition each agent
