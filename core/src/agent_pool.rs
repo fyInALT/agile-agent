@@ -1457,8 +1457,8 @@ impl AgentPool {
         let slot = &mut self.slots[slot_index];
 
         // Check if agent is blocked (most decisions require blocked state)
-        // Allow idle state too for some decisions
-        if !slot.status().is_blocked() && !slot.status().is_idle() {
+        // Allow idle state and waiting_for_input state for some decisions like continue_all_tasks
+        if !slot.status().is_blocked() && !slot.status().is_idle() && !slot.status().is_waiting_for_input() {
             return DecisionExecutionResult::NotBlocked;
         }
 
@@ -1728,9 +1728,10 @@ impl AgentPool {
                         instruction.clone(),
                     ));
 
-                    // Transition agent back to responding state so it processes the instruction
-                    if slot.status().is_idle() || slot.status().is_blocked() {
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    // Transition agent to responding state so it processes the instruction
+                    // Bug fix: Use responding status instead of idle to trigger provider processing
+                    if slot.status().is_idle() || slot.status().is_blocked() || slot.status().is_waiting_for_input() {
+                        let _ = slot.transition_to(AgentSlotStatus::responding_now());
                     }
 
                     // Log: Continue all tasks action
@@ -1741,7 +1742,7 @@ impl AgentPool {
                             "work_agent_id": work_agent_id.as_str(),
                             "prompt_type": "continue_all_tasks",
                             "instruction": instruction,
-                            "agent_status_after": "idle",
+                            "agent_status_after": "responding",
                         }),
                     );
 
