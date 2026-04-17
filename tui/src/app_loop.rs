@@ -253,14 +253,26 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         );
 
                         // Check if agent slot is in a valid state for new provider request
-                        // Valid states: "responding" (already ready), "starting" (transitioned from idle)
-                        // Invalid states: "idle", "blocked", etc.
+                        // Valid states include:
+                        // - "responding": Already ready (rare case)
+                        // - "starting": Just transitioned from idle/blocked/waiting
+                        // - "idle": Agent ready for new work (will be transitioned in start_provider_for_agent_with_mode)
+                        // - "blocked": Decision triggered work (will be transitioned)
+                        // - "waiting_for_input": Idle timeout recovery (will be transitioned)
+                        //
+                        // Invalid states: "stopping", "stopped", "tool_executing", "finishing"
                         let slot_status = state.agent_pool.as_ref()
                             .and_then(|pool| pool.get_slot_by_id(&agent_id))
                             .map(|slot| slot.status().label());
 
                         if let Some(status) = slot_status {
-                            if status == "responding" || status == "starting" {
+                            let is_valid_for_request = status == "responding"
+                                || status == "starting"
+                                || status == "idle"
+                                || status.starts_with("blocked:")
+                                || status == "waiting_for_input";
+
+                            if is_valid_for_request {
                                 // Agent is ready to process the instruction
                                 // Start provider request without injecting mail (instruction is the prompt)
                                 let _started = start_multi_agent_provider_request_for_agent(
@@ -276,7 +288,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     serde_json::json!({
                                         "agent_id": agent_id.as_str(),
                                         "status": status,
-                                        "valid_states": ["responding", "starting"],
+                                        "valid_states": ["responding", "starting", "idle", "blocked:*", "waiting_for_input"],
                                     }),
                                 );
                             }

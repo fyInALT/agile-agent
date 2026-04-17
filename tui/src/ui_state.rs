@@ -1505,10 +1505,22 @@ impl TuiState {
         let (provider_kind, session_handle, cwd, busy_codename) = {
             let pool = self.agent_pool.as_ref()?;
             let slot = pool.get_slot_by_id(agent_id)?;
-            if slot.has_provider_thread()
+            // Check if agent is truly busy:
+            // - Has running provider thread
+            // - Is stopping (graceful shutdown)
+            // - Is actively working (Responding, ToolExecuting, Finishing)
+            // Note: Starting state is allowed (agent preparing for thread start)
+            // Note: Blocked/WaitingForInput states are allowed (decision layer may trigger work)
+            // Note: Idle state is allowed (agent ready for new work)
+            let is_truly_busy = slot.has_provider_thread()
                 || slot.status().is_stopping()
-                || slot.status().is_active()
-            {
+                || matches!(
+                    slot.status(),
+                    agent_core::agent_slot::AgentSlotStatus::Responding { .. }
+                        | agent_core::agent_slot::AgentSlotStatus::ToolExecuting { .. }
+                        | agent_core::agent_slot::AgentSlotStatus::Finishing
+                );
+            if is_truly_busy {
                 (
                     slot.provider_type()
                         .to_provider_kind()
@@ -1554,8 +1566,24 @@ impl TuiState {
                 if let Some(jh) = join_handle {
                     slot.set_thread_handle(jh);
                 }
-                let _ =
-                    slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                // Handle state transition properly:
+                // - Idle → Responding: INVALID (must go Idle → Starting → Responding)
+                // - Starting → Responding: VALID
+                // - Blocked → Responding: VALID
+                // - WaitingForInput → Responding: VALID
+                // - Already Responding/ToolExecuting: No transition needed
+                let current_status = slot.status().clone();
+                if current_status.is_idle() {
+                    // Idle must go through Starting first
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::starting());
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                } else if current_status.is_active() {
+                    // Already in Starting/Responding/ToolExecuting/Finishing - try direct transition
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                } else if current_status.is_blocked() || current_status.is_waiting_for_input() {
+                    // Blocked/WaitingForInput can directly go to Responding
+                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                }
                 Some(event_rx)
             }
             Err(e) => {

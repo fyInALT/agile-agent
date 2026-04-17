@@ -1728,38 +1728,17 @@ impl AgentPool {
                         instruction.clone(),
                     ));
 
-                    // Transition agent to responding state so it processes the instruction
-                    // NOTE: State transition rules:
-                    // - Blocked → Responding: VALID
-                    // - WaitingForInput → Responding: VALID
-                    // - Idle → Responding: INVALID (must go through Starting first)
+                    // NOTE: We do NOT transition status here. The state transition
+                    // will be handled by start_provider_for_agent_with_mode when
+                    // the provider thread starts.
                     //
-                    // For Idle agents, we transition to Starting state instead.
-                    // The app_loop will handle the transition to Responding when
-                    // the provider thread starts (see start_multi_agent_provider_request_for_agent).
-                    let current_status = slot.status().clone();
-                    let transition_result = if current_status.is_blocked() || current_status.is_waiting_for_input() {
-                        slot.transition_to(AgentSlotStatus::responding_now())
-                    } else if current_status.is_idle() {
-                        // Idle cannot go directly to Responding - use Starting as intermediate
-                        slot.transition_to(AgentSlotStatus::starting())
-                    } else {
-                        // Already in valid state, no transition needed
-                        Ok(())
-                    };
-
-                    // Log transition result for debugging
-                    logging::debug_event(
-                        "decision_layer.continue_all_tasks_transition",
-                        "continue_all_tasks status transition",
-                        serde_json::json!({
-                            "work_agent_id": work_agent_id.as_str(),
-                            "prompt_type": "continue_all_tasks",
-                            "instruction": instruction,
-                            "status_before": current_status.label(),
-                            "transition_result": transition_result.map(|_| "success").map_err(|e| e),
-                        }),
-                    );
+                    // State transition rules:
+                    // - Blocked → Responding: VALID (handled by start_provider_for_agent_with_mode)
+                    // - WaitingForInput → Responding: VALID (handled by start_provider_for_agent_with_mode)
+                    // - Idle → Responding: INVALID
+                    //
+                    // For Idle agents, the proper flow is:
+                    // - Idle → Starting → Responding (handled in ui_state.rs)
 
                     // Log: Continue all tasks action
                     logging::debug_event(
@@ -1769,7 +1748,7 @@ impl AgentPool {
                             "work_agent_id": work_agent_id.as_str(),
                             "prompt_type": "continue_all_tasks",
                             "instruction": instruction,
-                            "agent_status_after": slot.status().label(),
+                            "agent_status": slot.status().label(),
                         }),
                     );
 
