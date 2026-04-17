@@ -553,6 +553,46 @@ impl WorktreeManager {
         Ok(self.config.default_base_branch.clone())
     }
 
+    /// Check if a branch is currently checked out in any worktree
+    ///
+    /// Returns the path to the worktree that has this branch checked out,
+    /// or None if the branch is not checked out anywhere.
+    pub fn branch_checkout_location(&self, branch: &str) -> Result<Option<PathBuf>, WorktreeError> {
+        let worktrees = self.list()?;
+        for wt in worktrees {
+            if wt.branch.as_ref().map(|b| b == branch).unwrap_or(false) {
+                return Ok(Some(wt.path));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Check if a branch can be used for a new worktree
+    ///
+    /// A branch can be used if:
+    /// - It doesn't exist (can create new branch)
+    /// - It exists but is not checked out in any worktree
+    pub fn can_checkout_branch(&self, branch: &str) -> Result<bool, WorktreeError> {
+        // If branch doesn't exist, we can create it
+        if !self.branch_exists(branch)? {
+            return Ok(true);
+        }
+        // If branch exists but not checked out anywhere, we can use it
+        let location = self.branch_checkout_location(branch)?;
+        Ok(location.is_none())
+    }
+
+    /// Get the HEAD commit SHA for a specific branch
+    ///
+    /// Returns the commit that the branch points to.
+    pub fn get_branch_head(&self, branch: &str) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+        let output = self.run_git_command_internal(&[
+            "rev-parse", &format!("refs/heads/{}", branch)
+        ])?;
+        Ok(output.trim().to_string())
+    }
+
     /// Count the number of worktrees (excluding main)
     pub fn count_worktrees(&self) -> Result<usize, WorktreeError> {
         let all = self.list()?;

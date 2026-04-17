@@ -1048,6 +1048,10 @@ impl TuiState {
         let workplace_store = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd).ok();
         let workplace_path = workplace_store.as_ref().map(|w| w.path().to_path_buf());
 
+        // Create WorktreeStateStore for loading authoritative worktree states
+        let worktree_state_store = workplace_path.as_ref()
+            .map(|p| agent_core::worktree_state_store::WorktreeStateStore::new(p.clone()));
+
         let pool = if let Some(wp_path) = workplace_path {
             AgentPool::new_with_worktrees(
                 workplace_id.clone(),
@@ -1085,6 +1089,59 @@ impl TuiState {
         };
 
         for agent in snapshot.agents {
+            // Priority: use WorktreeStateStore data (authoritative) over snapshot data
+            let (wt_path, wt_branch, wt_id) = if let Some(ref store) = worktree_state_store {
+                // Try to load authoritative worktree state from store
+                match store.load(agent.agent_id.as_str()) {
+                    Ok(Some(state)) => {
+                        // Use authoritative state from store (more up-to-date)
+                        agent_core::logging::debug_event(
+                            "worktree.restore.authoritative",
+                            "using worktree state from store",
+                            serde_json::json!({
+                                "agent_id": agent.agent_id.as_str(),
+                                "store_path": state.path.display().to_string(),
+                                "store_branch": state.branch,
+                                "snapshot_path": agent.worktree_path.as_ref().map(|p| p.display().to_string()),
+                            }),
+                        );
+                        (Some(state.path), state.branch, Some(state.worktree_id))
+                    }
+                    Ok(None) => {
+                        // No state in store, use snapshot data
+                        (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+                    }
+                    Err(e) => {
+                        // Failed to load from store, fallback to snapshot
+                        agent_core::logging::warn_event(
+                            "worktree.restore.store_failed",
+                            "failed to load worktree state from store, using snapshot",
+                            serde_json::json!({
+                                "agent_id": agent.agent_id.as_str(),
+                                "error": e.to_string(),
+                            }),
+                        );
+                        (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+                    }
+                }
+            } else {
+                // No store available, use snapshot data
+                (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+            };
+
+            // Log worktree restoration (before moving values)
+            if let Some(ref wt_path) = wt_path {
+                agent_core::logging::debug_event(
+                    "worktree.restore",
+                    "agent restored with worktree",
+                    serde_json::json!({
+                        "agent_id": agent.agent_id.as_str(),
+                        "worktree_path": wt_path.display().to_string(),
+                        "worktree_branch": wt_branch,
+                    }),
+                );
+            }
+
             let mut restored_slot = agent_core::agent_slot::AgentSlot::restored_with_worktree(
                 agent.agent_id.clone(),
                 agent.codename.clone(),
@@ -1094,9 +1151,9 @@ impl TuiState {
                 agent.restore_session_handle(),
                 agent.transcript.clone(),
                 agent.assigned_task_id.clone(),
-                agent.worktree_path.clone(),
-                agent.worktree_branch.clone(),
-                agent.worktree_id.clone(),
+                wt_path,
+                wt_branch,
+                wt_id,
             );
             // Attach launch bundle if available
             if let Some(bundle) = agent.launch_bundle {
@@ -1108,18 +1165,6 @@ impl TuiState {
                         "agent_id": agent.agent_id.as_str(),
                         "provider": agent.provider_type,
                         "source": "snapshot",
-                    }),
-                );
-            }
-            // Log worktree restoration
-            if let Some(wt_path) = &agent.worktree_path {
-                agent_core::logging::debug_event(
-                    "worktree.restore",
-                    "agent restored with worktree",
-                    serde_json::json!({
-                        "agent_id": agent.agent_id.as_str(),
-                        "worktree_path": wt_path.display().to_string(),
-                        "worktree_branch": agent.worktree_branch,
                     }),
                 );
             }
@@ -1252,25 +1297,57 @@ impl TuiState {
         let worktree_manager = WorktreeManager::new(cwd.clone(), WorktreeConfig::default())
             .map_err(|e| anyhow::anyhow!("Failed to create worktree manager: {}", e))?;
 
-        // Check if branch exists
-        let branch_exists = branch
-            .map(|b| worktree_manager.branch_exists(b).unwrap_or(false))
-            .unwrap_or(false);
-
-        // Get base commit
+        // Get base commit for fallback
         let base_commit = worktree_manager.get_current_head()
             .map_err(|e| anyhow::anyhow!("Failed to get HEAD: {}", e))?;
+
+        // Determine how to create the worktree
+        // Check if we can use the branch (not checked out elsewhere)
+        let can_checkout = branch
+            .map(|b| worktree_manager.can_checkout_branch(b).unwrap_or(false))
+            .unwrap_or(false);
+
+        let (wt_branch, create_branch, wt_base) = if let Some(b) = branch {
+            if can_checkout {
+                // Branch can be used - either create new or checkout existing
+                let branch_exists = worktree_manager.branch_exists(b).unwrap_or(false);
+                if branch_exists {
+                    // Checkout existing branch
+                    (Some(b.to_string()), false, None)
+                } else {
+                    // Create new branch from base
+                    (Some(b.to_string()), true, Some(base_commit.clone()))
+                }
+            } else {
+                // Branch is checked out elsewhere - use detached HEAD at branch's HEAD
+                // Get the commit SHA of the branch
+                let branch_head = worktree_manager.get_branch_head(b)
+                    .map_err(|e| anyhow::anyhow!("Failed to get branch HEAD: {}", e))?;
+
+                agent_core::logging::warn_event(
+                    "worktree.recreate.branch_in_use",
+                    "branch is checked out elsewhere, using detached HEAD",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "branch": b,
+                        "detached_at": branch_head,
+                    }),
+                );
+
+                // Use detached HEAD (no branch)
+                (None, false, Some(branch_head))
+            }
+        } else {
+            // No branch specified - use detached HEAD at current HEAD
+            (None, false, Some(base_commit.clone()))
+        };
 
         // Create worktree
         let options = WorktreeCreateOptions {
             path: worktree_manager.worktrees_dir().join(worktree_id),
-            branch: branch.map(|b| b.to_string()),
-            create_branch: !branch_exists && branch.is_some(),
-            base: if branch_exists {
-                None
-            } else {
-                Some(base_commit.clone())
-            },
+            branch: wt_branch,
+            create_branch,
+            base: wt_base,
             lock_reason: None,
         };
 
@@ -1311,6 +1388,7 @@ impl TuiState {
                 "worktree_id": worktree_id,
                 "path": worktree_info.path.display().to_string(),
                 "branch": worktree_info.branch,
+                "detached": worktree_info.is_detached,
             }),
         );
 
