@@ -94,6 +94,7 @@ pub enum PersistedAgentStatus {
     Paused { reason: String },
     Stopped { reason: String },
     Error { message: String },
+    WaitingForInput,
 }
 
 impl TuiShutdownSnapshot {
@@ -233,6 +234,7 @@ impl PersistedAgentSnapshot {
             PersistedAgentStatus::Paused { reason } => AgentSlotStatus::paused(reason.clone()),
             PersistedAgentStatus::Stopped { reason } => AgentSlotStatus::stopped(reason.clone()),
             PersistedAgentStatus::Error { message } => AgentSlotStatus::error(message.clone()),
+            PersistedAgentStatus::WaitingForInput => AgentSlotStatus::waiting_for_input(),
         }
     }
 
@@ -269,6 +271,7 @@ impl PersistedAgentStatus {
             AgentSlotStatus::Paused { reason } => Self::Paused {
                 reason: reason.clone(),
             },
+            AgentSlotStatus::WaitingForInput { .. } => Self::WaitingForInput,
             AgentSlotStatus::Starting
             | AgentSlotStatus::Responding { .. }
             | AgentSlotStatus::ToolExecuting { .. }

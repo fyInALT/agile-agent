@@ -163,6 +163,7 @@ impl OverviewAgentRow {
             AgentSlotStatus::Starting | AgentSlotStatus::Finishing => "◐",
             AgentSlotStatus::Stopping => "◐",
             AgentSlotStatus::Error { .. } => "⚠",
+            AgentSlotStatus::WaitingForInput { .. } => "◉", // Waiting for user input
         }
     }
 
@@ -179,6 +180,7 @@ impl OverviewAgentRow {
             AgentSlotStatus::Finishing => "fin",
             AgentSlotStatus::Stopping => "stop",
             AgentSlotStatus::Error { .. } => "err",
+            AgentSlotStatus::WaitingForInput { .. } => "wait",
         }
     }
 
@@ -214,6 +216,17 @@ impl OverviewAgentRow {
                     "Working".to_string()
                 }
             }
+            AgentSlotStatus::WaitingForInput { .. } => {
+                if snapshot.has_worktree {
+                    if let Some(branch) = &snapshot.worktree_branch {
+                        format!("Waiting for input [wt:{}]", branch)
+                    } else {
+                        "Waiting for input".to_string()
+                    }
+                } else {
+                    "Waiting for input".to_string()
+                }
+            }
             _ => String::new(),
         }
     }
@@ -221,6 +234,12 @@ impl OverviewAgentRow {
     fn elapsed_time(status: &AgentSlotStatus) -> String {
         match status {
             AgentSlotStatus::Responding { started_at } => {
+                let elapsed = started_at.elapsed().as_secs();
+                let mins = elapsed / 60;
+                let secs = elapsed % 60;
+                format!("{}m{}s", mins, secs)
+            }
+            AgentSlotStatus::WaitingForInput { started_at } => {
                 let elapsed = started_at.elapsed().as_secs();
                 let mins = elapsed / 60;
                 let secs = elapsed % 60;

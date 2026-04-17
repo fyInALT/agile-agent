@@ -52,6 +52,10 @@ const PERSISTENCE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// Interval for decision agent polling
 const DECISION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Idle timeout for detecting agents waiting for user input
+/// An agent is transitioned to WaitingForInput if no events received for this duration
+const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 5;
+
 /// Decision output info for transcript display
 ///
 /// Captures decision details for showing in TUI with special formatting.
@@ -954,6 +958,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             for disconnected_id in poll_result.disconnected_channels {
                 handle_agent_channel_disconnect(&mut state, disconnected_id);
             }
+
+            // Check for idle responding agents and transition to WaitingForInput
+            check_for_idle_responding_agents(&mut state);
         }
 
         // Process pending mail delivery
@@ -1723,6 +1730,17 @@ fn handle_agent_provider_event(
     // Clone event for decision layer classification before processing
     let event_for_classification = event.clone();
 
+    // Update activity timestamp for this agent
+    if let Some(pool) = state.agent_pool.as_mut()
+        && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+    {
+        slot.touch_activity();
+        // If agent was waiting for input, transition back to responding
+        if slot.status().is_waiting_for_input() {
+            let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+        }
+    }
+
     if let Some(msg) = generate_overview_log_message(&event, &agent_id, state) {
         state.view_state.overview.push_log_message(msg);
     }
@@ -2015,6 +2033,37 @@ fn handle_agent_provider_event(
                         }),
                     );
                 }
+            }
+        }
+    }
+}
+
+/// Check for agents that have been idle in Responding state for too long
+/// and transition them to WaitingForInput status
+fn check_for_idle_responding_agents(state: &mut TuiState) {
+    if let Some(pool) = state.agent_pool.as_mut() {
+        // Collect agent IDs that need transition (can't modify during iteration)
+        let agents_to_transition: Vec<agent_core::agent_runtime::AgentId> = pool
+            .agent_slots()
+            .iter()
+            .filter(|slot| slot.should_transition_to_waiting(RESPONDING_IDLE_TIMEOUT_SECS))
+            .map(|slot| slot.agent_id().clone())
+            .collect();
+
+        // Transition each agent
+        for agent_id in agents_to_transition {
+            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                let _ = slot.transition_to(
+                    agent_core::agent_slot::AgentSlotStatus::waiting_for_input()
+                );
+                logging::debug_event(
+                    "app_loop.agent_idle_timeout",
+                    "agent transitioned to waiting_for_input due to idle timeout",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "idle_timeout_secs": RESPONDING_IDLE_TIMEOUT_SECS,
+                    }),
+                );
             }
         }
     }
