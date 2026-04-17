@@ -54,7 +54,8 @@ const DECISION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Idle timeout for detecting agents waiting for user input
 /// An agent is transitioned to WaitingForInput if no events received for this duration
-const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 5;
+/// This should match the desired decision trigger timeout (60s) to avoid premature intervention
+const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 60;
 
 /// Idle timeout for triggering decision layer intervention
 /// If an agent is idle for this duration, decision layer will check if there are pending tasks
