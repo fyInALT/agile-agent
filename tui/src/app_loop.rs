@@ -1927,31 +1927,73 @@ fn handle_agent_provider_event(
     if let Some(pool) = state.agent_pool.as_ref() {
         let classify_result = pool.classify_event(&agent_id, &event_for_classification);
         if classify_result.is_needs_decision() {
-            // Build decision context from current agent state
-            if let Some(situation_type) = classify_result.situation_type() {
-                use agent_core::decision_mail::DecisionRequest;
-                use agent_decision::context::DecisionContext;
+            // Get situation from classify result, or build if not available
+            let situation = classify_result
+                .situation()
+                .map(|s| s.clone_boxed())
+                .unwrap_or_else(|| {
+                    let components = agent_decision::initializer::initialize_decision_layer();
+                    components
+                        .situation_registry
+                        .build(classify_result.situation_type().unwrap().clone())
+                });
 
-                // Create minimal context for the decision
-                let components = agent_decision::initializer::initialize_decision_layer();
-                let situation = components.situation_registry.build(situation_type.clone());
-                let context = DecisionContext::new(situation, agent_id.as_str());
+            let situation_type = classify_result.situation_type().unwrap();
 
-                let request =
-                    DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
+            // Create decision context
+            use agent_decision::context::DecisionContext;
+            let context = DecisionContext::new(situation.clone_boxed(), agent_id.as_str());
 
-                // Send decision request to decision agent
-                if let Some(pool) = state.agent_pool.as_mut() {
-                    if let Err(e) = pool.send_decision_request(&agent_id, request) {
+            // Create decision request
+            use agent_core::decision_mail::DecisionRequest;
+            let request = DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
+
+            // Send decision request to decision agent
+            if let Some(pool) = state.agent_pool.as_mut() {
+                if let Err(e) = pool.send_decision_request(&agent_id, request) {
+                    logging::warn_event(
+                        "app_loop.decision_request_failed",
+                        "failed to send decision request",
+                        serde_json::json!({
+                            "agent_id": agent_id.as_str(),
+                            "error": e,
+                        }),
+                    );
+                } else {
+                    // Request sent successfully - transition agent to blocked_for_decision status
+                    use agent_decision::blocking::{BlockedState, HumanDecisionBlocking};
+
+                    let decision_request_id = format!(
+                        "req-{}-{}",
+                        agent_id.as_str(),
+                        chrono::Local::now().format("%H%M%S")
+                    );
+                    let blocking = HumanDecisionBlocking::new(
+                        decision_request_id,
+                        situation,
+                        Vec::new(), // Options determined by decision engine
+                    );
+                    let blocked_state = BlockedState::new(Box::new(blocking));
+
+                    if let Err(e) = pool.process_agent_blocked(&agent_id, blocked_state, None) {
                         logging::warn_event(
-                            "app_loop.decision_request_failed",
-                            "failed to send decision request",
+                            "app_loop.blocked_transition_failed",
+                            "failed to transition agent to blocked_for_decision",
                             serde_json::json!({
                                 "agent_id": agent_id.as_str(),
                                 "error": e,
                             }),
                         );
                     }
+
+                    logging::debug_event(
+                        "app_loop.decision_request_sent",
+                        "decision request sent, agent now blocked_for_decision",
+                        serde_json::json!({
+                            "agent_id": agent_id.as_str(),
+                            "situation_type": situation_type.name,
+                        }),
+                    );
                 }
             }
         }
