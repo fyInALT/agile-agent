@@ -309,3 +309,68 @@ TieredEngineConfig {
 | `decision/src/builtin_situations.rs` | Built-in situation definitions |
 | `decision/src/builtin_actions.rs` | Built-in action implementations |
 | `tui/src/app_loop.rs` | Event handling, decision polling |
+
+## Logging Events
+
+The decision layer produces structured JSON logs for debugging. All events use `logging::debug_event`
+with the prefix `decision_layer.`.
+
+### Trigger Events
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `decision_layer.triggered` | Decision triggered by work agent event | `decision_agent_id`, `work_agent_id`, `situation_type`, `situation_prompt`, `available_actions`, `requires_human` |
+| `decision_layer.request_sent` | Request sent to decision agent | `work_agent_id`, `situation_type`, `situation_prompt` |
+
+### Execution Events
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `decision_layer.prompt_sent` | Prompt sent to decision engine | `decision_agent_id`, `work_agent_id`, `prompt_length`, `prompt_preview` |
+| `decision_layer.engine_response` | Decision engine response received | `decision_agent_id`, `work_agent_id`, `action_types`, `action_params`, `reasoning`, `confidence` |
+| `decision_layer.response_sent` | Response sent to work agent | `decision_agent_id`, `work_agent_id`, `status` |
+
+### Action Execution Events
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `decision_layer.action_executing` | Starting action execution | `work_agent_id`, `action_type`, `action_params`, `reasoning`, `confidence` |
+| `decision_layer.action_completed` | Action completed successfully | `work_agent_id`, `action_type`, additional context varies by action |
+| `decision_layer.work_agent_prompt` | Prompt/instruction sent to work agent | `work_agent_id`, `prompt_type`, `prompt`, `agent_status_after` |
+
+### Error and Termination Events
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `decision_layer.engine_error` | Decision engine returned error | `decision_agent_id`, `work_agent_id`, `error`, `situation_type` |
+| `decision_layer.response_send_failed` | Failed to send response to work agent | `decision_agent_id`, `work_agent_id`, `error` |
+| `decision_layer.terminated` | Decision agent stopped | `decision_agent_id`, `reason`, `total_decisions`, `total_errors` |
+| `decision_layer.reset` | Decision agent reset from error | `decision_agent_id` |
+| `decision_layer.no_decision_agent` | No decision agent for work agent | `work_agent_id` |
+| `decision_layer.request_send_failed` | Failed to send request to decision agent | `work_agent_id`, `situation_type`, `error` |
+| `decision_layer.unknown_action` | Unknown action type | `work_agent_id`, `action_type`, `action_params` |
+| `decision_layer.no_actions` | No actions in decision output | `work_agent_id`, `reasoning` |
+
+### Example Log Flow
+
+```
+1. decision_layer.triggered       → Agent finished, needs decision
+2. decision_layer.request_sent    → Request queued for decision agent
+3. decision_layer.prompt_sent     → Decision engine processing
+4. decision_layer.engine_response → Decision made: reflect action
+5. decision_layer.response_sent   → Response delivered to work agent
+6. decision_layer.action_executing → Executing reflect action
+7. decision_layer.work_agent_prompt → "Reflect: Please verify..." sent
+```
+
+### Viewing Logs
+
+Logs are written to JSON files in the workplace directory:
+
+```bash
+# Find the log file
+cat ~/.local/share/agile-agent/workplaces/<workplace-id>/logs/*.json | grep decision_layer
+
+# Pretty print decision layer logs
+jq 'select(.event | startswith("decision_layer"))' ~/.local/share/agile-agent/workplaces/*/logs/*.json
+```
