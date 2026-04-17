@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Vision
+
+`agile-agent` builds local autonomous engineering agents on top of `claude`/`codex` CLIs:
+- **Interactive TUI**: Codex-style terminal interface with multi-agent session support and real-time monitoring
+- **Autonomous Loop**: Headless task execution, verification, and error recovery
+- **Decision Layer**: Tiered decision engine handling ambiguous outputs with human escalation
+- **Multi-Agent Coordination**: Scrum-style role coordination with git worktree isolation
+
+## Architecture
+
+Layered architecture: `agent-cli` as the entry point, coordinating `agent-tui` (interactive interface) and `agent-core` (runtime core). `agent-decision` provides decision-layer capabilities, `agent-kanban` provides Kanban domain model, and `agent-llm-provider` provides LLM client abstraction.
+
 ## Focus
 
 - `agile-agent` is the primary implementation target in this workspace.
@@ -18,52 +30,62 @@
 
 The multi-agent foundation provides Scrum-style coordination:
 
-### Key Modules
+### Key Modules (core)
 
-- `core/src/agent_role.rs`: AgentRole enum (ProductOwner, ScrumMaster, Developer) with role-specific behaviors
-- `core/src/runtime_mode.rs`: RuntimeMode enum for backward compatibility (SingleAgent, MultiAgent)
-- `core/src/sprint_planning.rs`: SprintPlanningSession for ProductOwner sprint planning
-- `core/src/standup_report.rs`: DailyStandupReport for daily status generation
-- `core/src/blocker_escalation.rs`: BlockerEscalation for ScrumMaster blocker resolution
-- `core/src/data_migration.rs`: DataMigrator for converting legacy single-agent data
+- `agent_pool.rs`: AgentPool managing multiple concurrent agent slots
+- `agent_slot.rs`: AgentSlot representing a single agent's runtime state
+- `agent_role.rs`: AgentRole enum (ProductOwner, ScrumMaster, Developer)
+- `runtime_mode.rs`: RuntimeMode enum for backward compatibility
+- `sprint_planning.rs`: SprintPlanningSession for ProductOwner sprint planning
+- `standup_report.rs`: DailyStandupReport for daily status generation
+- `blocker_escalation.rs`: BlockerEscalation for ScrumMaster blocker resolution
+- `worktree_manager.rs`: Git worktree isolation for parallel agent work
+- `decision_agent_slot.rs`: Decision-layer integration for agent slots
+
+### Key Modules (decision)
+
+- `tiered_engine.rs`: Tiered decision engine (rule → LLM → human escalation)
+- `blocking.rs`: Blocking decision workflows with human intervention
+- `concurrent.rs`: Concurrent decision processing
+- `context.rs`: Decision context aggregation
+- `recovery.rs`: Error recovery decision handling
+- `builtin_*.rs`: Built-in actions and situations
 
 ### Design Principles
 
 1. **Backward Compatibility**: RuntimeMode defaults to SingleAgent, preserving existing behavior
 2. **Role-Based Coordination**: Each role has specific focus, skills, and prompt prefixes
-3. **Foundation First**: Sprint 10-11 implements foundational Scrum concepts; advanced lifecycle (ScrumEvent, RolePermissions) is future work
-
-### CLI Commands
-
-```bash
-# List all agents
-agent list --all
-
-# Show agent status
-agent status <agent-id>
-
-# Spawn new agent (placeholder for future)
-agent spawn <provider>
-
-# Stop agent (placeholder for future)
-agent stop <agent-id>
-
-# Run with multi-agent flag (future implementation)
-run-loop --multi-agent
-```
+3. **Worktree Isolation**: Agents operate in isolated git worktrees for conflict-free parallel work
+4. **Decision Escalation**: Tiered engine escalates ambiguous cases to human intervention
 
 ## Index
 
-- `README.md`: project overview, scope, runtime model, and developer entrypoints.
-- `Cargo.toml`: workspace manifest for the Rust crates.
-- `cli/`: `agent-cli` crate, binary entrypoints and CLI-facing integration tests.
-- `core/`: `agent-core` crate, providers, runtime loop, persistence, backlog/task state, and verification logic.
-- `tui/`: `agent-tui` crate, terminal UI, rendering, transcript, composer, and interaction flow.
-- `test-support/`: shared test helpers for workspace crates.
-- `kanban/`: `agent-kanban` crate, trait-based Kanban domain model.
-- `docs/plan/spec/`: implementation-facing product and sprint specs.
-- `docs/plan/spec/multi-agent/`: multi-agent sprint specs (sprint-01 through sprint-11).
-- `docs/superpowers/specs/`: design specs written through the superpowers workflow.
-- `docs/superpowers/plans/`: implementation plans written through the superpowers workflow.
-- `scripts/coverage.sh`: local coverage helper script.
-- `target/`: build artifacts and generated output; not a source directory.
+### Root
+
+- `README.md`: Project overview, features, quick start, and CLI reference
+- `Cargo.toml`: Workspace manifest for Rust crates
+
+### Crates
+
+- `cli/`: `agent-cli` crate — binary entrypoints and CLI-facing integration tests
+- `core/`: `agent-core` crate — runtime, providers, persistence, backlog, verification
+- `tui/`: `agent-tui` crate — terminal UI, rendering, transcript, composer, overlays
+- `decision/`: `agent-decision` crate — classifiers, engines, actions, situations
+- `kanban/`: `agent-kanban` crate — trait-based Kanban domain model
+- `llm-provider/`: `agent-llm-provider` crate — OpenAI client/provider abstraction
+- `test-support/`: `agent-test-support` crate — shared test helpers
+
+### Documentation
+
+- `docs/plan/spec/`: Implementation-facing sprint specs
+- `docs/plan/spec/multi-agent/`: Multi-agent sprint specs (sprint-01 through sprint-11)
+- `docs/plan/spec/decision-layer/`: Decision-layer architecture and sprint specs
+- `docs/plan/spec/launch-config/`: Launch configuration sprint specs
+- `docs/plan/spec/worktree/`: Git worktree isolation sprint specs
+- `docs/plan/spec/kanban/`: Kanban system sprint specs
+- `docs/superpowers/specs/`: Design specs written through superpowers workflow
+- `docs/superpowers/plans/`: Implementation plans written through superpowers workflow
+
+### Scripts
+
+- `scripts/coverage.sh`: Local coverage helper script
