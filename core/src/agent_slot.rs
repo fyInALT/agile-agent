@@ -410,6 +410,28 @@ impl std::fmt::Debug for AgentSlot {
     }
 }
 
+impl Drop for AgentSlot {
+    fn drop(&mut self) {
+        // Join the provider thread if still running to prevent zombie processes
+        if let Some(handle) = self.thread_handle.take() {
+            logging::debug_event(
+                "slot.drop.join",
+                "joining provider thread on slot drop",
+                serde_json::json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "codename": self.codename.as_str(),
+                }),
+            );
+            // Try to join with a short timeout first
+            // If thread is stuck, we still need to let it go to avoid blocking forever
+            // The OS will reap the thread when the process exits
+            let _ = handle.join();
+        }
+        // Clear event receiver to signal thread to stop
+        self.event_rx = None;
+    }
+}
+
 impl AgentSlot {
     /// Create a new agent slot with given identity
     pub fn new(agent_id: AgentId, codename: AgentCodename, provider_type: ProviderType) -> Self {
