@@ -323,10 +323,9 @@ impl GlobalConfigStore {
     pub fn save_global_config(&self, config: &GlobalConfig) -> Result<()> {
         self.ensure()?;
         let path = self.config_path();
-        let payload = serde_json::to_string_pretty(config)
-            .context("failed to serialize global config")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        let payload =
+            serde_json::to_string_pretty(config).context("failed to serialize global config")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "global_config.save_global",
             "saved global config",
@@ -388,10 +387,9 @@ impl GlobalConfigStore {
     pub fn save_llm_config(&self, config: &LlmConfigFile) -> Result<()> {
         self.ensure()?;
         let path = self.llm_path();
-        let payload = serde_json::to_string_pretty(config)
-            .context("failed to serialize llm config")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        let payload =
+            serde_json::to_string_pretty(config).context("failed to serialize llm config")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "global_config.save_llm",
             "saved llm config",
@@ -439,10 +437,9 @@ impl GlobalConfigStore {
     pub fn save_decision_config(&self, config: &DecisionConfig) -> Result<()> {
         self.ensure()?;
         let path = self.decision_path();
-        let payload = serde_json::to_string_pretty(config)
-            .context("failed to serialize decision config")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        let payload =
+            serde_json::to_string_pretty(config).context("failed to serialize decision config")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "global_config.save_decision",
             "saved decision config",
@@ -492,8 +489,7 @@ impl GlobalConfigStore {
         let path = self.multi_agent_path();
         let payload = serde_json::to_string_pretty(config)
             .context("failed to serialize multi-agent config")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "global_config.save_multi_agent",
             "saved multi-agent config",
@@ -543,10 +539,9 @@ impl GlobalConfigStore {
     pub fn save_prompts_config_raw(&self, config: &serde_json::Value) -> Result<()> {
         self.ensure()?;
         let path = self.prompts_path();
-        let payload = serde_json::to_string_pretty(config)
-            .context("failed to serialize prompts config")?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        let payload =
+            serde_json::to_string_pretty(config).context("failed to serialize prompts config")?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "global_config.save_prompts",
             "saved prompts config",

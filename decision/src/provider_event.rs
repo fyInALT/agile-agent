@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum ProviderEvent {
     // Common events
     /// Provider finished execution
-    Finished {
-        summary: Option<String>,
-    },
+    Finished { summary: Option<String> },
 
     /// Provider error
     Error {
@@ -19,20 +17,13 @@ pub enum ProviderEvent {
 
     // Claude-specific events
     /// Claude assistant chunk
-    ClaudeAssistantChunk {
-        text: String,
-    },
+    ClaudeAssistantChunk { text: String },
 
     /// Claude thinking chunk
-    ClaudeThinkingChunk {
-        text: String,
-    },
+    ClaudeThinkingChunk { text: String },
 
     /// Claude tool call started
-    ClaudeToolCallStarted {
-        name: String,
-        input: Option<String>,
-    },
+    ClaudeToolCallStarted { name: String, input: Option<String> },
 
     /// Claude tool call finished
     ClaudeToolCallFinished {
@@ -50,15 +41,10 @@ pub enum ProviderEvent {
     },
 
     /// Codex patch apply started
-    CodexPatchApplyStarted {
-        path: String,
-    },
+    CodexPatchApplyStarted { path: String },
 
     /// Codex error
-    CodexError {
-        kind: String,
-        message: String,
-    },
+    CodexError { kind: String, message: String },
 
     // ACP-specific events (OpenCode/Kimi)
     /// ACP notification
@@ -68,16 +54,11 @@ pub enum ProviderEvent {
     },
 
     /// ACP error
-    ACPError {
-        code: String,
-        message: String,
-    },
+    ACPError { code: String, message: String },
 
     // Generic running events
     /// Status update
-    StatusUpdate {
-        status: String,
-    },
+    StatusUpdate { status: String },
 
     /// Session handle
     SessionHandle {
@@ -121,7 +102,9 @@ mod tests {
 
     #[test]
     fn test_provider_event_is_running() {
-        let event = ProviderEvent::ClaudeAssistantChunk { text: "hello".to_string() };
+        let event = ProviderEvent::ClaudeAssistantChunk {
+            text: "hello".to_string(),
+        };
         assert!(event.is_running());
         assert!(!event.needs_decision());
     }
@@ -154,7 +137,9 @@ mod tests {
 
     #[test]
     fn test_provider_event_serde() {
-        let event = ProviderEvent::Finished { summary: Some("done".to_string()) };
+        let event = ProviderEvent::Finished {
+            summary: Some("done".to_string()),
+        };
         let json = serde_json::to_string(&event).unwrap();
         let parsed: ProviderEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, parsed);

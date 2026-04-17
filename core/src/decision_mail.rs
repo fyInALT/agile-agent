@@ -102,16 +102,17 @@ impl Clone for DecisionResponse {
                 DecisionResponse {
                     work_agent_id: self.work_agent_id.clone(),
                     output: None, // Can't clone Box<dyn DecisionAction>
-                    error: Some(format!("cloned response (original had {} actions)", output.actions.len())),
+                    error: Some(format!(
+                        "cloned response (original had {} actions)",
+                        output.actions.len()
+                    )),
                 }
             }
-            None => {
-                DecisionResponse {
-                    work_agent_id: self.work_agent_id.clone(),
-                    output: None,
-                    error: self.error.clone(),
-                }
-            }
+            None => DecisionResponse {
+                work_agent_id: self.work_agent_id.clone(),
+                output: None,
+                error: self.error.clone(),
+            },
         }
     }
 }
@@ -378,11 +379,15 @@ mod tests {
         let mail = DecisionMail::new();
 
         // Should have valid senders and receivers
-        assert!(mail.request_sender().send(DecisionRequest::new(
-            make_test_agent_id(),
-            SituationType::new("test"),
-            make_test_context(),
-        )).is_ok());
+        assert!(
+            mail.request_sender()
+                .send(DecisionRequest::new(
+                    make_test_agent_id(),
+                    SituationType::new("test"),
+                    make_test_context(),
+                ))
+                .is_ok()
+        );
 
         assert!(mail.request_receiver().try_recv().is_ok());
     }

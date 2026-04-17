@@ -175,13 +175,14 @@ pub fn execute(cli: Cli) -> Result<()> {
             command: DecisionCommand::Show { request_id },
         }) => print_decision_show(request_id),
         Some(Command::Decision {
-            command: DecisionCommand::Respond {
-                request_id,
-                select,
-                accept,
-                custom,
-                skip,
-            },
+            command:
+                DecisionCommand::Respond {
+                    request_id,
+                    select,
+                    accept,
+                    custom,
+                    skip,
+                },
         }) => respond_to_decision(request_id, select, accept, custom, skip),
         Some(Command::Decision {
             command: DecisionCommand::History { count },

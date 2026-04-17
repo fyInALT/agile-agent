@@ -20,7 +20,11 @@ impl std::fmt::Display for RestoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RestoreError::ExecutableNotFound { path, provider } => {
-                write!(f, "executable not found: {} for provider {:?}", path, provider)
+                write!(
+                    f,
+                    "executable not found: {} for provider {:?}",
+                    path, provider
+                )
             }
             RestoreError::MissingLaunchBundle => {
                 write!(f, "missing launch bundle")

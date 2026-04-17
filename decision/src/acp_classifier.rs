@@ -32,10 +32,7 @@ impl OutputClassifier for ACPClassifier {
                 match status {
                     "idle" => Some(claims_completion()),
                     "retry" => {
-                        let attempt = params
-                            .get("attempt")
-                            .and_then(|a| a.as_u64())
-                            .unwrap_or(0);
+                        let attempt = params.get("attempt").and_then(|a| a.as_u64()).unwrap_or(0);
                         if attempt > 3 {
                             Some(SituationType::with_subtype("error", "retry_exhausted"))
                         } else {
@@ -80,18 +77,20 @@ impl OutputClassifier for ACPClassifier {
 pub fn register_acp_builders(registry: &SituationRegistry) {
     // ACP permission builder
     registry.register_builder(acp_permission(), || {
-        Some(Box::new(crate::builtin_situations::WaitingForChoiceSituation::new(vec![
-            ChoiceOption::new("once", "Once"),
-            ChoiceOption::new("always", "Always for session"),
-            ChoiceOption::new("reject", "Reject"),
-        ])))
+        Some(Box::new(
+            crate::builtin_situations::WaitingForChoiceSituation::new(vec![
+                ChoiceOption::new("once", "Once"),
+                ChoiceOption::new("always", "Always for session"),
+                ChoiceOption::new("reject", "Reject"),
+            ]),
+        ))
     });
 
     // ACP completion builder
     registry.register_builder(claims_completion(), || {
-        Some(Box::new(crate::builtin_situations::ClaimsCompletionSituation::new(
-            "ACP session idle",
-        )))
+        Some(Box::new(
+            crate::builtin_situations::ClaimsCompletionSituation::new("ACP session idle"),
+        ))
     });
 
     // ACP error builder
@@ -114,20 +113,16 @@ pub fn parse_acp_options(_params: &serde_json::Value) -> Vec<ChoiceOption> {
 /// Detect critical permissions
 pub fn is_critical_permission(permission_type: &str, params: &serde_json::Value) -> bool {
     match permission_type {
-        "write" | "edit" => {
-            params
-                .get("path")
-                .and_then(|p| p.as_str())
-                .map(|path| path.contains(".env") || path.contains("credentials"))
-                .unwrap_or(false)
-        }
-        "execute" => {
-            params
-                .get("command")
-                .and_then(|c| c.as_str())
-                .map(|cmd| cmd.contains("rm") || cmd.contains("sudo"))
-                .unwrap_or(false)
-        }
+        "write" | "edit" => params
+            .get("path")
+            .and_then(|p| p.as_str())
+            .map(|path| path.contains(".env") || path.contains("credentials"))
+            .unwrap_or(false),
+        "execute" => params
+            .get("command")
+            .and_then(|c| c.as_str())
+            .map(|cmd| cmd.contains("rm") || cmd.contains("sudo"))
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -196,7 +191,10 @@ mod tests {
             params: serde_json::json!({ "status": "retry", "attempt": 4 }),
         };
         let type_ = classifier.classify_type(&event);
-        assert_eq!(type_, Some(SituationType::with_subtype("error", "retry_exhausted")));
+        assert_eq!(
+            type_,
+            Some(SituationType::with_subtype("error", "retry_exhausted"))
+        );
     }
 
     #[test]

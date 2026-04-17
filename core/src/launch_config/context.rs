@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::provider::{ProviderKind, SessionHandle};
 use crate::launch_config::spec::ResolvedLaunchSpec;
+use crate::provider::{ProviderKind, SessionHandle};
 
 /// Context for launching a provider with structured configuration.
 ///

@@ -2,7 +2,9 @@
 
 use crate::action::DecisionAction;
 use crate::action_registry::ActionRegistry;
-use crate::builtin_actions::{CustomInstructionAction, ReflectAction, RetryAction, SelectOptionAction};
+use crate::builtin_actions::{
+    CustomInstructionAction, ReflectAction, RetryAction, SelectOptionAction,
+};
 use crate::context::DecisionContext;
 use crate::engine::DecisionEngine;
 use crate::output::{DecisionOutput, DecisionRecord};
@@ -17,7 +19,9 @@ pub struct MockDecisionEngine {
 
 impl MockDecisionEngine {
     pub fn new() -> Self {
-        Self { history: Vec::new() }
+        Self {
+            history: Vec::new(),
+        }
     }
 
     /// Get mock actions for situation
@@ -34,7 +38,9 @@ impl MockDecisionEngine {
             }
             "error" => {
                 // Return retry action for error
-                vec![Box::new(RetryAction::new("Mock: retry").with_cooldown(1000))]
+                vec![Box::new(
+                    RetryAction::new("Mock: retry").with_cooldown(1000),
+                )]
             }
             _ => {
                 // Default: continue with custom instruction
@@ -82,7 +88,11 @@ impl DecisionEngine for MockDecisionEngine {
         Ok(output)
     }
 
-    fn build_prompt(&self, _context: &DecisionContext, _action_registry: &ActionRegistry) -> String {
+    fn build_prompt(
+        &self,
+        _context: &DecisionContext,
+        _action_registry: &ActionRegistry,
+    ) -> String {
         "Mock prompt".to_string()
     }
 

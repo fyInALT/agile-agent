@@ -6,22 +6,10 @@ use crate::provider::ProviderKind;
 use super::spec::{LaunchInputSpec, LaunchSourceMode, LaunchSourceOrigin, ResolvedLaunchSpec};
 
 /// Host environment variables that are inherited by default.
-const HOST_ENV_WHITELIST: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-];
+const HOST_ENV_WHITELIST: &[&str] = &["PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL"];
 
 /// Provider-specific environment variable prefixes.
-const PROVIDER_ENV_PREFIXES: &[&str] = &[
-    "ANTHROPIC_",
-    "CODEX_",
-    "OPENAI_",
-    "API_",
-];
+const PROVIDER_ENV_PREFIXES: &[&str] = &["ANTHROPIC_", "CODEX_", "OPENAI_", "API_"];
 
 /// Default executable names for each provider.
 fn default_executable_name(provider: ProviderKind) -> Option<&'static str> {
@@ -106,10 +94,8 @@ pub fn generate_host_default_input(provider: ProviderKind) -> LaunchInputSpec {
 
 /// Resolve a LaunchInputSpec into a ResolvedLaunchSpec.
 pub fn resolve_launch_spec(input: &LaunchInputSpec) -> anyhow::Result<ResolvedLaunchSpec> {
-    let resolved_executable = resolve_executable_path(
-        input.provider,
-        input.requested_executable.as_deref(),
-    )?;
+    let resolved_executable =
+        resolve_executable_path(input.provider, input.requested_executable.as_deref())?;
 
     let host_env = resolve_host_env(input.provider);
     let mut effective_env = host_env;
@@ -123,13 +109,17 @@ pub fn resolve_launch_spec(input: &LaunchInputSpec) -> anyhow::Result<ResolvedLa
 
     // Add note about source origin
     match input.source_origin {
-        LaunchSourceOrigin::Manual => resolution_notes.push("Source: manual user input".to_string()),
+        LaunchSourceOrigin::Manual => {
+            resolution_notes.push("Source: manual user input".to_string())
+        }
         LaunchSourceOrigin::Template => {
             if let Some(template_id) = &input.template_id {
                 resolution_notes.push(format!("Source: template '{}'", template_id));
             }
         }
-        LaunchSourceOrigin::HostDefault => resolution_notes.push("Source: host default".to_string()),
+        LaunchSourceOrigin::HostDefault => {
+            resolution_notes.push("Source: host default".to_string())
+        }
     }
 
     Ok(ResolvedLaunchSpec {
@@ -214,7 +204,8 @@ mod tests {
     fn test_resolve_executable_path_windows_style() {
         // On Windows, C:\Users\... is absolute; on Linux it won't be recognized
         // This test verifies the function doesn't panic and handles the input gracefully
-        let result = resolve_executable_path(ProviderKind::Claude, Some("C:\\Users\\test\\claude.exe"));
+        let result =
+            resolve_executable_path(ProviderKind::Claude, Some("C:\\Users\\test\\claude.exe"));
         // On Linux this returns an error from which::which since the path is not absolute there
         // On Windows it would return the path directly since Path::is_absolute() would be true
         if cfg!(windows) {
@@ -288,8 +279,14 @@ mod tests {
         // but we can verify it's different or doesn't exist due to override)
         // Actually, since decision has no env_overrides, it will just have host env
         // The key point is it doesn't INHERIT from work_resolved
-        assert!(decision_resolved.effective_env.get("ANTHROPIC_MODEL").is_none()
-            || decision_resolved.effective_env.get("ANTHROPIC_MODEL") != Some(&"claude-opus".to_string()));
+        assert!(
+            decision_resolved
+                .effective_env
+                .get("ANTHROPIC_MODEL")
+                .is_none()
+                || decision_resolved.effective_env.get("ANTHROPIC_MODEL")
+                    != Some(&"claude-opus".to_string())
+        );
     }
 
     #[test]

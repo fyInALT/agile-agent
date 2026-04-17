@@ -280,7 +280,8 @@ impl DecisionAgentState {
 
         // Create or restore new task context
         if !self.task_contexts.contains_key(&new_task) {
-            self.task_contexts.insert(new_task.clone(), TaskDecisionContext::new(new_task.clone()));
+            self.task_contexts
+                .insert(new_task.clone(), TaskDecisionContext::new(new_task.clone()));
         }
 
         self.current_task_id = Some(new_task);

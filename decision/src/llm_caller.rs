@@ -42,9 +42,7 @@ pub struct MockLLMCaller {
 impl MockLLMCaller {
     /// Create a new mock LLM caller
     pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-        }
+        Self { id: id.into() }
     }
 }
 

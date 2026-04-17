@@ -64,11 +64,7 @@ pub fn format_launch_summary(
 ) -> String {
     format!(
         "{} [{}]: exec={}, env={} overrides, decision={}",
-        codename,
-        provider_label,
-        executable,
-        env_count,
-        decision_source
+        codename, provider_label, executable, env_count, decision_source
     )
 }
 
@@ -134,23 +130,24 @@ mod tests {
     fn test_redact_env_map() {
         let mut env = std::collections::BTreeMap::new();
         env.insert("PATH".to_string(), "/usr/bin".to_string());
-        env.insert("ANTHROPIC_API_KEY".to_string(), "sk-ant-secret-value".to_string());
+        env.insert(
+            "ANTHROPIC_API_KEY".to_string(),
+            "sk-ant-secret-value".to_string(),
+        );
 
         let redacted = redact_env_map(&env);
 
         assert_eq!(redacted.get("PATH"), Some(&"/usr/bin".to_string()));
-        assert_eq!(redacted.get("ANTHROPIC_API_KEY"), Some(&"sk-ant-s...".to_string()));
+        assert_eq!(
+            redacted.get("ANTHROPIC_API_KEY"),
+            Some(&"sk-ant-s...".to_string())
+        );
     }
 
     #[test]
     fn test_format_launch_summary() {
-        let summary = format_launch_summary(
-            "alpha",
-            "claude",
-            "/usr/bin/claude",
-            2,
-            "host default",
-        );
+        let summary =
+            format_launch_summary("alpha", "claude", "/usr/bin/claude", 2, "host default");
         assert_eq!(
             summary,
             "alpha [claude]: exec=/usr/bin/claude, env=2 overrides, decision=host default"

@@ -167,7 +167,11 @@ pub struct AgentLaunchBundle {
 
 impl AgentLaunchBundle {
     /// Create a new bundle with the same config for both agents.
-    pub fn symmetric(provider: ProviderKind, input: LaunchInputSpec, resolved: ResolvedLaunchSpec) -> Self {
+    pub fn symmetric(
+        provider: ProviderKind,
+        input: LaunchInputSpec,
+        resolved: ResolvedLaunchSpec,
+    ) -> Self {
         Self {
             work_input: input.clone(),
             work_resolved: resolved.clone(),
@@ -214,7 +218,10 @@ mod tests {
         let spec = LaunchInputSpec::env_only(ProviderKind::Claude, env);
         assert_eq!(spec.source_mode, LaunchSourceMode::EnvOnly);
         assert_eq!(spec.source_origin, LaunchSourceOrigin::Manual);
-        assert_eq!(spec.env_overrides.get("ANTHROPIC_MODEL"), Some(&"opus-4".to_string()));
+        assert_eq!(
+            spec.env_overrides.get("ANTHROPIC_MODEL"),
+            Some(&"opus-4".to_string())
+        );
     }
 
     #[test]
@@ -292,7 +299,12 @@ mod tests {
             vec![],
             LaunchSourceMode::HostDefault,
         );
-        let bundle = AgentLaunchBundle::asymmetric(work_input, work_resolved, decision_input, decision_resolved);
+        let bundle = AgentLaunchBundle::asymmetric(
+            work_input,
+            work_resolved,
+            decision_input,
+            decision_resolved,
+        );
         assert_eq!(bundle.work_input.provider, ProviderKind::Claude);
         assert_eq!(bundle.decision_input.provider, ProviderKind::Codex);
     }

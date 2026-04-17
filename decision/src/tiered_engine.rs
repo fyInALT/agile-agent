@@ -269,7 +269,8 @@ impl TieredDecisionEngine {
             situation_type,
             tier,
             engine_type,
-            action_type: output.first_action_type()
+            action_type: output
+                .first_action_type()
                 .map(|a| a.name)
                 .unwrap_or_default(),
             confidence: output.confidence,
@@ -341,7 +342,9 @@ impl TierStatistics {
 impl DecisionEngine for TieredDecisionEngine {
     fn engine_type(&self) -> DecisionEngineType {
         // Report as Custom since it uses multiple engines
-        DecisionEngineType::Custom { name: "tiered".to_string() }
+        DecisionEngineType::Custom {
+            name: "tiered".to_string(),
+        }
     }
 
     fn decide(
@@ -359,9 +362,15 @@ impl DecisionEngine for TieredDecisionEngine {
         // 2. Get engine type for this tier
         let engine_type = match tier {
             DecisionTier::Simple => DecisionEngineType::RuleBased,
-            DecisionTier::Medium => DecisionEngineType::LLM { provider: llm_provider },
-            DecisionTier::Complex => DecisionEngineType::LLM { provider: llm_provider },
-            DecisionTier::Critical => DecisionEngineType::CLI { provider: llm_provider },
+            DecisionTier::Medium => DecisionEngineType::LLM {
+                provider: llm_provider,
+            },
+            DecisionTier::Complex => DecisionEngineType::LLM {
+                provider: llm_provider,
+            },
+            DecisionTier::Critical => DecisionEngineType::CLI {
+                provider: llm_provider,
+            },
         };
 
         // 3. Select engine and try decision with fallback
@@ -381,16 +390,19 @@ impl DecisionEngine for TieredDecisionEngine {
                     let registry = crate::situation_registry::SituationRegistry::new();
                     crate::builtin_situations::register_situation_builtins(&registry);
                     let fallback_situation = registry.build(situation_type.clone());
-                    let fallback_context = DecisionContext::new(fallback_situation, "tiered-fallback");
+                    let fallback_context =
+                        DecisionContext::new(fallback_situation, "tiered-fallback");
 
                     // Select fallback engine
                     let fallback_engine = self.select_engine(fallback_tier);
                     let fallback_engine_type = match fallback_tier {
                         DecisionTier::Simple => DecisionEngineType::RuleBased,
-                        DecisionTier::Medium | DecisionTier::Complex =>
-                            DecisionEngineType::LLM { provider: llm_provider },
-                        DecisionTier::Critical =>
-                            DecisionEngineType::CLI { provider: llm_provider },
+                        DecisionTier::Medium | DecisionTier::Complex => DecisionEngineType::LLM {
+                            provider: llm_provider,
+                        },
+                        DecisionTier::Critical => DecisionEngineType::CLI {
+                            provider: llm_provider,
+                        },
                     };
 
                     // Try fallback
@@ -407,10 +419,10 @@ impl DecisionEngine for TieredDecisionEngine {
                         }
                         Err(fallback_err) => {
                             // Both failed - return original error with context
-                            return Err(crate::error::DecisionError::EngineError(
-                                format!("Primary engine failed: {}. Fallback engine also failed: {}",
-                                    e, fallback_err)
-                            ));
+                            return Err(crate::error::DecisionError::EngineError(format!(
+                                "Primary engine failed: {}. Fallback engine also failed: {}",
+                                e, fallback_err
+                            )));
                         }
                     }
                 } else {
@@ -438,7 +450,8 @@ impl DecisionEngine for TieredDecisionEngine {
         action_registry: &ActionRegistry,
     ) -> crate::error::Result<Vec<Box<dyn DecisionAction>>> {
         // Use rule engine parsing (most flexible)
-        self.rule_engine.parse_response(response, situation, action_registry)
+        self.rule_engine
+            .parse_response(response, situation, action_registry)
     }
 
     fn session_handle(&self) -> Option<&str> {
@@ -467,7 +480,7 @@ mod tests {
     use crate::action_registry::ActionRegistry;
     use crate::builtin_actions::register_action_builtins;
     use crate::builtin_situations::{
-        WaitingForChoiceSituation, ClaimsCompletionSituation, ErrorSituation,
+        ClaimsCompletionSituation, ErrorSituation, WaitingForChoiceSituation,
     };
     use crate::context::DecisionContext;
     use crate::situation::{ChoiceOption, ErrorInfo};
@@ -480,33 +493,27 @@ mod tests {
 
     fn make_simple_choice_context() -> DecisionContext {
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![
-                ChoiceOption::new("A", "Option A"),
-            ])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
         DecisionContext::new(situation, "test-agent")
     }
 
     fn make_medium_choice_context() -> DecisionContext {
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ClaimsCompletionSituation::new("Test completion")
-        );
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ClaimsCompletionSituation::new("Test completion"));
         DecisionContext::new(situation, "test-agent")
     }
 
     fn make_error_context() -> DecisionContext {
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ErrorSituation::new(ErrorInfo::new("test", "Test error"))
-        );
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ErrorSituation::new(ErrorInfo::new("test", "Test error")));
         DecisionContext::new(situation, "test-agent")
     }
 
     #[test]
     fn test_decision_tier_from_simple() {
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![
-                ChoiceOption::new("A", "Option A"),
-            ])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
         let tier = DecisionTier::from_situation(situation.as_ref());
         assert_eq!(tier, DecisionTier::Simple);
@@ -515,18 +522,16 @@ mod tests {
     #[test]
     fn test_decision_tier_from_medium() {
         // Claims completion is Medium tier
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ClaimsCompletionSituation::new("Test")
-        );
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ClaimsCompletionSituation::new("Test"));
         let tier = DecisionTier::from_situation(situation.as_ref());
         assert_eq!(tier, DecisionTier::Medium);
     }
 
     #[test]
     fn test_decision_tier_from_error() {
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ErrorSituation::new(ErrorInfo::new("test", "Test error"))
-        );
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ErrorSituation::new(ErrorInfo::new("test", "Test error")));
         let tier = DecisionTier::from_situation(situation.as_ref());
         assert_eq!(tier, DecisionTier::Complex);
     }
@@ -550,7 +555,10 @@ mod tests {
     #[test]
     fn test_tiered_engine_new() {
         let engine = TieredDecisionEngine::with_provider(ProviderKind::Claude);
-        assert!(matches!(engine.engine_type(), DecisionEngineType::Custom { .. }));
+        assert!(matches!(
+            engine.engine_type(),
+            DecisionEngineType::Custom { .. }
+        ));
     }
 
     #[test]
@@ -566,15 +574,20 @@ mod tests {
 
         // WaitingForChoice is Simple tier
         let simple_situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
-        assert_eq!(engine.select_tier(simple_situation.as_ref()), DecisionTier::Simple);
+        assert_eq!(
+            engine.select_tier(simple_situation.as_ref()),
+            DecisionTier::Simple
+        );
 
         // ClaimsCompletion is Medium tier
-        let medium_situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ClaimsCompletionSituation::new("Test")
+        let medium_situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ClaimsCompletionSituation::new("Test"));
+        assert_eq!(
+            engine.select_tier(medium_situation.as_ref()),
+            DecisionTier::Medium
         );
-        assert_eq!(engine.select_tier(medium_situation.as_ref()), DecisionTier::Medium);
     }
 
     #[test]
@@ -619,8 +632,12 @@ mod tests {
         let mut engine = TieredDecisionEngine::with_provider(ProviderKind::Claude);
         let registry = make_test_registry();
 
-        engine.decide(make_simple_choice_context(), &registry).unwrap();
-        engine.decide(make_medium_choice_context(), &registry).unwrap();
+        engine
+            .decide(make_simple_choice_context(), &registry)
+            .unwrap();
+        engine
+            .decide(make_medium_choice_context(), &registry)
+            .unwrap();
         engine.decide(make_error_context(), &registry).unwrap();
 
         assert_eq!(engine.history().len(), 3);
@@ -631,9 +648,15 @@ mod tests {
         let mut engine = TieredDecisionEngine::with_provider(ProviderKind::Claude);
         let registry = make_test_registry();
 
-        engine.decide(make_simple_choice_context(), &registry).unwrap();
-        engine.decide(make_simple_choice_context(), &registry).unwrap();
-        engine.decide(make_medium_choice_context(), &registry).unwrap();
+        engine
+            .decide(make_simple_choice_context(), &registry)
+            .unwrap();
+        engine
+            .decide(make_simple_choice_context(), &registry)
+            .unwrap();
+        engine
+            .decide(make_medium_choice_context(), &registry)
+            .unwrap();
 
         let stats = engine.tier_stats();
         assert_eq!(stats.total, 3);
@@ -660,7 +683,9 @@ mod tests {
         let mut engine = TieredDecisionEngine::with_provider(ProviderKind::Claude);
         let registry = make_test_registry();
 
-        engine.decide(make_simple_choice_context(), &registry).unwrap();
+        engine
+            .decide(make_simple_choice_context(), &registry)
+            .unwrap();
         engine.reset().unwrap();
 
         assert!(engine.history().is_empty());

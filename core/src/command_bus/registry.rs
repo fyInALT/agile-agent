@@ -68,10 +68,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     },
 ];
 
-pub fn command_spec(
-    namespace: CommandNamespace,
-    path: &[&str],
-) -> Option<&'static CommandSpec> {
+pub fn command_spec(namespace: CommandNamespace, path: &[&str]) -> Option<&'static CommandSpec> {
     COMMAND_SPECS
         .iter()
         .find(|spec| spec.namespace == namespace && spec.path == path)
@@ -102,7 +99,12 @@ pub fn longest_registered_path_prefix(
                 .zip(tokens.iter())
                 .all(|(expected, actual)| expected == &actual.as_str());
             if matches {
-                Some(spec.path.iter().map(|segment| segment.to_string()).collect::<Vec<_>>())
+                Some(
+                    spec.path
+                        .iter()
+                        .map(|segment| segment.to_string())
+                        .collect::<Vec<_>>(),
+                )
             } else {
                 None
             }

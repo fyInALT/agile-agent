@@ -34,7 +34,10 @@ impl ActionRegistry {
 
     /// THREAD-SAFE: Register an action
     pub fn register(&self, action: Box<dyn DecisionAction>) {
-        self.actions.write().unwrap().insert(action.action_type(), action);
+        self.actions
+            .write()
+            .unwrap()
+            .insert(action.action_type(), action);
     }
 
     /// THREAD-SAFE: Register an action parser
@@ -43,7 +46,10 @@ impl ActionRegistry {
         type_: ActionType,
         parser: impl Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync + 'static,
     ) {
-        self.parsers.write().unwrap().insert(type_, Box::new(parser));
+        self.parsers
+            .write()
+            .unwrap()
+            .insert(type_, Box::new(parser));
     }
 
     /// THREAD-SAFE: Register an action deserializer
@@ -52,7 +58,10 @@ impl ActionRegistry {
         type_: ActionType,
         deserializer: impl Fn(&str) -> Option<Box<dyn DecisionAction>> + Send + Sync + 'static,
     ) {
-        self.deserializers.write().unwrap().insert(type_, Box::new(deserializer));
+        self.deserializers
+            .write()
+            .unwrap()
+            .insert(type_, Box::new(deserializer));
     }
 
     /// THREAD-SAFE: Get action by type
@@ -89,12 +98,7 @@ impl ActionRegistry {
 
     /// THREAD-SAFE: Get all registered action types
     pub fn registered_types(&self) -> Vec<ActionType> {
-        self.actions
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
+        self.actions.read().unwrap().keys().cloned().collect()
     }
 
     /// Generate prompt format for all actions
@@ -141,7 +145,10 @@ mod tests {
 
         let retrieved = registry.get(&ActionType::new("select_option"));
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().action_type(), ActionType::new("select_option"));
+        assert_eq!(
+            retrieved.unwrap().action_type(),
+            ActionType::new("select_option")
+        );
     }
 
     #[test]
@@ -180,9 +187,7 @@ mod tests {
         let threads: Vec<_> = (0..10)
             .map(|_| {
                 let r = registry.clone();
-                thread::spawn(move || {
-                    r.get(&ActionType::new("select_option")).unwrap()
-                })
+                thread::spawn(move || r.get(&ActionType::new("select_option")).unwrap())
             })
             .collect();
 

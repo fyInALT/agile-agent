@@ -27,24 +27,16 @@ pub enum ActionResult {
     Success,
 
     /// Action needs follow-up
-    NeedsFollowUp {
-        next_action: Option<ActionType>,
-    },
+    NeedsFollowUp { next_action: Option<ActionType> },
 
     /// Action delegated to other agent
-    Delegated {
-        target_agent_id: String,
-    },
+    Delegated { target_agent_id: String },
 
     /// Action failed
-    Failed {
-        reason: String,
-    },
+    Failed { reason: String },
 
     /// Action requires human confirmation
-    NeedsHumanConfirmation {
-        message: String,
-    },
+    NeedsHumanConfirmation { message: String },
 }
 
 impl ActionResult {

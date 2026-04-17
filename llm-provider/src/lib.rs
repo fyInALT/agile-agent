@@ -71,6 +71,6 @@ pub mod text;
 pub use client::LlmClient;
 pub use config::ConfigFile;
 pub use error::LlmError;
-pub use models::{ChatMessage, LlmConfig, ModelType, MessageRole};
+pub use models::{ChatMessage, LlmConfig, MessageRole, ModelType};
 pub use provider::{LlmProvider, LlmResponse, LlmStreamChunk, LlmUsage};
 pub use text::TextProcessor;

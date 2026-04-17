@@ -119,7 +119,11 @@ impl CLIDecisionEngine {
     }
 
     /// Build prompt for human
-    fn build_human_prompt(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
+    fn build_human_prompt(
+        &self,
+        context: &DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> String {
         let situation_text = context.trigger_situation.to_prompt_text();
         let available_actions = context.trigger_situation.available_actions();
 
@@ -133,7 +137,8 @@ impl CLIDecisionEngine {
             })
             .collect();
 
-        let task_info = context.current_task_id
+        let task_info = context
+            .current_task_id
             .as_ref()
             .map(|id| format!("Task: {}", id))
             .unwrap_or_else(|| "No task assigned".to_string());
@@ -225,7 +230,10 @@ impl CLIDecisionEngine {
             }
         }
 
-        Err(DecisionError::ParseError(format!("Invalid CLI input: {}", input)))
+        Err(DecisionError::ParseError(format!(
+            "Invalid CLI input: {}",
+            input
+        )))
     }
 
     /// Add pending request
@@ -251,11 +259,9 @@ impl CLIDecisionEngine {
             pending_requests: self.pending_requests.clone(),
         };
 
-        let json = serde_json::to_string_pretty(&state)
-            .map_err(DecisionError::JsonError)?;
+        let json = serde_json::to_string_pretty(&state).map_err(DecisionError::JsonError)?;
 
-        std::fs::write(path, json)
-            .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
+        std::fs::write(path, json).map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
         Ok(())
     }
@@ -269,8 +275,8 @@ impl CLIDecisionEngine {
         let json = std::fs::read_to_string(path)
             .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
-        let state: CLISessionState = serde_json::from_str(&json)
-            .map_err(DecisionError::JsonError)?;
+        let state: CLISessionState =
+            serde_json::from_str(&json).map_err(DecisionError::JsonError)?;
 
         self.provider = state.provider;
         self.config = state.config;
@@ -290,7 +296,9 @@ struct CLISessionState {
 
 impl DecisionEngine for CLIDecisionEngine {
     fn engine_type(&self) -> DecisionEngineType {
-        DecisionEngineType::CLI { provider: self.provider }
+        DecisionEngineType::CLI {
+            provider: self.provider,
+        }
     }
 
     fn decide(
@@ -305,11 +313,8 @@ impl DecisionEngine for CLIDecisionEngine {
         let input = self.get_cli_input(&prompt)?;
 
         // 3. Parse to actions
-        let actions = self.parse_cli_input(
-            &input,
-            context.trigger_situation.as_ref(),
-            action_registry,
-        )?;
+        let actions =
+            self.parse_cli_input(&input, context.trigger_situation.as_ref(), action_registry)?;
 
         // 4. Build reasoning
         let reasoning = format!("CLI input: {}", input);
@@ -360,12 +365,11 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_test_context() -> DecisionContext {
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(WaitingForChoiceSituation::new(vec![
                 ChoiceOption::new("A", "Option A"),
                 ChoiceOption::new("B", "Option B"),
-            ])
-        );
+            ]));
         DecisionContext::new(situation, "test-agent")
     }
 
@@ -378,7 +382,10 @@ mod tests {
     #[test]
     fn test_cli_engine_new() {
         let engine = CLIDecisionEngine::new(ProviderKind::Claude);
-        assert!(matches!(engine.engine_type(), DecisionEngineType::CLI { .. }));
+        assert!(matches!(
+            engine.engine_type(),
+            DecisionEngineType::CLI { .. }
+        ));
     }
 
     #[test]
@@ -405,10 +412,12 @@ mod tests {
         let engine = CLIDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
 
-        let actions = engine.parse_cli_input("1", situation.as_ref(), &registry).unwrap();
+        let actions = engine
+            .parse_cli_input("1", situation.as_ref(), &registry)
+            .unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type().name, "select_option");
     }
@@ -418,10 +427,12 @@ mod tests {
         let engine = CLIDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
 
-        let actions = engine.parse_cli_input("c:do something", situation.as_ref(), &registry).unwrap();
+        let actions = engine
+            .parse_cli_input("c:do something", situation.as_ref(), &registry)
+            .unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type().name, "custom_instruction");
     }
@@ -431,10 +442,12 @@ mod tests {
         let engine = CLIDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
 
-        let actions = engine.parse_cli_input("s", situation.as_ref(), &registry).unwrap();
+        let actions = engine
+            .parse_cli_input("s", situation.as_ref(), &registry)
+            .unwrap();
         assert!(actions.is_empty());
     }
 
@@ -443,10 +456,12 @@ mod tests {
         let engine = CLIDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
 
-        let actions = engine.parse_cli_input("h", situation.as_ref(), &registry).unwrap();
+        let actions = engine
+            .parse_cli_input("h", situation.as_ref(), &registry)
+            .unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type().name, "request_human");
     }

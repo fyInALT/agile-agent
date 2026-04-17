@@ -64,7 +64,10 @@ pub struct SessionHandle {
 }
 
 impl SessionHandle {
-    pub fn new(session_id: impl Into<String>, provider: crate::provider_kind::ProviderKind) -> Self {
+    pub fn new(
+        session_id: impl Into<String>,
+        provider: crate::provider_kind::ProviderKind,
+    ) -> Self {
         Self {
             session_id: session_id.into(),
             provider,
@@ -94,7 +97,9 @@ mod tests {
 
     #[test]
     fn test_decision_engine_type_llm() {
-        let type_ = DecisionEngineType::LLM { provider: crate::provider_kind::ProviderKind::Claude };
+        let type_ = DecisionEngineType::LLM {
+            provider: crate::provider_kind::ProviderKind::Claude,
+        };
         assert!(type_.is_llm());
         assert!(!type_.is_mock());
     }

@@ -79,7 +79,8 @@ mod mock_provider_tests {
     fn test_mock_records_last_prompt_and_model() {
         let mock = MockLlmProvider::new().with_response("resp".to_string());
 
-        mock.complete_with_model("thinking prompt", ModelType::Thinking).unwrap();
+        mock.complete_with_model("thinking prompt", ModelType::Thinking)
+            .unwrap();
 
         assert_eq!(mock.last_prompt(), Some("thinking prompt".to_string()));
         assert_eq!(mock.last_model(), Some(ModelType::Thinking));
@@ -90,17 +91,22 @@ mod mock_provider_tests {
         let mock = MockLlmProvider::new().with_error("Something went wrong");
         let result = mock.complete("test");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Something went wrong"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Something went wrong")
+        );
     }
 
     #[test]
     fn test_mock_streaming() {
-        let mock = MockLlmProvider::new()
-            .with_response("Hello world".to_string());
+        let mock = MockLlmProvider::new().with_response("Hello world".to_string());
 
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let chunks_clone = chunks.clone();
-        mock.complete_streaming("say hello", move |c| chunks_clone.lock().unwrap().push(c)).unwrap();
+        mock.complete_streaming("say hello", move |c| chunks_clone.lock().unwrap().push(c))
+            .unwrap();
 
         let chunks = chunks.lock().unwrap();
         assert!(!chunks.is_empty());
@@ -125,8 +131,8 @@ mod mock_provider_tests {
 
     #[test]
     fn test_mock_response_by_model() {
-        let mock = MockLlmProvider::new()
-            .with_responses("Simple answer", "Complex thoughtful answer");
+        let mock =
+            MockLlmProvider::new().with_responses("Simple answer", "Complex thoughtful answer");
 
         let simple = mock.complete_with_model("Q?", ModelType::Simple).unwrap();
         let thinking = mock.complete_with_model("Q?", ModelType::Thinking).unwrap();
@@ -146,7 +152,9 @@ mod mock_provider_tests {
         assert_eq!(response.usage.unwrap().total_tokens, 10);
         assert_eq!(echo.call_count(), 1);
 
-        let response2 = echo.complete_with_model("World", ModelType::Thinking).unwrap();
+        let response2 = echo
+            .complete_with_model("World", ModelType::Thinking)
+            .unwrap();
         assert_eq!(response2.content, "Echo: World");
         assert_eq!(echo.call_count(), 2);
     }
@@ -157,10 +165,14 @@ mod mock_provider_tests {
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let chunks_clone = chunks.clone();
 
-        echo.complete_streaming("Hi", move |c| chunks_clone.lock().unwrap().push(c)).unwrap();
+        echo.complete_streaming("Hi", move |c| chunks_clone.lock().unwrap().push(c))
+            .unwrap();
 
         // Should have chunks for "Echo: Hi"
-        let content: String = chunks.lock().unwrap().iter()
+        let content: String = chunks
+            .lock()
+            .unwrap()
+            .iter()
             .map(|c| c.content.clone())
             .collect();
         assert!(content.contains("Echo:"));
@@ -176,7 +188,10 @@ mod provider_trait_tests {
     use super::*;
 
     // Example function that works with any LLM provider
-    fn summarize_using_provider<P: LlmProvider>(provider: &P, text: &str) -> anyhow::Result<String> {
+    fn summarize_using_provider<P: LlmProvider>(
+        provider: &P,
+        text: &str,
+    ) -> anyhow::Result<String> {
         let prompt = format!("Summarize this: {}", text);
         let response = provider.complete_with_model(&prompt, ModelType::Thinking)?;
         Ok(response.content)
@@ -195,11 +210,13 @@ mod provider_trait_tests {
 
     #[test]
     fn test_provider_trait_with_mock() {
-        let mock = MockLlmProvider::new()
-            .with_responses("Category A", "Complex Category B response");
+        let mock =
+            MockLlmProvider::new().with_responses("Category A", "Complex Category B response");
 
         // Simple classification
-        let result = classify_with_provider(&mock, "I love this product", &["positive", "negative"]).unwrap();
+        let result =
+            classify_with_provider(&mock, "I love this product", &["positive", "negative"])
+                .unwrap();
         assert!(result.contains("Category"));
 
         // Reset for thinking model test
@@ -385,8 +402,8 @@ mod text_processor_tests {
 
     #[test]
     fn test_text_processor_summarize() {
-        let mock = MockLlmProvider::new()
-            .with_response("This is a summary of the text".to_string());
+        let mock =
+            MockLlmProvider::new().with_response("This is a summary of the text".to_string());
         let processor = TextProcessor::new(mock);
 
         let result = processor.summarize("Long text to summarize").unwrap();
@@ -401,8 +418,7 @@ mod text_processor_tests {
 
     #[test]
     fn test_text_processor_compress() {
-        let mock = MockLlmProvider::new()
-            .with_response("Compressed version".to_string());
+        let mock = MockLlmProvider::new().with_response("Compressed version".to_string());
         let processor = TextProcessor::new(mock);
 
         let result = processor.compress("Long text", 100).unwrap();
@@ -411,8 +427,7 @@ mod text_processor_tests {
 
     #[test]
     fn test_text_processor_extract_key_points() {
-        let mock = MockLlmProvider::new()
-            .with_response("Point 1\nPoint 2\nPoint 3".to_string());
+        let mock = MockLlmProvider::new().with_response("Point 1\nPoint 2\nPoint 3".to_string());
         let processor = TextProcessor::new(mock);
 
         let result = processor.extract_key_points("Document content").unwrap();
@@ -422,18 +437,18 @@ mod text_processor_tests {
 
     #[test]
     fn test_text_processor_classify() {
-        let mock = MockLlmProvider::new()
-            .with_response("positive".to_string());
+        let mock = MockLlmProvider::new().with_response("positive".to_string());
         let processor = TextProcessor::new(mock);
 
-        let result = processor.classify("I love it", &["positive", "negative"]).unwrap();
+        let result = processor
+            .classify("I love it", &["positive", "negative"])
+            .unwrap();
         assert!(result.to_lowercase().contains("positive"));
     }
 
     #[test]
     fn test_text_processor_rewrite() {
-        let mock = MockLlmProvider::new()
-            .with_response("Rewritten in formal style".to_string());
+        let mock = MockLlmProvider::new().with_response("Rewritten in formal style".to_string());
         let processor = TextProcessor::new(mock);
 
         let result = processor.rewrite("casual text", "formal").unwrap();
@@ -465,14 +480,14 @@ mod streaming_tests {
 
     #[test]
     fn test_mock_streaming_chunks() {
-        let mock = MockLlmProvider::new()
-            .with_response("A B C".to_string());
+        let mock = MockLlmProvider::new().with_response("A B C".to_string());
 
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
         mock.complete_streaming("test", move |chunk| {
             received_clone.lock().unwrap().push(chunk);
-        }).unwrap();
+        })
+        .unwrap();
 
         let chunks = received.lock().unwrap();
         // Should receive chunks for "A", "B", "C" plus final chunk
@@ -488,27 +503,29 @@ mod streaming_tests {
 
         echo.complete_streaming("Hi", move |chunk| {
             received_clone.lock().unwrap().push_str(&chunk.content);
-        }).unwrap();
+        })
+        .unwrap();
 
         assert!(received.lock().unwrap().contains("Echo:"));
     }
 
     #[test]
     fn test_streaming_with_model() {
-        let mock = MockLlmProvider::new()
-            .with_responses("Simple streaming", "Complex streaming");
+        let mock = MockLlmProvider::new().with_responses("Simple streaming", "Complex streaming");
 
         let simple_chunks = Arc::new(Mutex::new(Vec::new()));
         let simple_clone = simple_chunks.clone();
         mock.complete_streaming_with_model("test", ModelType::Simple, move |c| {
             simple_clone.lock().unwrap().push(c);
-        }).unwrap();
+        })
+        .unwrap();
 
         let thinking_chunks = Arc::new(Mutex::new(Vec::new()));
         let thinking_clone = thinking_chunks.clone();
         mock.complete_streaming_with_model("test", ModelType::Thinking, move |c| {
             thinking_clone.lock().unwrap().push(c);
-        }).unwrap();
+        })
+        .unwrap();
 
         // Both should work
         assert!(!simple_chunks.lock().unwrap().is_empty());

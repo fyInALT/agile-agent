@@ -7,8 +7,8 @@ use std::process::Command;
 use agent_core::backlog::BacklogState;
 use agent_core::backlog::TodoItem;
 use agent_core::backlog::TodoStatus;
-use agent_core::workplace_store::WorkplaceStore;
 use agent_core::workplace_store::WORKPLACES_ROOT_ENV;
+use agent_core::workplace_store::WorkplaceStore;
 use tempfile::TempDir;
 
 pub struct RuntimeHarness {
@@ -128,7 +128,10 @@ fn write_fake_claude(script_path: &PathBuf, provider_log: &PathBuf) {
         + "    resume=\"${!j}\"\n"
         + "  fi\n"
         + "done\n"
-        + &format!("echo \"resume=$resume\" >> \"{}\"\n", provider_log.display())
+        + &format!(
+            "echo \"resume=$resume\" >> \"{}\"\n",
+            provider_log.display()
+        )
         + "cat >/dev/null\n"
         + "session=\"sess-cli-1\"\n"
         + "if [[ \"$resume\" != \"<none>\" ]]; then\n"

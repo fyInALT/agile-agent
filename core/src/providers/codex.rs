@@ -132,7 +132,7 @@ fn run_codex(
 
     command.args(&args);
     command.current_dir(&cwd);
-    command.stdin(Stdio::null());  // exec mode doesn't need stdin
+    command.stdin(Stdio::null()); // exec mode doesn't need stdin
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -261,9 +261,12 @@ fn run_codex_with_context(
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start codex executable `{}`", spec.resolved_executable_path))?;
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start codex executable `{}`",
+            spec.resolved_executable_path
+        )
+    })?;
 
     logging::debug_event(
         "provider.codex.process_spawned_with_context",
@@ -465,9 +468,7 @@ fn parse_item_event(
                 .get("exit_code")
                 .and_then(|value| value.as_i64())
                 .and_then(|value| i32::try_from(value).ok());
-            let duration_ms = item
-                .get("duration_ms")
-                .and_then(|value| value.as_u64());
+            let duration_ms = item.get("duration_ms").and_then(|value| value.as_u64());
             let source = item
                 .get("source")
                 .and_then(|value| value.as_str())
@@ -891,7 +892,10 @@ mod tests {
         assert_eq!(event.event_type, "item.completed");
         assert!(event.item.is_some());
         let item = event.item.unwrap();
-        assert_eq!(item.get("type").and_then(|v| v.as_str()), Some("agent_message"));
+        assert_eq!(
+            item.get("type").and_then(|v| v.as_str()),
+            Some("agent_message")
+        );
     }
 
     #[test]
@@ -1037,7 +1041,9 @@ mod tests {
         let events = parse_item_event("item.completed", &item, &HashSet::new());
         assert_eq!(
             events,
-            vec![ProviderEvent::AssistantChunk("hello from exec mode".to_string())]
+            vec![ProviderEvent::AssistantChunk(
+                "hello from exec mode".to_string()
+            )]
         );
     }
 

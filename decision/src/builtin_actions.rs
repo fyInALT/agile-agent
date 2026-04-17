@@ -301,7 +301,10 @@ impl RetryAction {
     }
 
     pub fn with_cooldown(self, cooldown_ms: u64) -> Self {
-        Self { cooldown_ms, ..self }
+        Self {
+            cooldown_ms,
+            ..self
+        }
     }
 
     pub fn adjusted(self) -> Self {
@@ -559,7 +562,8 @@ mod tests {
 
     #[test]
     fn test_continue_action_with_focus() {
-        let action = ContinueAction::new("keep going").with_focus_items(vec!["item1".to_string(), "item2".to_string()]);
+        let action = ContinueAction::new("keep going")
+            .with_focus_items(vec!["item1".to_string(), "item2".to_string()]);
         assert_eq!(action.focus_items.len(), 2);
     }
 

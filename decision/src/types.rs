@@ -68,9 +68,7 @@ pub struct ActionType {
 
 impl ActionType {
     pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-        }
+        Self { name: name.into() }
     }
 }
 
@@ -111,9 +109,13 @@ impl fmt::Display for UrgencyLevel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionEngineType {
     /// LLM-based engine with provider
-    LLM { provider: crate::provider_kind::ProviderKind },
+    LLM {
+        provider: crate::provider_kind::ProviderKind,
+    },
     /// CLI-based engine with provider
-    CLI { provider: crate::provider_kind::ProviderKind },
+    CLI {
+        provider: crate::provider_kind::ProviderKind,
+    },
     /// Rule-based engine
     RuleBased,
     /// Mock engine for testing

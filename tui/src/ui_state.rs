@@ -477,7 +477,8 @@ impl TuiState {
         let decision_input = parse(provider, decision_config).ok()?;
 
         // Resolve to get bundle
-        let (work_resolved, decision_resolved) = resolve_bundle(work_input.clone(), decision_input.clone()).ok()?;
+        let (work_resolved, decision_resolved) =
+            resolve_bundle(work_input.clone(), decision_input.clone()).ok()?;
 
         let bundle = agent_core::launch_config::AgentLaunchBundle::asymmetric(
             work_input,
@@ -754,12 +755,7 @@ impl TuiState {
 
             // Try to create pool with worktree support first
             let pool = if let Some(wp_path) = workplace_path {
-                AgentPool::new_with_worktrees(
-                    workplace_id.clone(),
-                    10,
-                    cwd.clone(),
-                    wp_path,
-                )
+                AgentPool::new_with_worktrees(workplace_id.clone(), 10, cwd.clone(), wp_path)
             } else {
                 // Can't get workplace path, use regular pool
                 Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
@@ -829,7 +825,8 @@ impl TuiState {
 
             // Check if agent has a worktree (required for pause)
             if !focused.has_worktree() {
-                self.app_mut().push_error_message("Cannot pause agent without worktree");
+                self.app_mut()
+                    .push_error_message("Cannot pause agent without worktree");
                 return None;
             }
 
@@ -1049,16 +1046,12 @@ impl TuiState {
         let workplace_path = workplace_store.as_ref().map(|w| w.path().to_path_buf());
 
         // Create WorktreeStateStore for loading authoritative worktree states
-        let worktree_state_store = workplace_path.as_ref()
+        let worktree_state_store = workplace_path
+            .as_ref()
             .map(|p| agent_core::worktree_state_store::WorktreeStateStore::new(p.clone()));
 
         let pool = if let Some(wp_path) = workplace_path {
-            AgentPool::new_with_worktrees(
-                workplace_id.clone(),
-                10,
-                cwd.clone(),
-                wp_path,
-            )
+            AgentPool::new_with_worktrees(workplace_id.clone(), 10, cwd.clone(), wp_path)
         } else {
             Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
         };
@@ -1109,7 +1102,11 @@ impl TuiState {
                     }
                     Ok(None) => {
                         // No state in store, use snapshot data
-                        (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+                        (
+                            agent.worktree_path.clone(),
+                            agent.worktree_branch.clone(),
+                            agent.worktree_id.clone(),
+                        )
                     }
                     Err(e) => {
                         // Failed to load from store, fallback to snapshot
@@ -1121,12 +1118,20 @@ impl TuiState {
                                 "error": e.to_string(),
                             }),
                         );
-                        (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+                        (
+                            agent.worktree_path.clone(),
+                            agent.worktree_branch.clone(),
+                            agent.worktree_id.clone(),
+                        )
                     }
                 }
             } else {
                 // No store available, use snapshot data
-                (agent.worktree_path.clone(), agent.worktree_branch.clone(), agent.worktree_id.clone())
+                (
+                    agent.worktree_path.clone(),
+                    agent.worktree_branch.clone(),
+                    agent.worktree_id.clone(),
+                )
             };
 
             // Log worktree restoration (before moving values)
@@ -1213,13 +1218,21 @@ impl TuiState {
 
     /// Verify worktrees exist for restored agents, recreate if missing
     fn verify_restored_worktrees(&mut self) -> Result<()> {
-        let pool = self.agent_pool.as_mut().ok_or_else(|| anyhow::anyhow!("No agent pool"))?;
+        let pool = self
+            .agent_pool
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("No agent pool"))?;
         if !pool.has_worktree_support() {
             return Ok(()); // No worktree support, nothing to verify
         }
 
         // Collect agents with worktrees that need verification
-        let agents_to_verify: Vec<(agent_core::agent_runtime::AgentId, std::path::PathBuf, Option<String>, String)> = pool
+        let agents_to_verify: Vec<(
+            agent_core::agent_runtime::AgentId,
+            std::path::PathBuf,
+            Option<String>,
+            String,
+        )> = pool
             .slots()
             .iter()
             .filter_map(|slot| {
@@ -1257,7 +1270,8 @@ impl TuiState {
             // Use pool's worktree recreation logic
             // Note: resume_agent_with_worktree requires paused state, so we need a different approach
             // For now, we just clear the worktree info if we can't recreate
-            if let Err(e) = self.recreate_agent_worktree(&agent_id, &worktree_id, branch.as_deref()) {
+            if let Err(e) = self.recreate_agent_worktree(&agent_id, &worktree_id, branch.as_deref())
+            {
                 agent_core::logging::warn_event(
                     "worktree.restore.failed",
                     "failed to recreate worktree, clearing worktree info",
@@ -1285,9 +1299,11 @@ impl TuiState {
         worktree_id: &str,
         branch: Option<&str>,
     ) -> Result<()> {
-        use agent_core::worktree_manager::{WorktreeCreateOptions, WorktreeManager, WorktreeConfig};
-        use agent_core::worktree_state_store::WorktreeStateStore;
+        use agent_core::worktree_manager::{
+            WorktreeConfig, WorktreeCreateOptions, WorktreeManager,
+        };
         use agent_core::worktree_state::WorktreeState;
+        use agent_core::worktree_state_store::WorktreeStateStore;
 
         let cwd = self.session.app.cwd.clone();
         let workplace_store = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd)?;
@@ -1298,7 +1314,8 @@ impl TuiState {
             .map_err(|e| anyhow::anyhow!("Failed to create worktree manager: {}", e))?;
 
         // Get base commit for fallback
-        let base_commit = worktree_manager.get_current_head()
+        let base_commit = worktree_manager
+            .get_current_head()
             .map_err(|e| anyhow::anyhow!("Failed to get HEAD: {}", e))?;
 
         // Determine how to create the worktree
@@ -1321,7 +1338,8 @@ impl TuiState {
             } else {
                 // Branch is checked out elsewhere - use detached HEAD at branch's HEAD
                 // Get the commit SHA of the branch
-                let branch_head = worktree_manager.get_branch_head(b)
+                let branch_head = worktree_manager
+                    .get_branch_head(b)
                     .map_err(|e| anyhow::anyhow!("Failed to get branch HEAD: {}", e))?;
 
                 agent_core::logging::warn_event(

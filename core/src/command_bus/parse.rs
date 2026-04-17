@@ -9,8 +9,8 @@ pub fn parse_slash_command(input: &str) -> Result<ParsedSlashCommand, CommandPar
         return Err(CommandParseError::new("slash commands must start with `/`"));
     }
 
-    let tokens =
-        shlex::split(trimmed).ok_or_else(|| CommandParseError::new("invalid slash command quoting"))?;
+    let tokens = shlex::split(trimmed)
+        .ok_or_else(|| CommandParseError::new("invalid slash command quoting"))?;
     let Some(first) = tokens.first() else {
         return Err(CommandParseError::new("empty slash command"));
     };
@@ -51,13 +51,21 @@ fn parse_agent(tokens: &[String]) -> Result<ParsedSlashCommand, CommandParseErro
     }
 
     let known_heads = namespace_path_heads(CommandNamespace::Agent);
-    let (target, command_start) = if tokens.len() >= 3 && !known_heads.contains(&tokens[1].as_str()) {
-        (Some(CommandTargetSpec::AgentName(tokens[1].clone())), 2usize)
+    let (target, command_start) = if tokens.len() >= 3 && !known_heads.contains(&tokens[1].as_str())
+    {
+        (
+            Some(CommandTargetSpec::AgentName(tokens[1].clone())),
+            2usize,
+        )
     } else {
         (None, 1usize)
     };
 
-    let (path, args) = split_path_and_args(CommandNamespace::Agent, &tokens[command_start..], Some(&known_heads));
+    let (path, args) = split_path_and_args(
+        CommandNamespace::Agent,
+        &tokens[command_start..],
+        Some(&known_heads),
+    );
     if path.is_empty() {
         return Err(CommandParseError::new("usage: /agent [target] <path...>"));
     }
@@ -79,7 +87,10 @@ fn parse_provider(tokens: &[String]) -> Result<ParsedSlashCommand, CommandParseE
     }
 
     let (target, raw_index) = if tokens.len() >= 3 && tokens[2].starts_with('/') {
-        (Some(CommandTargetSpec::AgentName(tokens[1].clone())), 2usize)
+        (
+            Some(CommandTargetSpec::AgentName(tokens[1].clone())),
+            2usize,
+        )
     } else {
         (None, 1usize)
     };
@@ -198,8 +209,8 @@ mod tests {
 
     #[test]
     fn parses_quoted_arguments_for_local_config() {
-        let parsed = parse_slash_command("/local config set ui.title \"My Agile Agent\"")
-            .expect("parse");
+        let parsed =
+            parse_slash_command("/local config set ui.title \"My Agile Agent\"").expect("parse");
         let ParsedSlashCommand::Invocation(invocation) = parsed;
         assert_eq!(
             invocation.path,

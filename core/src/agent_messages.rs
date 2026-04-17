@@ -416,11 +416,7 @@ fn map_entry(
             correlation_id: None,
             summary: format!(
                 "decision:{}:{}:{}:{}%:{}",
-                tier,
-                situation_type,
-                action_type,
-                confidence,
-                reasoning
+                tier, situation_type, action_type, confidence, reasoning
             ),
             created_at: captured_at,
         },

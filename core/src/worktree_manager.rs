@@ -253,14 +253,20 @@ impl WorktreeManager {
     /// - Worktree limit is reached
     /// - Path is invalid
     /// - Git command fails
-    pub fn create(&self, name: &str, options: WorktreeCreateOptions) -> Result<WorktreeInfo, WorktreeError> {
+    pub fn create(
+        &self,
+        name: &str,
+        options: WorktreeCreateOptions,
+    ) -> Result<WorktreeInfo, WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
 
         // Check worktree limit
         let current_count = self.list_internal()?.len();
         if current_count >= self.config.max_worktrees + 1 {
             // +1 for main worktree
-            return Err(WorktreeError::MaxWorktreesReached(self.config.max_worktrees));
+            return Err(WorktreeError::MaxWorktreesReached(
+                self.config.max_worktrees,
+            ));
         }
 
         // Determine worktree path
@@ -404,11 +410,19 @@ impl WorktreeManager {
     pub fn prune(&self) -> Result<(), WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
 
-        logging::debug_event("worktree.prune.start", "Pruning worktree records", serde_json::json!({}));
+        logging::debug_event(
+            "worktree.prune.start",
+            "Pruning worktree records",
+            serde_json::json!({}),
+        );
 
         self.run_git_command_internal(&["worktree", "prune"])?;
 
-        logging::debug_event("worktree.prune.complete", "Worktree records pruned", serde_json::json!({}));
+        logging::debug_event(
+            "worktree.prune.complete",
+            "Worktree records pruned",
+            serde_json::json!({}),
+        );
 
         Ok(())
     }
@@ -435,10 +449,7 @@ impl WorktreeManager {
     pub fn unlock_worktree(&self, path: &Path) -> Result<(), WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
 
-        self.run_git_command_internal(&[
-            "worktree", "unlock",
-            path.to_str().unwrap_or("")
-        ])?;
+        self.run_git_command_internal(&["worktree", "unlock", path.to_str().unwrap_or("")])?;
         Ok(())
     }
 
@@ -538,9 +549,9 @@ impl WorktreeManager {
         let _lock = self.git_lock.lock().unwrap();
 
         // Try to detect from remote
-        let output = self.run_git_command_internal(&[
-            "symbolic-ref", "refs/remotes/origin/HEAD"
-        ]).ok();
+        let output = self
+            .run_git_command_internal(&["symbolic-ref", "refs/remotes/origin/HEAD"])
+            .ok();
 
         if let Some(refs) = output {
             // refs/remotes/origin/HEAD -> refs/remotes/origin/main
@@ -587,9 +598,8 @@ impl WorktreeManager {
     /// Returns the commit that the branch points to.
     pub fn get_branch_head(&self, branch: &str) -> Result<String, WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
-        let output = self.run_git_command_internal(&[
-            "rev-parse", &format!("refs/heads/{}", branch)
-        ])?;
+        let output =
+            self.run_git_command_internal(&["rev-parse", &format!("refs/heads/{}", branch)])?;
         Ok(output.trim().to_string())
     }
 
@@ -686,7 +696,12 @@ impl WorktreeManager {
                         // Extract branch name from refs/heads/xxx
                         // For refs/heads/feature/test, we want "feature/test"
                         if branch_ref.starts_with("refs/heads/") {
-                            info.branch = Some(branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref).to_string());
+                            info.branch = Some(
+                                branch_ref
+                                    .strip_prefix("refs/heads/")
+                                    .unwrap_or(branch_ref)
+                                    .to_string(),
+                            );
                         } else {
                             info.branch = Some(branch_ref.to_string());
                         }
@@ -876,7 +891,9 @@ mod tests {
         let config = WorktreeConfig::default();
         let manager = WorktreeManager::new(repo_path, config).unwrap();
 
-        let info = manager.create_for_agent("agent_001", Some("task-123")).unwrap();
+        let info = manager
+            .create_for_agent("agent_001", Some("task-123"))
+            .unwrap();
         assert!(info.path.exists());
         assert_eq!(info.branch, Some("agent/task-123".to_string()));
 
@@ -959,7 +976,10 @@ mod tests {
         let worktrees = manager.parse_porcelain_output(output).unwrap();
         assert_eq!(worktrees.len(), 1);
         assert!(worktrees[0].is_locked);
-        assert_eq!(worktrees[0].lock_reason, Some("work in progress".to_string()));
+        assert_eq!(
+            worktrees[0].lock_reason,
+            Some("work in progress".to_string())
+        );
     }
 
     #[test]

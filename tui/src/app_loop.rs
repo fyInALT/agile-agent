@@ -327,10 +327,17 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 LaunchConfigOverlayCommand::Close => {
                                     state.close_launch_config_overlay();
                                 }
-                                LaunchConfigOverlayCommand::Confirm { work_config, decision_config } => {
+                                LaunchConfigOverlayCommand::Confirm {
+                                    work_config,
+                                    decision_config,
+                                } => {
                                     let provider = overlay.provider;
                                     state.close_launch_config_overlay();
-                                    if let Some(agent_id) = state.spawn_agent_with_launch_config(provider, &work_config, &decision_config) {
+                                    if let Some(agent_id) = state.spawn_agent_with_launch_config(
+                                        provider,
+                                        &work_config,
+                                        &decision_config,
+                                    ) {
                                         state.app_mut().push_status_message(format!(
                                             "spawned {} with {}",
                                             agent_id.as_str(),
@@ -477,16 +484,24 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                         InputOutcome::PauseFocusedAgent => {
                             if state.pause_focused_agent().is_some() {
-                                state.app_mut().push_status_message("Agent paused with worktree preserved".to_string());
+                                state.app_mut().push_status_message(
+                                    "Agent paused with worktree preserved".to_string(),
+                                );
                             } else {
-                                state.app_mut().push_status_message("Failed to pause agent".to_string());
+                                state
+                                    .app_mut()
+                                    .push_status_message("Failed to pause agent".to_string());
                             }
                         }
                         InputOutcome::ResumeFocusedAgent => {
                             if state.resume_focused_agent().is_some() {
-                                state.app_mut().push_status_message("Agent resumed".to_string());
+                                state
+                                    .app_mut()
+                                    .push_status_message("Agent resumed".to_string());
                             } else {
-                                state.app_mut().push_status_message("Failed to resume agent (not paused?)".to_string());
+                                state.app_mut().push_status_message(
+                                    "Failed to resume agent (not paused?)".to_string(),
+                                );
                             }
                         }
                         InputOutcome::SwitchViewMode(n) => {
@@ -1425,7 +1440,7 @@ fn handle_provider_terminal_error(state: &mut TuiState, error: String) -> Result
     if is_session_expired_error(&error) {
         state.app_mut().clear_session();
         state.app_mut().push_error_message(
-            "session expired - starting fresh conversation. Please retry your request."
+            "session expired - starting fresh conversation. Please retry your request.",
         );
     } else {
         state.app_mut().push_error_message(error);
@@ -2058,9 +2073,8 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
         // Transition each agent
         for agent_id in agents_to_transition {
             if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                let _ = slot.transition_to(
-                    agent_core::agent_slot::AgentSlotStatus::waiting_for_input()
-                );
+                let _ = slot
+                    .transition_to(agent_core::agent_slot::AgentSlotStatus::waiting_for_input());
                 logging::debug_event(
                     "app_loop.agent_idle_timeout",
                     "agent transitioned to waiting_for_input due to idle timeout",
@@ -2214,15 +2228,17 @@ mod tests {
         let mut state = TuiState::from_session(session);
         state.app_mut().begin_provider_response();
         // Set a session ID that will be cleared
-        state.app_mut().apply_session_handle(SessionHandle::ClaudeSession {
-            session_id: "expired-session-123".to_string(),
-        });
+        state
+            .app_mut()
+            .apply_session_handle(SessionHandle::ClaudeSession {
+                session_id: "expired-session-123".to_string(),
+            });
 
         handle_provider_terminal_error(
             &mut state,
             "No conversation found with session ID: expired-session-123".to_string(),
         )
-            .expect("handle error");
+        .expect("handle error");
 
         // Session should be cleared
         assert!(state.app().claude_session_id.is_none());

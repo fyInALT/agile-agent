@@ -68,10 +68,7 @@ fn is_valid_key(key: &str) -> bool {
 }
 
 /// Parse environment variable only input (KEY=VALUE per line).
-pub fn parse_env_only(
-    provider: ProviderKind,
-    input: &str,
-) -> ParseResult<LaunchInputSpec> {
+pub fn parse_env_only(provider: ProviderKind, input: &str) -> ParseResult<LaunchInputSpec> {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
@@ -153,10 +150,7 @@ pub fn parse_env_only(
 }
 
 /// Parse command fragment input with env prefix, executable, and args.
-pub fn parse_command_fragment(
-    provider: ProviderKind,
-    input: &str,
-) -> ParseResult<LaunchInputSpec> {
+pub fn parse_command_fragment(provider: ProviderKind, input: &str) -> ParseResult<LaunchInputSpec> {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
@@ -207,9 +201,10 @@ pub fn parse_command_fragment(
         if executable.is_none() {
             // Reject executable names that start with '=' (malformed env var syntax)
             if token.starts_with('=') {
-                return Err(ParseError::InvalidKeyFormat(
-                    format!("invalid token: {}", token),
-                ));
+                return Err(ParseError::InvalidKeyFormat(format!(
+                    "invalid token: {}",
+                    token
+                )));
             }
             executable = Some(token.clone());
         } else {
@@ -232,10 +227,7 @@ pub fn parse_command_fragment(
 }
 
 /// Parse input and auto-detect the appropriate mode.
-pub fn parse(
-    provider: ProviderKind,
-    input: &str,
-) -> ParseResult<LaunchInputSpec> {
+pub fn parse(provider: ProviderKind, input: &str) -> ParseResult<LaunchInputSpec> {
     let trimmed = input.trim();
     let mode = detect_source_mode(trimmed);
 
@@ -364,7 +356,10 @@ mod tests {
 
     #[test]
     fn test_parse_env_only_empty_input() {
-        assert!(matches!(parse_env_only(ProviderKind::Claude, ""), Err(ParseError::EmptyInput)));
+        assert!(matches!(
+            parse_env_only(ProviderKind::Claude, ""),
+            Err(ParseError::EmptyInput)
+        ));
     }
 
     #[test]
@@ -395,12 +390,16 @@ mod tests {
 
     #[test]
     fn test_parse_command_fragment_with_env() {
-        let result = parse_command_fragment(ProviderKind::Claude, "ANTHROPIC_MODEL=X claude --flag");
+        let result =
+            parse_command_fragment(ProviderKind::Claude, "ANTHROPIC_MODEL=X claude --flag");
         assert!(result.is_ok());
         let spec = result.unwrap();
         assert_eq!(spec.requested_executable, Some("claude".to_string()));
         assert_eq!(spec.extra_args, vec!["--flag".to_string()]);
-        assert_eq!(spec.env_overrides.get("ANTHROPIC_MODEL"), Some(&"X".to_string()));
+        assert_eq!(
+            spec.env_overrides.get("ANTHROPIC_MODEL"),
+            Some(&"X".to_string())
+        );
     }
 
     #[test]
@@ -432,6 +431,9 @@ mod tests {
     fn test_parse_auto_fragment() {
         let result = parse(ProviderKind::Claude, "claude --flag");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().source_mode, LaunchSourceMode::CommandFragment);
+        assert_eq!(
+            result.unwrap().source_mode,
+            LaunchSourceMode::CommandFragment
+        );
     }
 }

@@ -279,7 +279,8 @@ fn run_provider_internal_with_context(
             let _ = event_tx.send(ProviderEvent::Finished);
         }
         ProviderKind::Claude => {
-            if let Err(e) = crate::providers::claude::start_with_context(context, prompt, event_tx) {
+            if let Err(e) = crate::providers::claude::start_with_context(context, prompt, event_tx)
+            {
                 logging::warn_event(
                     "provider.claude.start_failed",
                     "Claude provider failed to start",

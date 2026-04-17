@@ -42,15 +42,17 @@ impl ConditionExpr {
     }
 
     /// Evaluate against context
-    pub fn evaluate(&self, context: &DecisionContext, registry: &ConditionEvaluatorRegistry) -> bool {
+    pub fn evaluate(
+        &self,
+        context: &DecisionContext,
+        registry: &ConditionEvaluatorRegistry,
+    ) -> bool {
         match self {
             ConditionExpr::Single(cond) => cond.evaluate(context, registry),
 
-            ConditionExpr::And(exprs) => exprs.iter()
-                .all(|e| e.evaluate(context, registry)),
+            ConditionExpr::And(exprs) => exprs.iter().all(|e| e.evaluate(context, registry)),
 
-            ConditionExpr::Or(exprs) => exprs.iter()
-                .any(|e| e.evaluate(context, registry)),
+            ConditionExpr::Or(exprs) => exprs.iter().any(|e| e.evaluate(context, registry)),
 
             ConditionExpr::Not(expr) => !expr.evaluate(context, registry),
         }
@@ -73,21 +75,31 @@ pub enum Condition {
     ConfidenceBelow { threshold: f64 },
 
     /// Time since last action in seconds range
-    TimeSinceLastAction { min_seconds: u64, max_seconds: Option<u64> },
+    TimeSinceLastAction {
+        min_seconds: u64,
+        max_seconds: Option<u64>,
+    },
 
     /// Custom condition (extensible)
-    Custom { name: String, params: HashMap<String, String> },
+    Custom {
+        name: String,
+        params: HashMap<String, String>,
+    },
 }
 
 impl Condition {
     /// Create a situation type condition
     pub fn situation_type(type_name: impl Into<String>) -> Self {
-        Condition::SituationType { type_name: type_name.into() }
+        Condition::SituationType {
+            type_name: type_name.into(),
+        }
     }
 
     /// Create a project keyword condition
     pub fn project_keyword(keyword: impl Into<String>) -> Self {
-        Condition::ProjectKeyword { keyword: keyword.into() }
+        Condition::ProjectKeyword {
+            keyword: keyword.into(),
+        }
     }
 
     /// Create a reflection rounds condition
@@ -102,11 +114,18 @@ impl Condition {
 
     /// Create a custom condition
     pub fn custom(name: impl Into<String>, params: HashMap<String, String>) -> Self {
-        Condition::Custom { name: name.into(), params }
+        Condition::Custom {
+            name: name.into(),
+            params,
+        }
     }
 
     /// Evaluate against context
-    pub fn evaluate(&self, context: &DecisionContext, registry: &ConditionEvaluatorRegistry) -> bool {
+    pub fn evaluate(
+        &self,
+        context: &DecisionContext,
+        registry: &ConditionEvaluatorRegistry,
+    ) -> bool {
         match self {
             Condition::SituationType { type_name } => {
                 context.trigger_situation.situation_type().name == *type_name
@@ -128,14 +147,15 @@ impl Condition {
                 false
             }
 
-            Condition::TimeSinceLastAction { min_seconds: _, max_seconds: _ } => {
+            Condition::TimeSinceLastAction {
+                min_seconds: _,
+                max_seconds: _,
+            } => {
                 // Would need timestamp tracking
                 false
             }
 
-            Condition::Custom { name, params } => {
-                registry.evaluate(name, context, params)
-            }
+            Condition::Custom { name, params } => registry.evaluate(name, context, params),
         }
     }
 }
@@ -152,15 +172,23 @@ pub struct ConditionEvaluatorRegistry {
 
 impl ConditionEvaluatorRegistry {
     pub fn new() -> Self {
-        Self { evaluators: HashMap::new() }
+        Self {
+            evaluators: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, name: impl Into<String>, evaluator: Box<dyn ConditionEvaluator>) {
         self.evaluators.insert(name.into(), evaluator);
     }
 
-    pub fn evaluate(&self, name: &str, context: &DecisionContext, params: &HashMap<String, String>) -> bool {
-        self.evaluators.get(name)
+    pub fn evaluate(
+        &self,
+        name: &str,
+        context: &DecisionContext,
+        params: &HashMap<String, String>,
+    ) -> bool {
+        self.evaluators
+            .get(name)
             .map(|e| e.evaluate(context, params))
             .unwrap_or(false)
     }
@@ -179,10 +207,7 @@ mod tests {
     use crate::context::DecisionContext;
 
     fn make_context() -> DecisionContext {
-        DecisionContext::new(
-            Box::new(WaitingForChoiceSituation::default()),
-            "test-agent",
-        )
+        DecisionContext::new(Box::new(WaitingForChoiceSituation::default()), "test-agent")
     }
 
     #[test]
@@ -251,7 +276,11 @@ mod tests {
     fn test_condition_custom_evaluator() {
         struct TestEvaluator;
         impl ConditionEvaluator for TestEvaluator {
-            fn evaluate(&self, _context: &DecisionContext, params: &HashMap<String, String>) -> bool {
+            fn evaluate(
+                &self,
+                _context: &DecisionContext,
+                params: &HashMap<String, String>,
+            ) -> bool {
                 params.get("value").map(|v| v == "true").unwrap_or(false)
             }
         }
@@ -287,6 +316,9 @@ mod tests {
 
         let ctx = make_context();
         let registry = ConditionEvaluatorRegistry::new();
-        assert_eq!(expr.evaluate(&ctx, &registry), parsed.evaluate(&ctx, &registry));
+        assert_eq!(
+            expr.evaluate(&ctx, &registry),
+            parsed.evaluate(&ctx, &registry)
+        );
     }
 }

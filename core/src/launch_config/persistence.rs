@@ -31,8 +31,7 @@ pub fn save_launch_config(
         .with_context(|| format!("failed to create agent directory: {}", agent_dir.display()))?;
 
     // Write the launch config as pretty JSON
-    let json = serde_json::to_string_pretty(bundle)
-        .context("failed to serialize launch config")?;
+    let json = serde_json::to_string_pretty(bundle).context("failed to serialize launch config")?;
     fs::write(&path, json)
         .with_context(|| format!("failed to write launch config: {}", path.display()))?;
 
@@ -74,10 +73,7 @@ pub fn has_launch_config(agent_store: &AgentStore, agent_id: &AgentId) -> bool {
 }
 
 /// Delete a launch config for an agent.
-pub fn delete_launch_config(
-    agent_store: &AgentStore,
-    agent_id: &AgentId,
-) -> Result<()> {
+pub fn delete_launch_config(agent_store: &AgentStore, agent_id: &AgentId) -> Result<()> {
     let path = launch_config_path(agent_store, agent_id);
 
     if path.exists() {
@@ -96,9 +92,8 @@ mod tests {
 
     use crate::agent_runtime::AgentId;
     use crate::launch_config::{
-        save_launch_config, load_launch_config, has_launch_config, delete_launch_config,
-        AgentLaunchBundle, LaunchInputSpec, LaunchSourceMode,
-        ResolvedLaunchSpec,
+        AgentLaunchBundle, LaunchInputSpec, LaunchSourceMode, ResolvedLaunchSpec,
+        delete_launch_config, has_launch_config, load_launch_config, save_launch_config,
     };
     use crate::provider::ProviderKind;
     use crate::workplace_store::WorkplaceStore;
@@ -133,7 +128,12 @@ mod tests {
             vec![],
             LaunchSourceMode::HostDefault,
         );
-        let bundle = AgentLaunchBundle::asymmetric(work_input, work_resolved, decision_input, decision_resolved);
+        let bundle = AgentLaunchBundle::asymmetric(
+            work_input,
+            work_resolved,
+            decision_input,
+            decision_resolved,
+        );
 
         // Save
         let path = save_launch_config(&agent_store, &agent_id, &bundle).unwrap();

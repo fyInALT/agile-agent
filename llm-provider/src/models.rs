@@ -257,8 +257,7 @@ mod tests {
 
     #[test]
     fn chat_request_with_streaming() {
-        let req = ChatRequest::new("gpt-4", vec![ChatMessage::user("hi")])
-            .with_streaming();
+        let req = ChatRequest::new("gpt-4", vec![ChatMessage::user("hi")]).with_streaming();
         assert_eq!(req.stream, Some(true));
     }
 

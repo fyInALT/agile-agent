@@ -159,7 +159,7 @@ impl DecisionRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtin_actions::{register_action_builtins, SelectOptionAction};
+    use crate::builtin_actions::{SelectOptionAction, register_action_builtins};
 
     #[test]
     fn test_decision_output_new() {
@@ -185,10 +185,8 @@ mod tests {
 
     #[test]
     fn test_decision_output_first_action_type() {
-        let output = DecisionOutput::new(
-            vec![Box::new(SelectOptionAction::new("A", "test"))],
-            "test",
-        );
+        let output =
+            DecisionOutput::new(vec![Box::new(SelectOptionAction::new("A", "test"))], "test");
         assert_eq!(
             output.first_action_type(),
             Some(ActionType::new("select_option"))
@@ -210,7 +208,8 @@ mod tests {
         let output = DecisionOutput::new(
             vec![Box::new(SelectOptionAction::new("A", "reason"))],
             "Selected A",
-        ).with_confidence(0.9);
+        )
+        .with_confidence(0.9);
 
         let serde = output.to_serde();
         let restored = DecisionOutput::from_serde(serde, &registry);
@@ -240,10 +239,8 @@ mod tests {
 
     #[test]
     fn test_decision_record_new() {
-        let output = DecisionOutput::new(
-            vec![Box::new(SelectOptionAction::new("A", "test"))],
-            "test",
-        );
+        let output =
+            DecisionOutput::new(vec![Box::new(SelectOptionAction::new("A", "test"))], "test");
         let record = DecisionRecord::new(
             "dec-1",
             SituationType::new("waiting_for_choice"),
@@ -252,7 +249,10 @@ mod tests {
         );
 
         assert_eq!(record.decision_id, "dec-1");
-        assert_eq!(record.situation_type, SituationType::new("waiting_for_choice"));
+        assert_eq!(
+            record.situation_type,
+            SituationType::new("waiting_for_choice")
+        );
         assert!(record.engine_type.is_mock());
     }
 }

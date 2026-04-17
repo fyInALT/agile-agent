@@ -53,10 +53,16 @@ impl ContextUpdate {
     /// Apply to decision context
     pub fn apply_to_context(&self, context: &mut DecisionContext) {
         match self {
-            ContextUpdate::Thinking(text) => context.running_context.update_thinking_summary(text.clone()),
+            ContextUpdate::Thinking(text) => context
+                .running_context
+                .update_thinking_summary(text.clone()),
             ContextUpdate::KeyOutput(text) => context.running_context.add_key_output(text.clone()),
-            ContextUpdate::ToolCall(record) => context.running_context.add_tool_call(record.clone()),
-            ContextUpdate::FileChange(record) => context.running_context.add_file_change(record.clone()),
+            ContextUpdate::ToolCall(record) => {
+                context.running_context.add_tool_call(record.clone())
+            }
+            ContextUpdate::FileChange(record) => {
+                context.running_context.add_file_change(record.clone())
+            }
         }
     }
 }
@@ -101,7 +107,10 @@ impl ClassifyResult {
         situation_type: SituationType,
         situation: Option<Box<dyn crate::situation::DecisionSituation>>,
     ) -> Self {
-        ClassifyResult::NeedsDecision { situation_type, situation }
+        ClassifyResult::NeedsDecision {
+            situation_type,
+            situation,
+        }
     }
 
     /// Check if this is a running result
@@ -192,10 +201,7 @@ mod tests {
 
     #[test]
     fn test_classify_result_needs_decision() {
-        let result = ClassifyResult::create_needs_decision(
-            SituationType::new("test"),
-            None,
-        );
+        let result = ClassifyResult::create_needs_decision(SituationType::new("test"), None);
         assert!(!result.is_running());
         assert!(result.is_needs_decision());
     }

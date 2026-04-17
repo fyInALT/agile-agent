@@ -179,7 +179,10 @@ impl LLMDecisionEngine {
     }
 
     /// Create with custom prompt configuration
-    pub fn with_prompt_config(provider: ProviderKind, prompt_config: PromptConfig) -> crate::error::Result<Self> {
+    pub fn with_prompt_config(
+        provider: ProviderKind,
+        prompt_config: PromptConfig,
+    ) -> crate::error::Result<Self> {
         prompt_config.validate()?;
         Ok(Self {
             provider,
@@ -240,7 +243,11 @@ impl LLMDecisionEngine {
     }
 
     /// Build prompt from context using PromptBuilder if available
-    fn build_prompt_internal(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
+    fn build_prompt_internal(
+        &self,
+        context: &DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> String {
         // If PromptBuilder is configured, use it
         if let Some(builder) = &self.prompt_builder {
             return self.build_prompt_with_builder(builder, context, action_registry);
@@ -260,11 +267,18 @@ impl LLMDecisionEngine {
         let situation_type = context.trigger_situation.situation_type().name;
 
         // Build history from recent records
-        let history_records: Vec<(String, String, f64)> = self.history
+        let history_records: Vec<(String, String, f64)> = self
+            .history
             .iter()
             .rev()
             .take(5)
-            .map(|r| (r.situation_type.name.clone(), r.action_type.name.clone(), r.confidence))
+            .map(|r| {
+                (
+                    r.situation_type.name.clone(),
+                    r.action_type.name.clone(),
+                    r.confidence,
+                )
+            })
             .collect();
 
         // Use the new from_decision_context method for complete variable extraction
@@ -279,7 +293,11 @@ impl LLMDecisionEngine {
     }
 
     /// Build prompt using legacy format (fallback)
-    fn build_prompt_legacy(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {
+    fn build_prompt_legacy(
+        &self,
+        context: &DecisionContext,
+        action_registry: &ActionRegistry,
+    ) -> String {
         let situation_text = context.trigger_situation.to_prompt_text();
         let available_actions = context.trigger_situation.available_actions();
 
@@ -294,7 +312,8 @@ impl LLMDecisionEngine {
 
         let project_rules_summary = context.project_rules.summary();
         let running_context_summary = context.running_context.summary();
-        let task_info = context.current_task_id
+        let task_info = context
+            .current_task_id
             .as_ref()
             .map(|id| format!("Task ID: {}", id))
             .unwrap_or_else(|| "No task assigned".to_string());
@@ -347,12 +366,12 @@ impl LLMDecisionEngine {
 
         let recent = self.history.iter().rev().take(5);
         let entries: Vec<String> = recent
-            .map(|r| format!(
-                "- {} -> {} (confidence: {:.2})",
-                r.situation_type.name,
-                r.action_type.name,
-                r.confidence
-            ))
+            .map(|r| {
+                format!(
+                    "- {} -> {} (confidence: {:.2})",
+                    r.situation_type.name, r.action_type.name, r.confidence
+                )
+            })
             .collect();
 
         entries.join("\n")
@@ -397,7 +416,9 @@ impl LLMDecisionEngine {
             let action_type = ActionType::new(&action_name);
 
             // Try to get action from registry with parameters
-            if let Some(action) = action_registry.deserialize(&action_type, &params_line.unwrap_or_default()) {
+            if let Some(action) =
+                action_registry.deserialize(&action_type, &params_line.unwrap_or_default())
+            {
                 return Ok(vec![action]);
             }
 
@@ -437,7 +458,10 @@ impl LLMDecisionEngine {
     }
 
     /// Parse custom instruction from unstructured response
-    fn parse_custom_instruction(&self, response: &str) -> crate::error::Result<Vec<Box<dyn DecisionAction>>> {
+    fn parse_custom_instruction(
+        &self,
+        response: &str,
+    ) -> crate::error::Result<Vec<Box<dyn DecisionAction>>> {
         use crate::builtin_actions::CustomInstructionAction;
 
         // Take meaningful portion of response as instruction
@@ -452,7 +476,9 @@ impl LLMDecisionEngine {
         if instruction.len() > 10 {
             Ok(vec![Box::new(CustomInstructionAction::new(instruction))])
         } else {
-            Err(DecisionError::ParseError("Could not parse response".to_string()))
+            Err(DecisionError::ParseError(
+                "Could not parse response".to_string(),
+            ))
         }
     }
 
@@ -461,9 +487,10 @@ impl LLMDecisionEngine {
         // If we have a custom LLM caller, use it
         if let Some(caller) = &self.llm_caller {
             if !caller.is_healthy() {
-                return Err(DecisionError::EngineError(
-                    format!("LLM caller {} is not healthy", caller.caller_id())
-                ));
+                return Err(DecisionError::EngineError(format!(
+                    "LLM caller {} is not healthy",
+                    caller.caller_id()
+                )));
             }
             return caller.call(prompt, self.config.timeout_seconds * 1000);
         }
@@ -496,7 +523,9 @@ impl LLMDecisionEngine {
         }
 
         self.healthy = false;
-        Err(DecisionError::EngineError("Max retries exceeded".to_string()))
+        Err(DecisionError::EngineError(
+            "Max retries exceeded".to_string(),
+        ))
     }
 
     /// Persist session to path
@@ -511,11 +540,9 @@ impl LLMDecisionEngine {
             config: self.config.clone(),
         };
 
-        let json = serde_json::to_string_pretty(&state)
-            .map_err(|e| DecisionError::JsonError(e))?;
+        let json = serde_json::to_string_pretty(&state).map_err(|e| DecisionError::JsonError(e))?;
 
-        std::fs::write(path, json)
-            .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
+        std::fs::write(path, json).map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
         Ok(())
     }
@@ -529,8 +556,8 @@ impl LLMDecisionEngine {
         let json = std::fs::read_to_string(path)
             .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
-        let state: LLMSessionState = serde_json::from_str(&json)
-            .map_err(|e| DecisionError::JsonError(e))?;
+        let state: LLMSessionState =
+            serde_json::from_str(&json).map_err(|e| DecisionError::JsonError(e))?;
 
         self.provider = state.provider;
         self.history = state.history;
@@ -550,7 +577,9 @@ struct LLMSessionState {
 
 impl DecisionEngine for LLMDecisionEngine {
     fn engine_type(&self) -> DecisionEngineType {
-        DecisionEngineType::LLM { provider: self.provider }
+        DecisionEngineType::LLM {
+            provider: self.provider,
+        }
     }
 
     fn decide(
@@ -578,7 +607,11 @@ impl DecisionEngine for LLMDecisionEngine {
                     let llm_record = LLMDecisionRecord {
                         id: record.decision_id.clone(),
                         situation_type: record.situation_type.clone(),
-                        action_type: record.action_types.first().cloned().unwrap_or_else(|| ActionType::new("unknown")),
+                        action_type: record
+                            .action_types
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| ActionType::new("unknown")),
                         reasoning: record.reasoning.clone(),
                         confidence: record.confidence,
                         timestamp: record.timestamp.to_rfc3339(),
@@ -611,7 +644,7 @@ impl DecisionEngine for LLMDecisionEngine {
         // If parse succeeded but returned empty actions, this is an error
         if actions.is_empty() {
             return Err(DecisionError::ParseError(
-                "Parsed response produced no actions".to_string()
+                "Parsed response produced no actions".to_string(),
             ));
         }
 
@@ -685,7 +718,9 @@ mod tests {
     use super::*;
     use crate::action_registry::ActionRegistry;
     use crate::builtin_actions::register_action_builtins;
-    use crate::builtin_situations::{WaitingForChoiceSituation, ClaimsCompletionSituation, register_situation_builtins};
+    use crate::builtin_situations::{
+        ClaimsCompletionSituation, WaitingForChoiceSituation, register_situation_builtins,
+    };
     use crate::context::{DecisionContext, ProjectRules, RunningContextCache};
     use crate::situation::ChoiceOption;
     use crate::situation_registry::SituationRegistry;
@@ -708,7 +743,10 @@ mod tests {
     #[test]
     fn test_llm_engine_new() {
         let engine = LLMDecisionEngine::new(ProviderKind::Claude);
-        assert!(matches!(engine.engine_type(), DecisionEngineType::LLM { .. }));
+        assert!(matches!(
+            engine.engine_type(),
+            DecisionEngineType::LLM { .. }
+        ));
     }
 
     #[test]
@@ -761,11 +799,13 @@ mod tests {
         let engine = LLMDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])
+            WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")]),
         );
 
         let response = "ACTION: select_option\nPARAMETERS: {\"option_id\": \"A\"}\nREASONING: Test\nCONFIDENCE: 0.9";
-        let actions = engine.parse_response(response, situation.as_ref(), &registry).unwrap();
+        let actions = engine
+            .parse_response(response, situation.as_ref(), &registry)
+            .unwrap();
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type().name, "select_option");
@@ -776,11 +816,14 @@ mod tests {
         let engine = LLMDecisionEngine::new(ProviderKind::Claude);
         let registry = make_test_registry();
         let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            ClaimsCompletionSituation::new("Task completed successfully")
+            ClaimsCompletionSituation::new("Task completed successfully"),
         );
 
-        let response = "ACTION: confirm_completion\nPARAMETERS: {}\nREASONING: Task done\nCONFIDENCE: 0.85";
-        let actions = engine.parse_response(response, situation.as_ref(), &registry).unwrap();
+        let response =
+            "ACTION: confirm_completion\nPARAMETERS: {}\nREASONING: Task done\nCONFIDENCE: 0.85";
+        let actions = engine
+            .parse_response(response, situation.as_ref(), &registry)
+            .unwrap();
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type().name, "confirm_completion");
@@ -829,7 +872,10 @@ mod tests {
         let output = engine.decide(context, &registry).unwrap();
 
         assert!(output.has_actions());
-        assert_eq!(output.first_action_type().unwrap().name, "confirm_completion");
+        assert_eq!(
+            output.first_action_type().unwrap().name,
+            "confirm_completion"
+        );
     }
 
     #[test]
@@ -851,7 +897,9 @@ mod tests {
         let registry = make_test_registry();
 
         engine.decide(context, &registry).unwrap();
-        engine.decide(make_test_context("claims_completion"), &registry).unwrap();
+        engine
+            .decide(make_test_context("claims_completion"), &registry)
+            .unwrap();
 
         assert_eq!(engine.history.len(), 2);
     }
@@ -873,7 +921,8 @@ mod tests {
     #[test]
     fn test_llm_with_prompt_config() {
         let prompt_config = PromptConfig::default();
-        let engine = LLMDecisionEngine::with_prompt_config(ProviderKind::Claude, prompt_config).unwrap();
+        let engine =
+            LLMDecisionEngine::with_prompt_config(ProviderKind::Claude, prompt_config).unwrap();
         assert!(engine.prompt_builder.is_some());
     }
 
@@ -1026,6 +1075,10 @@ mod tests {
 
         let prompt = engine.build_prompt(&context, &registry);
         // Should contain reflection round 1 prompt content
-        assert!(prompt.contains("Reflection Round 1") || prompt.contains("claims completion") || prompt.contains("decision assistant"));
+        assert!(
+            prompt.contains("Reflection Round 1")
+                || prompt.contains("claims completion")
+                || prompt.contains("decision assistant")
+        );
     }
 }

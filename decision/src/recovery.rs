@@ -286,7 +286,10 @@ impl SessionHealthStatus {
     }
 
     pub fn is_usable(&self) -> bool {
-        matches!(self, SessionHealthStatus::Active | SessionHealthStatus::Stale)
+        matches!(
+            self,
+            SessionHealthStatus::Active | SessionHealthStatus::Stale
+        )
     }
 }
 
@@ -319,7 +322,10 @@ impl EngineHealthStatus {
     }
 
     pub fn is_usable(&self) -> bool {
-        matches!(self, EngineHealthStatus::Healthy | EngineHealthStatus::Degraded)
+        matches!(
+            self,
+            EngineHealthStatus::Healthy | EngineHealthStatus::Degraded
+        )
     }
 }
 
@@ -541,11 +547,10 @@ impl RecoveryContext {
         // Use escalation level
         let level = self.determine_level();
         match level {
-            RecoveryLevel::AutoRetry => RecoveryAction::RetryWithCooldown {
-                cooldown_ms: 5000,
-            },
+            RecoveryLevel::AutoRetry => RecoveryAction::RetryWithCooldown { cooldown_ms: 5000 },
             RecoveryLevel::AdjustedRetry => RecoveryAction::RetryWithAdjustedPrompt {
-                additional_context: "Previous attempt failed. Consider alternative approach.".to_string(),
+                additional_context: "Previous attempt failed. Consider alternative approach."
+                    .to_string(),
             },
             RecoveryLevel::SwitchEngine => RecoveryAction::SwitchEngine,
             RecoveryLevel::HumanIntervention => RecoveryAction::RequestHuman {

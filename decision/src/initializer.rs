@@ -1,10 +1,10 @@
 //! Decision layer initialization
 
+use crate::acp_classifier::ACPClassifier;
 use crate::action_registry::ActionRegistry;
 use crate::classifier_registry::ClassifierRegistry;
 use crate::claude_classifier::ClaudeClassifier;
 use crate::codex_classifier::CodexClassifier;
-use crate::acp_classifier::ACPClassifier;
 use crate::situation_registry::SituationRegistry;
 use std::sync::Arc;
 
@@ -44,38 +44,83 @@ pub fn initialize_decision_layer() -> DecisionLayerComponents {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider_kind::ProviderKind;
-    use crate::provider_event::ProviderEvent;
+    use crate::builtin_situations::{
+        acp_permission, claims_completion, claude_finished, codex_approval, error,
+        waiting_for_choice,
+    };
     use crate::classifier::ClassifyResult;
-    use crate::builtin_situations::{waiting_for_choice, claims_completion, claude_finished, codex_approval, acp_permission, error};
+    use crate::provider_event::ProviderEvent;
+    use crate::provider_kind::ProviderKind;
 
     #[test]
     fn test_initialize_decision_layer() {
         let components = initialize_decision_layer();
 
         // Check situation registry
-        assert!(components.situation_registry.is_registered(&waiting_for_choice()));
-        assert!(components.situation_registry.is_registered(&claims_completion()));
-        assert!(components.situation_registry.is_registered(&claude_finished()));
-        assert!(components.situation_registry.is_registered(&codex_approval()));
-        assert!(components.situation_registry.is_registered(&acp_permission()));
+        assert!(
+            components
+                .situation_registry
+                .is_registered(&waiting_for_choice())
+        );
+        assert!(
+            components
+                .situation_registry
+                .is_registered(&claims_completion())
+        );
+        assert!(
+            components
+                .situation_registry
+                .is_registered(&claude_finished())
+        );
+        assert!(
+            components
+                .situation_registry
+                .is_registered(&codex_approval())
+        );
+        assert!(
+            components
+                .situation_registry
+                .is_registered(&acp_permission())
+        );
         assert!(components.situation_registry.is_registered(&error()));
 
         // Check action registry
-        assert!(components.action_registry.is_registered(&crate::builtin_actions::select_option()));
-        assert!(components.action_registry.is_registered(&crate::builtin_actions::reflect()));
+        assert!(
+            components
+                .action_registry
+                .is_registered(&crate::builtin_actions::select_option())
+        );
+        assert!(
+            components
+                .action_registry
+                .is_registered(&crate::builtin_actions::reflect())
+        );
 
         // Check classifier registry
-        assert!(components.classifier_registry.is_registered(ProviderKind::Claude));
-        assert!(components.classifier_registry.is_registered(ProviderKind::Codex));
-        assert!(components.classifier_registry.is_registered(ProviderKind::ACP));
+        assert!(
+            components
+                .classifier_registry
+                .is_registered(ProviderKind::Claude)
+        );
+        assert!(
+            components
+                .classifier_registry
+                .is_registered(ProviderKind::Codex)
+        );
+        assert!(
+            components
+                .classifier_registry
+                .is_registered(ProviderKind::ACP)
+        );
     }
 
     #[test]
     fn test_classifier_claude_finished() {
         let components = initialize_decision_layer();
         let event = ProviderEvent::Finished { summary: None };
-        let result = components.classifier_registry.classify(&event, ProviderKind::Claude);
+        let result = components
+            .classifier_registry
+            .classify(&event, ProviderKind::Claude);
 
         assert!(result.is_needs_decision());
         if let ClassifyResult::NeedsDecision { situation_type, .. } = result {
@@ -91,7 +136,9 @@ mod tests {
             params: serde_json::json!({}),
             request_id: None,
         };
-        let result = components.classifier_registry.classify(&event, ProviderKind::Codex);
+        let result = components
+            .classifier_registry
+            .classify(&event, ProviderKind::Codex);
 
         assert!(result.is_needs_decision());
         if let ClassifyResult::NeedsDecision { situation_type, .. } = result {
@@ -106,7 +153,9 @@ mod tests {
             method: "permission.asked".to_string(),
             params: serde_json::json!({}),
         };
-        let result = components.classifier_registry.classify(&event, ProviderKind::ACP);
+        let result = components
+            .classifier_registry
+            .classify(&event, ProviderKind::ACP);
 
         assert!(result.is_needs_decision());
         if let ClassifyResult::NeedsDecision { situation_type, .. } = result {
@@ -118,7 +167,9 @@ mod tests {
     fn test_classifier_unknown_provider_fallback() {
         let components = initialize_decision_layer();
         let event = ProviderEvent::Finished { summary: None };
-        let result = components.classifier_registry.classify(&event, ProviderKind::Unknown);
+        let result = components
+            .classifier_registry
+            .classify(&event, ProviderKind::Unknown);
 
         assert!(result.is_needs_decision());
         if let ClassifyResult::NeedsDecision { situation_type, .. } = result {
@@ -136,7 +187,9 @@ mod tests {
     #[test]
     fn test_action_registry_get() {
         let components = initialize_decision_layer();
-        let action = components.action_registry.get(&crate::builtin_actions::select_option());
+        let action = components
+            .action_registry
+            .get(&crate::builtin_actions::select_option());
         assert!(action.is_some());
     }
 }

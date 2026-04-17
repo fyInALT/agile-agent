@@ -782,24 +782,29 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
     // Work config header
     let work_header_style = if overlay.focus == LaunchConfigFocus::WorkConfig {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled("Work Agent Config:", work_header_style)))
-            .alignment(ratatui::layout::Alignment::Left),
+        Paragraph::new(Line::from(Span::styled(
+            "Work Agent Config:",
+            work_header_style,
+        )))
+        .alignment(ratatui::layout::Alignment::Left),
         config_areas[0],
     );
 
     // Work config input with border
-    let work_input_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(if overlay.focus == LaunchConfigFocus::WorkConfig {
+    let work_input_block = Block::default().borders(Borders::ALL).border_style(
+        if overlay.focus == LaunchConfigFocus::WorkConfig {
             Style::default().fg(Color::Cyan)
         } else {
             Style::default().fg(Color::DarkGray)
-        });
+        },
+    );
     let work_input_inner = work_input_block.inner(config_areas[1]);
     frame.render_widget(work_input_block, config_areas[1]);
 
@@ -837,24 +842,29 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
     // Decision config header
     let decision_header_style = if overlay.focus == LaunchConfigFocus::DecisionConfig {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled("Decision Agent Config:", decision_header_style)))
-            .alignment(ratatui::layout::Alignment::Left),
+        Paragraph::new(Line::from(Span::styled(
+            "Decision Agent Config:",
+            decision_header_style,
+        )))
+        .alignment(ratatui::layout::Alignment::Left),
         config_areas[3],
     );
 
     // Decision config input with border
-    let decision_input_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(if overlay.focus == LaunchConfigFocus::DecisionConfig {
+    let decision_input_block = Block::default().borders(Borders::ALL).border_style(
+        if overlay.focus == LaunchConfigFocus::DecisionConfig {
             Style::default().fg(Color::Cyan)
         } else {
             Style::default().fg(Color::DarkGray)
-        });
+        },
+    );
     let decision_input_inner = decision_input_block.inner(config_areas[4]);
     frame.render_widget(decision_input_block, config_areas[4]);
 
@@ -900,7 +910,10 @@ fn render_launch_config_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
     // Confirm button
     let confirm_style = if overlay.focus == LaunchConfigFocus::Confirm {
-        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };

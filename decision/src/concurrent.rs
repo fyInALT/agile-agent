@@ -142,7 +142,11 @@ impl DecisionSessionPool {
     }
 
     /// Acquire session for agent (simulated - returns mock)
-    pub fn acquire(&mut self, provider: ProviderKind, agent_id: AgentId) -> crate::error::Result<PooledSession> {
+    pub fn acquire(
+        &mut self,
+        provider: ProviderKind,
+        agent_id: AgentId,
+    ) -> crate::error::Result<PooledSession> {
         // Check if agent already has session
         if let Some(session) = self.active.get(&agent_id) {
             return Ok(session.clone());
@@ -164,25 +168,25 @@ impl DecisionSessionPool {
         }
 
         // Check active count for provider
-        let active_count = self.active.values()
+        let active_count = self
+            .active
+            .values()
             .filter(|s| s.provider == provider)
             .count();
 
         if active_count < self.config.max_per_provider {
             // Create new session
-            let handle = SessionHandle::new(
-                format!("session-{}", uuid::Uuid::new_v4()),
-                provider,
-            );
+            let handle = SessionHandle::new(format!("session-{}", uuid::Uuid::new_v4()), provider);
             let mut session = PooledSession::new(handle, provider);
             session.assign(agent_id.clone());
             self.active.insert(agent_id.clone(), session.clone());
             Ok(session)
         } else {
             // Pool exhausted
-            Err(crate::error::DecisionError::EngineError(
-                format!("Session pool exhausted for provider: {}", provider)
-            ))
+            Err(crate::error::DecisionError::EngineError(format!(
+                "Session pool exhausted for provider: {}",
+                provider
+            )))
         }
     }
 
@@ -193,7 +197,10 @@ impl DecisionSessionPool {
 
             if self.config.reuse_enabled {
                 // Return to available pool
-                let pool = self.available.entry(session.provider).or_insert_with(VecDeque::new);
+                let pool = self
+                    .available
+                    .entry(session.provider)
+                    .or_insert_with(VecDeque::new);
 
                 // Don't exceed pool size
                 if pool.len() < self.config.max_per_provider {
@@ -254,7 +261,10 @@ pub enum RateLimitResult {
 
     /// Dequeued from waiting queue (minute reset, now allowed)
     /// Bug fix: Separate result type to distinguish from normal allowed
-    DequeuedAllowed { agent_id: AgentId, original_position: usize },
+    DequeuedAllowed {
+        agent_id: AgentId,
+        original_position: usize,
+    },
 }
 
 /// Rate limit status
@@ -364,7 +374,10 @@ impl DecisionRateLimiter {
             if in_waiting.is_none() {
                 self.waiting.push_back(agent_id.clone());
             }
-            let position = self.waiting.iter().position(|id| id == &agent_id)
+            let position = self
+                .waiting
+                .iter()
+                .position(|id| id == &agent_id)
                 .map(|p| p + 1)
                 .unwrap_or(self.waiting.len());
             RateLimitResult::Waiting { position }
@@ -391,7 +404,10 @@ impl DecisionRateLimiter {
 
     /// Get waiting queue position for agent
     pub fn waiting_position(&self, agent_id: &AgentId) -> Option<usize> {
-        self.waiting.iter().position(|id| id == agent_id).map(|p| p + 1)
+        self.waiting
+            .iter()
+            .position(|id| id == agent_id)
+            .map(|p| p + 1)
     }
 
     /// Remove agent from waiting queue
@@ -476,7 +492,9 @@ impl HumanDecisionArbitrator {
                 if self.current.is_some() {
                     // Add to queue, wait for current to complete
                     self.queue.push(request);
-                    ArbitrationResult::Queued { position: self.queue.total_pending() }
+                    ArbitrationResult::Queued {
+                        position: self.queue.total_pending(),
+                    }
                 } else {
                     // Handle immediately
                     self.current = Some(request.clone());
@@ -484,16 +502,22 @@ impl HumanDecisionArbitrator {
                 }
             }
 
-            ArbitrationStrategy::BatchSimilar { similarity_threshold } => {
+            ArbitrationStrategy::BatchSimilar {
+                similarity_threshold,
+            } => {
                 // Check if similar to current
                 if let Some(current) = &self.current {
                     if self.is_similar(&request, current, *similarity_threshold) {
                         // Batch with current
                         self.queue.push(request);
-                        ArbitrationResult::Batched { with_request_id: current.id.clone() }
+                        ArbitrationResult::Batched {
+                            with_request_id: current.id.clone(),
+                        }
                     } else {
                         self.queue.push(request);
-                        ArbitrationResult::Queued { position: self.queue.total_pending() }
+                        ArbitrationResult::Queued {
+                            position: self.queue.total_pending(),
+                        }
                     }
                 } else {
                     self.current = Some(request.clone());
@@ -508,7 +532,9 @@ impl HumanDecisionArbitrator {
                     ArbitrationResult::Immediate { request }
                 } else {
                     self.queue.push(request);
-                    ArbitrationResult::Queued { position: self.queue.total_pending() }
+                    ArbitrationResult::Queued {
+                        position: self.queue.total_pending(),
+                    }
                 }
             }
         }
@@ -572,18 +598,28 @@ impl HumanDecisionArbitrator {
     }
 
     /// Check similarity between two requests
-    fn is_similar(&self, a: &HumanDecisionRequest, b: &HumanDecisionRequest, threshold: f64) -> bool {
-        a.situation_type == b.situation_type &&
-        self.options_similarity(&a.options, &b.options) > threshold
+    fn is_similar(
+        &self,
+        a: &HumanDecisionRequest,
+        b: &HumanDecisionRequest,
+        threshold: f64,
+    ) -> bool {
+        a.situation_type == b.situation_type
+            && self.options_similarity(&a.options, &b.options) > threshold
     }
 
     /// Calculate options similarity
-    fn options_similarity(&self, a: &[crate::situation::ChoiceOption], b: &[crate::situation::ChoiceOption]) -> f64 {
+    fn options_similarity(
+        &self,
+        a: &[crate::situation::ChoiceOption],
+        b: &[crate::situation::ChoiceOption],
+    ) -> f64 {
         if a.is_empty() || b.is_empty() {
             return 0.0;
         }
 
-        let matching = a.iter()
+        let matching = a
+            .iter()
             .filter(|opt_a| b.iter().any(|opt_b| opt_a.id == opt_b.id))
             .count();
 
@@ -594,14 +630,20 @@ impl HumanDecisionArbitrator {
     pub fn active_count(&self) -> usize {
         match &self.strategy {
             ArbitrationStrategy::Sequential => {
-                if self.current.is_some() { 1 } else { 0 }
+                if self.current.is_some() {
+                    1
+                } else {
+                    0
+                }
             }
             ArbitrationStrategy::BatchSimilar { .. } => {
-                if self.current.is_some() { 1 } else { 0 }
+                if self.current.is_some() {
+                    1
+                } else {
+                    0
+                }
             }
-            ArbitrationStrategy::Parallel { .. } => {
-                self.active_parallel.len()
-            }
+            ArbitrationStrategy::Parallel { .. } => self.active_parallel.len(),
         }
     }
 
@@ -637,7 +679,11 @@ impl ThreadSafeSessionPool {
         }
     }
 
-    pub fn acquire(&self, provider: ProviderKind, agent_id: AgentId) -> crate::error::Result<PooledSession> {
+    pub fn acquire(
+        &self,
+        provider: ProviderKind,
+        agent_id: AgentId,
+    ) -> crate::error::Result<PooledSession> {
         let mut pool = self.pool.lock().unwrap();
         pool.acquire(provider, agent_id)
     }
@@ -762,12 +808,16 @@ impl Default for ThreadSafeArbitrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::situation::ChoiceOption;
     use crate::types::{SituationType, UrgencyLevel};
 
     // Helper function to create HumanDecisionRequest for tests
-    fn create_test_request(id: &str, agent_id: &str, options: Vec<ChoiceOption>) -> HumanDecisionRequest {
+    fn create_test_request(
+        id: &str,
+        agent_id: &str,
+        options: Vec<ChoiceOption>,
+    ) -> HumanDecisionRequest {
         HumanDecisionRequest::new(
             id.to_string(),
             agent_id.to_string(),
@@ -854,10 +904,14 @@ mod tests {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
 
         // First acquire
-        let session1 = pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        let session1 = pool
+            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
 
         // Same agent - should return same session
-        let session2 = pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        let session2 = pool
+            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
 
         assert_eq!(session1.handle.session_id, session2.handle.session_id);
     }
@@ -865,7 +919,8 @@ mod tests {
     #[test]
     fn test_decision_session_pool_release() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
 
         pool.release(&AgentId::new("agent-1"));
 
@@ -881,8 +936,10 @@ mod tests {
         });
 
         // Acquire max sessions
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-2")).unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-2"))
+            .unwrap();
 
         // Should fail for third agent
         let result = pool.acquire(ProviderKind::Claude, AgentId::new("agent-3"));
@@ -892,8 +949,10 @@ mod tests {
     #[test]
     fn test_decision_session_pool_stats() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
-        pool.acquire(ProviderKind::Codex, AgentId::new("agent-2")).unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
+        pool.acquire(ProviderKind::Codex, AgentId::new("agent-2"))
+            .unwrap();
 
         let stats = pool.stats();
 
@@ -911,7 +970,8 @@ mod tests {
         });
 
         // Acquire and release
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
         pool.release(&AgentId::new("agent-1"));
 
         // Wait for timeout
@@ -927,7 +987,8 @@ mod tests {
     #[test]
     fn test_decision_session_pool_clear() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
         pool.clear();
 
         assert!(pool.active.is_empty());
@@ -936,7 +997,9 @@ mod tests {
 
     #[test]
     fn test_rate_limit_result() {
-        let allowed = RateLimitResult::Allowed { agent_id: AgentId::new("agent-1") };
+        let allowed = RateLimitResult::Allowed {
+            agent_id: AgentId::new("agent-1"),
+        };
         let waiting = RateLimitResult::Waiting { position: 5 };
 
         assert!(matches!(allowed, RateLimitResult::Allowed { .. }));
@@ -1052,7 +1115,9 @@ mod tests {
             request: create_test_request("req-1", "agent-1", vec![]),
         };
         let queued = ArbitrationResult::Queued { position: 3 };
-        let batched = ArbitrationResult::Batched { with_request_id: "req-1".to_string() };
+        let batched = ArbitrationResult::Batched {
+            with_request_id: "req-1".to_string(),
+        };
 
         assert!(matches!(immediate, ArbitrationResult::Immediate { .. }));
         assert!(matches!(queued, ArbitrationResult::Queued { position: 3 }));
@@ -1118,7 +1183,9 @@ mod tests {
 
         let response = HumanDecisionResponse::new(
             "req-1".to_string(),
-            crate::blocking::HumanSelection::Selected { option_id: "opt-1".to_string() },
+            crate::blocking::HumanSelection::Selected {
+                option_id: "opt-1".to_string(),
+            },
         );
 
         let completed = arb.complete(response);
@@ -1213,7 +1280,9 @@ mod tests {
         let pool1 = ThreadSafeSessionPool::new(SessionPoolConfig::default());
         let pool2 = pool1.clone();
 
-        pool1.acquire(ProviderKind::Claude, AgentId::new("agent-1")).unwrap();
+        pool1
+            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .unwrap();
 
         // Both pools share the same underlying pool
         let stats = pool2.stats();
@@ -1278,11 +1347,18 @@ mod tests {
 
     #[test]
     fn test_arbitration_strategy_serde() {
-        let strategy = ArbitrationStrategy::BatchSimilar { similarity_threshold: 0.8 };
+        let strategy = ArbitrationStrategy::BatchSimilar {
+            similarity_threshold: 0.8,
+        };
         let json = serde_json::to_string(&strategy).unwrap();
         let parsed: ArbitrationStrategy = serde_json::from_str(&json).unwrap();
 
-        assert!(matches!(parsed, ArbitrationStrategy::BatchSimilar { similarity_threshold: 0.8 }));
+        assert!(matches!(
+            parsed,
+            ArbitrationStrategy::BatchSimilar {
+                similarity_threshold: 0.8
+            }
+        ));
     }
 
     #[test]

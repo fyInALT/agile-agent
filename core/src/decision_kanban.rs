@@ -52,7 +52,10 @@ pub struct TaskKanbanMapping {
 #[derive(Debug, Clone)]
 pub enum KanbanSyncResult {
     /// Task synced successfully
-    Synced { task_id: String, kanban_id: ElementId },
+    Synced {
+        task_id: String,
+        kanban_id: ElementId,
+    },
     /// No Kanban element found for task
     NotFound { task_id: String },
     /// Sync failed
@@ -65,7 +68,10 @@ pub enum KanbanSyncResult {
 #[derive(Debug, Clone)]
 pub enum NextTaskResult {
     /// Task selected successfully
-    Selected { kanban_element: KanbanElement, backlog_task: TaskItem },
+    Selected {
+        kanban_element: KanbanElement,
+        backlog_task: TaskItem,
+    },
     /// No tasks available
     NoTasksAvailable,
     /// Kanban service unavailable
@@ -175,14 +181,26 @@ impl DecisionKanbanIntegration {
                     // Search Kanban for matching task
                     if let Ok(elements) = kanban.list_elements() {
                         for elem in elements {
-                            if elem.element_type() == ElementType::Task && elem.title() == task.objective {
+                            if elem.element_type() == ElementType::Task
+                                && elem.title() == task.objective
+                            {
                                 // Update status
-                                let result = kanban.update_status(&elem.id().unwrap(), Status::Done, "decision_layer");
+                                let result = kanban.update_status(
+                                    &elem.id().unwrap(),
+                                    Status::Done,
+                                    "decision_layer",
+                                );
 
                                 if result.is_ok() {
                                     // Register mapping
-                                    self.register_mapping(task_id.to_string(), elem.id().unwrap().clone());
-                                    backlog.complete_task(task_id, Some("Completed successfully".to_string()));
+                                    self.register_mapping(
+                                        task_id.to_string(),
+                                        elem.id().unwrap().clone(),
+                                    );
+                                    backlog.complete_task(
+                                        task_id,
+                                        Some("Completed successfully".to_string()),
+                                    );
 
                                     return KanbanSyncResult::Synced {
                                         task_id: task_id.to_string(),
@@ -272,7 +290,8 @@ impl DecisionKanbanIntegration {
                                 // Create backlog task from Kanban element
                                 let task = TaskItem {
                                     id: kanban_id.as_str().to_string(),
-                                    todo_id: kanban_elem.parent()
+                                    todo_id: kanban_elem
+                                        .parent()
                                         .map(|p| p.as_str().to_string())
                                         .unwrap_or_default(),
                                     objective: kanban_elem.title().to_string(),
@@ -350,10 +369,7 @@ impl DecisionKanbanIntegration {
     ///
     /// Marks task as Ready for PR review in Kanban.
     /// If already at InProgress, returns success without changing status.
-    pub fn notify_pr_submission(
-        &self,
-        task_id: &str,
-    ) -> KanbanSyncResult {
+    pub fn notify_pr_submission(&self, task_id: &str) -> KanbanSyncResult {
         if let Some(kanban) = &self.kanban {
             let kanban_id = self.find_kanban_id(task_id);
 
@@ -396,8 +412,8 @@ impl DecisionKanbanIntegration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use agent_kanban::KanbanEventBus;
+    use tempfile::TempDir;
 
     fn create_test_kanban_service(temp: &TempDir) -> Arc<KanbanService<FileKanbanRepository>> {
         let repo = FileKanbanRepository::from_workplace(temp.path()).unwrap();
@@ -452,7 +468,10 @@ mod tests {
         integration.register_mapping("task-001".to_string(), make_element_id("task-001"));
 
         assert_eq!(integration.mappings().len(), 1);
-        assert_eq!(integration.find_kanban_id("task-001"), Some(&make_element_id("task-001")));
+        assert_eq!(
+            integration.find_kanban_id("task-001"),
+            Some(&make_element_id("task-001"))
+        );
     }
 
     #[test]
@@ -476,7 +495,8 @@ mod tests {
         let mut backlog = BacklogState::default();
         backlog.push_task(make_test_task());
 
-        let result = integration.sync_task_failure("task-001", "test error".to_string(), &mut backlog);
+        let result =
+            integration.sync_task_failure("task-001", "test error".to_string(), &mut backlog);
 
         assert!(matches!(result, KanbanSyncResult::NoKanbanService));
 
@@ -494,13 +514,33 @@ mod tests {
         // Create Kanban task
         use agent_kanban::domain::KanbanElement;
         let kanban_task = KanbanElement::new_task("Test Task");
-        let created = integration.kanban.as_ref().unwrap().create_element(kanban_task).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(kanban_task)
+            .unwrap();
         let kanban_id = created.id().unwrap();
 
         // Transition to InProgress (Plan -> Backlog -> Todo -> InProgress)
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Backlog, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Todo, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::InProgress, "test").unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Backlog, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Todo, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::InProgress, "test")
+            .unwrap();
 
         // Register mapping
         integration.register_mapping("task-001".to_string(), kanban_id.clone());
@@ -515,7 +555,13 @@ mod tests {
         assert!(matches!(result, KanbanSyncResult::Synced { .. }));
 
         // Kanban task should be Done
-        let kanban_elem = integration.kanban.as_ref().unwrap().get_element(&kanban_id).unwrap().unwrap();
+        let kanban_elem = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .get_element(&kanban_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(kanban_elem.status(), Status::Done);
     }
 
@@ -528,13 +574,33 @@ mod tests {
         // Create Kanban task
         use agent_kanban::domain::KanbanElement;
         let kanban_task = KanbanElement::new_task("Test Task");
-        let created = integration.kanban.as_ref().unwrap().create_element(kanban_task).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(kanban_task)
+            .unwrap();
         let kanban_id = created.id().unwrap();
 
         // Transition to InProgress first (Plan -> Backlog -> Todo -> InProgress)
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Backlog, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Todo, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::InProgress, "test").unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Backlog, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Todo, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::InProgress, "test")
+            .unwrap();
 
         // Register mapping
         integration.register_mapping("task-001".to_string(), kanban_id.clone());
@@ -544,13 +610,20 @@ mod tests {
         backlog.push_task(make_test_task());
 
         // Sync failure - InProgress -> Todo is valid transition for rework
-        let result = integration.sync_task_failure("task-001", "test error".to_string(), &mut backlog);
+        let result =
+            integration.sync_task_failure("task-001", "test error".to_string(), &mut backlog);
 
         // Verify result - the failure should transition InProgress -> Todo
         assert!(matches!(result, KanbanSyncResult::Synced { .. }));
 
         // Kanban task should be Todo (for rework after failure)
-        let kanban_elem = integration.kanban.as_ref().unwrap().get_element(&kanban_id).unwrap().unwrap();
+        let kanban_elem = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .get_element(&kanban_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(kanban_elem.status(), Status::Todo);
     }
 
@@ -572,12 +645,27 @@ mod tests {
         // Create Kanban task
         use agent_kanban::domain::KanbanElement;
         let kanban_task = KanbanElement::new_task("New Task");
-        let created = integration.kanban.as_ref().unwrap().create_element(kanban_task).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(kanban_task)
+            .unwrap();
         let kanban_id = created.id().unwrap();
 
         // Transition to Todo status (Plan -> Backlog -> Todo)
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Backlog, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Todo, "test").unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Backlog, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Todo, "test")
+            .unwrap();
 
         let mut backlog = BacklogState::default();
 
@@ -598,7 +686,12 @@ mod tests {
         // Create Kanban story
         use agent_kanban::domain::KanbanElement;
         let story = KanbanElement::new_story("Test Story", "Story content here");
-        let created = integration.kanban.as_ref().unwrap().create_element(story).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(story)
+            .unwrap();
 
         // Load story
         let content = integration.load_story_definition(created.id().unwrap().as_str());
@@ -616,7 +709,12 @@ mod tests {
         // Create Kanban task
         use agent_kanban::domain::KanbanElement;
         let task = KanbanElement::new_task("Test Task");
-        let created = integration.kanban.as_ref().unwrap().create_element(task).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(task)
+            .unwrap();
 
         // Load task
         let loaded = integration.load_task_definition(created.id().unwrap().as_str());
@@ -635,13 +733,33 @@ mod tests {
         // Create Kanban task
         use agent_kanban::domain::KanbanElement;
         let kanban_task = KanbanElement::new_task("Test Task");
-        let created = integration.kanban.as_ref().unwrap().create_element(kanban_task).unwrap();
+        let created = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .create_element(kanban_task)
+            .unwrap();
         let kanban_id = created.id().unwrap();
 
         // Transition to InProgress first (Plan -> Backlog -> Todo -> InProgress)
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Backlog, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::Todo, "test").unwrap();
-        integration.kanban.as_ref().unwrap().update_status(&kanban_id, Status::InProgress, "test").unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Backlog, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::Todo, "test")
+            .unwrap();
+        integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .update_status(&kanban_id, Status::InProgress, "test")
+            .unwrap();
 
         // Register mapping
         integration.register_mapping("task-001".to_string(), kanban_id.clone());
@@ -652,7 +770,13 @@ mod tests {
         assert!(matches!(result, KanbanSyncResult::Synced { .. }));
 
         // Kanban task should still be InProgress
-        let kanban_elem = integration.kanban.as_ref().unwrap().get_element(&kanban_id).unwrap().unwrap();
+        let kanban_elem = integration
+            .kanban
+            .as_ref()
+            .unwrap()
+            .get_element(&kanban_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(kanban_elem.status(), Status::InProgress);
     }
 }

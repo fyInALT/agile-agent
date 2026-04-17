@@ -1,8 +1,8 @@
 //! Configuration loading utilities.
 
-use std::path::Path;
 use anyhow::Result;
 use serde::Deserialize;
+use std::path::Path;
 
 use crate::models::LlmConfig;
 
@@ -25,23 +25,26 @@ impl ConfigFile {
     /// Load configuration from a TOML file.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let contents = std::fs::read_to_string(path)?;
-        toml::from_str(&contents)
-            .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))
+        toml::from_str(&contents).map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))
     }
 }
 
 impl From<ConfigFile> for LlmConfig {
     fn from(file: ConfigFile) -> Self {
-        let api_key = file.api_key
+        let api_key = file
+            .api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .unwrap_or_default();
-        let base_url = file.base_url
+        let base_url = file
+            .base_url
             .or_else(|| std::env::var("OPENAI_BASE_URL").ok())
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-        let simple_model = file.simple_model
+        let simple_model = file
+            .simple_model
             .or_else(|| std::env::var("OPENAI_SIMPLE_MODEL").ok())
             .unwrap_or_else(|| "gpt-4o-mini".to_string());
-        let thinking_model = file.thinking_model
+        let thinking_model = file
+            .thinking_model
             .or_else(|| std::env::var("OPENAI_THINKING_MODEL").ok())
             .unwrap_or_else(|| "gpt-4o".to_string());
         let timeout_secs = file.timeout_secs.unwrap_or(60);

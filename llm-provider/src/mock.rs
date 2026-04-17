@@ -128,7 +128,8 @@ impl MockLlmProvider {
     /// Get the number of times this provider has been called.
     pub fn call_count(&self, model: ModelType) -> usize {
         self.call_counts
-            .lock().unwrap()
+            .lock()
+            .unwrap()
             .get(&model)
             .copied()
             .unwrap_or(0)
@@ -136,10 +137,7 @@ impl MockLlmProvider {
 
     /// Get the total number of calls across all models.
     pub fn total_call_count(&self) -> usize {
-        self.call_counts
-            .lock().unwrap()
-            .values()
-            .sum()
+        self.call_counts.lock().unwrap().values().sum()
     }
 
     /// Get the last prompt received.
@@ -201,7 +199,8 @@ impl LlmProvider for MockLlmProvider {
             } else {
                 "SIMPLE:"
             };
-            parts.iter()
+            parts
+                .iter()
                 .find(|p| p.starts_with(prefix))
                 .map(|p| p.strip_prefix(prefix).unwrap_or(p))
                 .unwrap_or(&config.response)
@@ -227,7 +226,12 @@ impl LlmProvider for MockLlmProvider {
         self.complete_streaming_with_model(prompt, ModelType::Simple, callback)
     }
 
-    fn complete_streaming_with_model<F>(&self, prompt: &str, model: ModelType, callback: F) -> Result<()>
+    fn complete_streaming_with_model<F>(
+        &self,
+        prompt: &str,
+        model: ModelType,
+        callback: F,
+    ) -> Result<()>
     where
         F: Fn(LlmStreamChunk) + Send + 'static,
     {
@@ -261,7 +265,10 @@ impl LlmProvider for MockLlmProvider {
         Ok(())
     }
 
-    fn complete_async(&self, prompt: &str) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
+    fn complete_async(
+        &self,
+        prompt: &str,
+    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
         async move { self.complete(prompt) }
     }
 
@@ -324,14 +331,22 @@ impl LlmProvider for EchoMockProvider {
         Ok(())
     }
 
-    fn complete_streaming_with_model<F>(&self, prompt: &str, _model: ModelType, callback: F) -> Result<()>
+    fn complete_streaming_with_model<F>(
+        &self,
+        prompt: &str,
+        _model: ModelType,
+        callback: F,
+    ) -> Result<()>
     where
         F: Fn(LlmStreamChunk) + Send + 'static,
     {
         self.complete_streaming(prompt, callback)
     }
 
-    fn complete_async(&self, prompt: &str) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
+    fn complete_async(
+        &self,
+        prompt: &str,
+    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
         async move { self.complete(prompt) }
     }
 
@@ -365,7 +380,8 @@ mod tests {
     #[test]
     fn test_mock_provider_records_last_model() {
         let mock = MockLlmProvider::new().with_response("Response".to_string());
-        mock.complete_with_model("Prompt", ModelType::Thinking).unwrap();
+        mock.complete_with_model("Prompt", ModelType::Thinking)
+            .unwrap();
         assert_eq!(mock.last_model(), Some(ModelType::Thinking));
     }
 
@@ -404,14 +420,14 @@ mod tests {
 
     #[test]
     fn test_mock_provider_streaming() {
-        let mock = MockLlmProvider::new()
-            .with_response("Hello world".to_string());
+        let mock = MockLlmProvider::new().with_response("Hello world".to_string());
         let chunks = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let chunks_clone = Arc::clone(&chunks);
 
         mock.complete_streaming("Say something", move |chunk| {
             chunks_clone.lock().unwrap().push(chunk);
-        }).unwrap();
+        })
+        .unwrap();
 
         let chunks = chunks.lock().unwrap();
         // Should have multiple chunks for "Hello world"
@@ -430,13 +446,17 @@ mod tests {
 
     #[test]
     fn test_mock_provider_different_responses_by_model() {
-        let mock = MockLlmProvider::new()
-            .with_responses("Simple response", "Complex thinking response");
+        let mock =
+            MockLlmProvider::new().with_responses("Simple response", "Complex thinking response");
 
-        let simple = mock.complete_with_model("prompt", ModelType::Simple).unwrap();
+        let simple = mock
+            .complete_with_model("prompt", ModelType::Simple)
+            .unwrap();
         assert!(simple.content.contains("Simple"));
 
-        let thinking = mock.complete_with_model("prompt", ModelType::Thinking).unwrap();
+        let thinking = mock
+            .complete_with_model("prompt", ModelType::Thinking)
+            .unwrap();
         assert!(thinking.content.contains("Complex"));
     }
 }

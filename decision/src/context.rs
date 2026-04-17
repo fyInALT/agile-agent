@@ -35,10 +35,7 @@ pub struct DecisionContext {
 }
 
 impl DecisionContext {
-    pub fn new(
-        situation: Box<dyn DecisionSituation>,
-        main_agent_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(situation: Box<dyn DecisionSituation>, main_agent_id: impl Into<String>) -> Self {
         Self {
             trigger_situation: situation,
             main_agent_id: main_agent_id.into(),
@@ -142,22 +139,23 @@ impl RunningContextCache {
     }
 
     pub fn with_max_bytes(self, max_bytes: usize) -> Self {
-        Self { max_total_bytes: max_bytes, ..self }
+        Self {
+            max_total_bytes: max_bytes,
+            ..self
+        }
     }
 
     /// Estimate tool call size
     fn estimate_tool_call_size(&self, record: &ToolCallRecord) -> usize {
-        record.name.len() +
-        record.input_preview.as_ref().map(|s| s.len()).unwrap_or(0) +
-        record.output_preview.as_ref().map(|s| s.len()).unwrap_or(0) +
-        50 // Fixed overhead
+        record.name.len()
+            + record.input_preview.as_ref().map(|s| s.len()).unwrap_or(0)
+            + record.output_preview.as_ref().map(|s| s.len()).unwrap_or(0)
+            + 50 // Fixed overhead
     }
 
     /// Estimate file change size
     fn estimate_file_change_size(&self, record: &FileChangeRecord) -> usize {
-        record.path.len() +
-        record.diff_preview.as_ref().map(|s| s.len()).unwrap_or(0) +
-        20 // Fixed overhead
+        record.path.len() + record.diff_preview.as_ref().map(|s| s.len()).unwrap_or(0) + 20 // Fixed overhead
     }
 
     /// Recalculate current size
@@ -186,8 +184,9 @@ impl RunningContextCache {
         }
 
         // Remove oldest if at limit
-        while self.tool_calls.len() >= self.max_entries ||
-              self.current_size + entry_size > self.max_total_bytes {
+        while self.tool_calls.len() >= self.max_entries
+            || self.current_size + entry_size > self.max_total_bytes
+        {
             if let Some(old) = self.tool_calls.pop_front() {
                 self.current_size -= self.estimate_tool_call_size(&old);
             } else {
@@ -216,8 +215,9 @@ impl RunningContextCache {
             return;
         }
 
-        while self.file_changes.len() >= self.max_entries ||
-              self.current_size + entry_size > self.max_total_bytes {
+        while self.file_changes.len() >= self.max_entries
+            || self.current_size + entry_size > self.max_total_bytes
+        {
             if let Some(old) = self.file_changes.pop_front() {
                 self.current_size -= self.estimate_file_change_size(&old);
             } else {
@@ -244,8 +244,9 @@ impl RunningContextCache {
             return;
         }
 
-        while self.key_outputs.len() >= self.max_entries ||
-              self.current_size + entry_size > self.max_total_bytes {
+        while self.key_outputs.len() >= self.max_entries
+            || self.current_size + entry_size > self.max_total_bytes
+        {
             if let Some(old) = self.key_outputs.pop_front() {
                 self.current_size -= old.len();
             } else {
@@ -265,7 +266,10 @@ impl RunningContextCache {
         // Truncate if exceeds half of max bytes
         let max_thinking_len = self.max_total_bytes / 4;
         let truncated = if new_summary.len() > max_thinking_len {
-            new_summary.chars().skip(new_summary.len() - max_thinking_len).collect::<String>()
+            new_summary
+                .chars()
+                .skip(new_summary.len() - max_thinking_len)
+                .collect::<String>()
         } else {
             new_summary
         };
@@ -326,22 +330,24 @@ impl RunningContextCache {
 
     /// Generate compact summary for LLM prompt
     pub fn generate_summary(&self) -> String {
-        let files = self.file_changes.iter()
+        let files = self
+            .file_changes
+            .iter()
             .map(|fc| format!("{} ({})", fc.path, fc.change_type))
             .collect::<Vec<_>>();
 
-        let tool_stats: HashMap<&str, usize> = self.tool_calls.iter()
-            .fold(HashMap::new(), |mut acc, tc| {
+        let tool_stats: HashMap<&str, usize> =
+            self.tool_calls.iter().fold(HashMap::new(), |mut acc, tc| {
                 *acc.entry(tc.name.as_str()).or_insert(0) += 1;
                 acc
             });
 
-        let tool_summary = tool_stats.iter()
+        let tool_summary = tool_stats
+            .iter()
             .map(|(name, count)| format!("{}: {} calls", name, count))
             .collect::<Vec<_>>();
 
-        let recent_keys = self.key_outputs.iter().rev().take(3)
-            .collect::<Vec<_>>();
+        let recent_keys = self.key_outputs.iter().rev().take(3).collect::<Vec<_>>();
 
         format!(
             "Files: {}\n\
@@ -349,7 +355,11 @@ impl RunningContextCache {
              Recent: {}",
             files.join(", "),
             tool_summary.join(", "),
-            recent_keys.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n  ")
+            recent_keys
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
         )
     }
 
@@ -515,7 +525,10 @@ impl ProjectRules {
     pub fn with_requires_human_rule(self, rule: impl Into<String>) -> Self {
         let mut requires_human_rules = self.requires_human_rules;
         requires_human_rules.push(rule.into());
-        Self { requires_human_rules, ..self }
+        Self {
+            requires_human_rules,
+            ..self
+        }
     }
 
     pub fn contains_keyword(&self, keyword: &str) -> bool {
@@ -527,7 +540,8 @@ impl ProjectRules {
         if self.rules.is_empty() {
             "No project rules defined".to_string()
         } else {
-            self.rules.iter()
+            self.rules
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -551,7 +565,10 @@ mod tests {
         let situation = WaitingForChoiceSituation::default();
         let ctx = DecisionContext::new(Box::new(situation), "agent-1");
         assert_eq!(ctx.main_agent_id, "agent-1");
-        assert_eq!(ctx.situation_type(), SituationType::new("waiting_for_choice"));
+        assert_eq!(
+            ctx.situation_type(),
+            SituationType::new("waiting_for_choice")
+        );
     }
 
     #[test]
@@ -664,8 +681,10 @@ mod tests {
         let mut cache = RunningContextCache::new(100).with_max_bytes(1000);
         // Add many tool calls - size should stay within limit during addition
         for i in 0..50 {
-            cache.add_tool_call(ToolCallRecord::new(format!("tool-{}", i), true)
-                .with_input_preview("x".repeat(100)));
+            cache.add_tool_call(
+                ToolCallRecord::new(format!("tool-{}", i), true)
+                    .with_input_preview("x".repeat(100)),
+            );
         }
         // Size should be limited during addition
         assert!(cache.is_within_limits());

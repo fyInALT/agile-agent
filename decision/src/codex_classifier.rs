@@ -1,6 +1,6 @@
 //! Codex classifier
 
-use crate::builtin_situations::{codex_approval, claims_completion, error};
+use crate::builtin_situations::{claims_completion, codex_approval, error};
 use crate::classifier::{ContextUpdate, OutputClassifier};
 use crate::context::{ChangeType, FileChangeRecord};
 use crate::provider_event::ProviderEvent;
@@ -20,19 +20,19 @@ impl OutputClassifier for CodexClassifier {
     fn classify_type(&self, event: &ProviderEvent) -> Option<SituationType> {
         match event {
             // Approval requests = WaitingForChoice (Codex subtype)
-            ProviderEvent::CodexApprovalRequest { method, .. } => {
-                match method.as_str() {
-                    "execCommandApproval"
-                    | "applyPatchApproval"
-                    | "item/tool/requestUserInput"
-                    | "item/permissions/requestApproval" => Some(codex_approval()),
-                    _ => None,
-                }
-            }
+            ProviderEvent::CodexApprovalRequest { method, .. } => match method.as_str() {
+                "execCommandApproval"
+                | "applyPatchApproval"
+                | "item/tool/requestUserInput"
+                | "item/permissions/requestApproval" => Some(codex_approval()),
+                _ => None,
+            },
 
             // Finished
             ProviderEvent::Finished { .. } => Some(claims_completion()),
-            ProviderEvent::CodexError { kind, .. } => Some(SituationType::with_subtype("error", kind)),
+            ProviderEvent::CodexError { kind, .. } => {
+                Some(SituationType::with_subtype("error", kind))
+            }
             _ => None,
         }
     }
@@ -64,17 +64,21 @@ impl OutputClassifier for CodexClassifier {
 pub fn register_codex_builders(registry: &SituationRegistry) {
     // Codex approval builder
     registry.register_builder(codex_approval(), || {
-        Some(Box::new(crate::builtin_situations::WaitingForChoiceSituation::new(vec![
-            ChoiceOption::new("approved", "Approve"),
-            ChoiceOption::new("approved_for_session", "Approve for session"),
-            ChoiceOption::new("denied", "Deny"),
-            ChoiceOption::new("abort", "Abort"),
-        ])))
+        Some(Box::new(
+            crate::builtin_situations::WaitingForChoiceSituation::new(vec![
+                ChoiceOption::new("approved", "Approve"),
+                ChoiceOption::new("approved_for_session", "Approve for session"),
+                ChoiceOption::new("denied", "Deny"),
+                ChoiceOption::new("abort", "Abort"),
+            ]),
+        ))
     });
 
     // Codex completion builder
     registry.register_builder(claims_completion(), || {
-        Some(Box::new(crate::builtin_situations::ClaimsCompletionSituation::new("Codex task finished")))
+        Some(Box::new(
+            crate::builtin_situations::ClaimsCompletionSituation::new("Codex task finished"),
+        ))
     });
 
     // Codex error builder
@@ -100,28 +104,22 @@ pub fn parse_codex_options(method: &str, params: &serde_json::Value) -> Vec<Choi
             ChoiceOption::new("denied", "Deny"),
             ChoiceOption::new("abort", "Abort"),
         ],
-        "item/tool/requestUserInput" => {
-            params
-                .get("options")
-                .and_then(|o| o.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| {
-                            v.get("id")
-                                .and_then(|id| id.as_str())
-                                .map(|id| {
-                                    ChoiceOption::new(
-                                        id,
-                                        v.get("label")
-                                            .and_then(|l| l.as_str())
-                                            .unwrap_or(id),
-                                    )
-                                })
+        "item/tool/requestUserInput" => params
+            .get("options")
+            .and_then(|o| o.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        v.get("id").and_then(|id| id.as_str()).map(|id| {
+                            ChoiceOption::new(
+                                id,
+                                v.get("label").and_then(|l| l.as_str()).unwrap_or(id),
+                            )
                         })
-                        .collect()
-                })
-                .unwrap_or_default()
-        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         _ => vec![
             ChoiceOption::new("approved", "Approve"),
             ChoiceOption::new("denied", "Deny"),
@@ -196,13 +194,18 @@ mod tests {
             message: "timeout".to_string(),
         };
         let type_ = classifier.classify_type(&event);
-        assert_eq!(type_, Some(SituationType::with_subtype("error", "timed_out")));
+        assert_eq!(
+            type_,
+            Some(SituationType::with_subtype("error", "timed_out"))
+        );
     }
 
     #[test]
     fn test_codex_classifier_patch_apply_context() {
         let classifier = CodexClassifier;
-        let event = ProviderEvent::CodexPatchApplyStarted { path: "/src/main.rs".to_string() };
+        let event = ProviderEvent::CodexPatchApplyStarted {
+            path: "/src/main.rs".to_string(),
+        };
         let context = classifier.extract_context(&event);
         assert!(matches!(context, Some(ContextUpdate::FileChange(_))));
     }

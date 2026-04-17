@@ -173,12 +173,18 @@ impl DecisionMetrics {
 
     /// Record situation type
     fn record_situation_type(&mut self, situation_type: &str) {
-        *self.by_situation_type.entry(situation_type.to_string()).or_insert(0) += 1;
+        *self
+            .by_situation_type
+            .entry(situation_type.to_string())
+            .or_insert(0) += 1;
     }
 
     /// Record action type
     fn record_action_type(&mut self, action_type: &str) {
-        *self.by_action_type.entry(action_type.to_string()).or_insert(0) += 1;
+        *self
+            .by_action_type
+            .entry(action_type.to_string())
+            .or_insert(0) += 1;
     }
 
     /// Update duration statistics
@@ -678,7 +684,10 @@ mod tests {
         assert_eq!(metrics.avg_duration_ms, 100);
         assert_eq!(metrics.max_duration_ms, 100);
         assert_eq!(metrics.min_duration_ms, 100);
-        assert_eq!(metrics.by_situation_type.get("waiting_for_choice"), Some(&1));
+        assert_eq!(
+            metrics.by_situation_type.get("waiting_for_choice"),
+            Some(&1)
+        );
         assert_eq!(metrics.by_action_type.get("select_option"), Some(&1));
     }
 

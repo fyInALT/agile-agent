@@ -21,20 +21,19 @@ impl<P: LlmProvider> TextProcessor<P> {
     ///
     /// Returns a concise summary of the input text.
     pub fn summarize(&self, text: &str) -> Result<String> {
-        let prompt = format!(
-            "Summarize the following text concisely:\n\n{}",
-            text
-        );
-        self.provider.complete_with_model(&prompt, ModelType::Thinking).map(|r| r.content)
+        let prompt = format!("Summarize the following text concisely:\n\n{}", text);
+        self.provider
+            .complete_with_model(&prompt, ModelType::Thinking)
+            .map(|r| r.content)
     }
 
     /// Async version: Summarize text.
     pub async fn summarize_async(&self, text: &str) -> Result<String> {
-        let prompt = format!(
-            "Summarize the following text concisely:\n\n{}",
-            text
-        );
-        self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await.map(|r| r.content)
+        let prompt = format!("Summarize the following text concisely:\n\n{}", text);
+        self.provider
+            .complete_async_with_model(&prompt, ModelType::Thinking)
+            .await
+            .map(|r| r.content)
     }
 
     /// Compress text to approximately the given number of tokens using the simple model.
@@ -45,7 +44,9 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Compress the following text to approximately {} tokens, preserving key information:\n\n{}",
             max_tokens, text
         );
-        self.provider.complete_with_model(&prompt, ModelType::Simple).map(|r| r.content)
+        self.provider
+            .complete_with_model(&prompt, ModelType::Simple)
+            .map(|r| r.content)
     }
 
     /// Async version: Compress text.
@@ -54,7 +55,10 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Compress the following text to approximately {} tokens, preserving key information:\n\n{}",
             max_tokens, text
         );
-        self.provider.complete_async_with_model(&prompt, ModelType::Simple).await.map(|r| r.content)
+        self.provider
+            .complete_async_with_model(&prompt, ModelType::Simple)
+            .await
+            .map(|r| r.content)
     }
 
     /// Extract key points from text using the thinking model.
@@ -65,9 +69,12 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Extract the key points from the following text. Return each point on a separate line:\n\n{}",
             text
         );
-        let response = self.provider.complete_with_model(&prompt, ModelType::Thinking)?;
+        let response = self
+            .provider
+            .complete_with_model(&prompt, ModelType::Thinking)?;
 
-        Ok(response.content
+        Ok(response
+            .content
             .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -80,9 +87,13 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Extract the key points from the following text. Return each point on a separate line:\n\n{}",
             text
         );
-        let response = self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await?;
+        let response = self
+            .provider
+            .complete_async_with_model(&prompt, ModelType::Thinking)
+            .await?;
 
-        Ok(response.content
+        Ok(response
+            .content
             .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -98,7 +109,9 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Classify the following text into one of these categories: {}.\n\nText: {}\n\nCategory:",
             categories_str, text
         );
-        self.provider.complete_with_model(&prompt, ModelType::Simple).map(|r| r.content)
+        self.provider
+            .complete_with_model(&prompt, ModelType::Simple)
+            .map(|r| r.content)
     }
 
     /// Async version: Classify text.
@@ -108,7 +121,10 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Classify the following text into one of these categories: {}.\n\nText: {}\n\nCategory:",
             categories_str, text
         );
-        self.provider.complete_async_with_model(&prompt, ModelType::Simple).await.map(|r| r.content)
+        self.provider
+            .complete_async_with_model(&prompt, ModelType::Simple)
+            .await
+            .map(|r| r.content)
     }
 
     /// Rewrite text to match a target style using the thinking model.
@@ -117,7 +133,9 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Rewrite the following text in the style of {}:\n\n{}",
             style, text
         );
-        self.provider.complete_with_model(&prompt, ModelType::Thinking).map(|r| r.content)
+        self.provider
+            .complete_with_model(&prompt, ModelType::Thinking)
+            .map(|r| r.content)
     }
 
     /// Async version: Rewrite text.
@@ -126,7 +144,10 @@ impl<P: LlmProvider> TextProcessor<P> {
             "Rewrite the following text in the style of {}:\n\n{}",
             style, text
         );
-        self.provider.complete_async_with_model(&prompt, ModelType::Thinking).await.map(|r| r.content)
+        self.provider
+            .complete_async_with_model(&prompt, ModelType::Thinking)
+            .await
+            .map(|r| r.content)
     }
 
     /// Count approximate tokens in text (rough estimate).

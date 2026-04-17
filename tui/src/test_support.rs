@@ -129,10 +129,17 @@ impl ShellHarness {
                     LaunchConfigOverlayCommand::Close => {
                         self.state.close_launch_config_overlay();
                     }
-                    LaunchConfigOverlayCommand::Confirm { work_config, decision_config } => {
+                    LaunchConfigOverlayCommand::Confirm {
+                        work_config,
+                        decision_config,
+                    } => {
                         let provider = overlay.provider;
                         self.state.close_launch_config_overlay();
-                        if let Some(agent_id) = self.state.spawn_agent_with_launch_config(provider, &work_config, &decision_config) {
+                        if let Some(agent_id) = self.state.spawn_agent_with_launch_config(
+                            provider,
+                            &work_config,
+                            &decision_config,
+                        ) {
                             self.state.app_mut().push_status_message(format!(
                                 "spawned {} with {}",
                                 agent_id.as_str(),
@@ -235,16 +242,24 @@ impl ShellHarness {
             }
             InputOutcome::PauseFocusedAgent => {
                 if self.state.pause_focused_agent().is_some() {
-                    self.state.app_mut().push_status_message("Agent paused with worktree preserved".to_string());
+                    self.state
+                        .app_mut()
+                        .push_status_message("Agent paused with worktree preserved".to_string());
                 } else {
-                    self.state.app_mut().push_status_message("Failed to pause agent".to_string());
+                    self.state
+                        .app_mut()
+                        .push_status_message("Failed to pause agent".to_string());
                 }
             }
             InputOutcome::ResumeFocusedAgent => {
                 if self.state.resume_focused_agent().is_some() {
-                    self.state.app_mut().push_status_message("Agent resumed".to_string());
+                    self.state
+                        .app_mut()
+                        .push_status_message("Agent resumed".to_string());
                 } else {
-                    self.state.app_mut().push_status_message("Failed to resume agent (not paused?)".to_string());
+                    self.state
+                        .app_mut()
+                        .push_status_message("Failed to resume agent (not paused?)".to_string());
                 }
             }
             InputOutcome::Submit(text) => {

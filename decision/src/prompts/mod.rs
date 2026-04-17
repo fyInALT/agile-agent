@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use crate::error::{DecisionError, Result};
 
 // Import for context conversion
-use crate::context::DecisionContext;
 use crate::action_registry::ActionRegistry;
+use crate::context::DecisionContext;
 
 // ============================================================================
 // Default Prompt Templates
@@ -447,15 +447,13 @@ impl PromptConfig {
         }
         let content = std::fs::read_to_string(path)
             .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
-        let config: Self = serde_json::from_str(&content)
-            .map_err(DecisionError::JsonError)?;
+        let config: Self = serde_json::from_str(&content).map_err(DecisionError::JsonError)?;
         Ok(config)
     }
 
     /// Save to file path
     pub fn to_file(&self, path: &std::path::Path) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)
-            .map_err(DecisionError::JsonError)?;
+        let content = serde_json::to_string_pretty(self).map_err(DecisionError::JsonError)?;
         std::fs::write(path, content)
             .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
         Ok(())
@@ -793,7 +791,9 @@ impl PromptVariables {
         let file_changes_summary = if context.running_context.file_changes().is_empty() {
             "No file changes recorded".to_string()
         } else {
-            context.running_context.file_changes()
+            context
+                .running_context
+                .file_changes()
                 .iter()
                 .map(|fc| format!("{} ({})", fc.path, fc.change_type))
                 .collect::<Vec<_>>()
@@ -801,7 +801,9 @@ impl PromptVariables {
         };
 
         // Build completion summary from key outputs (for claims_completion)
-        let completion_summary = context.running_context.key_outputs()
+        let completion_summary = context
+            .running_context
+            .key_outputs()
             .iter()
             .rev()
             .take(5)
@@ -810,7 +812,8 @@ impl PromptVariables {
             .join("\n");
 
         // Build task info
-        let task_info = context.current_task_id
+        let task_info = context
+            .current_task_id
             .as_ref()
             .map(|id| format!("Task ID: {}", id))
             .unwrap_or_else(|| "No task assigned".to_string());
@@ -866,11 +869,7 @@ impl PromptBuilder {
     }
 
     /// Build the full decision prompt
-    pub fn build(
-        &self,
-        situation_type: &str,
-        variables: &PromptVariables,
-    ) -> String {
+    pub fn build(&self, situation_type: &str, variables: &PromptVariables) -> String {
         // Start with system prompt
         let system_prompt = &self.config.system_prompt;
 
@@ -881,11 +880,7 @@ impl PromptBuilder {
         let interpolated = self.interpolate(&template, variables);
 
         // Combine system + situation
-        format!(
-            "{}\n\n---\n\n{}",
-            system_prompt,
-            interpolated
-        )
+        format!("{}\n\n---\n\n{}", system_prompt, interpolated)
     }
 
     /// Get template for situation, considering reflection round
@@ -944,35 +939,59 @@ impl PromptBuilder {
         // Optional variables - replace with empty string or default if not set
         result = result.replace(
             "{completion_summary}",
-            variables.completion_summary.as_deref().unwrap_or("Not available"),
+            variables
+                .completion_summary
+                .as_deref()
+                .unwrap_or("Not available"),
         );
         result = result.replace(
             "{task_requirements}",
-            variables.task_requirements.as_deref().unwrap_or("Not specified"),
+            variables
+                .task_requirements
+                .as_deref()
+                .unwrap_or("Not specified"),
         );
         result = result.replace(
             "{work_summary}",
-            variables.work_summary.as_deref().unwrap_or("No work summary available"),
+            variables
+                .work_summary
+                .as_deref()
+                .unwrap_or("No work summary available"),
         );
         result = result.replace(
             "{reflection_summary}",
-            variables.reflection_summary.as_deref().unwrap_or("No previous reflection"),
+            variables
+                .reflection_summary
+                .as_deref()
+                .unwrap_or("No previous reflection"),
         );
         result = result.replace(
             "{file_changes}",
-            variables.file_changes.as_deref().unwrap_or("No file changes recorded"),
+            variables
+                .file_changes
+                .as_deref()
+                .unwrap_or("No file changes recorded"),
         );
         result = result.replace(
             "{progress_summary}",
-            variables.progress_summary.as_deref().unwrap_or("No progress summary"),
+            variables
+                .progress_summary
+                .as_deref()
+                .unwrap_or("No progress summary"),
         );
         result = result.replace(
             "{completed_items}",
-            variables.completed_items.as_deref().unwrap_or("None identified"),
+            variables
+                .completed_items
+                .as_deref()
+                .unwrap_or("None identified"),
         );
         result = result.replace(
             "{remaining_items}",
-            variables.remaining_items.as_deref().unwrap_or("None identified"),
+            variables
+                .remaining_items
+                .as_deref()
+                .unwrap_or("None identified"),
         );
         result = result.replace(
             "{error_type}",
@@ -980,19 +999,31 @@ impl PromptBuilder {
         );
         result = result.replace(
             "{error_details}",
-            variables.error_details.as_deref().unwrap_or("No details available"),
+            variables
+                .error_details
+                .as_deref()
+                .unwrap_or("No details available"),
         );
         result = result.replace(
             "{error_context}",
-            variables.error_context.as_deref().unwrap_or("No context available"),
+            variables
+                .error_context
+                .as_deref()
+                .unwrap_or("No context available"),
         );
         result = result.replace(
             "{retry_count}",
-            &variables.retry_count.map(|c| c.to_string()).unwrap_or_else(|| "0".to_string()),
+            &variables
+                .retry_count
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "0".to_string()),
         );
         result = result.replace(
             "{max_retries}",
-            &variables.max_retries.map(|m| m.to_string()).unwrap_or_else(|| "3".to_string()),
+            &variables
+                .max_retries
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "3".to_string()),
         );
         result = result.replace(
             "{decision_id}",
@@ -1000,31 +1031,52 @@ impl PromptBuilder {
         );
         result = result.replace(
             "{criticality_score}",
-            &variables.criticality_score.map(|s| s.to_string()).unwrap_or_else(|| "0".to_string()),
+            &variables
+                .criticality_score
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "0".to_string()),
         );
         result = result.replace(
             "{critical_factors}",
-            variables.critical_factors.as_deref().unwrap_or("None identified"),
+            variables
+                .critical_factors
+                .as_deref()
+                .unwrap_or("None identified"),
         );
         result = result.replace(
             "{preliminary_analysis}",
-            variables.preliminary_analysis.as_deref().unwrap_or("No analysis available"),
+            variables
+                .preliminary_analysis
+                .as_deref()
+                .unwrap_or("No analysis available"),
         );
         result = result.replace(
             "{recommendation}",
-            variables.recommendation.as_deref().unwrap_or("No recommendation"),
+            variables
+                .recommendation
+                .as_deref()
+                .unwrap_or("No recommendation"),
         );
         result = result.replace(
             "{impact_assessment}",
-            variables.impact_assessment.as_deref().unwrap_or("Not assessed"),
+            variables
+                .impact_assessment
+                .as_deref()
+                .unwrap_or("Not assessed"),
         );
         result = result.replace(
             "{definition_of_done}",
-            variables.definition_of_done.as_deref().unwrap_or("Not specified"),
+            variables
+                .definition_of_done
+                .as_deref()
+                .unwrap_or("Not specified"),
         );
         result = result.replace(
             "{files_modified}",
-            variables.files_modified.as_deref().unwrap_or("No files recorded"),
+            variables
+                .files_modified
+                .as_deref()
+                .unwrap_or("No files recorded"),
         );
         result = result.replace(
             "{tests_status}",
@@ -1032,11 +1084,17 @@ impl PromptBuilder {
         );
         result = result.replace(
             "{integration_check}",
-            variables.integration_check.as_deref().unwrap_or("Not checked"),
+            variables
+                .integration_check
+                .as_deref()
+                .unwrap_or("Not checked"),
         );
         result = result.replace(
             "{rules_compliance}",
-            variables.rules_compliance.as_deref().unwrap_or("Not verified"),
+            variables
+                .rules_compliance
+                .as_deref()
+                .unwrap_or("Not verified"),
         );
 
         result
@@ -1102,12 +1160,24 @@ impl CriticalityCriteria {
     /// Calculate criticality score (0-12)
     pub fn calculate_score(&self) -> u8 {
         let mut score = 0u8;
-        if self.multi_agent_impact { score += 2; }
-        if self.irreversible { score += 3; }
-        if self.high_risk { score += 3; }
-        if self.low_confidence { score += 1; }
-        if self.high_cost { score += 1; }
-        if self.requires_human { score += 2; }
+        if self.multi_agent_impact {
+            score += 2;
+        }
+        if self.irreversible {
+            score += 3;
+        }
+        if self.high_risk {
+            score += 3;
+        }
+        if self.low_confidence {
+            score += 1;
+        }
+        if self.high_cost {
+            score += 1;
+        }
+        if self.requires_human {
+            score += 2;
+        }
         score
     }
 
@@ -1179,9 +1249,10 @@ mod tests {
 
         let config = PromptConfig {
             max_reflection_rounds: 3,
-            custom_prompts: HashMap::from([
-                ("custom_situation".to_string(), "Custom prompt".to_string()),
-            ]),
+            custom_prompts: HashMap::from([(
+                "custom_situation".to_string(),
+                "Custom prompt".to_string(),
+            )]),
             ..Default::default()
         };
 
@@ -1292,8 +1363,7 @@ mod tests {
         );
 
         let builder = PromptBuilder::with_config(config);
-        let variables = PromptVariables::new()
-            .with_situation("Custom situation".to_string());
+        let variables = PromptVariables::new().with_situation("Custom situation".to_string());
 
         let prompt = builder.build("custom_situation", &variables);
         assert!(prompt.contains("Custom situation"));
@@ -1432,7 +1502,10 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("must contain at least one placeholder"));
+        assert!(
+            err.to_string()
+                .contains("must contain at least one placeholder")
+        );
     }
 
     #[test]
@@ -1448,8 +1521,16 @@ mod tests {
     #[test]
     fn test_prompt_variables_with_formatted_history() {
         let records = vec![
-            ("waiting_for_choice".to_string(), "select_option".to_string(), 0.85),
-            ("claims_completion".to_string(), "confirm_completion".to_string(), 0.90),
+            (
+                "waiting_for_choice".to_string(),
+                "select_option".to_string(),
+                0.85,
+            ),
+            (
+                "claims_completion".to_string(),
+                "confirm_completion".to_string(),
+                0.90,
+            ),
         ];
         let vars = PromptVariables::new().with_formatted_history(&records);
         assert!(vars.decision_history.contains("waiting_for_choice"));

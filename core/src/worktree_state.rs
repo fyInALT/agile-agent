@@ -132,7 +132,8 @@ impl WorktreeState {
     /// Get a human-readable summary
     pub fn summary(&self) -> String {
         let branch_str = self.branch.as_deref().unwrap_or("detached");
-        let head_short = self.head_commit
+        let head_short = self
+            .head_commit
             .as_ref()
             .map(|h| if h.len() >= 8 { &h[..8] } else { h.as_str() })
             .unwrap_or("unknown");

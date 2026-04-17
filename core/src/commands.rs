@@ -142,9 +142,6 @@ mod tests {
     #[test]
     fn legacy_backlog_alias_maps_to_local_kanban_list() {
         let parsed = parse_legacy_alias("/backlog").expect("alias");
-        assert_eq!(
-            parsed.path,
-            vec!["kanban".to_string(), "list".to_string()]
-        );
+        assert_eq!(parsed.path, vec!["kanban".to_string(), "list".to_string()]);
     }
 }

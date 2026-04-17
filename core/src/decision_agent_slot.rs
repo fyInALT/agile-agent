@@ -35,8 +35,8 @@
 //! DecisionAgentSlot is owned by the main thread (TUI loop).
 //! The decision provider thread sends events through the channel.
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -50,10 +50,10 @@ use agent_decision::builtin_actions::register_action_builtins;
 use agent_decision::engine::DecisionEngine;
 use agent_decision::initializer::DecisionLayerComponents;
 use agent_decision::llm_caller::LLMCaller;
-use agent_decision::tiered_engine::{TieredDecisionEngine, TieredEngineConfig};
 use agent_decision::llm_engine::LLMEngineConfig;
-use agent_decision::provider_kind::ProviderKind as DecisionProviderKind;
 use agent_decision::provider_event::ProviderEvent;
+use agent_decision::provider_kind::ProviderKind as DecisionProviderKind;
+use agent_decision::tiered_engine::{TieredDecisionEngine, TieredEngineConfig};
 
 /// Status of a decision agent slot
 #[derive(Debug, Clone, PartialEq, Eq)]

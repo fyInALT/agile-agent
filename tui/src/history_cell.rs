@@ -617,10 +617,25 @@ impl HistoryCell for DecisionHistoryCell {
         let header: &str = "🧠 Decision";
 
         lines.push(Line::from(vec![
-            Span::styled("• ", Style::default().fg(decision_color).add_modifier(Modifier::BOLD)),
-            Span::styled(header.to_string(), Style::default().fg(decision_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "• ",
+                Style::default()
+                    .fg(decision_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                header.to_string(),
+                Style::default()
+                    .fg(decision_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" [", Style::default().fg(decision_color)),
-            Span::styled(self.tier.clone(), Style::default().fg(decision_color).add_modifier(Modifier::DIM)),
+            Span::styled(
+                self.tier.clone(),
+                Style::default()
+                    .fg(decision_color)
+                    .add_modifier(Modifier::DIM),
+            ),
             Span::styled("]", Style::default().fg(decision_color)),
         ]));
 
@@ -628,15 +643,29 @@ impl HistoryCell for DecisionHistoryCell {
         lines.push(Line::from(vec![
             Span::styled("  Agent: ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(self.agent_id.clone(), Style::default().fg(Color::Cyan)),
-            Span::styled(" │ Situation: ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(self.situation_type.clone(), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                " │ Situation: ",
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                self.situation_type.clone(),
+                Style::default().fg(Color::Yellow),
+            ),
         ]));
 
         // Action taken
         lines.push(Line::from(vec![
             Span::styled("  Action: ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(self.action_type.clone(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(" │ Confidence: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(
+                self.action_type.clone(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " │ Confidence: ",
+                Style::default().add_modifier(Modifier::DIM),
+            ),
             Span::styled(
                 format!("{}%", self.confidence),
                 Style::default().fg(Color::Green),
@@ -645,9 +674,10 @@ impl HistoryCell for DecisionHistoryCell {
 
         // Reasoning (wrapped if needed)
         if !self.reasoning.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("  Reasoning: ", Style::default().add_modifier(Modifier::DIM)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  Reasoning: ",
+                Style::default().add_modifier(Modifier::DIM),
+            )]));
             lines.extend(wrap_prefixed(
                 "    ",
                 &self.reasoning,

@@ -302,7 +302,11 @@ mod tests {
         }
     }
 
-    fn make_snapshot_with_worktree(status: AgentSlotStatus, branch: Option<String>, exists: bool) -> AgentStatusSnapshot {
+    fn make_snapshot_with_worktree(
+        status: AgentSlotStatus,
+        branch: Option<String>,
+        exists: bool,
+    ) -> AgentStatusSnapshot {
         AgentStatusSnapshot {
             agent_id: AgentId::new("agent_001"),
             codename: AgentCodename::new("alpha"),
@@ -429,7 +433,9 @@ mod tests {
     #[test]
     fn row_format_working_agent_with_worktree() {
         let snapshot = make_snapshot_with_worktree(
-            AgentSlotStatus::Responding { started_at: std::time::Instant::now() },
+            AgentSlotStatus::Responding {
+                started_at: std::time::Instant::now(),
+            },
             Some("dev/123".to_string()),
             true,
         );

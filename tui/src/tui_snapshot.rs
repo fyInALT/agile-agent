@@ -331,7 +331,8 @@ fn deserialize_with_migration(json: &str) -> Result<TuiResumeSnapshot> {
     let value: serde_json::Value = serde_json::from_str(json)?;
 
     // Check if version field exists
-    let version = value.get("version")
+    let version = value
+        .get("version")
         .and_then(|v| v.as_str())
         .unwrap_or("v1");
 
@@ -561,8 +562,8 @@ mod tests {
 
     #[test]
     fn persisted_agent_snapshot_preserves_worktree_info() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
         use agent_core::agent_slot::AgentSlot;
-        use agent_core::agent_runtime::{AgentId, AgentCodename, ProviderType};
         use std::path::PathBuf;
 
         // Create a slot with worktree info
@@ -581,8 +582,14 @@ mod tests {
         let snapshot = PersistedAgentSnapshot::from_slot(&slot);
 
         // Verify worktree info is captured
-        assert_eq!(snapshot.worktree_path, Some(PathBuf::from("/path/to/worktrees/wt-agent_001")));
-        assert_eq!(snapshot.worktree_branch, Some("agent/agent_001".to_string()));
+        assert_eq!(
+            snapshot.worktree_path,
+            Some(PathBuf::from("/path/to/worktrees/wt-agent_001"))
+        );
+        assert_eq!(
+            snapshot.worktree_branch,
+            Some("agent/agent_001".to_string())
+        );
         assert_eq!(snapshot.worktree_id, Some("wt-agent_001".to_string()));
 
         // Verify serialization includes worktree fields

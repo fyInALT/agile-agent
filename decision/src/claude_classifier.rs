@@ -44,17 +44,23 @@ impl OutputClassifier for ClaudeClassifier {
 
     fn extract_context(&self, event: &ProviderEvent) -> Option<ContextUpdate> {
         match event {
-            ProviderEvent::ClaudeThinkingChunk { text } => Some(ContextUpdate::thinking(text.clone())),
+            ProviderEvent::ClaudeThinkingChunk { text } => {
+                Some(ContextUpdate::thinking(text.clone()))
+            }
             ProviderEvent::ClaudeAssistantChunk { text } if self.is_key_output(text) => {
                 Some(ContextUpdate::key_output(text.clone()))
             }
             ProviderEvent::ClaudeToolCallStarted { name, input } => Some(ContextUpdate::tool_call(
                 ToolCallRecord::new(name.clone(), true)
-                    .with_input_preview(input.clone().unwrap_or_default())
+                    .with_input_preview(input.clone().unwrap_or_default()),
             )),
-            ProviderEvent::ClaudeToolCallFinished { name, output, success } => Some(ContextUpdate::tool_call(
+            ProviderEvent::ClaudeToolCallFinished {
+                name,
+                output,
+                success,
+            } => Some(ContextUpdate::tool_call(
                 ToolCallRecord::new(name.clone(), *success)
-                    .with_output_preview(output.clone().unwrap_or_default())
+                    .with_output_preview(output.clone().unwrap_or_default()),
             )),
             _ => None,
         }
@@ -80,9 +86,10 @@ impl ClaudeClassifier {
 pub fn register_claude_builders(registry: &SituationRegistry) {
     // Claude Finished builder - uses ClaimsCompletionSituation
     registry.register_builder(claude_finished(), || {
-        Some(Box::new(crate::builtin_situations::ClaimsCompletionSituation::new(
-            "Claude session finished",
-        ).with_confidence(0.8)))
+        Some(Box::new(
+            crate::builtin_situations::ClaimsCompletionSituation::new("Claude session finished")
+                .with_confidence(0.8),
+        ))
     });
 
     // Claude Error builder
@@ -108,7 +115,9 @@ mod tests {
     #[test]
     fn test_claude_classifier_assistant_chunk_running() {
         let classifier = ClaudeClassifier;
-        let event = ProviderEvent::ClaudeAssistantChunk { text: "hello".to_string() };
+        let event = ProviderEvent::ClaudeAssistantChunk {
+            text: "hello".to_string(),
+        };
         let type_ = classifier.classify_type(&event);
         assert!(type_.is_none());
     }
@@ -116,7 +125,9 @@ mod tests {
     #[test]
     fn test_claude_classifier_thinking_chunk_context() {
         let classifier = ClaudeClassifier;
-        let event = ProviderEvent::ClaudeThinkingChunk { text: "thinking...".to_string() };
+        let event = ProviderEvent::ClaudeThinkingChunk {
+            text: "thinking...".to_string(),
+        };
         let context = classifier.extract_context(&event);
         assert!(matches!(context, Some(ContextUpdate::Thinking(_))));
     }
@@ -124,7 +135,9 @@ mod tests {
     #[test]
     fn test_claude_classifier_finished() {
         let classifier = ClaudeClassifier;
-        let event = ProviderEvent::Finished { summary: Some("done".to_string()) };
+        let event = ProviderEvent::Finished {
+            summary: Some("done".to_string()),
+        };
         let type_ = classifier.classify_type(&event);
         assert_eq!(type_, Some(claude_finished()));
     }
@@ -132,7 +145,10 @@ mod tests {
     #[test]
     fn test_claude_classifier_error() {
         let classifier = ClaudeClassifier;
-        let event = ProviderEvent::Error { message: "timeout".to_string(), error_type: None };
+        let event = ProviderEvent::Error {
+            message: "timeout".to_string(),
+            error_type: None,
+        };
         let type_ = classifier.classify_type(&event);
         assert_eq!(type_, Some(error()));
     }

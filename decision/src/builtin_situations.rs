@@ -362,10 +362,7 @@ impl DecisionSituation for ErrorSituation {
                 ActionType::new("restart"),
             ]
         } else {
-            vec![
-                ActionType::new("request_human"),
-                ActionType::new("abort"),
-            ]
+            vec![ActionType::new("request_human"), ActionType::new("abort")]
         }
     }
 
@@ -425,8 +422,9 @@ mod tests {
 
     #[test]
     fn test_claims_completion_reflection_rounds() {
-        let situation =
-            ClaimsCompletionSituation::new("Done").with_reflection_rounds(1, 2).with_confidence(0.9);
+        let situation = ClaimsCompletionSituation::new("Done")
+            .with_reflection_rounds(1, 2)
+            .with_confidence(0.9);
         assert_eq!(situation.reflection_rounds, 1);
         assert_eq!(situation.max_reflection_rounds, 2);
         assert!(!situation.requires_human()); // High confidence, not exhausted

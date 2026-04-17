@@ -18,17 +18,10 @@ const RESERVED_ARGS_CLAUDE: &[&str] = &[
 ];
 
 /// Reserved arguments for Codex provider.
-const RESERVED_ARGS_CODEX: &[&str] = &[
-    "exec",
-    "--json",
-    "--full-auto",
-];
+const RESERVED_ARGS_CODEX: &[&str] = &["exec", "--json", "--full-auto"];
 
 /// Validate that the executable name matches the selected provider.
-pub fn validate_provider_consistency(
-    selected: ProviderKind,
-    executable: &str,
-) -> ValidationResult {
+pub fn validate_provider_consistency(selected: ProviderKind, executable: &str) -> ValidationResult {
     // Extract basename from path
     let basename = Path::new(executable)
         .file_name()
@@ -50,10 +43,7 @@ pub fn validate_provider_consistency(
 }
 
 /// Validate that user-supplied args don't conflict with provider-reserved arguments.
-pub fn validate_reserved_args(
-    args: &[String],
-    provider: ProviderKind,
-) -> ValidationResult {
+pub fn validate_reserved_args(args: &[String], provider: ProviderKind) -> ValidationResult {
     let reserved = match provider {
         ProviderKind::Claude => RESERVED_ARGS_CLAUDE,
         ProviderKind::Codex => RESERVED_ARGS_CODEX,
@@ -77,9 +67,7 @@ pub fn validate_reserved_args(
 
 /// Validate that the provider supports launch config overrides.
 /// Mock provider does not support launch config overrides.
-pub fn validate_provider_supports_launch_config(
-    provider: ProviderKind,
-) -> ValidationResult {
+pub fn validate_provider_supports_launch_config(provider: ProviderKind) -> ValidationResult {
     match provider {
         ProviderKind::Mock => Err(ValidationError::MockProviderNoOverrides),
         ProviderKind::Claude | ProviderKind::Codex => Ok(()),
@@ -177,7 +165,10 @@ mod tests {
     #[test]
     fn test_validate_provider_supports_launch_config_mock() {
         let result = validate_provider_supports_launch_config(ProviderKind::Mock);
-        assert!(matches!(result, Err(ValidationError::MockProviderNoOverrides)));
+        assert!(matches!(
+            result,
+            Err(ValidationError::MockProviderNoOverrides)
+        ));
     }
 
     #[test]

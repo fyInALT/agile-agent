@@ -9,9 +9,7 @@ use reqwest::Client;
 use tokio::runtime::Handle;
 
 use crate::error::LlmError;
-use crate::models::{
-    ChatMessage, ChatRequest, ChatResponse, LlmConfig, ModelType, StreamChunk,
-};
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, LlmConfig, ModelType, StreamChunk};
 use crate::provider::{LlmProvider, LlmResponse, LlmStreamChunk};
 
 type StdResult<T, E> = std::result::Result<T, E>;
@@ -74,7 +72,12 @@ impl LlmClient {
     }
 
     /// Send a streaming request with a specific model type.
-    pub fn send_streaming_with_model<F>(&self, prompt: &str, model: ModelType, callback: F) -> Result<()>
+    pub fn send_streaming_with_model<F>(
+        &self,
+        prompt: &str,
+        model: ModelType,
+        callback: F,
+    ) -> Result<()>
     where
         F: Fn(String) + Send + 'static,
     {
@@ -94,7 +97,9 @@ impl LlmClient {
 
         let response = self.execute_request(request).await?;
 
-        let choice = response.choices.first()
+        let choice = response
+            .choices
+            .first()
             .ok_or_else(|| LlmError::Parse("No choices in response".to_string()))?;
         Ok(choice.message.content.clone())
     }
@@ -119,8 +124,8 @@ impl LlmClient {
         F: Fn(String) + Send + 'static,
     {
         let message = ChatMessage::user(prompt);
-        let request = ChatRequest::new(self.config.model_for(model), vec![message])
-            .with_streaming();
+        let request =
+            ChatRequest::new(self.config.model_for(model), vec![message]).with_streaming();
 
         let url = format!("{}/chat/completions", self.config.base_url);
 
@@ -153,7 +158,9 @@ impl LlmClient {
                                 return Ok(());
                             }
                             if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
-                                if let Some(content) = &chunk.choices.first().and_then(|c| c.delta.content.as_ref()) {
+                                if let Some(content) =
+                                    &chunk.choices.first().and_then(|c| c.delta.content.as_ref())
+                                {
                                     callback(content.to_string());
                                 }
                             }
@@ -203,10 +210,11 @@ impl LlmProvider for LlmClient {
     }
 
     fn complete_with_model(&self, prompt: &str, model: ModelType) -> anyhow::Result<LlmResponse> {
-        self.send_with_model(prompt, model).map(|content| LlmResponse {
-            content,
-            usage: None,
-        })
+        self.send_with_model(prompt, model)
+            .map(|content| LlmResponse {
+                content,
+                usage: None,
+            })
     }
 
     fn complete_streaming<F>(&self, prompt: &str, callback: F) -> anyhow::Result<()>
@@ -232,7 +240,12 @@ impl LlmProvider for LlmClient {
         Ok(())
     }
 
-    fn complete_streaming_with_model<F>(&self, prompt: &str, model: ModelType, callback: F) -> anyhow::Result<()>
+    fn complete_streaming_with_model<F>(
+        &self,
+        prompt: &str,
+        model: ModelType,
+        callback: F,
+    ) -> anyhow::Result<()>
     where
         F: Fn(LlmStreamChunk) + Send + 'static,
     {
@@ -255,7 +268,10 @@ impl LlmProvider for LlmClient {
         Ok(())
     }
 
-    fn complete_async(&self, prompt: &str) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
+    fn complete_async(
+        &self,
+        prompt: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
         async move {
             Ok(LlmResponse {
                 content: self.send(prompt)?,

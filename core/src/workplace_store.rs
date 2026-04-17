@@ -469,8 +469,7 @@ impl WorkplaceStore {
     pub fn save_project_rules(&self, rules: &str) -> Result<PathBuf> {
         self.ensure_decision_dir()?;
         let path = self.project_rules_path();
-        fs::write(&path, rules)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        fs::write(&path, rules).with_context(|| format!("failed to write {}", path.display()))?;
         logging::debug_event(
             "workplace.decision.save_rules",
             "saved project rules",
@@ -520,8 +519,8 @@ impl WorkplaceStore {
 
         history.push(entry.clone());
 
-        let payload =
-            serde_json::to_string_pretty(&history).context("failed to serialize decision history")?;
+        let payload = serde_json::to_string_pretty(&history)
+            .context("failed to serialize decision history")?;
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
 
         logging::debug_event(
@@ -648,8 +647,8 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::DecisionState;
     use super::DecisionHistoryEntry;
+    use super::DecisionState;
     use super::WorkplaceMeta;
     use super::WorkplaceStore;
     use super::slugify;
@@ -686,7 +685,8 @@ mod tests {
         let _guard = logging::test_guard();
         let temp = TempDir::new().expect("tempdir");
         let root = TempDir::new().expect("root");
-        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
+        let store =
+            WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         logging::init_for_workplace(&store, RunMode::RunLoop).expect("init logger");
 
         store.ensure().expect("ensure");
@@ -730,7 +730,8 @@ mod tests {
     fn register_agent_adds_to_list() {
         let temp = TempDir::new().expect("tempdir");
         let root = TempDir::new().expect("root");
-        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
+        let store =
+            WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         store.ensure().expect("ensure");
 
         store.register_agent("agent_001").expect("register");
@@ -749,7 +750,8 @@ mod tests {
     fn unregister_agent_removes_from_list() {
         let temp = TempDir::new().expect("tempdir");
         let root = TempDir::new().expect("root");
-        let store = WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
+        let store =
+            WorkplaceStore::for_root(temp.path(), root.path().to_path_buf()).expect("store");
         store.ensure().expect("ensure");
 
         store.register_agent("agent_001").expect("register 1");
@@ -807,7 +809,10 @@ mod tests {
 
         assert!(store.has_decision_state());
 
-        let loaded = store.load_decision_state().expect("load state").expect("state");
+        let loaded = store
+            .load_decision_state()
+            .expect("load state")
+            .expect("state");
         assert_eq!(loaded.decision_agent_id, "decision_001");
         assert_eq!(loaded.main_agent_id, "agent_001");
         assert_eq!(loaded.total_decisions, 5);
@@ -834,7 +839,10 @@ mod tests {
         store.save_decision_state(&state).expect("save state");
 
         // Simulate restore by loading
-        let loaded = store.load_decision_state().expect("load state").expect("state");
+        let loaded = store
+            .load_decision_state()
+            .expect("load state")
+            .expect("state");
 
         // Verify restore works
         assert_eq!(loaded.role, "Architect");
@@ -855,7 +863,10 @@ mod tests {
         let rules = "# Project Rules\n\n- Use TDD\n- Write tests\n";
         store.save_project_rules(rules).expect("save rules");
 
-        let loaded = store.load_project_rules().expect("load rules").expect("rules");
+        let loaded = store
+            .load_project_rules()
+            .expect("load rules")
+            .expect("rules");
         assert!(loaded.contains("Use TDD"));
     }
 
@@ -871,7 +882,10 @@ mod tests {
         std::fs::write(&claude_md_path, rules).expect("write CLAUDE.md");
 
         // Should fall back to cwd's CLAUDE.md
-        let loaded = store.load_project_rules().expect("load rules").expect("rules");
+        let loaded = store
+            .load_project_rules()
+            .expect("load rules")
+            .expect("rules");
         assert!(loaded.contains("TDD-first"));
     }
 

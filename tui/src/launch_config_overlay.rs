@@ -33,7 +33,12 @@ impl Default for ConfigPreview {
 
 impl ConfigPreview {
     /// Create a successful preview
-    fn success(mode: LaunchSourceMode, env_count: usize, arg_count: usize, executable: Option<String>) -> Self {
+    fn success(
+        mode: LaunchSourceMode,
+        env_count: usize,
+        arg_count: usize,
+        executable: Option<String>,
+    ) -> Self {
         Self {
             source_mode: mode,
             env_count,
@@ -160,7 +165,9 @@ impl LaunchConfigOverlayState {
 
         // Handle Ctrl+C as close (same as Esc)
         if key_event.code == KeyCode::Char('c')
-            && key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+            && key_event
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
         {
             return Some(LaunchConfigOverlayCommand::Close);
         }
@@ -222,7 +229,11 @@ impl LaunchConfigOverlayState {
                     None
                 }
             }
-            KeyCode::Char(c) if !key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char(c)
+                if !key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 // Add character to focused field (no Ctrl modifier)
                 match self.focus {
                     LaunchConfigFocus::WorkConfig => {
@@ -367,7 +378,8 @@ mod tests {
 
     #[test]
     fn test_config_preview_success() {
-        let preview = ConfigPreview::success(LaunchSourceMode::EnvOnly, 2, 1, Some("claude".to_string()));
+        let preview =
+            ConfigPreview::success(LaunchSourceMode::EnvOnly, 2, 1, Some("claude".to_string()));
         assert!(preview.is_valid());
         assert_eq!(preview.env_count, 2);
         assert_eq!(preview.arg_count, 1);

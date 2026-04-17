@@ -1,6 +1,6 @@
-use anyhow::{Result, anyhow};
 use agent_core::command_bus::registry::render_local_help_lines;
 use agent_core::provider::ProviderKind;
+use anyhow::{Result, anyhow};
 
 use crate::ui_state::TuiState;
 
@@ -64,7 +64,10 @@ pub fn execute_local_command(
         ["help"] => Ok(render_local_help_lines()),
         ["status"] => Ok(vec![
             format!("focused agent: {}", state.focused_agent_codename()),
-            format!("selected provider: {}", state.app().selected_provider.label()),
+            format!(
+                "selected provider: {}",
+                state.app().selected_provider.label()
+            ),
             format!("loop phase: {:?}", state.app().loop_phase),
         ]),
         ["kanban", "list"] => Ok(state.app().render_backlog_lines()),
@@ -90,7 +93,10 @@ pub fn execute_local_command(
         ["legacy", "run-loop"] => Ok(vec!["legacy alias: /run-loop".to_string()]),
         ["legacy", "quit"] => Ok(vec!["legacy alias: /quit".to_string()]),
         ["legacy", "todo-add"] => Ok(vec![format!("legacy alias: /todo-add {}", args.join(" "))]),
-        _ => Err(anyhow!("unsupported local command: /local {}", path.join(" "))),
+        _ => Err(anyhow!(
+            "unsupported local command: /local {}",
+            path.join(" ")
+        )),
     }
 }
 
@@ -128,15 +134,20 @@ pub fn execute_agent_command(
                 .as_ref()
                 .and_then(|pool| pool.get_slot_by_id(&target.agent_id))
                 .and_then(|slot| {
-                    slot.transcript().iter().rev().find_map(|entry| match entry {
-                        agent_core::app::TranscriptEntry::Assistant(text) if !text.is_empty() => {
-                            Some(text.as_str())
-                        }
-                        agent_core::app::TranscriptEntry::Status(text) if !text.is_empty() => {
-                            Some(text.as_str())
-                        }
-                        _ => None,
-                    })
+                    slot.transcript()
+                        .iter()
+                        .rev()
+                        .find_map(|entry| match entry {
+                            agent_core::app::TranscriptEntry::Assistant(text)
+                                if !text.is_empty() =>
+                            {
+                                Some(text.as_str())
+                            }
+                            agent_core::app::TranscriptEntry::Status(text) if !text.is_empty() => {
+                                Some(text.as_str())
+                            }
+                            _ => None,
+                        })
                 })
                 .unwrap_or("no summary available");
             Ok(vec![
@@ -145,7 +156,10 @@ pub fn execute_agent_command(
                 format!("latest: {}", latest),
             ])
         }
-        _ => Err(anyhow!("unsupported agent command: /agent {}", path.join(" "))),
+        _ => Err(anyhow!(
+            "unsupported agent command: /agent {}",
+            path.join(" ")
+        )),
     }
 }
 
@@ -213,9 +227,7 @@ fn execute_config_set(state: &mut TuiState, args: &[&str]) -> Result<Vec<String>
             state.app_mut().selected_provider = ProviderKind::Codex;
             Ok(vec!["runtime.selected_provider = codex".to_string()])
         }
-        ["runtime.selected_provider", other] => {
-            Err(anyhow!("unsupported provider value: {other}"))
-        }
+        ["runtime.selected_provider", other] => Err(anyhow!("unsupported provider value: {other}")),
         [other, _] => Err(anyhow!("unsupported config key: {other}")),
         _ => Err(anyhow!("usage: /local config set <key> <value>")),
     }
@@ -265,9 +277,11 @@ mod tests {
         .expect("command");
 
         assert_eq!(shell.state.view_state.overview.agent_list_rows, 10);
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("tui.overview.agent_list_rows = 10")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("tui.overview.agent_list_rows = 10"))
+        );
     }
 
     #[test]
@@ -296,9 +310,11 @@ mod tests {
 
         let lines =
             execute_agent_command(&shell.state, Some("alpha"), &["summary"], &[]).expect("summary");
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("finished reviewing parser layout")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("finished reviewing parser layout"))
+        );
     }
 
     #[test]
@@ -321,7 +337,10 @@ mod tests {
     #[test]
     fn provider_passthrough_requires_existing_session_handle() {
         let mut shell = ShellHarness::new_with_overview(ProviderKind::Claude);
-        let alpha_id = shell.state.spawn_agent(ProviderKind::Claude).expect("spawn");
+        let alpha_id = shell
+            .state
+            .spawn_agent(ProviderKind::Claude)
+            .expect("spawn");
         shell.state.focus_agent(&alpha_id);
 
         let error = execute_provider_command(&shell.state, None, "/status").expect_err("must fail");

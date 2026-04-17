@@ -413,8 +413,8 @@ fn is_session_expired_error(error: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_session_expired_error;
     use super::LoopGuardrails;
+    use super::is_session_expired_error;
     use super::run_loop;
     use super::run_single_iteration;
     use crate::app::AppState;

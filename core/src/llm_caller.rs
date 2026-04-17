@@ -3,7 +3,7 @@
 //! Implements the LLMCaller trait from agent-decision using the
 //! provider infrastructure in agent-core.
 
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::Builder;
 use std::time::Duration;
 
@@ -40,7 +40,11 @@ impl ProviderLLMCaller {
     }
 
     /// Create with custom identifier
-    pub fn with_id(provider_kind: ProviderKind, cwd: std::path::PathBuf, id: impl Into<String>) -> Self {
+    pub fn with_id(
+        provider_kind: ProviderKind,
+        cwd: std::path::PathBuf,
+        id: impl Into<String>,
+    ) -> Self {
         Self {
             provider_kind,
             cwd,
@@ -111,7 +115,10 @@ impl LLMCaller for ProviderLLMCaller {
                             finished = true;
                         }
                         ProviderEvent::Error(error) => {
-                            return Err(DecisionError::EngineError(format!("Provider error: {}", error)));
+                            return Err(DecisionError::EngineError(format!(
+                                "Provider error: {}",
+                                error
+                            )));
                         }
                         ProviderEvent::Status(_) | ProviderEvent::ThinkingChunk(_) => {
                             // Ignore status and thinking chunks for decision making
@@ -142,7 +149,9 @@ impl LLMCaller for ProviderLLMCaller {
 
         let response = response_chunks.join("");
         if response.is_empty() {
-            Err(DecisionError::EngineError("Empty response from provider".to_string()))
+            Err(DecisionError::EngineError(
+                "Empty response from provider".to_string(),
+            ))
         } else {
             logging::debug_event(
                 "llm_caller.response",
@@ -201,12 +210,8 @@ fn run_provider_for_llm_call(
             let _ = event_tx.send(ProviderEvent::Finished);
             Ok(())
         }
-        ProviderKind::Claude => {
-            crate::providers::claude::start(prompt, cwd, None, event_tx)
-        }
-        ProviderKind::Codex => {
-            crate::providers::codex::start(prompt, cwd, None, event_tx)
-        }
+        ProviderKind::Claude => crate::providers::claude::start(prompt, cwd, None, event_tx),
+        ProviderKind::Codex => crate::providers::codex::start(prompt, cwd, None, event_tx),
     };
 
     // Provider takes ownership of event_tx, so we can't use it in fallback
@@ -267,11 +272,8 @@ mod tests {
     #[test]
     fn test_provider_llm_caller_with_custom_id() {
         let temp = TempDir::new().unwrap();
-        let caller = ProviderLLMCaller::with_id(
-            ProviderKind::Mock,
-            temp.path().to_path_buf(),
-            "custom-id",
-        );
+        let caller =
+            ProviderLLMCaller::with_id(ProviderKind::Mock, temp.path().to_path_buf(), "custom-id");
         assert_eq!(caller.caller_id(), "custom-id");
     }
 }

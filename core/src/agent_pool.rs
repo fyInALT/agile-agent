@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::Utc;
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
@@ -15,9 +14,12 @@ use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
 use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
 use crate::logging;
 use crate::provider::{ProviderEvent, ProviderKind};
-use crate::worktree_manager::{WorktreeConfig, WorktreeManager, WorktreeError, WorktreeCreateOptions};
+use crate::worktree_manager::{
+    WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
+};
 use crate::worktree_state::WorktreeState;
 use crate::worktree_state_store::WorktreeStateStore;
+use chrono::Utc;
 
 // Decision layer imports
 use agent_decision::{
@@ -611,9 +613,7 @@ impl AgentPool {
 
         // Generate worktree ID and branch name
         let worktree_id = format!("wt-{}", agent_id.as_str());
-        let actual_branch = branch_name.unwrap_or_else(|| {
-            format!("agent/{}", agent_id.as_str())
-        });
+        let actual_branch = branch_name.unwrap_or_else(|| format!("agent/{}", agent_id.as_str()));
 
         // Now get worktree_manager and state_store (immutable borrows)
         let worktree_manager = self.worktree_manager.as_ref().unwrap();
@@ -632,7 +632,8 @@ impl AgentPool {
             .map_err(AgentPoolWorktreeError::WorktreeError)?;
 
         // Get the base commit SHA before creating worktree state
-        let base_commit = worktree_manager.get_current_head()
+        let base_commit = worktree_manager
+            .get_current_head()
             .map_err(AgentPoolWorktreeError::WorktreeError)?;
 
         // Create worktree state
@@ -694,12 +695,15 @@ impl AgentPool {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
-        let slot = self.get_slot_by_id(agent_id)
+        let slot = self
+            .get_slot_by_id(agent_id)
             .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
 
         // Only pause if agent has worktree
         if !slot.has_worktree() {
-            return Err(AgentPoolWorktreeError::NoWorktree(agent_id.as_str().to_string()));
+            return Err(AgentPoolWorktreeError::NoWorktree(
+                agent_id.as_str().to_string(),
+            ));
         }
 
         // Get the actual worktree path from slot (most current)
@@ -740,7 +744,8 @@ impl AgentPool {
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
 
         // Transition slot to paused
-        let slot_mut = self.get_slot_mut_by_id(agent_id)
+        let slot_mut = self
+            .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
         slot_mut
             .transition_to(AgentSlotStatus::paused("worktree preserved"))
@@ -782,11 +787,14 @@ impl AgentPool {
             .ok_or_else(|| AgentPoolWorktreeError::StateNotFound(agent_id.as_str().to_string()))?;
 
         // Get the slot and verify it's paused
-        let slot = self.get_slot_by_id(agent_id)
+        let slot = self
+            .get_slot_by_id(agent_id)
             .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
 
         if !slot.status().is_paused() {
-            return Err(AgentPoolWorktreeError::AgentNotPaused(agent_id.as_str().to_string()));
+            return Err(AgentPoolWorktreeError::AgentNotPaused(
+                agent_id.as_str().to_string(),
+            ));
         }
 
         // Verify worktree exists or recreate it
@@ -795,16 +803,20 @@ impl AgentPool {
         } else {
             // Worktree was deleted externally - recreate it
             // Check if branch still exists - if so, use existing branch, don't create new
-            let branch_exists = worktree_state.branch.as_ref()
+            let branch_exists = worktree_state
+                .branch
+                .as_ref()
                 .map(|b| worktree_manager.branch_exists(b).unwrap_or(false))
                 .unwrap_or(false);
 
             let options = WorktreeCreateOptions {
-                path: worktree_manager.worktrees_dir().join(&worktree_state.worktree_id),
+                path: worktree_manager
+                    .worktrees_dir()
+                    .join(&worktree_state.worktree_id),
                 branch: worktree_state.branch.clone(),
                 create_branch: !branch_exists && worktree_state.branch.is_some(),
                 base: if branch_exists {
-                    None  // Use existing branch, no base needed
+                    None // Use existing branch, no base needed
                 } else {
                     Some(worktree_state.base_commit.clone())
                 },
@@ -838,8 +850,9 @@ impl AgentPool {
 
         // Update slot's worktree path if it differs from current
         {
-            let slot_mut = self.get_slot_mut_by_id(agent_id)
-                .ok_or_else(|| AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string()))?;
+            let slot_mut = self.get_slot_mut_by_id(agent_id).ok_or_else(|| {
+                AgentPoolWorktreeError::AgentNotFound(agent_id.as_str().to_string())
+            })?;
 
             // Sync the slot's worktree info with actual state
             if slot_mut.worktree_path() != Some(&actual_worktree_path) {
@@ -961,7 +974,10 @@ impl AgentPool {
                 worktree_state_store
                     .delete(&agent_id)
                     .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-                cleaned_up.push((agent_id.clone(), "worktree missing, state deleted".to_string()));
+                cleaned_up.push((
+                    agent_id.clone(),
+                    "worktree missing, state deleted".to_string(),
+                ));
             }
         }
 
@@ -988,7 +1004,10 @@ impl AgentPool {
         }
 
         // Get all states first (this borrows the store)
-        let all_states = self.worktree_state_store.as_ref().unwrap()
+        let all_states = self
+            .worktree_state_store
+            .as_ref()
+            .unwrap()
             .list_all()
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
 
@@ -998,9 +1017,8 @@ impl AgentPool {
         for (agent_id, state) in &all_states {
             // Check if agent is in pool and is idle
             let slot = self.get_slot_by_id(&AgentId::new(agent_id));
-            let is_pool_idle = slot.map_or(false, |s| {
-                s.status().is_idle() || s.status().is_paused()
-            });
+            let is_pool_idle =
+                slot.map_or(false, |s| s.status().is_idle() || s.status().is_paused());
 
             // Skip if agent is active (not idle/paused)
             if slot.is_some() && !is_pool_idle {
@@ -1030,7 +1048,8 @@ impl AgentPool {
 
             // Delete state
             if let Some(store) = &self.worktree_state_store {
-                store.delete(&agent_id)
+                store
+                    .delete(&agent_id)
                     .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
             }
 
@@ -1547,7 +1566,8 @@ impl AgentPool {
         cleanup_worktree: bool,
     ) -> Result<usize, AgentPoolWorktreeError> {
         // First, transition the slot to stopped
-        let index = self.find_slot_index(agent_id)
+        let index = self
+            .find_slot_index(agent_id)
             .map_err(|e| AgentPoolWorktreeError::AgentNotFound(e))?;
 
         let slot = &mut self.slots[index];
@@ -3819,14 +3839,13 @@ mod tests {
         let mut pool = make_pool(4);
 
         // Attempt to spawn with worktree should fail
-        let result = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            None,
-            None,
-        );
+        let result = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::WorktreeNotEnabled
+        ));
     }
 
     #[test]
@@ -3840,13 +3859,16 @@ mod tests {
             4,
             repo_path.clone(),
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/test-branch".to_string()),
-            Some("task-001".to_string()),
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/test-branch".to_string()),
+                Some("task-001".to_string()),
+            )
+            .unwrap();
 
         // Check agent was created
         assert_eq!(pool.active_count(), 1);
@@ -3878,13 +3900,16 @@ mod tests {
             4,
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            None, // No custom branch name
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                None, // No custom branch name
+                None,
+            )
+            .unwrap();
 
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
         assert!(slot.has_worktree());
@@ -3911,15 +3936,21 @@ mod tests {
             1, // Only 1 slot
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Spawn first agent - should succeed
-        let _ = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None).unwrap();
+        let _ = pool
+            .spawn_agent_with_worktree(ProviderKind::Mock, None, None)
+            .unwrap();
 
         // Spawn second agent - should fail
         let result = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::PoolFull));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::PoolFull
+        ));
     }
 
     #[test]
@@ -3933,13 +3964,16 @@ mod tests {
             4,
             repo_path,
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/test".to_string()),
-            Some("task-001".to_string()),
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/test".to_string()),
+                Some("task-001".to_string()),
+            )
+            .unwrap();
 
         // Verify state was persisted
         let store = WorktreeStateStore::new(state_dir);
@@ -3962,13 +3996,16 @@ mod tests {
             4,
             repo_path,
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/pause-test".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/pause-test".to_string()),
+                None,
+            )
+            .unwrap();
 
         // Verify agent is running (idle after spawn)
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
@@ -4002,13 +4039,16 @@ mod tests {
             4,
             repo_path,
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/resume-test".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/resume-test".to_string()),
+                None,
+            )
+            .unwrap();
 
         // Pause the agent
         pool.pause_agent_with_worktree(&agent_id).unwrap();
@@ -4033,7 +4073,10 @@ mod tests {
         // Pause should fail because pool has no worktree support
         let result = pool.pause_agent_with_worktree(&agent_id);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::WorktreeNotEnabled
+        ));
     }
 
     #[test]
@@ -4047,7 +4090,8 @@ mod tests {
             4,
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Spawn agent without worktree (using regular spawn)
         let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
@@ -4055,7 +4099,10 @@ mod tests {
         // Pause should fail because agent has no worktree
         let result = pool.pause_agent_with_worktree(&agent_id);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::NoWorktree(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::NoWorktree(_)
+        ));
     }
 
     #[test]
@@ -4069,18 +4116,24 @@ mod tests {
             4,
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/resume-fail".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/resume-fail".to_string()),
+                None,
+            )
+            .unwrap();
 
         // Agent is idle, not paused - resume should fail
         let result = pool.resume_agent_with_worktree(&agent_id);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::AgentNotPaused(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::AgentNotPaused(_)
+        ));
     }
 
     #[test]
@@ -4094,20 +4147,24 @@ mod tests {
             4,
             repo_path.clone(),
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/stop-cleanup".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/stop-cleanup".to_string()),
+                None,
+            )
+            .unwrap();
 
         // Get worktree info before stop
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
         let worktree_path = slot.cwd();
 
         // Stop with cleanup
-        pool.stop_agent_with_worktree_cleanup(&agent_id, true).unwrap();
+        pool.stop_agent_with_worktree_cleanup(&agent_id, true)
+            .unwrap();
 
         // Verify slot is stopped
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
@@ -4139,20 +4196,24 @@ mod tests {
             4,
             repo_path.clone(),
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/stop-preserve".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(
+                ProviderKind::Mock,
+                Some("feature/stop-preserve".to_string()),
+                None,
+            )
+            .unwrap();
 
         // Get worktree info before stop
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
         let worktree_path = slot.cwd();
 
         // Stop with preserve (cleanup=false)
-        pool.stop_agent_with_worktree_cleanup(&agent_id, false).unwrap();
+        pool.stop_agent_with_worktree_cleanup(&agent_id, false)
+            .unwrap();
 
         // Verify slot is stopped
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
@@ -4178,13 +4239,15 @@ mod tests {
             4,
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Spawn agent without worktree (regular spawn)
         let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
 
         // Stop with cleanup should still work
-        pool.stop_agent_with_worktree_cleanup(&agent_id, true).unwrap();
+        pool.stop_agent_with_worktree_cleanup(&agent_id, true)
+            .unwrap();
 
         // Verify slot is stopped
         let slot = pool.get_slot_by_id(&agent_id).unwrap();
@@ -4218,7 +4281,8 @@ mod tests {
             4,
             repo_path,
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Recover without recreating
         let report = pool.recover_orphaned_worktrees(false).unwrap();
@@ -4241,7 +4305,8 @@ mod tests {
             4,
             repo_path,
             state_dir,
-        ).unwrap();
+        )
+        .unwrap();
 
         let report = pool.recover_orphaned_worktrees(true).unwrap();
         assert_eq!(report.recovered.len(), 0);
@@ -4259,14 +4324,13 @@ mod tests {
             4,
             repo_path,
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Spawn an agent with worktree
-        let agent_id = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            Some("feature/active".to_string()),
-            None,
-        ).unwrap();
+        let agent_id = pool
+            .spawn_agent_with_worktree(ProviderKind::Mock, Some("feature/active".to_string()), None)
+            .unwrap();
 
         // The state is created by spawn, so it exists
         // Recovery should not affect it since agent is in pool
@@ -4285,7 +4349,10 @@ mod tests {
         let mut pool = AgentPool::new(WorkplaceId::new("workplace-001"), 4);
         let result = pool.recover_orphaned_worktrees(true);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::WorktreeNotEnabled
+        ));
     }
 
     #[test]
@@ -4315,7 +4382,9 @@ mod tests {
             base: None,
             lock_reason: None,
         };
-        let worktree_info = worktree_manager.create(worktree_id, worktree_options).unwrap();
+        let worktree_info = worktree_manager
+            .create(worktree_id, worktree_options)
+            .unwrap();
 
         // Save worktree state for agent_001
         let base_commit = worktree_manager.get_current_head().unwrap();
@@ -4335,27 +4404,35 @@ mod tests {
             4,
             repo_path.clone(),
             state_dir.clone(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Try to spawn a new agent - should NOT fail with worktree collision
-        let result = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            None,
-            None,
-        );
+        let result = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None);
 
         // The bug: this would fail with "worktree already exists: wt-agent_001"
         // The fix: pool should sync its next_agent_index with existing worktrees
-        assert!(result.is_ok(), "spawn should succeed, got error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "spawn should succeed, got error: {:?}",
+            result.err()
+        );
 
         // The spawned agent should have a different ID (not agent_001)
         let spawned_id = result.unwrap();
-        assert_ne!(spawned_id.as_str(), "agent_001", "spawned agent should not collide with existing agent_001");
+        assert_ne!(
+            spawned_id.as_str(),
+            "agent_001",
+            "spawned agent should not collide with existing agent_001"
+        );
 
         // Verify the worktree was created with a different path
         let slot = pool.get_slot_by_id(&spawned_id).unwrap();
         let worktree_path = slot.cwd();
-        assert_ne!(worktree_path, worktree_info.path, "worktree path should be different");
+        assert_ne!(
+            worktree_path, worktree_info.path,
+            "worktree path should be different"
+        );
         assert!(worktree_path.exists(), "new worktree should exist");
     }
 
@@ -4381,7 +4458,9 @@ mod tests {
             base: None,
             lock_reason: None,
         };
-        let _worktree_info = worktree_manager.create("wt-agent_001", branch_options).unwrap();
+        let _worktree_info = worktree_manager
+            .create("wt-agent_001", branch_options)
+            .unwrap();
 
         // Remove worktree but keep the branch (simulating cleanup that deleted state)
         worktree_manager.remove("wt-agent_001", true).unwrap();
@@ -4396,22 +4475,27 @@ mod tests {
             4,
             repo_path.clone(),
             state_dir, // empty state dir, no worktree states
-        ).unwrap();
+        )
+        .unwrap();
 
         // Try to spawn a new agent - should NOT fail with branch collision
-        let result = pool.spawn_agent_with_worktree(
-            ProviderKind::Mock,
-            None,
-            None,
-        );
+        let result = pool.spawn_agent_with_worktree(ProviderKind::Mock, None, None);
 
         // The bug: this would fail with "branch already exists: agent/agent_001"
         // The fix: pool should sync its next_agent_index with existing branches too
-        assert!(result.is_ok(), "spawn should succeed, got error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "spawn should succeed, got error: {:?}",
+            result.err()
+        );
 
         // The spawned agent should have a different ID (not agent_001)
         let spawned_id = result.unwrap();
-        assert_ne!(spawned_id.as_str(), "agent_001", "spawned agent should not collide with existing branch agent_001");
+        assert_ne!(
+            spawned_id.as_str(),
+            "agent_001",
+            "spawned agent should not collide with existing branch agent_001"
+        );
 
         // Verify the worktree was created
         let slot = pool.get_slot_by_id(&spawned_id).unwrap();

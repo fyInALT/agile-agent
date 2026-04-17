@@ -189,7 +189,9 @@ fn run_claude_with_context(
     let protocol_args = build_claude_args(context.session_handle.clone());
 
     // Inject extra args BEFORE protocol args
-    let full_args: Vec<String> = spec.extra_args.iter()
+    let full_args: Vec<String> = spec
+        .extra_args
+        .iter()
         .chain(protocol_args.iter())
         .cloned()
         .collect();

@@ -40,9 +40,7 @@ impl ClassifierRegistry {
     /// Classify event
     pub fn classify(&self, event: &ProviderEvent, provider: ProviderKind) -> ClassifyResult {
         let classifiers = self.classifiers.read().unwrap();
-        let classifier = classifiers
-            .get(&provider)
-            .unwrap_or(&self.fallback);
+        let classifier = classifiers.get(&provider).unwrap_or(&self.fallback);
 
         match classifier.classify_type(event) {
             Some(situation_type) => {
@@ -167,7 +165,9 @@ mod tests {
     #[test]
     fn test_fallback_classifier_running() {
         let classifier = FallbackClassifier;
-        let event = ProviderEvent::StatusUpdate { status: "running".to_string() };
+        let event = ProviderEvent::StatusUpdate {
+            status: "running".to_string(),
+        };
         let type_ = classifier.classify_type(&event);
         assert!(type_.is_none());
     }

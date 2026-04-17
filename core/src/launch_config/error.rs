@@ -24,14 +24,21 @@ pub enum ParseError {
     TooManyEnvVars { max: usize, actual: usize },
 
     #[error("line too long: max {max} bytes, got {actual} at line {line}")]
-    LineTooLong { max: usize, actual: usize, line: usize },
+    LineTooLong {
+        max: usize,
+        actual: usize,
+        line: usize,
+    },
 }
 
 /// Errors that can occur during launch config validation.
 #[derive(Debug, Error)]
 pub enum ValidationError {
     #[error("provider mismatch: selected {:?} but found executable {found}", .selected)]
-    ProviderMismatch { selected: ProviderKind, found: String },
+    ProviderMismatch {
+        selected: ProviderKind,
+        found: String,
+    },
 
     #[error("reserved argument conflict: {arg} is reserved for provider {provider:?}", arg = .0, provider = .1)]
     ReservedArgumentConflict(String, ProviderKind),

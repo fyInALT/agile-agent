@@ -64,7 +64,9 @@ impl PartialEq for AgentSlotStatus {
                 Self::BlockedForDecision { blocked_state: b },
             ) => a.reason().reason_type() == b.reason().reason_type(),
             (Self::Paused { reason: a }, Self::Paused { reason: b }) => a == b,
-            (Self::WaitingForInput { started_at: a }, Self::WaitingForInput { started_at: b }) => a == b,
+            (Self::WaitingForInput { started_at: a }, Self::WaitingForInput { started_at: b }) => {
+                a == b
+            }
             _ => false,
         }
     }
@@ -376,7 +378,7 @@ pub struct AgentSlot {
     last_activity: Instant,
     /// Decision agent creation policy
     decision_policy: DecisionAgentCreationPolicy,
-/// Launch configuration bundle (for resume/restore)
+    /// Launch configuration bundle (for resume/restore)
     launch_bundle: Option<AgentLaunchBundle>,
     /// Worktree path (if using independent worktree)
     worktree_path: Option<PathBuf>,
@@ -400,7 +402,7 @@ impl std::fmt::Debug for AgentSlot {
             .field("has_provider_thread", &self.has_provider_thread())
             .field("last_activity", &self.last_activity)
             .field("decision_policy", &self.decision_policy)
-.field("launch_bundle", &self.launch_bundle.is_some())
+            .field("launch_bundle", &self.launch_bundle.is_some())
             .field("worktree_path", &self.worktree_path)
             .field("worktree_branch", &self.worktree_branch)
             .field("worktree_id", &self.worktree_id)
@@ -1382,7 +1384,8 @@ mod tests {
     #[test]
     fn slot_should_transition_to_waiting_after_timeout() {
         let mut slot = make_slot();
-        slot.transition_to(AgentSlotStatus::responding_now()).unwrap();
+        slot.transition_to(AgentSlotStatus::responding_now())
+            .unwrap();
 
         // Should not transition immediately
         assert!(!slot.should_transition_to_waiting(5));

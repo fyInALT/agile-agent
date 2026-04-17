@@ -54,7 +54,11 @@ impl WorktreeStateStore {
     ///
     /// The worktree state is embedded in the agent's state file.
     /// If the file doesn't exist, creates a minimal state file.
-    pub fn save(&self, agent_id: &str, state: &WorktreeState) -> Result<(), WorktreeStateStoreError> {
+    pub fn save(
+        &self,
+        agent_id: &str,
+        state: &WorktreeState,
+    ) -> Result<(), WorktreeStateStoreError> {
         self.ensure_dir_exists()?;
         let path = self.agent_state_path(agent_id);
 
@@ -163,8 +167,11 @@ impl WorktreeStateStore {
         agent_id: &str,
         updater: impl FnOnce(&mut WorktreeState),
     ) -> Result<(), WorktreeStateStoreError> {
-        let state = self.load(agent_id)?
-            .ok_or(WorktreeStateStoreError::NoWorktreeState(agent_id.to_string()))?;
+        let state = self
+            .load(agent_id)?
+            .ok_or(WorktreeStateStoreError::NoWorktreeState(
+                agent_id.to_string(),
+            ))?;
 
         let mut updated_state = state;
         updater(&mut updated_state);
@@ -319,9 +326,11 @@ mod tests {
 
         store.save("agent_001", &state).unwrap();
 
-        store.update("agent_001", |s| {
-            s.record_commit("def456".to_string());
-        }).unwrap();
+        store
+            .update("agent_001", |s| {
+                s.record_commit("def456".to_string());
+            })
+            .unwrap();
 
         let loaded = store.load("agent_001").unwrap().unwrap();
         assert_eq!(loaded.commits.len(), 1);
@@ -332,15 +341,22 @@ mod tests {
     fn store_update_nonexistent_fails() {
         let (_temp, store) = create_test_store();
         let result = store.update("nonexistent", |_s| {});
-        assert!(matches!(result, Err(WorktreeStateStoreError::NoWorktreeState(_))));
+        assert!(matches!(
+            result,
+            Err(WorktreeStateStoreError::NoWorktreeState(_))
+        ));
     }
 
     #[test]
     fn store_list_all() {
         let (_temp, store) = create_test_store();
 
-        store.save("agent_001", &create_test_state("agent_001")).unwrap();
-        store.save("agent_002", &create_test_state("agent_002")).unwrap();
+        store
+            .save("agent_001", &create_test_state("agent_001"))
+            .unwrap();
+        store
+            .save("agent_002", &create_test_state("agent_002"))
+            .unwrap();
 
         let all = store.list_all().unwrap();
         assert_eq!(all.len(), 2);
@@ -352,10 +368,14 @@ mod tests {
 
         assert_eq!(store.count().unwrap(), 0);
 
-        store.save("agent_001", &create_test_state("agent_001")).unwrap();
+        store
+            .save("agent_001", &create_test_state("agent_001"))
+            .unwrap();
         assert_eq!(store.count().unwrap(), 1);
 
-        store.save("agent_002", &create_test_state("agent_002")).unwrap();
+        store
+            .save("agent_002", &create_test_state("agent_002"))
+            .unwrap();
         assert_eq!(store.count().unwrap(), 2);
     }
 
@@ -365,7 +385,9 @@ mod tests {
 
         assert!(!store.has_worktree("agent_001").unwrap());
 
-        store.save("agent_001", &create_test_state("agent_001")).unwrap();
+        store
+            .save("agent_001", &create_test_state("agent_001"))
+            .unwrap();
         assert!(store.has_worktree("agent_001").unwrap());
     }
 
@@ -385,7 +407,11 @@ mod tests {
             "provider_type": "claude",
             "status": "running"
         });
-        fs::write(&agent_path, serde_json::to_string_pretty(&initial_state).unwrap()).unwrap();
+        fs::write(
+            &agent_path,
+            serde_json::to_string_pretty(&initial_state).unwrap(),
+        )
+        .unwrap();
 
         // Save worktree state
         store.save("agent_001", &state).unwrap();

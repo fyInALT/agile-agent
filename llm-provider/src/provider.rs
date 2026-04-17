@@ -73,12 +73,20 @@ pub trait LlmProvider: Send + Sync {
         F: Fn(LlmStreamChunk) + Send + 'static;
 
     /// Send a streaming request with a specific model type.
-    fn complete_streaming_with_model<F>(&self, prompt: &str, model: ModelType, callback: F) -> Result<()>
+    fn complete_streaming_with_model<F>(
+        &self,
+        prompt: &str,
+        model: ModelType,
+        callback: F,
+    ) -> Result<()>
     where
         F: Fn(LlmStreamChunk) + Send + 'static;
 
     /// Async version: Send a prompt and get a response.
-    fn complete_async(&self, prompt: &str) -> impl std::future::Future<Output = Result<LlmResponse>> + Send;
+    fn complete_async(
+        &self,
+        prompt: &str,
+    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send;
 
     /// Async version: Send a prompt with a specific model type.
     fn complete_async_with_model(

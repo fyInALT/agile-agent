@@ -32,7 +32,10 @@ impl SituationRegistry {
         type_: SituationType,
         builder: impl Fn() -> Option<Box<dyn DecisionSituation>> + Send + Sync + 'static,
     ) {
-        self.builders.write().unwrap().insert(type_, Box::new(builder));
+        self.builders
+            .write()
+            .unwrap()
+            .insert(type_, Box::new(builder));
     }
 
     /// THREAD-SAFE: Register a default situation
@@ -226,7 +229,9 @@ mod tests {
 
         // Register builder that returns specific situation
         registry.register_builder(SituationType::new("test"), || {
-            Some(Box::new(GenericUnknownSituation::new(SituationType::new("from_builder"))))
+            Some(Box::new(GenericUnknownSituation::new(SituationType::new(
+                "from_builder",
+            ))))
         });
 
         let situation = registry.build(SituationType::new("test"));
@@ -245,8 +250,12 @@ mod tests {
     #[test]
     fn test_registry_registered_types() {
         let registry = SituationRegistry::new();
-        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new("a"))));
-        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new("b"))));
+        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new(
+            "a",
+        ))));
+        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new(
+            "b",
+        ))));
 
         let types = registry.registered_types();
         assert_eq!(types.len(), 2);
@@ -258,14 +267,14 @@ mod tests {
         use std::thread;
 
         let registry = Arc::new(SituationRegistry::new());
-        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new("test"))));
+        registry.register_default(Box::new(GenericUnknownSituation::new(SituationType::new(
+            "test",
+        ))));
 
         let threads: Vec<_> = (0..10)
             .map(|_| {
                 let r = registry.clone();
-                thread::spawn(move || {
-                    r.get(&SituationType::new("test")).unwrap()
-                })
+                thread::spawn(move || r.get(&SituationType::new("test")).unwrap())
             })
             .collect();
 

@@ -139,7 +139,10 @@ impl BlockingContext {
     pub fn with_info(self, key: impl Into<String>, value: impl Into<String>) -> Self {
         let mut additional_info = self.additional_info;
         additional_info.insert(key.into(), value.into());
-        Self { additional_info, ..self }
+        Self {
+            additional_info,
+            ..self
+        }
     }
 }
 
@@ -372,7 +375,11 @@ pub struct Recommendation {
 }
 
 impl Recommendation {
-    pub fn new(action_type: impl Into<String>, reasoning: impl Into<String>, confidence: f64) -> Self {
+    pub fn new(
+        action_type: impl Into<String>,
+        reasoning: impl Into<String>,
+        confidence: f64,
+    ) -> Self {
         Self {
             action_type: action_type.into(),
             action_params: "{}".to_string(),
@@ -382,7 +389,10 @@ impl Recommendation {
     }
 
     pub fn with_params(self, params: impl Into<String>) -> Self {
-        Self { action_params: params.into(), ..self }
+        Self {
+            action_params: params.into(),
+            ..self
+        }
     }
 }
 
@@ -445,11 +455,17 @@ impl HumanDecisionRequest {
     }
 
     pub fn with_description(self, description: impl Into<String>) -> Self {
-        Self { situation_description: description.into(), ..self }
+        Self {
+            situation_description: description.into(),
+            ..self
+        }
     }
 
     pub fn with_recommendation(self, recommendation: Recommendation) -> Self {
-        Self { recommendation: Some(recommendation), ..self }
+        Self {
+            recommendation: Some(recommendation),
+            ..self
+        }
     }
 
     pub fn is_expired(&self) -> bool {
@@ -482,7 +498,9 @@ pub enum HumanSelection {
 
 impl HumanSelection {
     pub fn selected(option_id: impl Into<String>) -> Self {
-        HumanSelection::Selected { option_id: option_id.into() }
+        HumanSelection::Selected {
+            option_id: option_id.into(),
+        }
     }
 
     pub fn accept_recommendation() -> Self {
@@ -490,7 +508,9 @@ impl HumanSelection {
     }
 
     pub fn custom(instruction: impl Into<String>) -> Self {
-        HumanSelection::Custom { instruction: instruction.into() }
+        HumanSelection::Custom {
+            instruction: instruction.into(),
+        }
     }
 
     pub fn skip() -> Self {
@@ -530,7 +550,10 @@ impl HumanDecisionResponse {
 
     pub fn with_response_time(self, created_at: DateTime<Utc>) -> Self {
         let response_time_ms = (self.responded_at - created_at).num_milliseconds() as u64;
-        Self { response_time_ms, ..self }
+        Self {
+            response_time_ms,
+            ..self
+        }
     }
 }
 
@@ -559,11 +582,11 @@ pub struct HumanDecisionTimeoutConfig {
 impl Default for HumanDecisionTimeoutConfig {
     fn default() -> Self {
         Self {
-            default_timeout_ms: 3600000,  // 1 hour
-            high_timeout_ms: 1800000,     // 30 min
-            critical_timeout_ms: 900000,  // 15 min
-            low_timeout_ms: 7200000,      // 2 hours
-            warning_before_ms: 60000,     // 1 min
+            default_timeout_ms: 3600000, // 1 hour
+            high_timeout_ms: 1800000,    // 30 min
+            critical_timeout_ms: 900000, // 15 min
+            low_timeout_ms: 7200000,     // 2 hours
+            warning_before_ms: 60000,    // 1 min
             timeout_default: AutoAction::FollowRecommendation,
         }
     }
@@ -654,7 +677,8 @@ impl HumanDecisionQueue {
     /// Peek next request without removing
     pub fn peek(&self) -> Option<&HumanDecisionRequest> {
         // Priority: Critical > High > Medium > Low
-        self.critical.first()
+        self.critical
+            .first()
             .or_else(|| self.high.first())
             .or_else(|| self.medium.first())
             .or_else(|| self.low.first())
@@ -667,7 +691,8 @@ impl HumanDecisionQueue {
     /// is applied to the correct agent's request.
     pub fn find_by_agent_id(&self, agent_id: &str) -> Option<&HumanDecisionRequest> {
         // Search all queues for the agent's request
-        self.critical.iter()
+        self.critical
+            .iter()
             .find(|r| r.agent_id == agent_id)
             .or_else(|| self.high.iter().find(|r| r.agent_id == agent_id))
             .or_else(|| self.medium.iter().find(|r| r.agent_id == agent_id))
@@ -726,13 +751,17 @@ impl HumanDecisionQueue {
             UrgencyLevel::Low => &mut self.low,
         };
 
-        queue.iter().position(|r| r.id == id).map(|pos| queue.remove(pos))
+        queue
+            .iter()
+            .position(|r| r.id == id)
+            .map(|pos| queue.remove(pos))
     }
 
     /// Check for expired requests
     pub fn check_expired(&mut self) -> Vec<HumanDecisionRequest> {
         let now = Utc::now();
-        let expired: Vec<HumanDecisionRequest> = self.all_requests()
+        let expired: Vec<HumanDecisionRequest> = self
+            .all_requests()
             .into_iter()
             .filter(|r| now > r.expires_at)
             .cloned()
@@ -748,7 +777,8 @@ impl HumanDecisionQueue {
 
     /// Get requests approaching timeout
     pub fn approaching_timeout(&self) -> Vec<&HumanDecisionRequest> {
-        let warning_threshold = Utc::now() + chrono::Duration::milliseconds(self.timeout_config.warning_before_ms as i64);
+        let warning_threshold = Utc::now()
+            + chrono::Duration::milliseconds(self.timeout_config.warning_before_ms as i64);
         self.all_requests()
             .into_iter()
             .filter(|r| r.expires_at < warning_threshold && !r.is_expired())
@@ -756,7 +786,8 @@ impl HumanDecisionQueue {
     }
 
     fn all_requests(&self) -> Vec<&HumanDecisionRequest> {
-        self.critical.iter()
+        self.critical
+            .iter()
             .chain(self.high.iter())
             .chain(self.medium.iter())
             .chain(self.low.iter())
@@ -870,7 +901,10 @@ mod tests {
         // With options available, can_auto_resolve should be true
         assert!(blocking.can_auto_resolve());
         // auto_resolve_action returns SelectDefault when there are options
-        assert_eq!(blocking.auto_resolve_action(), Some(AutoAction::SelectDefault));
+        assert_eq!(
+            blocking.auto_resolve_action(),
+            Some(AutoAction::SelectDefault)
+        );
     }
 
     #[test]
@@ -880,11 +914,14 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         )
-        .with_recommendation(Box::new(
-            crate::builtin_actions::SelectOptionAction::new("A", "test"),
-        ));
+        .with_recommendation(Box::new(crate::builtin_actions::SelectOptionAction::new(
+            "A", "test",
+        )));
         assert!(blocking.can_auto_resolve());
-        assert_eq!(blocking.auto_resolve_action(), Some(AutoAction::FollowRecommendation));
+        assert_eq!(
+            blocking.auto_resolve_action(),
+            Some(AutoAction::FollowRecommendation)
+        );
     }
 
     #[test]
@@ -894,9 +931,9 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         )
-        .with_recommendation(Box::new(
-            crate::builtin_actions::SelectOptionAction::new("A", "test"),
-        ));
+        .with_recommendation(Box::new(crate::builtin_actions::SelectOptionAction::new(
+            "A", "test",
+        )));
 
         assert!(blocking.can_auto_resolve());
         assert_eq!(
@@ -1042,7 +1079,8 @@ mod tests {
             vec![],
             UrgencyLevel::Medium,
             3600000,
-        ).with_description("Test description");
+        )
+        .with_description("Test description");
         assert_eq!(req.situation_description, "Test description");
     }
 
@@ -1061,7 +1099,9 @@ mod tests {
     #[test]
     fn test_human_selection_custom() {
         let sel = HumanSelection::custom("Do something else");
-        assert!(matches!(sel, HumanSelection::Custom { instruction } if instruction == "Do something else"));
+        assert!(
+            matches!(sel, HumanSelection::Custom { instruction } if instruction == "Do something else")
+        );
     }
 
     #[test]
@@ -1141,9 +1181,30 @@ mod tests {
         let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
 
         // Push in reverse priority order
-        queue.push(HumanDecisionRequest::new("low", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Low, 7200000));
-        queue.push(HumanDecisionRequest::new("medium", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Medium, 3600000));
-        queue.push(HumanDecisionRequest::new("critical", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Critical, 900000));
+        queue.push(HumanDecisionRequest::new(
+            "low",
+            "agent",
+            crate::types::SituationType::new("t"),
+            vec![],
+            UrgencyLevel::Low,
+            7200000,
+        ));
+        queue.push(HumanDecisionRequest::new(
+            "medium",
+            "agent",
+            crate::types::SituationType::new("t"),
+            vec![],
+            UrgencyLevel::Medium,
+            3600000,
+        ));
+        queue.push(HumanDecisionRequest::new(
+            "critical",
+            "agent",
+            crate::types::SituationType::new("t"),
+            vec![],
+            UrgencyLevel::Critical,
+            900000,
+        ));
 
         // Pop should return critical first
         let first = queue.pop();
@@ -1154,7 +1215,14 @@ mod tests {
     #[test]
     fn test_human_decision_queue_complete() {
         let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
-        queue.push(HumanDecisionRequest::new("req-1", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::Medium, 3600000));
+        queue.push(HumanDecisionRequest::new(
+            "req-1",
+            "agent",
+            crate::types::SituationType::new("t"),
+            vec![],
+            UrgencyLevel::Medium,
+            3600000,
+        ));
 
         let resp = HumanDecisionResponse::new("req-1", HumanSelection::selected("A"));
         assert!(queue.complete(resp));
@@ -1165,7 +1233,14 @@ mod tests {
     #[test]
     fn test_human_decision_queue_peek() {
         let mut queue = HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default());
-        queue.push(HumanDecisionRequest::new("req-1", "agent", crate::types::SituationType::new("t"), vec![], UrgencyLevel::High, 1800000));
+        queue.push(HumanDecisionRequest::new(
+            "req-1",
+            "agent",
+            crate::types::SituationType::new("t"),
+            vec![],
+            UrgencyLevel::High,
+            1800000,
+        ));
 
         let peeked = queue.peek();
         assert!(peeked.is_some());
