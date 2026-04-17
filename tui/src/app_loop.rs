@@ -58,7 +58,7 @@ const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 5;
 
 /// Idle timeout for triggering decision layer intervention
 /// If an agent is idle for this duration, decision layer will check if there are pending tasks
-const IDLE_DECISION_TRIGGER_SECS: u64 = 10;
+const IDLE_DECISION_TRIGGER_SECS: u64 = 60;
 
 /// Decision output info for transcript display
 ///

@@ -146,7 +146,7 @@ automatically triggered to determine whether to continue working or stop.
 ### Trigger Conditions
 
 1. **Idle Timeout**: Agent in Responding state with no events for `RESPONDING_IDLE_TIMEOUT_SECS` (5s)
-2. **Idle Check**: Agent in Idle state for `IDLE_DECISION_TRIGGER_SECS` (10s)
+2. **Idle Check**: Agent in Idle state for `IDLE_DECISION_TRIGGER_SECS` (60s)
 
 ### Trigger Flow
 
