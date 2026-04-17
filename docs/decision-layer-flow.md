@@ -136,6 +136,50 @@ Located in `decision/src/rule_engine.rs`. Contains built-in rules for simple sit
 | approve-first | waiting_for_choice | select_first | Medium |
 | reflect-first | claims_completion + reflection_rounds(0,1) | reflect | High |
 | retry-error | error | retry | Medium |
+| continue-on-idle | agent_idle | continue_all_tasks | Medium |
+
+## Idle State Decision Trigger
+
+When work agents become idle (no active provider output), the decision layer is
+automatically triggered to determine whether to continue working or stop.
+
+### Trigger Conditions
+
+1. **Idle Timeout**: Agent in Responding state with no events for `RESPONDING_IDLE_TIMEOUT_SECS` (5s)
+2. **Idle Check**: Agent in Idle state for `IDLE_DECISION_TRIGGER_SECS` (10s)
+
+### Trigger Flow
+
+```
+Agent becomes idle (no provider output)
+         │
+         ▼
+  ┌──────────────────────┐
+  │ check_idle_agents_   │  (every tick)
+  │ for_decision()       │
+  └──────────────────────┘
+         │
+         │ elapsed >= IDLE_DECISION_TRIGGER_SECS
+         ▼
+  ┌──────────────────────┐
+  │ trigger_decision_    │
+  │ for_idle_agent()     │
+  └──────────────────────┘
+         │
+         ▼
+  ┌──────────────────────┐
+  │ AgentIdleSituation   │
+  │ created and sent     │
+  └──────────────────────┘
+         │
+         ▼
+  Decision: continue_all_tasks or stop_if_complete
+```
+
+### Decision Logic
+
+- **Default**: `continue_all_tasks` - Agent receives "continue finish all tasks" instruction
+- **Stop condition**: Only when decision layer confirms all tasks complete (kanban/backlog empty)
 
 ## Action Execution
 
@@ -151,6 +195,8 @@ The `execute_decision_action` function in `agent_pool.rs` handles each action ty
 | `reflect` | idle | User("Reflect: ...") | Add reflection prompt |
 | `confirm_completion` | idle | - | Log completion |
 | `retry` | idle | User(prompt) | Add retry prompt |
+| `continue_all_tasks` | idle | User(instruction) | Send "continue finish all tasks" |
+| `stop_if_complete` | stopped | - | Stop agent (tasks complete) |
 
 ## Built-in Situations
 
@@ -166,6 +212,14 @@ Defined in `decision/src/builtin_situations.rs`:
 - Agent claims task completion, needs verification
 - Reflection rounds track verification iterations
 - Available actions: `reflect` (if rounds < max), `confirm_completion`, `request_human`
+
+### AgentIdleSituation
+
+- Triggered when agent enters idle state (no active provider output)
+- Decision layer determines whether to continue or stop
+- Fields: `trigger_reason`, `has_assigned_task`, `idle_duration_secs`
+- Available actions: `continue_all_tasks`, `stop_if_complete`, `request_human`
+- Tier: Simple (rule engine handles with `continue-on-idle` rule)
 
 ### ErrorSituation
 
@@ -222,6 +276,26 @@ RetryAction {
     prompt: "Retry with adjusted approach",
     cooldown_ms: 1000,
     adjusted: true
+}
+```
+
+### ContinueAllTasksAction
+
+Sends instruction to continue working on all pending tasks.
+
+```rust
+ContinueAllTasksAction {
+    instruction: "continue finish all tasks"
+}
+```
+
+### StopIfCompleteAction
+
+Instructs agent to stop when all tasks are confirmed complete.
+
+```rust
+StopIfCompleteAction {
+    reason: "All tasks complete"
 }
 ```
 
