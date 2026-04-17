@@ -502,6 +502,30 @@ impl WorktreeManager {
         Ok(output.trim().contains(branch))
     }
 
+    /// List all agent branches (branches starting with "agent/")
+    ///
+    /// Returns a list of branch names like "agent/agent_001", "agent/agent_002"
+    pub fn list_agent_branches(&self) -> Result<Vec<String>, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+        let output = self.run_git_command_internal(&["branch", "--list", "agent/*"])?;
+
+        let branches: Vec<String> = output
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                // Remove leading "* " if it's the current branch
+                let branch = line.strip_prefix('*').unwrap_or(line).trim();
+                if branch.starts_with("agent/") {
+                    Some(branch.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(branches)
+    }
+
     /// Get the current HEAD commit SHA
     pub fn get_current_head(&self) -> Result<String, WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
@@ -620,8 +644,9 @@ impl WorktreeManager {
                         // branch refs/heads/branch-name
                         let branch_ref = value.unwrap_or("");
                         // Extract branch name from refs/heads/xxx
-                        if let Some(branch_name) = branch_ref.split('/').nth(2) {
-                            info.branch = Some(branch_name.to_string());
+                        // For refs/heads/feature/test, we want "feature/test"
+                        if branch_ref.starts_with("refs/heads/") {
+                            info.branch = Some(branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref).to_string());
                         } else {
                             info.branch = Some(branch_ref.to_string());
                         }

@@ -426,10 +426,32 @@ impl AgentPool {
         let worktree_manager = WorktreeManager::new(repo_root.clone(), config)?;
         let worktree_state_store = WorktreeStateStore::new(state_dir);
 
+        // Sync next_agent_index with existing worktree states AND git branches
+        // to avoid collision when user cancels restore but previous artifacts exist
+        let existing_states = worktree_state_store.list_all().unwrap_or_default();
+        let max_state_index = existing_states
+            .iter()
+            .filter_map(|(agent_id, _)| parse_agent_index(agent_id))
+            .max();
+
+        // Also check existing agent branches (agent/agent_XXX pattern)
+        let existing_branches = worktree_manager.list_agent_branches().unwrap_or_default();
+        let max_branch_index = existing_branches
+            .iter()
+            .filter_map(|branch| {
+                // Branch format: "agent/agent_001"
+                branch.strip_prefix("agent/").and_then(parse_agent_index)
+            })
+            .max();
+
+        // Use the maximum index found from both sources
+        let max_existing_index = max_state_index.max(max_branch_index);
+        let next_agent_index = max_existing_index.map_or(1, |idx| idx + 1);
+
         Ok(Self {
             slots: Vec::new(),
             max_slots,
-            next_agent_index: 1,
+            next_agent_index,
             focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
@@ -4244,5 +4266,135 @@ mod tests {
         let result = pool.recover_orphaned_worktrees(true);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), AgentPoolWorktreeError::WorktreeNotEnabled));
+    }
+
+    #[test]
+    fn spawn_does_not_collide_with_existing_worktrees() {
+        // This test reproduces the bug: when creating a new AgentPool with
+        // existing worktrees on disk (from a previous session), spawn should
+        // NOT fail with "worktree already exists" error.
+
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        // Create a worktree state store
+        let state_store = WorktreeStateStore::new(state_dir.clone());
+
+        // Create a worktree manager and pre-create worktree for agent_001
+        // (simulating a previous session's leftover)
+        let config = WorktreeConfig::default();
+        let worktree_manager = WorktreeManager::new(repo_path.clone(), config).unwrap();
+
+        // Pre-create worktree wt-agent_001
+        let worktree_id = "wt-agent_001";
+        let worktree_options = WorktreeCreateOptions {
+            path: worktree_manager.worktrees_dir().join(worktree_id),
+            branch: Some("agent/agent_001".to_string()),
+            create_branch: true,
+            base: None,
+            lock_reason: None,
+        };
+        let worktree_info = worktree_manager.create(worktree_id, worktree_options).unwrap();
+
+        // Save worktree state for agent_001
+        let base_commit = worktree_manager.get_current_head().unwrap();
+        let worktree_state = WorktreeState::new(
+            worktree_id.to_string(),
+            worktree_info.path.clone(),
+            Some("agent/agent_001".to_string()),
+            base_commit,
+            None,
+            "agent_001".to_string(),
+        );
+        state_store.save("agent_001", &worktree_state).unwrap();
+
+        // Now create a fresh AgentPool (simulating TUI startup after cancel restore)
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-002"),
+            4,
+            repo_path.clone(),
+            state_dir.clone(),
+        ).unwrap();
+
+        // Try to spawn a new agent - should NOT fail with worktree collision
+        let result = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            None,
+            None,
+        );
+
+        // The bug: this would fail with "worktree already exists: wt-agent_001"
+        // The fix: pool should sync its next_agent_index with existing worktrees
+        assert!(result.is_ok(), "spawn should succeed, got error: {:?}", result.err());
+
+        // The spawned agent should have a different ID (not agent_001)
+        let spawned_id = result.unwrap();
+        assert_ne!(spawned_id.as_str(), "agent_001", "spawned agent should not collide with existing agent_001");
+
+        // Verify the worktree was created with a different path
+        let slot = pool.get_slot_by_id(&spawned_id).unwrap();
+        let worktree_path = slot.cwd();
+        assert_ne!(worktree_path, worktree_info.path, "worktree path should be different");
+        assert!(worktree_path.exists(), "new worktree should exist");
+    }
+
+    #[test]
+    fn spawn_does_not_collide_with_existing_branches() {
+        // This test reproduces the bug where worktree state was deleted
+        // but the git branch still exists, causing spawn to fail
+
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        // Create a worktree manager and pre-create a branch for agent_001
+        // (simulating leftover from previous session after worktree state cleanup)
+        let config = WorktreeConfig::default();
+        let worktree_manager = WorktreeManager::new(repo_path.clone(), config).unwrap();
+
+        // Create branch "agent/agent_001" (without creating worktree state)
+        let branch_options = WorktreeCreateOptions {
+            path: worktree_manager.worktrees_dir().join("wt-agent_001"),
+            branch: Some("agent/agent_001".to_string()),
+            create_branch: true,
+            base: None,
+            lock_reason: None,
+        };
+        let _worktree_info = worktree_manager.create("wt-agent_001", branch_options).unwrap();
+
+        // Remove worktree but keep the branch (simulating cleanup that deleted state)
+        worktree_manager.remove("wt-agent_001", true).unwrap();
+
+        // Verify branch still exists
+        assert!(worktree_manager.branch_exists("agent/agent_001").unwrap());
+
+        // Now create a fresh AgentPool with no worktree state files
+        // (simulating TUI startup after cancel restore + manual cleanup)
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-003"),
+            4,
+            repo_path.clone(),
+            state_dir, // empty state dir, no worktree states
+        ).unwrap();
+
+        // Try to spawn a new agent - should NOT fail with branch collision
+        let result = pool.spawn_agent_with_worktree(
+            ProviderKind::Mock,
+            None,
+            None,
+        );
+
+        // The bug: this would fail with "branch already exists: agent/agent_001"
+        // The fix: pool should sync its next_agent_index with existing branches too
+        assert!(result.is_ok(), "spawn should succeed, got error: {:?}", result.err());
+
+        // The spawned agent should have a different ID (not agent_001)
+        let spawned_id = result.unwrap();
+        assert_ne!(spawned_id.as_str(), "agent_001", "spawned agent should not collide with existing branch agent_001");
+
+        // Verify the worktree was created
+        let slot = pool.get_slot_by_id(&spawned_id).unwrap();
+        assert!(slot.cwd().exists(), "new worktree should exist");
     }
 }

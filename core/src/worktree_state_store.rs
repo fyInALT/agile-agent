@@ -376,6 +376,9 @@ mod tests {
 
         // Create agent state file with other data
         let agent_path = store.agent_state_path("agent_001");
+        // Ensure parent directory exists
+        fs::create_dir_all(agent_path.parent().unwrap()).unwrap();
+
         let initial_state = serde_json::json!({
             "agent_id": "agent_001",
             "codename": "alpha",
