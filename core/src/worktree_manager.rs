@@ -313,11 +313,16 @@ impl WorktreeManager {
         args.push(path.to_str().unwrap_or(""));
 
         // Add start-point for the worktree
-        // - For new branches: base commit is specified after path (already handled by -b flag above)
+        // - For new branches: base commit is specified after path
         // - For existing branches: use the branch name as start-point
         // - For detached HEAD: optionally specify commit
         if let Some(branch) = &options.branch {
-            if !options.create_branch {
+            if options.create_branch {
+                // New branch: add base if specified
+                if let Some(base) = &options.base {
+                    args.push(base);
+                }
+            } else {
                 // Use existing branch as start-point
                 args.push(branch);
             }
@@ -648,7 +653,7 @@ impl WorktreeManager {
     /// Parse porcelain output from git worktree list --porcelain
     ///
     /// Porcelain format:
-    /// ```
+    /// ```text
     /// worktree /path/to/worktree
     /// HEAD abc123...
     /// branch refs/heads/branch-name  # optional
