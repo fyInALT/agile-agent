@@ -502,7 +502,7 @@ fn render_overview_footer(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     };
 
     let hint = format!(
-        "Overview | filter:{} | Tab:focus | f/r/a:filter | PageUp/Down:page | Ctrl+N:spawn | Ctrl+X:stop",
+        "Overview | filter:{} | Tab:focus | PageUp/Down:page | Ctrl+N:spawn | Ctrl+X:stop",
         filter_label
     );
 
