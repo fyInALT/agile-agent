@@ -46,6 +46,14 @@ pub fn custom_instruction() -> ActionType {
     ActionType::new("custom_instruction")
 }
 
+pub fn continue_all_tasks() -> ActionType {
+    ActionType::new("continue_all_tasks")
+}
+
+pub fn stop_if_complete() -> ActionType {
+    ActionType::new("stop_if_complete")
+}
+
 /// Action: Select option
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -431,6 +439,100 @@ impl DecisionAction for CustomInstructionAction {
     }
 }
 
+/// Action: Continue All Tasks
+///
+/// Sends instruction to agent to continue working on all pending tasks.
+/// Used when decision layer determines there are still tasks to complete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContinueAllTasksAction {
+    #[serde(default)]
+    pub instruction: String,
+}
+
+impl ContinueAllTasksAction {
+    pub fn new(instruction: impl Into<String>) -> Self {
+        Self {
+            instruction: instruction.into(),
+        }
+    }
+}
+
+impl Default for ContinueAllTasksAction {
+    fn default() -> Self {
+        Self::new("continue finish all tasks")
+    }
+}
+
+impl DecisionAction for ContinueAllTasksAction {
+    fn action_type(&self) -> ActionType {
+        continue_all_tasks()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "ContinueAllTasksAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        "ContinueAllTasks: [Instruction to continue working]".to_string()
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(&self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Stop If Complete
+///
+/// Instructs agent to stop if all tasks are confirmed complete.
+/// Decision layer checks Kanban/Backlog before choosing this action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StopIfCompleteAction {
+    #[serde(default)]
+    pub reason: String,
+}
+
+impl StopIfCompleteAction {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl Default for StopIfCompleteAction {
+    fn default() -> Self {
+        Self::new("All tasks complete")
+    }
+}
+
+impl DecisionAction for StopIfCompleteAction {
+    fn action_type(&self) -> ActionType {
+        stop_if_complete()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "StopIfCompleteAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        "StopIfComplete: [Reason for stopping]".to_string()
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(&self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
 /// Initialize registry with built-in actions
 // Helper deserializer functions
 fn deserialize_select_option(params: &str) -> Option<Box<dyn DecisionAction>> {
@@ -468,6 +570,16 @@ fn deserialize_custom_instruction(params: &str) -> Option<Box<dyn DecisionAction
     Some(Box::new(action))
 }
 
+fn deserialize_continue_all_tasks(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: ContinueAllTasksAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
+fn deserialize_stop_if_complete(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: StopIfCompleteAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
 pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(SelectOptionAction::default()));
     registry.register(Box::new(ReflectAction::default()));
@@ -476,6 +588,8 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(RetryAction::default()));
     registry.register(Box::new(RequestHumanAction::default()));
     registry.register(Box::new(CustomInstructionAction::default()));
+    registry.register(Box::new(ContinueAllTasksAction::default()));
+    registry.register(Box::new(StopIfCompleteAction::default()));
 
     // Register parsers
     registry.register_parser(select_option(), SelectOptionAction::parse);
@@ -488,6 +602,8 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register_deserializer(retry(), deserialize_retry);
     registry.register_deserializer(request_human(), deserialize_request_human);
     registry.register_deserializer(custom_instruction(), deserialize_custom_instruction);
+    registry.register_deserializer(continue_all_tasks(), deserialize_continue_all_tasks);
+    registry.register_deserializer(stop_if_complete(), deserialize_stop_if_complete);
 }
 
 #[cfg(test)]

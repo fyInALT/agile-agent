@@ -35,6 +35,11 @@ pub fn acp_permission() -> SituationType {
     SituationType::with_subtype("waiting_for_choice", "acp")
 }
 
+/// Agent idle situation - triggered when agent enters idle state
+pub fn agent_idle() -> SituationType {
+    SituationType::new("agent_idle")
+}
+
 /// Situation 1: Waiting for choice
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaitingForChoiceSituation {
@@ -377,6 +382,94 @@ pub fn register_situation_builtins(registry: &SituationRegistry) {
     registry.register_default(Box::new(ClaimsCompletionSituation::default()));
     registry.register_default(Box::new(PartialCompletionSituation::default()));
     registry.register_default(Box::new(ErrorSituation::default()));
+    registry.register_default(Box::new(AgentIdleSituation::default()));
+}
+
+/// Situation: Agent Idle
+///
+/// Triggered when an agent enters idle state. The decision layer needs to
+/// determine whether the agent should continue working on pending tasks
+/// or stop if all tasks are complete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentIdleSituation {
+    /// Trigger reason (idle_timeout, idle_check, finished)
+    pub trigger_reason: String,
+    /// Whether agent has an assigned task
+    pub has_assigned_task: bool,
+    /// Idle duration in seconds
+    pub idle_duration_secs: u64,
+}
+
+impl AgentIdleSituation {
+    pub fn new(trigger_reason: impl Into<String>) -> Self {
+        Self {
+            trigger_reason: trigger_reason.into(),
+            has_assigned_task: false,
+            idle_duration_secs: 0,
+        }
+    }
+
+    pub fn with_assigned_task(self, has_task: bool) -> Self {
+        Self {
+            has_assigned_task: has_task,
+            ..self
+        }
+    }
+
+    pub fn with_idle_duration(self, secs: u64) -> Self {
+        Self {
+            idle_duration_secs: secs,
+            ..self
+        }
+    }
+}
+
+impl Default for AgentIdleSituation {
+    fn default() -> Self {
+        Self::new("unknown")
+    }
+}
+
+impl DecisionSituation for AgentIdleSituation {
+    fn situation_type(&self) -> SituationType {
+        agent_idle()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "AgentIdleSituation"
+    }
+
+    fn requires_human(&self) -> bool {
+        // Not critical - decision layer can handle automatically
+        false
+    }
+
+    fn human_urgency(&self) -> UrgencyLevel {
+        UrgencyLevel::Low
+    }
+
+    fn to_prompt_text(&self) -> String {
+        format!(
+            "Agent Idle State:\nTrigger: {}\nHas assigned task: {}\nIdle duration: {}s\n\n\
+            Determine whether agent should continue working or stop.\n\
+            Check Kanban/Backlog for pending tasks.",
+            self.trigger_reason,
+            self.has_assigned_task,
+            self.idle_duration_secs
+        )
+    }
+
+    fn available_actions(&self) -> Vec<ActionType> {
+        vec![
+            ActionType::new("continue_all_tasks"),
+            ActionType::new("stop_if_complete"),
+            ActionType::new("request_human"),
+        ]
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

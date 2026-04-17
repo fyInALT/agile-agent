@@ -62,7 +62,7 @@ impl DecisionTier {
         }
 
         // Simple: well-known patterns that rule engine can handle
-        if type_name == "waiting_for_choice" {
+        if type_name == "waiting_for_choice" || type_name == "agent_idle" {
             return DecisionTier::Simple;
         }
 

@@ -56,6 +56,10 @@ const DECISION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// An agent is transitioned to WaitingForInput if no events received for this duration
 const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 5;
 
+/// Idle timeout for triggering decision layer intervention
+/// If an agent is idle for this duration, decision layer will check if there are pending tasks
+const IDLE_DECISION_TRIGGER_SECS: u64 = 10;
+
 /// Decision output info for transcript display
 ///
 /// Captures decision details for showing in TUI with special formatting.
@@ -975,7 +979,12 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             }
 
             // Check for idle responding agents and transition to WaitingForInput
+            // Also trigger decision layer intervention for long-idle agents
             check_for_idle_responding_agents(&mut state);
+
+            // Check for idle agents that need decision layer intervention
+            // Decision layer will determine if agent should continue or stop
+            check_idle_agents_for_decision(&mut state);
         }
 
         // Process pending mail delivery
@@ -2056,22 +2065,28 @@ fn handle_agent_provider_event(
 /// Check for agents that have been idle in Responding state for too long
 /// and transition them to WaitingForInput status
 fn check_for_idle_responding_agents(state: &mut TuiState) {
-    if let Some(pool) = state.agent_pool.as_mut() {
-        // Collect agent IDs that need transition (can't modify during iteration)
-        let agents_to_transition: Vec<agent_core::agent_runtime::AgentId> = pool
-            .slots()
-            .iter()
-            .filter_map(|slot| {
-                if slot.should_transition_to_waiting(RESPONDING_IDLE_TIMEOUT_SECS) {
-                    Some(slot.agent_id().clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
+    // Collect agent IDs that need transition and decision trigger
+    let agents_to_process: Vec<(agent_core::agent_runtime::AgentId, String)> = {
+        if let Some(pool) = state.agent_pool.as_ref() {
+            pool.slots()
+                .iter()
+                .filter_map(|slot| {
+                    if slot.should_transition_to_waiting(RESPONDING_IDLE_TIMEOUT_SECS) {
+                        Some((slot.agent_id().clone(), "idle_timeout".to_string()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    };
 
-        // Transition each agent
-        for agent_id in agents_to_transition {
+    // Transition each agent and trigger decision layer
+    for (agent_id, trigger_reason) in agents_to_process {
+        // Transition agent status
+        if let Some(pool) = state.agent_pool.as_mut() {
             if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                 let _ = slot
                     .transition_to(agent_core::agent_slot::AgentSlotStatus::waiting_for_input());
@@ -2084,6 +2099,100 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
                     }),
                 );
             }
+        }
+
+        // Trigger decision layer for this agent to determine next action
+        trigger_decision_for_idle_agent(state, &agent_id, &trigger_reason);
+    }
+}
+
+/// Check for idle agents that need decision layer intervention
+///
+/// This function triggers the decision layer for agents that have been idle
+/// (not blocked, not active) for a configured duration. The decision layer
+/// will check if there are pending tasks and either continue or stop the agent.
+fn check_idle_agents_for_decision(state: &mut TuiState) {
+    if let Some(pool) = state.agent_pool.as_ref() {
+        // Collect agent IDs that have been idle for too long
+        let agents_to_check: Vec<agent_core::agent_runtime::AgentId> = pool
+            .slots()
+            .iter()
+            .filter_map(|slot| {
+                // Only check idle agents (not blocked, not active, not stopped)
+                if slot.status().is_idle() {
+                    // Check if idle for longer than IDLE_DECISION_TRIGGER_SECS
+                    let idle_duration = slot.last_activity();
+                    let elapsed = idle_duration.elapsed().as_secs();
+                    if elapsed >= IDLE_DECISION_TRIGGER_SECS {
+                        Some(slot.agent_id().clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Trigger decision for each idle agent
+        for agent_id in agents_to_check {
+            trigger_decision_for_idle_agent(state, &agent_id, "idle_check");
+        }
+    }
+}
+
+/// Trigger decision layer for an idle agent
+///
+/// Creates a decision request for the agent to determine whether to:
+/// 1. Continue working on pending tasks
+/// 2. Stop if all tasks are complete
+fn trigger_decision_for_idle_agent(
+    state: &mut TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+    trigger_reason: &str,
+) {
+    use agent_decision::context::DecisionContext;
+    use agent_decision::initializer::initialize_decision_layer;
+    use agent_decision::types::SituationType;
+
+    // Create agent_idle situation type
+    let situation_type = SituationType::new("agent_idle");
+
+    // Get decision layer components
+    let components = initialize_decision_layer();
+
+    // Build the situation
+    let situation = components.situation_registry.build(situation_type.clone());
+
+    // Create decision context with agent state info
+    let context = DecisionContext::new(situation, agent_id.as_str());
+
+    // Create decision request
+    use agent_core::decision_mail::DecisionRequest;
+    let request = DecisionRequest::new(agent_id.clone(), situation_type.clone(), context);
+
+    // Send decision request
+    if let Some(pool) = state.agent_pool.as_mut() {
+        if let Err(e) = pool.send_decision_request(agent_id, request) {
+            logging::warn_event(
+                "decision_layer.idle_trigger_failed",
+                "failed to trigger decision for idle agent",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "trigger_reason": trigger_reason,
+                    "error": e,
+                }),
+            );
+        } else {
+            logging::debug_event(
+                "decision_layer.idle_triggered",
+                "decision layer triggered for idle agent",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "trigger_reason": trigger_reason,
+                    "situation_type": "agent_idle",
+                }),
+            );
         }
     }
 }

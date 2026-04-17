@@ -79,6 +79,20 @@ impl ActionSpec {
                 let instruction = self.params.get("instruction").cloned().unwrap_or_default();
                 Some(Box::new(CustomInstructionAction::new(instruction)))
             }
+            "continue_all_tasks" => {
+                let instruction = self.params
+                    .get("instruction")
+                    .cloned()
+                    .unwrap_or_else(|| "continue finish all tasks".to_string());
+                Some(Box::new(crate::builtin_actions::ContinueAllTasksAction::new(instruction)))
+            }
+            "stop_if_complete" => {
+                let reason = self.params
+                    .get("reason")
+                    .cloned()
+                    .unwrap_or_else(|| "All tasks complete".to_string());
+                Some(Box::new(crate::builtin_actions::StopIfCompleteAction::new(reason)))
+            }
             _ => None,
         }
     }
@@ -204,6 +218,14 @@ impl RuleBasedDecisionEngine {
                 "retry-error",
                 ConditionExpr::single(Condition::situation_type("error")),
                 vec![ActionSpec::new("retry")],
+                RulePriority::Medium,
+            ),
+            // Rule: Continue all tasks on agent_idle (default behavior)
+            // Decision layer should verify pending tasks before stopping
+            DecisionRule::new(
+                "continue-on-idle",
+                ConditionExpr::single(Condition::situation_type("agent_idle")),
+                vec![ActionSpec::new("continue_all_tasks")],
                 RulePriority::Medium,
             ),
         ]

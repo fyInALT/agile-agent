@@ -1692,6 +1692,68 @@ impl AgentPool {
 
                     DecisionExecutionResult::CustomInstruction { instruction: prompt }
                 }
+                "continue_all_tasks" => {
+                    // Parse params to get instruction
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let instruction = params["instruction"]
+                        .as_str()
+                        .unwrap_or("continue finish all tasks")
+                        .to_string();
+
+                    // Add continue instruction as a user message to trigger work
+                    slot.append_transcript(crate::app::TranscriptEntry::User(
+                        instruction.clone(),
+                    ));
+
+                    // Transition agent back to responding state so it processes the instruction
+                    if slot.status().is_idle() || slot.status().is_blocked() {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    }
+
+                    // Log: Continue all tasks action
+                    logging::debug_event(
+                        "decision_layer.work_agent_prompt",
+                        "continue_all_tasks instruction sent to work agent",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "prompt_type": "continue_all_tasks",
+                            "instruction": instruction,
+                            "agent_status_after": "idle",
+                        }),
+                    );
+
+                    DecisionExecutionResult::CustomInstruction { instruction }
+                }
+                "stop_if_complete" => {
+                    // Parse params to get reason
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let reason = params["reason"]
+                        .as_str()
+                        .unwrap_or("All tasks complete")
+                        .to_string();
+
+                    // Only stop if there are no pending tasks (decision layer's responsibility to check)
+                    // Transition agent to stopped state
+                    let _ = slot.transition_to(AgentSlotStatus::stopped(reason.clone()));
+
+                    // Log: Stop if complete action
+                    logging::debug_event(
+                        "decision_layer.action_completed",
+                        "stop_if_complete action executed - agent stopped",
+                        serde_json::json!({
+                            "work_agent_id": work_agent_id.as_str(),
+                            "action_type": "stop_if_complete",
+                            "reason": reason,
+                            "agent_status_after": "stopped",
+                        }),
+                    );
+
+                    DecisionExecutionResult::Executed {
+                        option_id: "stop_if_complete".to_string(),
+                    }
+                }
                 _ => {
                     // Unknown action type
                     logging::warn_event(
