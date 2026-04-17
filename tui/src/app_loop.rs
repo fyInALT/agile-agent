@@ -1413,12 +1413,32 @@ fn handle_multi_agent_submission(state: &mut TuiState, user_input: String) -> bo
 fn handle_provider_terminal_error(state: &mut TuiState, error: String) -> Result<()> {
     state.finalize_active_entries_after_failure(Some(&error));
     state.app_mut().mark_active_task_error();
-    state.app_mut().push_error_message(error);
+
+    // Check if this is a session expiry error and clear the session handle
+    if is_session_expired_error(&error) {
+        state.app_mut().clear_session();
+        state.app_mut().push_error_message(
+            "session expired - starting fresh conversation. Please retry your request."
+        );
+    } else {
+        state.app_mut().push_error_message(error);
+    }
+
     state.app_mut().finish_provider_response();
     if state.app().active_task_id.is_none() && state.app().loop_phase != LoopPhase::Escalating {
         state.app_mut().set_loop_phase(LoopPhase::Idle);
     }
     state.persist_if_changed()
+}
+
+/// Check if the error indicates an expired or invalid session/conversation
+fn is_session_expired_error(error: &str) -> bool {
+    // Claude CLI returns this when --resume session ID doesn't exist
+    error.contains("No conversation found with session ID")
+        || error.contains("No conversation found")
+        // Codex may have similar error patterns
+        || error.contains("thread not found")
+        || error.contains("session not found")
 }
 
 fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
@@ -2085,12 +2105,14 @@ mod tests {
     use super::handle_command_submission;
     use super::handle_multi_agent_submission;
     use super::handle_provider_terminal_error;
+    use super::is_session_expired_error;
     use super::shutdown_tui_state;
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
     use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec};
     use agent_core::provider::ProviderKind;
+    use agent_core::provider::SessionHandle;
     use agent_core::runtime_session::RuntimeSession;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -2128,6 +2150,47 @@ mod tests {
             state.app().transcript.last(),
             Some(TranscriptEntry::Error(text)) if text == "provider crashed"
         ));
+    }
+
+    #[test]
+    fn session_expired_error_clears_session_and_shows_friendly_message() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+        state.app_mut().begin_provider_response();
+        // Set a session ID that will be cleared
+        state.app_mut().apply_session_handle(SessionHandle::ClaudeSession {
+            session_id: "expired-session-123".to_string(),
+        });
+
+        handle_provider_terminal_error(
+            &mut state,
+            "No conversation found with session ID: expired-session-123".to_string(),
+        )
+            .expect("handle error");
+
+        // Session should be cleared
+        assert!(state.app().claude_session_id.is_none());
+        assert!(state.app().codex_thread_id.is_none());
+        // Should have exactly one error message (the friendly one)
+        assert_eq!(state.app().transcript.len(), 1);
+        assert!(matches!(
+            state.app().transcript.last(),
+            Some(TranscriptEntry::Error(text)) if text.contains("session expired")
+        ));
+    }
+
+    #[test]
+    fn is_session_expired_error_detects_known_patterns() {
+        assert!(is_session_expired_error(
+            "No conversation found with session ID: abc123"
+        ));
+        assert!(is_session_expired_error("No conversation found"));
+        assert!(is_session_expired_error("thread not found"));
+        assert!(is_session_expired_error("session not found"));
+        assert!(!is_session_expired_error("provider crashed"));
+        assert!(!is_session_expired_error("network error"));
     }
 
     #[test]

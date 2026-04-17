@@ -370,7 +370,15 @@ fn consume_provider_until_finished(
                 }
                 ProviderEvent::Error(error) => {
                     state.mark_active_task_error();
-                    state.push_error_message(error);
+                    // Check if this is a session expiry error and clear the session handle
+                    if is_session_expired_error(&error) {
+                        state.clear_session();
+                        state.push_error_message(
+                            "session expired - starting fresh conversation. Please retry your request."
+                        );
+                    } else {
+                        state.push_error_message(error);
+                    }
                     on_state_change(state)?;
                 }
                 ProviderEvent::Finished => {
@@ -393,8 +401,19 @@ fn consume_provider_until_finished(
     Ok(())
 }
 
+/// Check if the error indicates an expired or invalid session/conversation
+fn is_session_expired_error(error: &str) -> bool {
+    // Claude CLI returns this when --resume session ID doesn't exist
+    error.contains("No conversation found with session ID")
+        || error.contains("No conversation found")
+        // Codex may have similar error patterns
+        || error.contains("thread not found")
+        || error.contains("session not found")
+}
+
 #[cfg(test)]
 mod tests {
+    use super::is_session_expired_error;
     use super::LoopGuardrails;
     use super::run_loop;
     use super::run_single_iteration;
@@ -514,5 +533,17 @@ mod tests {
             state.backlog.tasks[0].status,
             crate::backlog::TaskStatus::Done
         );
+    }
+
+    #[test]
+    fn is_session_expired_error_detects_known_patterns() {
+        assert!(is_session_expired_error(
+            "No conversation found with session ID: abc123"
+        ));
+        assert!(is_session_expired_error("No conversation found"));
+        assert!(is_session_expired_error("thread not found"));
+        assert!(is_session_expired_error("session not found"));
+        assert!(!is_session_expired_error("provider crashed"));
+        assert!(!is_session_expired_error("network error"));
     }
 }
