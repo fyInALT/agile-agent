@@ -1576,13 +1576,16 @@ impl TuiState {
                 if current_status.is_idle() {
                     // Idle must go through Starting first
                     let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::starting());
-                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                    let _ = slot
+                        .transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
                 } else if current_status.is_active() {
                     // Already in Starting/Responding/ToolExecuting/Finishing - try direct transition
-                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                    let _ = slot
+                        .transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
                 } else if current_status.is_blocked() || current_status.is_waiting_for_input() {
                     // Blocked/WaitingForInput can directly go to Responding
-                    let _ = slot.transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
+                    let _ = slot
+                        .transition_to(agent_core::agent_slot::AgentSlotStatus::responding_now());
                 }
                 Some(event_rx)
             }

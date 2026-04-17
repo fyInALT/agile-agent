@@ -11,7 +11,9 @@
 
 use crate::context::DecisionContext;
 use crate::error::DecisionError;
-use crate::maker::{DecisionMakerType, DecisionPostProcessor, DecisionPreProcessor, DecisionRegistries};
+use crate::maker::{
+    DecisionMakerType, DecisionPostProcessor, DecisionPreProcessor, DecisionRegistries,
+};
 use crate::maker_registry::DecisionMakerRegistry;
 use crate::output::DecisionOutput;
 use crate::strategy::StrategySelection;
@@ -485,7 +487,9 @@ impl DecisionPreProcessor for ReflectionRoundPreProcessor {
         // Reflection round is already in context metadata
         // This processor ensures it's properly set
         if context.metadata.get("reflection_round").is_none() {
-            context.metadata.insert("reflection_round".to_string(), "0".to_string());
+            context
+                .metadata
+                .insert("reflection_round".to_string(), "0".to_string());
         }
         Ok(())
     }

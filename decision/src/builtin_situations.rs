@@ -453,9 +453,7 @@ impl DecisionSituation for AgentIdleSituation {
             "Agent Idle State:\nTrigger: {}\nHas assigned task: {}\nIdle duration: {}s\n\n\
             Determine whether agent should continue working or stop.\n\
             Check Kanban/Backlog for pending tasks.",
-            self.trigger_reason,
-            self.has_assigned_task,
-            self.idle_duration_secs
+            self.trigger_reason, self.has_assigned_task, self.idle_duration_secs
         )
     }
 

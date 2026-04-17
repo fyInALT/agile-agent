@@ -112,7 +112,10 @@ impl fmt::Debug for DecisionRegistries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DecisionRegistries")
             .field("actions_count", &self.actions.registered_types().len())
-            .field("situations_count", &self.situations.registered_types().len())
+            .field(
+                "situations_count",
+                &self.situations.registered_types().len(),
+            )
             .finish()
     }
 }
@@ -304,7 +307,9 @@ impl DecisionMakerMeta {
     /// Check if maker supports a situation
     pub fn supports_situation(&self, situation_type: &str) -> bool {
         self.supported_situations.is_empty()
-            || self.supported_situations.contains(&situation_type.to_string())
+            || self
+                .supported_situations
+                .contains(&situation_type.to_string())
     }
 }
 

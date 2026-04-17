@@ -127,7 +127,11 @@ impl StrategySelection {
     /// Add fallback to the chain
     pub fn with_fallback(self, fallback: DecisionMakerType) -> Self {
         Self {
-            fallback_chain: self.fallback_chain.into_iter().chain(std::iter::once(fallback)).collect(),
+            fallback_chain: self
+                .fallback_chain
+                .into_iter()
+                .chain(std::iter::once(fallback))
+                .collect(),
             ..self
         }
     }
@@ -177,7 +181,9 @@ impl TieredStrategy {
     pub fn with_mapping(self, situation: impl Into<String>, maker: DecisionMakerType) -> Self {
         let mut mappings = self.tier_mappings;
         mappings.insert(situation.into(), maker);
-        Self { tier_mappings: mappings }
+        Self {
+            tier_mappings: mappings,
+        }
     }
 
     /// Determine tier from situation
@@ -321,7 +327,10 @@ impl SituationMappingStrategy {
     }
 
     /// Create with default maker
-    pub fn with_default(mappings: std::collections::HashMap<String, DecisionMakerType>, default: DecisionMakerType) -> Self {
+    pub fn with_default(
+        mappings: std::collections::HashMap<String, DecisionMakerType>,
+        default: DecisionMakerType,
+    ) -> Self {
         Self {
             mappings,
             default_maker: default,
@@ -344,7 +353,10 @@ impl Default for SituationMappingStrategy {
     fn default() -> Self {
         let mut mappings = std::collections::HashMap::new();
         // Default mappings matching tiered strategy
-        mappings.insert("waiting_for_choice".to_string(), DecisionMakerType::rule_based());
+        mappings.insert(
+            "waiting_for_choice".to_string(),
+            DecisionMakerType::rule_based(),
+        );
         mappings.insert("agent_idle".to_string(), DecisionMakerType::rule_based());
         mappings.insert("claims_completion".to_string(), DecisionMakerType::llm());
         mappings.insert("error".to_string(), DecisionMakerType::llm());
@@ -432,7 +444,10 @@ impl AdaptiveStrategy {
 
     /// Set minimum samples for adaptation
     pub fn with_min_samples(self, min_samples: u32) -> Self {
-        Self { min_samples, ..self }
+        Self {
+            min_samples,
+            ..self
+        }
     }
 
     /// Set adaptation threshold
@@ -460,7 +475,10 @@ impl AdaptiveStrategy {
 
     /// Get success rate for maker type
     pub fn success_rate(&self, maker_type: &DecisionMakerType) -> f64 {
-        self.success_rates.get(&maker_type.name).copied().unwrap_or(0.8)
+        self.success_rates
+            .get(&maker_type.name)
+            .copied()
+            .unwrap_or(0.8)
     }
 }
 
@@ -565,7 +583,10 @@ impl DecisionStrategy for CompositeStrategy {
             let selection = strategy.select_maker(context, available_makers);
 
             // Check if the selected maker is actually available
-            if available_makers.iter().any(|m| m.maker_type.matches(&selection)) {
+            if available_makers
+                .iter()
+                .any(|m| m.maker_type.matches(&selection))
+            {
                 return selection;
             }
         }
@@ -595,13 +616,17 @@ impl DecisionStrategy for CompositeStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtin_situations::{ClaimsCompletionSituation, ErrorSituation, WaitingForChoiceSituation};
+    use crate::builtin_situations::{
+        ClaimsCompletionSituation, ErrorSituation, WaitingForChoiceSituation,
+    };
     use crate::context::DecisionContext;
     use crate::situation::{ChoiceOption, ErrorInfo};
 
     fn make_context_waiting_for_choice() -> DecisionContext {
         DecisionContext::new(
-            Box::new(WaitingForChoiceSituation::new(vec![ChoiceOption::new("A", "Option A")])),
+            Box::new(WaitingForChoiceSituation::new(vec![ChoiceOption::new(
+                "A", "Option A",
+            )])),
             "test-agent",
         )
     }
@@ -623,10 +648,12 @@ mod tests {
     fn make_available_makers() -> Vec<DecisionMakerMeta> {
         vec![
             DecisionMakerMeta::new(DecisionMakerType::rule_based())
-                .with_situations(vec!["waiting_for_choice".to_string(), "agent_idle".to_string()])
+                .with_situations(vec![
+                    "waiting_for_choice".to_string(),
+                    "agent_idle".to_string(),
+                ])
                 .with_priority(100),
-            DecisionMakerMeta::new(DecisionMakerType::llm())
-                .with_priority(90),
+            DecisionMakerMeta::new(DecisionMakerType::llm()).with_priority(90),
             DecisionMakerMeta::new(DecisionMakerType::human())
                 .handles_critical()
                 .with_priority(80),
@@ -635,11 +662,7 @@ mod tests {
 
     #[test]
     fn test_strategy_selection_new() {
-        let selection = StrategySelection::new(
-            DecisionMakerType::llm(),
-            "test",
-            "test reason",
-        );
+        let selection = StrategySelection::new(DecisionMakerType::llm(), "test", "test reason");
         assert_eq!(selection.maker_type.name, "llm");
         assert_eq!(selection.strategy_name, "test");
         assert!(selection.fallback_chain.is_empty());
@@ -647,11 +670,8 @@ mod tests {
 
     #[test]
     fn test_strategy_selection_with_fallback() {
-        let selection = StrategySelection::new(
-            DecisionMakerType::llm(),
-            "test",
-            "test",
-        ).with_fallback(DecisionMakerType::rule_based());
+        let selection = StrategySelection::new(DecisionMakerType::llm(), "test", "test")
+            .with_fallback(DecisionMakerType::rule_based());
 
         assert_eq!(selection.fallback_chain.len(), 1);
         assert_eq!(selection.next_fallback().unwrap().name, "rule_based");
@@ -689,8 +709,8 @@ mod tests {
 
     #[test]
     fn test_tiered_strategy_custom_mapping() {
-        let strategy = TieredStrategy::new()
-            .with_mapping("claims_completion", DecisionMakerType::human());
+        let strategy =
+            TieredStrategy::new().with_mapping("claims_completion", DecisionMakerType::human());
 
         let context = make_context_claims_completion();
         let makers = make_available_makers();
@@ -734,9 +754,8 @@ mod tests {
 
         let strategy = SituationMappingStrategy::new(mappings);
 
-        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
-            crate::builtin_situations::WaitingForChoiceSituation::default(),
-        );
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(crate::builtin_situations::WaitingForChoiceSituation::default());
         let context = DecisionContext::new(situation, "test");
         let makers = make_available_makers();
 

@@ -5,10 +5,10 @@
 //! The `DecisionMakerRegistry` manages decision makers and their metadata,
 //! allowing strategies to query available makers and select appropriate ones.
 
+use crate::context::DecisionContext;
 use crate::error::DecisionError;
 use crate::maker::{DecisionMaker, DecisionMakerMeta, DecisionMakerType, DecisionRegistries};
 use crate::strategy::{CompositeStrategy, DecisionStrategy, StrategySelection};
-use crate::context::DecisionContext;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -84,7 +84,10 @@ impl DecisionMakerRegistry {
     /// Register a decision maker with metadata
     pub fn register(&self, maker: Box<dyn DecisionMaker>, meta: DecisionMakerMeta) {
         let maker_type = maker.maker_type();
-        self.makers.write().unwrap().insert(maker_type.clone(), maker);
+        self.makers
+            .write()
+            .unwrap()
+            .insert(maker_type.clone(), maker);
         self.metadata.write().unwrap().insert(maker_type, meta);
     }
 
@@ -92,7 +95,10 @@ impl DecisionMakerRegistry {
     pub fn register_default(&self, maker: Box<dyn DecisionMaker>) {
         let maker_type = maker.maker_type();
         let meta = DecisionMakerMeta::new(maker_type.clone());
-        self.makers.write().unwrap().insert(maker_type.clone(), maker);
+        self.makers
+            .write()
+            .unwrap()
+            .insert(maker_type.clone(), maker);
         self.metadata.write().unwrap().insert(maker_type, meta);
     }
 
@@ -100,7 +106,10 @@ impl DecisionMakerRegistry {
     pub fn register_with_priority(&self, maker: Box<dyn DecisionMaker>, priority: u8) {
         let maker_type = maker.maker_type();
         let meta = DecisionMakerMeta::new(maker_type.clone()).with_priority(priority);
-        self.makers.write().unwrap().insert(maker_type.clone(), maker);
+        self.makers
+            .write()
+            .unwrap()
+            .insert(maker_type.clone(), maker);
         self.metadata.write().unwrap().insert(maker_type, meta);
     }
 
@@ -117,7 +126,10 @@ impl DecisionMakerRegistry {
     ///
     /// Note: This returns a cloned maker for mutation to avoid
     /// holding the write lock during decision execution.
-    pub fn get_for_execution(&self, maker_type: &DecisionMakerType) -> Option<Box<dyn DecisionMaker>> {
+    pub fn get_for_execution(
+        &self,
+        maker_type: &DecisionMakerType,
+    ) -> Option<Box<dyn DecisionMaker>> {
         self.makers
             .read()
             .unwrap()
@@ -163,11 +175,8 @@ impl DecisionMakerRegistry {
         let maker_type = strategy.select_maker(context, &metadata);
         let fallback = strategy.fallback();
 
-        StrategySelection::new(
-            maker_type,
-            strategy.strategy_name(),
-            "strategy selected",
-        ).with_fallbacks(fallback.into_iter().collect())
+        StrategySelection::new(maker_type, strategy.strategy_name(), "strategy selected")
+            .with_fallbacks(fallback.into_iter().collect())
     }
 
     /// Make a decision using the selected maker
@@ -224,10 +233,12 @@ impl DecisionMakerRegistry {
         Err(DecisionError::EngineError(
             last_error
                 .map(|e| format!("Decision failed: {}", e))
-                .unwrap_or_else(|| format!(
-                    "Maker {} not available or not healthy",
-                    selection.maker_type
-                ))
+                .unwrap_or_else(|| {
+                    format!(
+                        "Maker {} not available or not healthy",
+                        selection.maker_type
+                    )
+                }),
         ))
     }
 
@@ -278,17 +289,13 @@ impl DecisionMakerRegistry {
         Err(DecisionError::EngineError(
             last_error
                 .map(|e| format!("All makers failed, last error: {}", e))
-                .unwrap_or_else(|| "No healthy makers available".to_string())
+                .unwrap_or_else(|| "No healthy makers available".to_string()),
         ))
     }
 
     /// Check if all makers are healthy
     pub fn all_healthy(&self) -> bool {
-        self.makers
-            .read()
-            .unwrap()
-            .values()
-            .all(|m| m.is_healthy())
+        self.makers.read().unwrap().values().all(|m| m.is_healthy())
     }
 
     /// Reset all makers
@@ -347,7 +354,11 @@ impl DecisionMakerRegistryBuilder {
     }
 
     /// Add a decision maker with metadata
-    pub fn with_maker_and_meta(self, maker: Box<dyn DecisionMaker>, meta: DecisionMakerMeta) -> Self {
+    pub fn with_maker_and_meta(
+        self,
+        maker: Box<dyn DecisionMaker>,
+        meta: DecisionMakerMeta,
+    ) -> Self {
         self.registry.register(maker, meta);
         self
     }
@@ -368,7 +379,8 @@ impl DecisionMakerRegistryBuilder {
     pub fn build(self) -> DecisionMakerRegistry {
         // Set composite strategy if strategies were added
         if !self.composite_strategy.strategies().is_empty() {
-            self.registry.set_strategy(Box::new(self.composite_strategy));
+            self.registry
+                .set_strategy(Box::new(self.composite_strategy));
         }
         self.registry
     }
@@ -519,7 +531,9 @@ mod tests {
     #[test]
     fn test_registry_set_strategy() {
         let registry = DecisionMakerRegistry::new();
-        registry.set_strategy(Box::new(crate::strategy::SituationMappingStrategy::default()));
+        registry.set_strategy(Box::new(
+            crate::strategy::SituationMappingStrategy::default(),
+        ));
 
         let strategy = registry.strategy();
         assert_eq!(strategy.strategy_name(), "situation_mapping");

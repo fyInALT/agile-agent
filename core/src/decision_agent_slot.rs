@@ -339,7 +339,9 @@ impl DecisionAgentSlot {
         );
 
         // Build and log the prompt sent to decision engine
-        let decision_prompt = self.engine.build_prompt(&request.context, &self.action_registry);
+        let decision_prompt = self
+            .engine
+            .build_prompt(&request.context, &self.action_registry);
         logging::debug_event(
             "decision_layer.prompt_sent",
             "prompt sent to decision engine",

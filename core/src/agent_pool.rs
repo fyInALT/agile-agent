@@ -1317,14 +1317,14 @@ impl AgentPool {
     pub fn agents_with_pending_decisions(&self) -> Vec<(AgentId, std::time::Instant)> {
         self.decision_agents
             .iter()
-            .filter_map(|(work_agent_id, decision_agent)| {
-                match decision_agent.status() {
+            .filter_map(
+                |(work_agent_id, decision_agent)| match decision_agent.status() {
                     DecisionAgentStatus::Thinking { started_at } => {
                         Some((work_agent_id.clone(), *started_at))
                     }
-                    _ => None
-                }
-            })
+                    _ => None,
+                },
+            )
             .collect()
     }
 
@@ -1474,7 +1474,10 @@ impl AgentPool {
 
         // Check if agent is blocked (most decisions require blocked state)
         // Allow idle state and waiting_for_input state for some decisions like continue_all_tasks
-        if !slot.status().is_blocked() && !slot.status().is_idle() && !slot.status().is_waiting_for_input() {
+        if !slot.status().is_blocked()
+            && !slot.status().is_idle()
+            && !slot.status().is_waiting_for_input()
+        {
             return DecisionExecutionResult::NotBlocked;
         }
 
@@ -1648,9 +1651,10 @@ impl AgentPool {
                         .to_string();
 
                     // Add reflection prompt as a user message to trigger verification
-                    slot.append_transcript(crate::app::TranscriptEntry::User(
-                        format!("Reflect: {}", prompt),
-                    ));
+                    slot.append_transcript(crate::app::TranscriptEntry::User(format!(
+                        "Reflect: {}",
+                        prompt
+                    )));
 
                     // Transition agent back to idle so it can process the reflection prompt
                     if slot.status().is_blocked() {
@@ -1669,7 +1673,9 @@ impl AgentPool {
                         }),
                     );
 
-                    DecisionExecutionResult::CustomInstruction { instruction: prompt }
+                    DecisionExecutionResult::CustomInstruction {
+                        instruction: prompt,
+                    }
                 }
                 "confirm_completion" => {
                     // Parse params
@@ -1728,7 +1734,9 @@ impl AgentPool {
                         }),
                     );
 
-                    DecisionExecutionResult::CustomInstruction { instruction: prompt }
+                    DecisionExecutionResult::CustomInstruction {
+                        instruction: prompt,
+                    }
                 }
                 "continue_all_tasks" => {
                     // Parse params to get instruction
@@ -1740,9 +1748,7 @@ impl AgentPool {
                         .to_string();
 
                     // Add continue instruction as a user message to trigger work
-                    slot.append_transcript(crate::app::TranscriptEntry::User(
-                        instruction.clone(),
-                    ));
+                    slot.append_transcript(crate::app::TranscriptEntry::User(instruction.clone()));
 
                     // NOTE: We do NOT transition status here. The state transition
                     // will be handled by start_provider_for_agent_with_mode when

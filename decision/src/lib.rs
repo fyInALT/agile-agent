@@ -126,7 +126,7 @@ pub use rule_engine::*;
 // Note: tiered_engine exports DecisionTier which conflicts with strategy::DecisionTier
 // We export specific types instead to avoid ambiguity
 pub use tiered_engine::{
-    TieredDecisionEngine, TieredEngineConfig, TieredDecisionRecord, TierStatistics,
+    TierStatistics, TieredDecisionEngine, TieredDecisionRecord, TieredEngineConfig,
 };
 
 // Re-export Sprint 4-5 types

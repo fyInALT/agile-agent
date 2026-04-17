@@ -286,7 +286,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         // - "waiting_for_input": Idle timeout recovery (will be transitioned)
                         //
                         // Invalid states: "stopping", "stopped", "tool_executing", "finishing"
-                        let slot_status = state.agent_pool.as_ref()
+                        let slot_status = state
+                            .agent_pool
+                            .as_ref()
                             .and_then(|pool| pool.get_slot_by_id(&agent_id))
                             .map(|slot| slot.status().label());
 
