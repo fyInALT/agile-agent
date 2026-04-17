@@ -175,8 +175,8 @@ impl ProviderThreadHandle {
     /// # Implementation
     ///
     /// 1. Drop the keepalive sender to signal thread shutdown
-    /// 2. Wait for thread to finish via join with timeout
-    /// 3. If timeout expires, abandon the thread (log warning)
+    /// 2. Wait for thread to finish via watcher thread with timeout
+    /// 3. If timeout expires, abandon the thread (watcher becomes orphan but will be reaped on exit)
     /// 4. Catch any panic and report as Panicked result
     pub fn stop(&mut self, timeout: Duration) -> ThreadStopResult {
         if self.handle.is_none() {
@@ -226,7 +226,6 @@ impl ProviderThreadHandle {
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                // Watcher thread failed somehow, treat as timeout
                 ThreadStopResult::TimeoutAbandoned {
                     timeout_ms: timeout.as_millis() as u64,
                 }
