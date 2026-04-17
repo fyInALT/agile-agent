@@ -204,14 +204,21 @@ impl BlockingReason for HumanDecisionBlocking {
     }
 
     fn can_auto_resolve(&self) -> bool {
-        self.recommendation.is_some()
+        // Bug fix: Consistent logic - can auto resolve if we have a recommendation
+        // OR if there are options available (can select default)
+        self.recommendation.is_some() || !self.options.is_empty()
     }
 
     fn auto_resolve_action(&self) -> Option<AutoAction> {
+        // Bug fix: Consistent with can_auto_resolve
         if self.recommendation.is_some() {
             Some(AutoAction::FollowRecommendation)
-        } else {
+        } else if !self.options.is_empty() {
+            // Only return SelectDefault if there are actual options
             Some(AutoAction::SelectDefault)
+        } else {
+            // No recommendation and no options - cannot auto resolve
+            None
         }
     }
 
@@ -653,6 +660,48 @@ impl HumanDecisionQueue {
             .or_else(|| self.low.first())
     }
 
+    /// Find request by agent ID (for decision action execution)
+    ///
+    /// Returns a reference to the request belonging to the specified agent.
+    /// This is used when executing decision actions to ensure the action
+    /// is applied to the correct agent's request.
+    pub fn find_by_agent_id(&self, agent_id: &str) -> Option<&HumanDecisionRequest> {
+        // Search all queues for the agent's request
+        self.critical.iter()
+            .find(|r| r.agent_id == agent_id)
+            .or_else(|| self.high.iter().find(|r| r.agent_id == agent_id))
+            .or_else(|| self.medium.iter().find(|r| r.agent_id == agent_id))
+            .or_else(|| self.low.iter().find(|r| r.agent_id == agent_id))
+    }
+
+    /// Find and remove request by agent ID
+    ///
+    /// Returns the request belonging to the specified agent and removes it from the queue.
+    pub fn find_and_remove_by_agent_id(&mut self, agent_id: &str) -> Option<HumanDecisionRequest> {
+        // Try each queue in priority order
+        if let Some(pos) = self.critical.iter().position(|r| r.agent_id == agent_id) {
+            let request = self.critical.remove(pos);
+            self.id_index.remove(&request.id);
+            return Some(request);
+        }
+        if let Some(pos) = self.high.iter().position(|r| r.agent_id == agent_id) {
+            let request = self.high.remove(pos);
+            self.id_index.remove(&request.id);
+            return Some(request);
+        }
+        if let Some(pos) = self.medium.iter().position(|r| r.agent_id == agent_id) {
+            let request = self.medium.remove(pos);
+            self.id_index.remove(&request.id);
+            return Some(request);
+        }
+        if let Some(pos) = self.low.iter().position(|r| r.agent_id == agent_id) {
+            let request = self.low.remove(pos);
+            self.id_index.remove(&request.id);
+            return Some(request);
+        }
+        None
+    }
+
     /// Complete request
     pub fn complete(&mut self, response: HumanDecisionResponse) -> bool {
         // Find and remove request
@@ -796,14 +845,31 @@ mod tests {
 
     #[test]
     fn test_human_decision_blocking_auto_resolve_without_recommendation() {
+        // Bug fix test: Without recommendation and without options,
+        // auto_resolve_action should return None (cannot auto resolve)
         let blocking = HumanDecisionBlocking::new(
             "req-1",
             Box::new(WaitingForChoiceSituation::default()),
-            vec![],
+            vec![], // Empty options
         );
-        // Without recommendation, can_auto_resolve is false
+        // Without recommendation AND without options, can_auto_resolve is false
         assert!(!blocking.can_auto_resolve());
-        // But auto_resolve_action still returns SelectDefault as fallback
+        // auto_resolve_action returns None when there's nothing to select
+        assert_eq!(blocking.auto_resolve_action(), None);
+    }
+
+    #[test]
+    fn test_human_decision_blocking_auto_resolve_without_recommendation_but_with_options() {
+        // Bug fix test: Without recommendation but WITH options,
+        // auto_resolve_action should return SelectDefault
+        let blocking = HumanDecisionBlocking::new(
+            "req-1",
+            Box::new(WaitingForChoiceSituation::default()),
+            vec![ChoiceOption::new("A", "Option A")], // Has options
+        );
+        // With options available, can_auto_resolve should be true
+        assert!(blocking.can_auto_resolve());
+        // auto_resolve_action returns SelectDefault when there are options
         assert_eq!(blocking.auto_resolve_action(), Some(AutoAction::SelectDefault));
     }
 

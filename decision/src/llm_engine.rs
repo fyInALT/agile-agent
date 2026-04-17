@@ -208,6 +208,14 @@ impl LLMDecisionEngine {
         self.reflection_round
     }
 
+    /// Set reflection round from external state (for synchronization)
+    ///
+    /// This is used to synchronize reflection_round with DecisionAgentState
+    /// when the engine is created or reused across decisions.
+    pub fn set_reflection_round(&mut self, round: u8) {
+        self.reflection_round = round;
+    }
+
     /// Increment reflection round (for claims_completion)
     pub fn increment_reflection_round(&mut self) {
         self.reflection_round += 1;
@@ -216,6 +224,19 @@ impl LLMDecisionEngine {
     /// Reset reflection round (for new task)
     pub fn reset_reflection_round(&mut self) {
         self.reflection_round = 0;
+    }
+
+    /// Sync reflection round from context (if provided)
+    ///
+    /// This ensures the engine uses the correct reflection round
+    /// from the DecisionContext's running context.
+    fn sync_reflection_round_from_context(&mut self, context: &DecisionContext) {
+        // If context has reflection_round metadata, sync it
+        if let Some(round) = context.metadata.get("reflection_round") {
+            if let Ok(r) = round.parse::<u8>() {
+                self.reflection_round = r;
+            }
+        }
     }
 
     /// Build prompt from context using PromptBuilder if available
@@ -540,8 +561,35 @@ impl DecisionEngine for LLMDecisionEngine {
         // Get situation type for reflection tracking
         let situation_type_name = context.trigger_situation.situation_type().name;
 
-        // Auto-increment reflection_round for claims_completion
-        // (This tracks how many times we've asked for reflection)
+        // Bug fix: Sync reflection_round from context metadata first
+        // This ensures engine uses the correct round from DecisionAgentState
+        self.sync_reflection_round_from_context(&context);
+
+        // Bug fix: Sync decision history from context
+        // This ensures engine uses history from DecisionAgentState
+        // We merge context history into engine history if context has newer entries
+        if !context.decision_history.is_empty() {
+            // Add context history entries that aren't already in engine history
+            for record in &context.decision_history {
+                // Check if this record already exists in engine history
+                let exists = self.history.iter().any(|r| r.id == record.decision_id);
+                if !exists {
+                    // Convert DecisionRecord to LLMDecisionRecord
+                    let llm_record = LLMDecisionRecord {
+                        id: record.decision_id.clone(),
+                        situation_type: record.situation_type.clone(),
+                        action_type: record.action_types.first().cloned().unwrap_or_else(|| ActionType::new("unknown")),
+                        reasoning: record.reasoning.clone(),
+                        confidence: record.confidence,
+                        timestamp: record.timestamp.to_rfc3339(),
+                    };
+                    self.history.push(llm_record);
+                }
+            }
+        }
+
+        // Auto-increment reflection_round for claims_completion if still at 0
+        // (This handles the first claims_completion event)
         if situation_type_name == "claims_completion" && self.reflection_round == 0 {
             self.reflection_round = 1;
         }
@@ -558,6 +606,14 @@ impl DecisionEngine for LLMDecisionEngine {
             context.trigger_situation.as_ref(),
             action_registry,
         )?;
+
+        // Bug fix: Ensure actions are not empty
+        // If parse succeeded but returned empty actions, this is an error
+        if actions.is_empty() {
+            return Err(DecisionError::ParseError(
+                "Parsed response produced no actions".to_string()
+            ));
+        }
 
         // 4. Extract metadata
         let reasoning = self.extract_reasoning(&response);
@@ -589,7 +645,9 @@ impl DecisionEngine for LLMDecisionEngine {
             self.history.push(record);
         }
 
-        Ok(DecisionOutput::new(actions, reasoning).with_confidence(confidence))
+        Ok(DecisionOutput::new(actions, reasoning)
+            .with_confidence(confidence)
+            .with_reflection_round(self.reflection_round))
     }
 
     fn build_prompt(&self, context: &DecisionContext, action_registry: &ActionRegistry) -> String {

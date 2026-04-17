@@ -1403,10 +1403,23 @@ impl AgentPool {
                         serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
                     let option_id = params["option_id"].as_str().unwrap_or("a").to_string();
 
-                    // Execute the selection - find pending request for this agent
-                    // The human_queue stores requests with agent_id in the context
-                    let pending_request = self.human_queue.peek();
+                    // Execute the selection - find pending request for THIS agent
+                    // Bug fix: Use find_by_agent_id to ensure we process the correct agent's request
+                    let pending_request = self.human_queue.find_by_agent_id(work_agent_id.as_str());
                     if let Some(request) = pending_request {
+                        // Verify this request belongs to our agent (double-check)
+                        if request.agent_id != work_agent_id.as_str() {
+                            logging::warn_event(
+                                "pool.decision_action.mismatch",
+                                "request agent_id mismatch",
+                                serde_json::json!({
+                                    "work_agent_id": work_agent_id.as_str(),
+                                    "request_agent_id": request.agent_id,
+                                }),
+                            );
+                            return DecisionExecutionResult::Cancelled;
+                        }
+
                         // Create response with the selection
                         let selection = HumanSelection::selected(option_id.clone());
                         let response = HumanDecisionResponse::new(request.id.clone(), selection);
@@ -1427,13 +1440,20 @@ impl AgentPool {
                             }
                         }
                     } else {
-                        // No pending request - agent might not be blocked
+                        // No pending request for this agent - might not be blocked correctly
+                        logging::warn_event(
+                            "pool.decision_action.no_request",
+                            "no pending request for this agent",
+                            serde_json::json!({
+                                "work_agent_id": work_agent_id.as_str(),
+                            }),
+                        );
                         DecisionExecutionResult::NotBlocked
                     }
                 }
                 "skip" => {
-                    // Skip the current task
-                    let pending_request = self.human_queue.peek();
+                    // Skip the current task for THIS agent
+                    let pending_request = self.human_queue.find_by_agent_id(work_agent_id.as_str());
                     if let Some(request) = pending_request {
                         let response =
                             HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());

@@ -29,6 +29,9 @@ pub struct DecisionContext {
 
     /// Decision history for this session
     pub decision_history: Vec<DecisionRecord>,
+
+    /// Metadata for engine state synchronization (e.g., reflection_round)
+    pub metadata: HashMap<String, String>,
 }
 
 impl DecisionContext {
@@ -44,6 +47,7 @@ impl DecisionContext {
             running_context: RunningContextCache::default(),
             project_rules: ProjectRules::default(),
             decision_history: Vec::new(),
+            metadata: HashMap::new(),
         }
     }
 
@@ -59,6 +63,28 @@ impl DecisionContext {
             current_story_id: Some(story_id.into()),
             ..self
         }
+    }
+
+    /// Set reflection round in metadata for engine synchronization
+    pub fn with_reflection_round(self, round: u8) -> Self {
+        let mut metadata = self.metadata;
+        metadata.insert("reflection_round".to_string(), round.to_string());
+        Self { metadata, ..self }
+    }
+
+    /// Set metadata value
+    pub fn with_metadata(self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        let mut metadata = self.metadata;
+        metadata.insert(key.into(), value.into());
+        Self { metadata, ..self }
+    }
+
+    /// Get reflection round from metadata
+    pub fn reflection_round(&self) -> u8 {
+        self.metadata
+            .get("reflection_round")
+            .and_then(|s| s.parse::<u8>().ok())
+            .unwrap_or(0)
     }
 
     /// Get situation type

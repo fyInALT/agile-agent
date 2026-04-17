@@ -353,21 +353,74 @@ impl DecisionEngine for TieredDecisionEngine {
         let tier = self.select_tier(context.trigger_situation.as_ref());
         let situation_type = context.trigger_situation.situation_type();
 
+        // Bug fix: Get llm_provider before calling select_engine to avoid borrow issues
+        let llm_provider = self.config.llm_provider;
+
         // 2. Get engine type for this tier
         let engine_type = match tier {
             DecisionTier::Simple => DecisionEngineType::RuleBased,
-            DecisionTier::Medium => DecisionEngineType::LLM { provider: self.config.llm_provider },
-            DecisionTier::Complex => DecisionEngineType::LLM { provider: self.config.llm_provider },
-            DecisionTier::Critical => DecisionEngineType::CLI { provider: self.config.llm_provider },
+            DecisionTier::Medium => DecisionEngineType::LLM { provider: llm_provider },
+            DecisionTier::Complex => DecisionEngineType::LLM { provider: llm_provider },
+            DecisionTier::Critical => DecisionEngineType::CLI { provider: llm_provider },
         };
 
-        // 3. Select engine
+        // 3. Select engine and try decision with fallback
+        // Bug fix: Implement proper fallback mechanism
+        // Note: We can't clone context, so we pass it directly to primary engine
+        // If primary fails, we rebuild a minimal context for fallback
         let engine = self.select_engine(tier);
+        let output_result = engine.decide(context, action_registry);
 
-        // 4. Make decision
-        let output = engine.decide(context, action_registry)?;
+        let output = match output_result {
+            Ok(out) => out,
+            Err(e) => {
+                // Try fallback tier if configured and different from current
+                let fallback_tier = self.config.fallback_tier;
+                if fallback_tier != tier {
+                    // Rebuild minimal context for fallback (since context was consumed)
+                    let registry = crate::situation_registry::SituationRegistry::new();
+                    crate::builtin_situations::register_situation_builtins(&registry);
+                    let fallback_situation = registry.build(situation_type.clone());
+                    let fallback_context = DecisionContext::new(fallback_situation, "tiered-fallback");
 
-        // 5. Record decision
+                    // Select fallback engine
+                    let fallback_engine = self.select_engine(fallback_tier);
+                    let fallback_engine_type = match fallback_tier {
+                        DecisionTier::Simple => DecisionEngineType::RuleBased,
+                        DecisionTier::Medium | DecisionTier::Complex =>
+                            DecisionEngineType::LLM { provider: llm_provider },
+                        DecisionTier::Critical =>
+                            DecisionEngineType::CLI { provider: llm_provider },
+                    };
+
+                    // Try fallback
+                    match fallback_engine.decide(fallback_context, action_registry) {
+                        Ok(fallback_output) => {
+                            // Record with fallback info
+                            self.record_decision(
+                                situation_type,
+                                fallback_tier,
+                                fallback_engine_type,
+                                &fallback_output,
+                            );
+                            return Ok(fallback_output);
+                        }
+                        Err(fallback_err) => {
+                            // Both failed - return original error with context
+                            return Err(crate::error::DecisionError::EngineError(
+                                format!("Primary engine failed: {}. Fallback engine also failed: {}",
+                                    e, fallback_err)
+                            ));
+                        }
+                    }
+                } else {
+                    // No fallback available
+                    return Err(e);
+                }
+            }
+        };
+
+        // 4. Record decision
         self.record_decision(situation_type, tier, engine_type, &output);
 
         Ok(output)

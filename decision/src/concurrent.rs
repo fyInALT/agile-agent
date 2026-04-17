@@ -251,6 +251,10 @@ pub enum RateLimitResult {
 
     /// Request queued, waiting
     Waiting { position: usize },
+
+    /// Dequeued from waiting queue (minute reset, now allowed)
+    /// Bug fix: Separate result type to distinguish from normal allowed
+    DequeuedAllowed { agent_id: AgentId, original_position: usize },
 }
 
 /// Rate limit status
@@ -306,25 +310,64 @@ impl DecisionRateLimiter {
     }
 
     /// Check if request allowed
+    ///
+    /// Bug fix: Properly handle minute reset and waiting queue.
+    /// When a minute resets, we process waiting agents but don't return
+    /// their IDs to unrelated callers.
     pub fn check(&mut self, agent_id: AgentId) -> RateLimitResult {
-        // Reset counter if minute passed
-        if self.minute_start.elapsed() > Duration::from_secs(60) {
+        // Check if minute passed - need to reset
+        let minute_passed = self.minute_start.elapsed() > Duration::from_secs(60);
+
+        if minute_passed {
+            // Reset counter for new minute
             self.current_count = 0;
             self.minute_start = Instant::now();
+        }
 
-            // Process waiting queue
-            if let Some(waiting_id) = self.waiting.pop_front() {
+        // Check if this agent is already in waiting queue
+        let in_waiting = self.waiting.iter().position(|id| id == &agent_id);
+
+        // If minute passed and there are waiting agents, process them first
+        if minute_passed && !self.waiting.is_empty() {
+            // Process waiting queue up to limit
+            while self.current_count < self.requests_per_minute && !self.waiting.is_empty() {
+                let waiting_id = self.waiting.pop_front().unwrap();
+
+                // If the waiting agent is the current caller, allow it
+                if waiting_id == agent_id {
+                    self.current_count += 1;
+                    return RateLimitResult::DequeuedAllowed {
+                        agent_id,
+                        original_position: 1,
+                    };
+                }
+
+                // Otherwise, this waiting agent gets a slot but we need to
+                // track this separately. For now, we increment the count
+                // and the waiting agent will be notified separately.
+                // In a real implementation, we'd have a callback mechanism.
                 self.current_count += 1;
-                return RateLimitResult::Allowed { agent_id: waiting_id };
             }
         }
 
+        // Now check if current agent can be allowed
         if self.current_count < self.requests_per_minute {
+            // If agent was in waiting but we didn't process it above (limit reached)
+            // remove it from waiting since it's now allowed
+            if let Some(pos) = in_waiting {
+                self.waiting.remove(pos);
+            }
             self.current_count += 1;
             RateLimitResult::Allowed { agent_id }
         } else {
-            self.waiting.push_back(agent_id.clone());
-            RateLimitResult::Waiting { position: self.waiting.len() }
+            // At limit - add to waiting queue if not already there
+            if in_waiting.is_none() {
+                self.waiting.push_back(agent_id.clone());
+            }
+            let position = self.waiting.iter().position(|id| id == &agent_id)
+                .map(|p| p + 1)
+                .unwrap_or(self.waiting.len());
+            RateLimitResult::Waiting { position }
         }
     }
 

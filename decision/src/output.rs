@@ -18,6 +18,10 @@ pub struct DecisionOutput {
 
     /// Whether human was requested
     pub human_requested: bool,
+
+    /// Updated reflection round (for claims_completion tracking)
+    /// Bug fix: Add this field to sync back to DecisionAgentState
+    pub updated_reflection_round: Option<u8>,
 }
 
 impl DecisionOutput {
@@ -27,6 +31,7 @@ impl DecisionOutput {
             reasoning: reasoning.into(),
             confidence: 0.8,
             human_requested: false,
+            updated_reflection_round: None,
         }
     }
 
@@ -37,6 +42,14 @@ impl DecisionOutput {
     pub fn with_human_requested(self) -> Self {
         Self {
             human_requested: true,
+            ..self
+        }
+    }
+
+    /// Bug fix: Set updated reflection round for syncing back
+    pub fn with_reflection_round(self, round: u8) -> Self {
+        Self {
+            updated_reflection_round: Some(round),
             ..self
         }
     }
@@ -59,6 +72,7 @@ impl DecisionOutput {
             reasoning: self.reasoning.clone(),
             confidence: self.confidence,
             human_requested: self.human_requested,
+            reflection_round: self.updated_reflection_round,
         }
     }
 
@@ -83,6 +97,7 @@ impl DecisionOutput {
             reasoning: serde.reasoning,
             confidence: serde.confidence,
             human_requested: serde.human_requested,
+            updated_reflection_round: serde.reflection_round,
         })
     }
 }
@@ -104,6 +119,10 @@ pub struct DecisionOutputSerde {
 
     /// Human requested
     pub human_requested: bool,
+
+    /// Updated reflection round (Bug fix: add for syncing)
+    #[serde(default)]
+    pub reflection_round: Option<u8>,
 }
 
 /// Decision record - history entry
@@ -211,6 +230,7 @@ mod tests {
             reasoning: "test".to_string(),
             confidence: 0.8,
             human_requested: false,
+            reflection_round: None,
         };
 
         let json = serde_json::to_string(&serde).unwrap();

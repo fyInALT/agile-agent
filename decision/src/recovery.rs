@@ -64,7 +64,12 @@ impl RecoveryLevel {
         engine_switch_count: u8,
         human_requested: bool,
     ) -> Self {
-        if retry_count < max_retries {
+        // Bug fix: Handle edge case where max_retries is 0
+        // If max_retries is 0, we should still have at least one AutoRetry attempt
+        // before escalating
+        let effective_max = if max_retries == 0 { 1 } else { max_retries };
+
+        if retry_count < effective_max {
             if retry_count < 2 {
                 RecoveryLevel::AutoRetry
             } else {
