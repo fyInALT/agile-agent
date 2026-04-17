@@ -505,7 +505,10 @@ fn overview_spawn_agent_shows_in_list() {
     // Initially shows OVERVIEW agent
     let rendered_before = shell.render_to_string(80, 24);
     println!("=== Before spawn ===\n{}", rendered_before);
-    assert!(rendered_before.contains("OVERVIEW"), "Should show OVERVIEW agent");
+    assert!(
+        rendered_before.contains("OVERVIEW"),
+        "Should show OVERVIEW agent"
+    );
 
     // Spawn a worker agent
     shell.state.spawn_agent(ProviderKind::Mock);
@@ -737,7 +740,7 @@ fn overview_search_starts_with_slash() {
     let mut shell = ShellHarness::new(ProviderKind::Mock);
     shell.state.view_state.switch_by_number(6);
 
-    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('/'), KeyModifiers::CONTROL);
 
     assert!(shell.state.view_state.overview.search_active);
 }
@@ -748,7 +751,7 @@ fn overview_search_input_and_cancel() {
     shell.state.view_state.switch_by_number(6);
 
     // Start search
-    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('/'), KeyModifiers::CONTROL);
     shell.press(KeyCode::Char('a'), KeyModifiers::NONE);
     shell.press(KeyCode::Char('l'), KeyModifiers::NONE);
 
@@ -764,12 +767,15 @@ fn overview_search_input_and_cancel() {
 #[test]
 fn overview_search_moves_real_focus_to_matching_agent() {
     let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
-    shell.state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+    shell
+        .state
+        .spawn_agent(ProviderKind::Mock)
+        .expect("spawn alpha");
     shell.state.view_state.switch_by_number(6);
 
     assert_eq!(shell.state.focused_agent_codename(), "OVERVIEW");
 
-    shell.press(KeyCode::Char('/'), KeyModifiers::NONE);
+    shell.press(KeyCode::Char('/'), KeyModifiers::CONTROL);
     shell.press(KeyCode::Char('a'), KeyModifiers::NONE);
 
     assert_eq!(shell.state.focused_agent_codename(), "alpha");
@@ -778,7 +784,10 @@ fn overview_search_moves_real_focus_to_matching_agent() {
 #[test]
 fn overview_mode_shows_focused_worker_transcript_in_lower_pane() {
     let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
-    let alpha_id = shell.state.spawn_agent(ProviderKind::Mock).expect("spawn alpha");
+    let alpha_id = shell
+        .state
+        .spawn_agent(ProviderKind::Mock)
+        .expect("spawn alpha");
     {
         let pool = shell.state.agent_pool.as_mut().expect("agent pool");
         let slot = pool.get_slot_mut_by_id(&alpha_id).expect("alpha slot");
@@ -800,7 +809,10 @@ fn overview_mode_shows_focused_worker_transcript_in_lower_pane() {
 fn overview_page_offset_changes_visible_workers() {
     let mut shell = ShellHarness::new_with_overview(ProviderKind::Mock);
     for _ in 0..4 {
-        shell.state.spawn_agent(ProviderKind::Mock).expect("spawn worker");
+        shell
+            .state
+            .spawn_agent(ProviderKind::Mock)
+            .expect("spawn worker");
     }
     shell.state.view_state.switch_by_number(6);
     shell.state.view_state.overview.agent_list_rows = 3;
@@ -868,7 +880,11 @@ fn ctrl_n_opens_provider_overlay() {
     assert!(shell.state.is_provider_overlay_open());
 
     let rendered = shell.render_to_string(80, 24);
-    assert!(rendered.contains("New Agent"), "Should show provider overlay. Got:\n{}", rendered);
+    assert!(
+        rendered.contains("New Agent"),
+        "Should show provider overlay. Got:\n{}",
+        rendered
+    );
 }
 
 #[test]
@@ -916,7 +932,11 @@ fn provider_selection_for_mock_skips_launch_config_overlay() {
 
     // Check that new agent was spawned
     let statuses = shell.state.agent_statuses();
-    assert!(statuses.len() >= 2, "Should have at least 2 agents (OVERVIEW + new). Got: {}", statuses.len());
+    assert!(
+        statuses.len() >= 2,
+        "Should have at least 2 agents (OVERVIEW + new). Got: {}",
+        statuses.len()
+    );
 }
 
 #[test]

@@ -85,7 +85,10 @@ impl HumanDecisionOverlay {
 
     /// Get current selection label
     pub fn current_selection_label(&self) -> Option<&str> {
-        self.request.options.get(self.selected_index).map(|o| o.label.as_str())
+        self.request
+            .options
+            .get(self.selected_index)
+            .map(|o| o.label.as_str())
     }
 
     /// Move selection up (previous option)
@@ -196,29 +199,30 @@ impl HumanDecisionOverlay {
                         HumanDecisionCommand::Cancel
                     }
                 }
-                // R for recommendation (before letter selection)
-                KeyCode::Char('r') | KeyCode::Char('R') => {
+                // Ctrl+R for recommendation
+                KeyCode::Char('r') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                     if self.request.recommendation.is_some() {
                         HumanDecisionCommand::AcceptRecommendation
                     } else {
                         HumanDecisionCommand::None
                     }
                 }
-                // I for custom instruction (before letter selection)
-                KeyCode::Char('i') | KeyCode::Char('I') => {
+                // Ctrl+I for custom instruction
+                KeyCode::Char('i') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.enter_custom_mode();
                     HumanDecisionCommand::None
                 }
-                // S for skip (before letter selection)
-                KeyCode::Char('s') | KeyCode::Char('S') => {
+                // Ctrl+S for skip
+                KeyCode::Char('s') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                     HumanDecisionCommand::Skip
                 }
-                // Letter selection (A, B, C, D... excluding R, I, S)
-                KeyCode::Char(letter) if letter.is_ascii_uppercase() && letter >= 'A' => {
-                    // Skip special keys R, I, S
-                    if letter == 'R' || letter == 'I' || letter == 'S' {
-                        HumanDecisionCommand::None
-                    } else if self.select_by_letter(letter) {
+                // Letter selection (A, B, C, D...) - no modifier required
+                KeyCode::Char(letter)
+                    if letter.is_ascii_uppercase()
+                        && letter >= 'A'
+                        && !key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    if self.select_by_letter(letter) {
                         if let Some(option) = self.request.options.get(self.selected_index) {
                             HumanDecisionCommand::Select {
                                 option_id: option.id.clone(),
@@ -230,24 +234,23 @@ impl HumanDecisionOverlay {
                         HumanDecisionCommand::None
                     }
                 }
-                // Also accept lowercase letters (excluding r, i, s)
-                KeyCode::Char(letter) if letter.is_ascii_lowercase() && letter >= 'a' => {
-                    // Skip special keys r, i, s (already handled above)
-                    if letter == 'r' || letter == 'i' || letter == 's' {
-                        HumanDecisionCommand::None
-                    } else {
-                        let uppercase = letter.to_ascii_uppercase();
-                        if self.select_by_letter(uppercase) {
-                            if let Some(option) = self.request.options.get(self.selected_index) {
-                                HumanDecisionCommand::Select {
-                                    option_id: option.id.clone(),
-                                }
-                            } else {
-                                HumanDecisionCommand::None
+                // Also accept lowercase letters - no modifier required
+                KeyCode::Char(letter)
+                    if letter.is_ascii_lowercase()
+                        && letter >= 'a'
+                        && !key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let uppercase = letter.to_ascii_uppercase();
+                    if self.select_by_letter(uppercase) {
+                        if let Some(option) = self.request.options.get(self.selected_index) {
+                            HumanDecisionCommand::Select {
+                                option_id: option.id.clone(),
                             }
                         } else {
                             HumanDecisionCommand::None
                         }
+                    } else {
+                        HumanDecisionCommand::None
                     }
                 }
                 _ => HumanDecisionCommand::None,
@@ -259,8 +262,12 @@ impl HumanDecisionOverlay {
     pub fn command_to_selection(cmd: &HumanDecisionCommand) -> Option<HumanSelection> {
         match cmd {
             HumanDecisionCommand::Select { option_id } => Some(HumanSelection::selected(option_id)),
-            HumanDecisionCommand::AcceptRecommendation => Some(HumanSelection::accept_recommendation()),
-            HumanDecisionCommand::CustomInstruction { instruction } => Some(HumanSelection::custom(instruction)),
+            HumanDecisionCommand::AcceptRecommendation => {
+                Some(HumanSelection::accept_recommendation())
+            }
+            HumanDecisionCommand::CustomInstruction { instruction } => {
+                Some(HumanSelection::custom(instruction))
+            }
             HumanDecisionCommand::Skip => Some(HumanSelection::skip()),
             HumanDecisionCommand::Cancel => Some(HumanSelection::cancel()),
             HumanDecisionCommand::None => None,
@@ -354,11 +361,13 @@ mod tests {
         let request = make_test_request();
         let mut overlay = HumanDecisionOverlay::new(request);
 
-        let cmd = overlay.handle_key_event(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-        ));
-        assert_eq!(cmd, HumanDecisionCommand::Select { option_id: "A".to_string() });
+        let cmd = overlay.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            cmd,
+            HumanDecisionCommand::Select {
+                option_id: "A".to_string()
+            }
+        );
     }
 
     #[test]
@@ -366,11 +375,13 @@ mod tests {
         let request = make_test_request();
         let mut overlay = HumanDecisionOverlay::new(request);
 
-        let cmd = overlay.handle_key_event(KeyEvent::new(
-            KeyCode::Char('C'),
-            KeyModifiers::NONE,
-        ));
-        assert_eq!(cmd, HumanDecisionCommand::Select { option_id: "C".to_string() });
+        let cmd = overlay.handle_key_event(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
+        assert_eq!(
+            cmd,
+            HumanDecisionCommand::Select {
+                option_id: "C".to_string()
+            }
+        );
     }
 
     #[test]
@@ -378,10 +389,8 @@ mod tests {
         let request = make_test_request();
         let mut overlay = HumanDecisionOverlay::new(request);
 
-        let cmd = overlay.handle_key_event(KeyEvent::new(
-            KeyCode::Char('s'),
-            KeyModifiers::NONE,
-        ));
+        let cmd =
+            overlay.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(cmd, HumanDecisionCommand::Skip);
     }
 
@@ -391,7 +400,7 @@ mod tests {
         let mut overlay = HumanDecisionOverlay::new(request);
 
         // Enter custom mode
-        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
         assert!(overlay.custom_mode);
 
         // Type text
@@ -403,13 +412,20 @@ mod tests {
 
         // Submit with Enter
         let cmd = overlay.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(cmd, HumanDecisionCommand::CustomInstruction { instruction: "test".to_string() });
+        assert_eq!(
+            cmd,
+            HumanDecisionCommand::CustomInstruction {
+                instruction: "test".to_string()
+            }
+        );
         assert!(!overlay.custom_mode);
     }
 
     #[test]
     fn test_command_to_selection() {
-        let select = HumanDecisionCommand::Select { option_id: "A".to_string() };
+        let select = HumanDecisionCommand::Select {
+            option_id: "A".to_string(),
+        };
         assert_eq!(
             HumanDecisionOverlay::command_to_selection(&select),
             Some(HumanSelection::selected("A"))

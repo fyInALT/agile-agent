@@ -106,20 +106,12 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         return InputOutcome::Quit;
     }
 
-    if matches!(key_event.code, KeyCode::Char('q'))
-        && state.composer.is_empty()
-        && !state.app().skill_browser_open
-        && !state.is_overlay_open()
-    {
-        return InputOutcome::Quit;
-    }
-
     if state.app().skill_browser_open {
         return match key_event.code {
             KeyCode::Esc => InputOutcome::CloseSkills,
             KeyCode::Up => InputOutcome::SkillUp,
             KeyCode::Down => InputOutcome::SkillDown,
-            KeyCode::Enter | KeyCode::Char(' ') => InputOutcome::ToggleSelectedSkill,
+            KeyCode::Enter => InputOutcome::ToggleSelectedSkill,
             _ => InputOutcome::None,
         };
     }
@@ -178,37 +170,61 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             modifiers,
             ..
         } if modifiers.contains(KeyModifiers::CONTROL) => InputOutcome::OpenTranscript,
-        // View mode switching (Ctrl+V 1-5)
+        // View mode switching (Alt+1-6, but not in Dashboard mode where Alt+1-9 selects cards)
         KeyEvent {
             code: KeyCode::Char('1'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(1),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(1)
+        }
         KeyEvent {
             code: KeyCode::Char('2'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(2),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(2)
+        }
         KeyEvent {
             code: KeyCode::Char('3'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(3),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(3)
+        }
         KeyEvent {
             code: KeyCode::Char('4'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(4),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(4)
+        }
         KeyEvent {
             code: KeyCode::Char('5'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(5),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(5)
+        }
         KeyEvent {
             code: KeyCode::Char('6'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::ALT) => InputOutcome::SwitchViewMode(6),
+        } if modifiers.contains(KeyModifiers::ALT)
+            && state.view_state.mode != crate::view_mode::ViewMode::Dashboard =>
+        {
+            InputOutcome::SwitchViewMode(6)
+        }
         // Alt+V to cycle view modes
         KeyEvent {
             code: KeyCode::Char('v'),
@@ -242,7 +258,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char('s'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Split =>
         {
@@ -252,7 +268,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char('e'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Split =>
         {
@@ -284,13 +300,13 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char(c),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::ALT)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Dashboard
             && c >= '1'
             && c <= '9' =>
         {
-            InputOutcome::DashboardSelect(c as u8)
+            InputOutcome::DashboardSelect(c as u8 - '1' as u8 + 1)
         }
 
         // Mail view: arrow keys, c compose, r reply, m mark read
@@ -317,10 +333,11 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             InputOutcome::MailNext
         }
         KeyEvent {
-            code: KeyCode::Char('c'),
+            code: KeyCode::Char('C'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
+            && modifiers.contains(KeyModifiers::SHIFT)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
             && !state.view_state.mail.composing =>
@@ -394,10 +411,11 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             InputOutcome::None
         }
         KeyEvent {
-            code: KeyCode::Char('m'),
+            code: KeyCode::Char('M'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
+            && modifiers.contains(KeyModifiers::SHIFT)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Mail
             && !state.view_state.mail.composing =>
@@ -410,7 +428,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char('f'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
         {
@@ -420,7 +438,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char('r'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
         {
@@ -430,7 +448,7 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             code: KeyCode::Char('a'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
         {
@@ -459,12 +477,12 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             InputOutcome::OverviewPageDown
         }
 
-        // Overview: search mode (/ key)
+        // Overview: search mode (Ctrl+/ key)
         KeyEvent {
             code: KeyCode::Char('/'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::NONE)
+        } if modifiers.contains(KeyModifiers::CONTROL)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Overview =>
         {
@@ -560,7 +578,8 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
             ..
         } if modifiers.contains(KeyModifiers::CONTROL)
             && modifiers.contains(KeyModifiers::SHIFT)
-            && state.app().status == AppStatus::Idle => {
+            && state.app().status == AppStatus::Idle =>
+        {
             InputOutcome::PauseFocusedAgent
         }
         // Ctrl+R to resume paused agent
@@ -971,7 +990,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::SplitSwap));
@@ -985,7 +1004,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::SplitEqual));
@@ -1022,10 +1041,10 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::ALT),
         );
 
-        assert!(matches!(outcome, InputOutcome::DashboardSelect(51))); // '3' as u8 = 51
+        assert!(matches!(outcome, InputOutcome::DashboardSelect(3)));
     }
 
     #[test]
@@ -1059,7 +1078,10 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+            KeyEvent::new(
+                KeyCode::Char('C'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
         );
 
         assert!(matches!(outcome, InputOutcome::MailComposeStart));
@@ -1073,7 +1095,10 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+            KeyEvent::new(
+                KeyCode::Char('M'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
         );
 
         assert!(matches!(outcome, InputOutcome::MailMarkRead));
@@ -1087,7 +1112,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::OverviewFilterBlocked));
@@ -1101,7 +1126,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::OverviewFilterRunning));
@@ -1115,7 +1140,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::OverviewFilterAll));
@@ -1157,7 +1182,7 @@ mod tests {
 
         let outcome = handle_key_event(
             &mut state,
-            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL),
         );
 
         assert!(matches!(outcome, InputOutcome::OverviewSearchStart));

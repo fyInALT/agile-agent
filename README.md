@@ -126,8 +126,8 @@ Common keybindings:
 - `Ctrl+T`: open transcript overlay
 - `$`: open skill browser when the composer is empty
 - `Ctrl+C`: quit (or close overlay when open)
-- `q`: quit when the composer is empty
-- `1-4`: switch view modes (Overview, Focused, Agents, Skills)
+- `Alt+1-6`: switch view modes (Focused, Split, Dashboard, Mail, Skills, Overview)
+- `Alt+V`: cycle view modes
 
 Preferred namespaced slash commands:
 
