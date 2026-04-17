@@ -1384,6 +1384,8 @@ mod tests {
     #[test]
     fn slot_should_transition_to_waiting_after_timeout() {
         let mut slot = make_slot();
+        // Proper transition: Idle → Starting → Responding
+        slot.transition_to(AgentSlotStatus::starting()).unwrap();
         slot.transition_to(AgentSlotStatus::responding_now())
             .unwrap();
 
