@@ -24,6 +24,18 @@ pub struct DecisionOutput {
     pub updated_reflection_round: Option<u8>,
 }
 
+impl Clone for DecisionOutput {
+    fn clone(&self) -> Self {
+        Self {
+            actions: self.actions.iter().map(|a| a.clone_boxed()).collect(),
+            reasoning: self.reasoning.clone(),
+            confidence: self.confidence,
+            human_requested: self.human_requested,
+            updated_reflection_round: self.updated_reflection_round,
+        }
+    }
+}
+
 impl DecisionOutput {
     pub fn new(actions: Vec<Box<dyn DecisionAction>>, reasoning: impl Into<String>) -> Self {
         Self {

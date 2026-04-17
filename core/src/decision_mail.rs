@@ -94,25 +94,10 @@ impl std::fmt::Debug for DecisionResponse {
 
 impl Clone for DecisionResponse {
     fn clone(&self) -> Self {
-        // Note: DecisionOutput can't be cloned, so we only clone error case
-        // For success case, we need to reconstruct from output data
-        match &self.output {
-            Some(output) => {
-                // Clone what we can from DecisionOutput
-                DecisionResponse {
-                    work_agent_id: self.work_agent_id.clone(),
-                    output: None, // Can't clone Box<dyn DecisionAction>
-                    error: Some(format!(
-                        "cloned response (original had {} actions)",
-                        output.actions.len()
-                    )),
-                }
-            }
-            None => DecisionResponse {
-                work_agent_id: self.work_agent_id.clone(),
-                output: None,
-                error: self.error.clone(),
-            },
+        Self {
+            work_agent_id: self.work_agent_id.clone(),
+            output: self.output.clone(),
+            error: self.error.clone(),
         }
     }
 }
@@ -360,6 +345,57 @@ mod tests {
         assert!(!response.is_error());
         assert!(response.output().is_some());
         assert!(response.error_message().is_none());
+    }
+
+    #[test]
+    fn test_decision_response_clone_with_actions() {
+        use agent_decision::builtin_actions::SelectOptionAction;
+
+        let agent_id = make_test_agent_id();
+        let output = DecisionOutput::new(
+            vec![Box::new(SelectOptionAction::new("A", "test reason"))],
+            "Selected option A",
+        );
+
+        let response = DecisionResponse::success(agent_id.clone(), output);
+        assert!(response.is_success());
+        assert_eq!(response.output().unwrap().actions.len(), 1);
+
+        // Clone should preserve the output
+        let cloned = response.clone();
+        assert!(cloned.is_success(), "Cloned response should be success");
+        assert!(
+            cloned.output().is_some(),
+            "Cloned response should have output"
+        );
+        assert_eq!(
+            cloned.output().unwrap().actions.len(),
+            1,
+            "Cloned output should have 1 action"
+        );
+        assert_eq!(
+            cloned.output().unwrap().reasoning,
+            "Selected option A",
+            "Cloned output should preserve reasoning"
+        );
+        assert!(
+            cloned.error.is_none(),
+            "Cloned response should not have error"
+        );
+
+        // Original should still be valid
+        assert!(response.is_success());
+        assert_eq!(response.output().unwrap().actions.len(), 1);
+    }
+
+    #[test]
+    fn test_decision_response_clone_error() {
+        let agent_id = make_test_agent_id();
+        let response = DecisionResponse::error(agent_id.clone(), "Test error".to_string());
+
+        let cloned = response.clone();
+        assert!(cloned.is_error());
+        assert_eq!(cloned.error_message(), Some("Test error"));
     }
 
     #[test]
