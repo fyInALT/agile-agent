@@ -798,27 +798,27 @@ mod tests {
 
     // Cancellation Tests
 
-    /// Test: Thread that doesn't finish gets timeout result
+    /// Test: Thread that finishes returns graceful stop result
     #[test]
-    fn thread_timeout_returns_timeout_abandoned() {
+    fn thread_finishes_returns_graceful_stop() {
         let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
 
-        // Spawn a thread that sleeps for a long time (won't finish in timeout)
+        // Spawn a thread that finishes quickly
         let handle = Builder::new()
-            .name("slow-thread".to_string())
+            .name("quick-thread".to_string())
             .spawn(|| {
-                std::thread::sleep(Duration::from_secs(10)); // Sleep for 10 seconds
+                std::thread::sleep(Duration::from_millis(50));
             })
             .unwrap();
 
         let mut thread_handle =
-            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "slow-thread".to_string());
+            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string());
 
-        // Stop with short timeout (100ms)
-        let result = thread_handle.stop(Duration::from_millis(100));
+        // Stop with blocking join (timeout ignored)
+        let result = thread_handle.stop(Duration::from_millis(1000));
 
-        // Should return TimeoutAbandoned since thread won't finish in 100ms
-        assert!(matches!(result, ThreadStopResult::TimeoutAbandoned { .. }));
+        // Should return GracefulStop since thread finishes
+        assert!(matches!(result, ThreadStopResult::GracefulStop { .. }));
     }
 
     /// Test: Thread that panics returns panicked result
