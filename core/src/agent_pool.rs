@@ -583,6 +583,21 @@ impl AgentPool {
             );
         }
 
+        // Spawn decision agent for this work agent (if provider supports it)
+        // All non-Mock agents should have decision layer support
+        if provider_kind != ProviderKind::Mock {
+            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                logging::warn_event(
+                    "pool.agent.decision_agent_failed",
+                    "failed to spawn decision agent for work agent",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+            }
+        }
+
         Ok(agent_id)
     }
 
@@ -677,6 +692,21 @@ impl AgentPool {
         // Focus on the newly spawned agent if this is the first one
         if self.slots.len() == 1 {
             self.focused_slot = 0;
+        }
+
+        // Spawn decision agent for this work agent (if provider supports it)
+        // All non-Mock agents should have decision layer support
+        if provider_kind != ProviderKind::Mock {
+            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                logging::warn_event(
+                    "pool.agent.decision_agent_failed",
+                    "failed to spawn decision agent for work agent",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+            }
         }
 
         Ok(agent_id)
