@@ -163,9 +163,10 @@ impl Task {
             (TaskStatus::Reflecting, TaskStatus::NeedsHumanDecision) => true,
             (TaskStatus::Reflecting, TaskStatus::Paused) => true, // Recovery transition
 
-            // PendingConfirmation → Completed, Reflecting
+            // PendingConfirmation → Completed, Reflecting, Paused
             (TaskStatus::PendingConfirmation, TaskStatus::Completed) => true,
             (TaskStatus::PendingConfirmation, TaskStatus::Reflecting) => true,
+            (TaskStatus::PendingConfirmation, TaskStatus::Paused) => true, // Timeout during confirmation
 
             // NeedsHumanDecision → InProgress, Cancelled
             (TaskStatus::NeedsHumanDecision, TaskStatus::InProgress) => true,
@@ -543,6 +544,17 @@ mod tests {
         task.transition_to(TaskStatus::Cancelled).expect("InProgress -> Cancelled should work");
 
         assert_eq!(task.status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn t9_3_t17_pending_confirmation_to_paused_works() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+
+        task.transition_to(TaskStatus::Paused).expect("PendingConfirmation -> Paused should work for timeout");
+
+        assert_eq!(task.status, TaskStatus::Paused);
     }
 
     // Task Helper Methods Tests
