@@ -208,11 +208,12 @@ impl AgentSlotStatus {
             (Self::Blocked { .. }, Self::Stopped { .. }) => true,
             (Self::Blocked { .. }, Self::Paused { .. }) => true,
             (Self::Blocked { .. }, Self::BlockedForDecision { .. }) => true,
-            // BlockedForDecision can go to Idle, Responding, Stopped, or Paused
+            // BlockedForDecision can go to Idle, Responding, Stopped, Paused, or Blocked (provider crash recovery)
             (Self::BlockedForDecision { .. }, Self::Idle) => true,
             (Self::BlockedForDecision { .. }, Self::Responding { .. }) => true,
             (Self::BlockedForDecision { .. }, Self::Stopped { .. }) => true,
             (Self::BlockedForDecision { .. }, Self::Paused { .. }) => true,
+            (Self::BlockedForDecision { .. }, Self::Blocked { .. }) => true,
             // Paused can go to Idle (resume) or Stopped
             (Self::Paused { .. }, Self::Idle) => true,
             (Self::Paused { .. }, Self::Stopped { .. }) => true,
@@ -1437,6 +1438,19 @@ mod tests {
         let blocked_state = BlockedState::new(Box::new(blocking));
         let status = AgentSlotStatus::blocked("API Error: Request rejected (429)");
         assert!(status.can_transition_to(&AgentSlotStatus::blocked_for_decision(blocked_state)));
+    }
+
+    #[test]
+    fn status_blocked_for_decision_can_transition_to_blocked() {
+        // Provider crash recovery: BlockedForDecision → Blocked (when provider exits unexpectedly)
+        use agent_decision::{BlockedState, ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+
+        let error = ErrorInfo::new("rate_limit", "API Error: Request rejected (429)");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        let status = AgentSlotStatus::blocked_for_decision(blocked_state);
+        assert!(status.can_transition_to(&AgentSlotStatus::blocked("claude exited with status 1")));
     }
 
     // Worktree tests

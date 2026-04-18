@@ -264,7 +264,7 @@ impl StageYaml {
             .collect();
 
         Self {
-            id: stage.id.as_str(),
+            id: stage.id.to_string(),
             name: stage.name.clone(),
             description: Some(stage.description.clone()),
             entry_condition: Some(format_condition(&stage.entry_condition)),
@@ -279,7 +279,7 @@ impl TransitionYaml {
     /// Create YAML representation from StageTransition
     pub fn from_transition(t: &StageTransition) -> Self {
         Self {
-            target: t.target.as_str(),
+            target: t.target.to_string(),
             condition: Some(format_condition(&t.condition)),
             prompt: Some(t.prompt.clone()),
         }
