@@ -155,9 +155,9 @@ pub struct Task {
 ```
 
 **Acceptance Criteria**:
-- [ ] Task struct defined with all required fields
-- [ ] TaskId type defined (UUID or string-based)
-- [ ] Task can be serialized/deserialized for persistence
+- [x] Task struct defined with all required fields
+- [x] TaskId type defined (UUID or string-based)
+- [x] Task can be serialized/deserialized for persistence
 
 #### FR-002: Task Status Enumeration
 
@@ -194,9 +194,9 @@ pub enum TaskStatus {
 ```
 
 **Acceptance Criteria**:
-- [ ] All statuses defined covering complete lifecycle
-- [ ] Status transitions are valid (defined in FR-003)
-- [ ] Status can be displayed in TUI
+- [x] All statuses defined covering complete lifecycle
+- [x] Status transitions are valid (defined in FR-003)
+- [x] Status can be displayed in TUI
 
 #### FR-003: Task Status Transitions
 
@@ -220,9 +220,9 @@ pub enum TaskStatus {
 | Any | `Cancelled` | User cancels |
 
 **Acceptance Criteria**:
-- [ ] Transition function validates allowed state changes
-- [ ] Invalid transitions return error
-- [ ] Each transition is logged in execution history
+- [x] Transition function validates allowed state changes
+- [x] Invalid transitions return error
+- [x] Each transition is logged in execution history
 
 ### 4.2 Decision Workflow [P0]
 
@@ -269,9 +269,9 @@ pub struct StageTransition {
 ```
 
 **Acceptance Criteria**:
-- [ ] Stage struct defined with all fields
-- [ ] StageId type defined
-- [ ] Transitions are directed edges (no cycles at definition level, cycles form at runtime)
+- [x] Stage struct defined with all fields
+- [x] StageId type defined
+- [x] Transitions are directed edges (no cycles at definition level, cycles form at runtime)
 
 #### FR-005: Condition System
 
@@ -318,10 +318,10 @@ pub struct EvaluationContext {
 ```
 
 **Acceptance Criteria**:
-- [ ] All condition types implemented
-- [ ] evaluate() function correctly evaluates each condition
-- [ ] Composite conditions (All, Any, Not) work correctly
-- [ ] Custom conditions can be registered
+- [x] All condition types implemented
+- [x] evaluate() function correctly evaluates each condition
+- [x] Composite conditions (All, Any, Not) work correctly
+- [x] Custom conditions can be registered
 
 #### FR-006: Decision Action Definition
 
@@ -361,9 +361,9 @@ pub enum DecisionAction {
 ```
 
 **Acceptance Criteria**:
-- [ ] All actions defined
-- [ ] Each action can be converted to prompt for AI
-- [ ] Actions are serializable for logging
+- [x] All actions defined
+- [x] Each action can be converted to prompt for AI
+- [x] Actions are serializable for logging
 
 #### FR-007: Decision Process Definition
 
@@ -408,9 +408,9 @@ pub struct ProcessConfig {
 ```
 
 **Acceptance Criteria**:
-- [ ] Process struct defined
-- [ ] Process can be validated (no unreachable stages, valid initial/final)
-- [ ] Process can be serialized for persistence
+- [x] Process struct defined
+- [x] Process can be validated (no unreachable stages, valid initial/final)
+- [x] Process can be serialized for persistence
 
 #### FR-008: Default Process - Simple Agile
 
@@ -447,9 +447,9 @@ human_decision → developing (approve) or cancelled (reject)
 ```
 
 **Acceptance Criteria**:
-- [ ] Default process defined with all 9 stages
-- [ ] All transitions correctly defined
-- [ ] Default config: max_reflection_rounds=2, enforce_verification=true, timeout=30min
+- [x] Default process defined with all 9 stages
+- [x] All transitions correctly defined
+- [x] Default config: max_reflection_rounds=2, enforce_verification=true, timeout=30min
 
 ### 4.3 Prompt Templates [P0]
 
@@ -478,9 +478,9 @@ impl PromptTemplate {
 ```
 
 **Acceptance Criteria**:
-- [ ] Template struct defined
-- [ ] render() replaces all {{var}} placeholders
-- [ ] Missing variables return error or use default
+- [x] Template struct defined
+- [x] render() replaces all {{var}} placeholders
+- [x] Missing variables return error or use default
 
 #### FR-010: Default Prompt Templates
 
@@ -498,9 +498,9 @@ impl PromptTemplate {
 | `human_decision` | `question`, `context` | "Human decision required:\nQuestion: {{question}}\nContext: {{context}}" |
 
 **Acceptance Criteria**:
-- [ ] Templates defined for all decision-requiring stages
-- [ ] All variables documented
-- [ ] Templates are clear and actionable
+- [x] Templates defined for all decision-requiring stages
+- [x] All variables documented
+- [x] Templates are clear and actionable
 
 ### 4.4 Auto-Check System [P0]
 
@@ -546,9 +546,9 @@ impl AutoChecker {
 | Completion Check | Goals not achieved | NeedsReflection |
 
 **Acceptance Criteria**:
-- [ ] AutoChecker implemented with all rules
-- [ ] check() returns correct result type
-- [ ] Each rule is independently configurable
+- [x] AutoChecker implemented with all rules
+- [x] check() returns correct result type
+- [x] Each rule is independently configurable
 
 #### FR-012: Intelligent Human-Escalation Filter
 
@@ -578,9 +578,9 @@ impl AutoChecker {
 | Verification pass | Auto-confirm (pending human final approval) |
 
 **Acceptance Criteria**:
-- [ ] DecisionFilter implemented
-- [ ] Filter correctly classifies issues
-- [ ] Filter is configurable (add/remove rules)
+- [x] DecisionFilter implemented
+- [x] Filter correctly classifies issues
+- [x] Filter is configurable (add/remove rules)
 
 ### 4.5 Task Registry [P1]
 
@@ -630,10 +630,10 @@ impl TaskRegistry {
 ```
 
 **Acceptance Criteria**:
-- [ ] TaskRegistry implemented
-- [ ] Tasks persist across session restarts
-- [ ] CRUD operations work correctly
-- [ ] Concurrent access is safe
+- [x] TaskRegistry implemented
+- [x] Tasks persist across session restarts
+- [x] CRUD operations work correctly
+- [x] Concurrent access is safe
 
 ### 4.6 Execution History [P1]
 
@@ -680,9 +680,9 @@ impl Task {
 ```
 
 **Acceptance Criteria**:
-- [ ] ExecutionRecord defined
-- [ ] Records added for every decision
-- [ ] History can be queried by stage, time, action type
+- [x] ExecutionRecord defined
+- [x] Records added for every decision
+- [x] History can be queried by stage, time, action type
 
 ### 4.7 Decision Engine [P1]
 
@@ -746,10 +746,10 @@ AI Output → Auto-Check → Filter
 ```
 
 **Acceptance Criteria**:
-- [ ] DecisionEngine implemented
-- [ ] process_output() correctly evaluates conditions
-- [ ] Transitions follow defined workflow
-- [ ] Prompts generated correctly
+- [x] DecisionEngine implemented
+- [x] process_output() correctly evaluates conditions
+- [x] Transitions follow defined workflow
+- [x] Prompts generated correctly
 
 ### 4.8 Metrics Collection [P2]
 
@@ -809,9 +809,9 @@ impl DecisionMetrics {
 | Completion rate | > 90% |
 
 **Acceptance Criteria**:
-- [ ] Metrics collected for all decisions
-- [ ] Metrics persisted for analysis
-- [ ] Metrics viewable in TUI
+- [x] Metrics collected for all decisions
+- [x] Metrics persisted for analysis
+- [x] Metrics viewable in TUI
 
 ### 4.9 Custom Workflows [P2]
 
@@ -882,10 +882,10 @@ process:
 ```
 
 **Acceptance Criteria**:
-- [ ] YAML configuration supported
-- [ ] Custom processes can be loaded
-- [ ] Custom conditions can be registered
-- [ ] Invalid configurations return clear errors
+- [x] YAML configuration supported
+- [x] Custom processes can be loaded
+- [x] Custom conditions can be registered
+- [x] Invalid configurations return clear errors
 
 ---
 
@@ -974,26 +974,26 @@ pub struct AgentSlot {
 
 ### 7.1 Unit Tests
 
-- [ ] Task creation, update, completion
-- [ ] All status transitions valid
-- [ ] Condition evaluation correctness
-- [ ] Auto-check rule accuracy
-- [ ] Prompt template rendering
-- [ ] Metrics calculation
+- [x] Task creation, update, completion
+- [x] All status transitions valid
+- [x] Condition evaluation correctness
+- [x] Auto-check rule accuracy
+- [x] Prompt template rendering
+- [x] Metrics calculation
 
 ### 7.2 Integration Tests
 
-- [ ] Decision engine full workflow execution
-- [ ] TUI task display
-- [ ] Persistence and recovery
-- [ ] Human intervention flow
+- [x] Decision engine full workflow execution
+- [x] TUI task display
+- [x] Persistence and recovery
+- [x] Human intervention flow
 
 ### 7.3 Acceptance Tests
 
-- [ ] Automation rate > 80% with sample tasks
-- [ ] All escalation cases correctly identified
-- [ ] Task completes after successful AI execution
-- [ ] Task correctly handles repeated failures
+- [x] Automation rate > 80% with sample tasks
+- [x] All escalation cases correctly identified
+- [x] Task completes after successful AI execution
+- [x] Task correctly handles repeated failures
 
 ---
 
