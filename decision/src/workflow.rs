@@ -3,6 +3,7 @@
 //! Provides structured decision workflow with stages, conditions, and transitions.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Stage identifier within a decision process
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,6 +53,121 @@ pub enum Condition {
 impl Default for Condition {
     fn default() -> Self {
         Self::Custom("default".to_string())
+    }
+}
+
+/// Evaluator for custom workflow conditions
+pub trait WorkflowConditionEvaluator: Send + Sync {
+    /// Evaluate the condition given context
+    fn evaluate(&self, context: &WorkflowConditionContext) -> bool;
+}
+
+/// Context for workflow condition evaluation
+pub struct WorkflowConditionContext {
+    /// Whether AI has responded
+    pub has_ai_response: bool,
+    /// Whether AI has produced output
+    pub has_ai_output: bool,
+    /// Whether an issue was found
+    pub issue_found: bool,
+    /// Whether no issues were found
+    pub no_issue: bool,
+    /// Whether issue was fixed
+    pub fixed: bool,
+    /// Whether task is not complete
+    pub not_complete: bool,
+    /// Whether completion was rejected
+    pub rejected: bool,
+    /// Whether human cancelled
+    pub human_cancelled: bool,
+    /// Whether tests pass
+    pub tests_pass: bool,
+    /// Whether there are compile errors
+    pub has_compile_errors: bool,
+    /// Whether there are syntax errors
+    pub has_syntax_errors: bool,
+    /// Reflection count
+    pub reflection_count: usize,
+    /// Max reflection rounds
+    pub max_reflection_rounds: usize,
+    /// Human approved
+    pub human_approved: bool,
+}
+
+impl Default for WorkflowConditionContext {
+    fn default() -> Self {
+        Self {
+            has_ai_response: false,
+            has_ai_output: false,
+            issue_found: false,
+            no_issue: false,
+            fixed: false,
+            not_complete: false,
+            rejected: false,
+            human_cancelled: false,
+            tests_pass: true,
+            has_compile_errors: false,
+            has_syntax_errors: false,
+            reflection_count: 0,
+            max_reflection_rounds: 2,
+            human_approved: false,
+        }
+    }
+}
+
+/// Registry for custom workflow condition evaluators
+pub struct WorkflowConditionRegistry {
+    evaluators: HashMap<String, Box<dyn WorkflowConditionEvaluator>>,
+}
+
+impl WorkflowConditionRegistry {
+    /// Create a new registry
+    pub fn new() -> Self {
+        Self {
+            evaluators: HashMap::new(),
+        }
+    }
+
+    /// Register an evaluator for a custom condition name
+    pub fn register(&mut self, name: impl Into<String>, evaluator: Box<dyn WorkflowConditionEvaluator>) {
+        self.evaluators.insert(name.into(), evaluator);
+    }
+
+    /// Evaluate a custom condition
+    pub fn evaluate(&self, name: &str, context: &WorkflowConditionContext) -> bool {
+        self.evaluators
+            .get(name)
+            .map(|e| e.evaluate(context))
+            .unwrap_or_else(|| {
+                // Default behavior: evaluate based on common condition names
+                Self::evaluate_default(name, context)
+            })
+    }
+
+    /// Default evaluation for common condition names
+    fn evaluate_default(name: &str, context: &WorkflowConditionContext) -> bool {
+        match name {
+            "ai_response" => context.has_ai_response,
+            "ai_output" => context.has_ai_output,
+            "issue_found" => context.issue_found,
+            "no_issue" => context.no_issue,
+            "fixed" => context.fixed,
+            "not_complete" => context.not_complete,
+            "rejected" => context.rejected,
+            "human_cancelled" => context.human_cancelled,
+            _ => false,
+        }
+    }
+
+    /// Create registry with default evaluators for common conditions
+    pub fn with_defaults() -> Self {
+        Self::new() // Default behavior is built-in
+    }
+}
+
+impl Default for WorkflowConditionRegistry {
+    fn default() -> Self {
+        Self::with_defaults()
     }
 }
 

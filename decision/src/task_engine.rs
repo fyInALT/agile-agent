@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::automation::{AutoChecker, AutoCheckResult, DecisionFilter, SimulatedOutput};
 use crate::persistence::{ExecutionRecord, TaskRegistry, TaskUpdate};
 use crate::task::{Task, TaskId, TaskStatus};
-use crate::workflow::{Condition, DecisionProcess, DecisionStage, StageId, WorkflowAction};
+use crate::workflow::{Condition, DecisionProcess, DecisionStage, StageId, WorkflowAction, WorkflowConditionContext, WorkflowConditionRegistry};
 
 /// Task decision action returned by engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +176,10 @@ pub struct TaskDecisionEngine {
     filter: DecisionFilter,
     /// Task registry for persistence
     registry: TaskRegistry,
+    /// Workflow condition registry for Custom conditions
+    condition_registry: WorkflowConditionRegistry,
+    /// Workflow condition context
+    condition_context: WorkflowConditionContext,
 }
 
 impl TaskDecisionEngine {
@@ -197,6 +201,8 @@ impl TaskDecisionEngine {
             checker: AutoChecker::default(),
             filter: DecisionFilter::default(),
             registry,
+            condition_registry: WorkflowConditionRegistry::default(),
+            condition_context: WorkflowConditionContext::default(),
         }
     }
 
@@ -215,6 +221,12 @@ impl TaskDecisionEngine {
     /// Set custom filter
     pub fn with_filter(mut self, filter: DecisionFilter) -> Self {
         self.filter = filter;
+        self
+    }
+
+    /// Set custom condition registry
+    pub fn with_condition_registry(mut self, registry: WorkflowConditionRegistry) -> Self {
+        self.condition_registry = registry;
         self
     }
 
@@ -252,6 +264,9 @@ impl TaskDecisionEngine {
     pub fn process_output(&mut self, output: AgentOutput) -> TaskDecisionAction {
         // Get current stage (cloned to avoid borrow conflicts)
         let stage = self.stage_cloned();
+
+        // Update condition context based on output
+        self.update_condition_context(&output);
 
         // Auto-check the output
         let simulated = output.to_simulated();
@@ -323,8 +338,57 @@ impl TaskDecisionEngine {
             Condition::All(conditions) => conditions.iter().all(|c| self.check_transition_condition(c, output)),
             Condition::Any(conditions) => conditions.iter().any(|c| self.check_transition_condition(c, output)),
             Condition::Not(cond) => !self.check_transition_condition(cond, output),
-            Condition::Custom(_) => false,
+            Condition::Custom(name) => self.condition_registry.evaluate(name, &self.condition_context),
         }
+    }
+
+    /// Update condition context based on output
+    fn update_condition_context(&mut self, output: &AgentOutput) {
+        // Update AI response/output flags
+        self.condition_context.has_ai_response = !output.content.is_empty();
+        self.condition_context.has_ai_output = !output.content.is_empty();
+
+        // Update issue flags based on errors
+        self.condition_context.issue_found = output.has_syntax_errors || output.has_compile_errors || !output.tests_pass;
+        self.condition_context.no_issue = !self.condition_context.issue_found;
+
+        // Update test and compile status
+        self.condition_context.tests_pass = output.tests_pass;
+        self.condition_context.has_compile_errors = output.has_compile_errors;
+        self.condition_context.has_syntax_errors = output.has_syntax_errors;
+
+        // Update reflection count from task
+        self.condition_context.reflection_count = self.task.reflection_count;
+        self.condition_context.max_reflection_rounds = self.task.max_reflection_rounds;
+
+        // Note: fixed, not_complete, rejected, human_cancelled need to be set based on
+        // specific state transitions - these are set elsewhere
+    }
+
+    /// Mark issue as fixed (for Custom("fixed") condition)
+    pub fn mark_fixed(&mut self) {
+        self.condition_context.fixed = true;
+        self.condition_context.issue_found = false;
+    }
+
+    /// Mark task as not complete (for Custom("not_complete") condition)
+    pub fn mark_not_complete(&mut self) {
+        self.condition_context.not_complete = true;
+    }
+
+    /// Mark completion rejected (for Custom("rejected") condition)
+    pub fn mark_rejected(&mut self) {
+        self.condition_context.rejected = true;
+    }
+
+    /// Mark human cancelled (for Custom("human_cancelled") condition)
+    pub fn mark_human_cancelled(&mut self) {
+        self.condition_context.human_cancelled = true;
+    }
+
+    /// Mark human approved (for Condition::HumanApproved)
+    pub fn mark_human_approved(&mut self) {
+        self.condition_context.human_approved = true;
     }
 
     /// Execute decision effects on task

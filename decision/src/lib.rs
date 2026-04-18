@@ -168,7 +168,8 @@ pub use task::{Task, TaskStatus};
 // Re-export Workflow types (avoiding conflict with condition::Condition)
 pub use workflow::{
     DecisionProcess, DecisionStage, ProcessConfig, ProcessValidationError,
-    StageId, StageTransition, WorkflowAction,
+    StageId, StageTransition, WorkflowAction, WorkflowConditionContext,
+    WorkflowConditionEvaluator, WorkflowConditionRegistry,
 };
 // Note: workflow::Condition is separate from condition::Condition
 // - workflow::Condition: for workflow stage conditions
