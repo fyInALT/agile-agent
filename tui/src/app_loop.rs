@@ -224,6 +224,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 info.confidence,
                                 info.tier,
                             );
+                            // Set decision status in status bar (max 15 chars)
+                            state.set_decision_status(Some(option_id.clone()));
                         }
                         state.app_mut().push_status_message(format!(
                             "🧠 {}: decision executed ({})",
@@ -236,11 +238,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             state.app_mut().push_decision(
                                 agent_id.as_str().to_string(),
                                 info.situation_type,
-                                info.action_type,
+                                info.action_type.clone(),
                                 info.reasoning,
                                 info.confidence,
                                 info.tier,
                             );
+                            // Set decision status in status bar (max 15 chars)
+                            state.set_decision_status(Some(info.action_type));
                         }
                         state.app_mut().push_status_message(format!(
                             "🧠 {}: recommendation accepted",
@@ -260,6 +264,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 info.tier,
                             );
                         }
+                        // Set decision status in status bar (max 15 chars)
+                        state.set_decision_status(Some("custom".to_string()));
                         state.app_mut().push_status_message(format!(
                             "🧠 {}: custom instruction sent",
                             agent_id.as_str()
@@ -273,7 +279,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             "triggering provider request for custom instruction",
                             serde_json::json!({
                                 "agent_id": agent_id.as_str(),
-                                "instruction": instruction,
                             }),
                         );
 
@@ -1196,6 +1201,10 @@ fn start_provider_request(
     prompt: String,
     provider_rx: &mut Option<mpsc::Receiver<ProviderEvent>>,
 ) {
+    // Clear decision status when starting new provider request
+    // (agent is starting new work, decision context no longer applies)
+    state.set_decision_status(None);
+
     // Check if multi-agent mode is active (agent pool exists with agents)
     if state.is_multi_agent_mode() {
         start_multi_agent_provider_request(state, prompt);

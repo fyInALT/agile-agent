@@ -651,6 +651,15 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
         ));
     }
 
+    // Add decision status if active (shown when decision layer makes a decision)
+    if let Some(ref decision_status) = state.decision_status {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("🧠 {}", decision_status),
+            Style::default().fg(Color::Green),
+        ));
+    }
+
     // Add mail indicator if unread mail exists
     let unread_count = state.focused_unread_mail_count();
     let action_count = state.focused_action_required_count();

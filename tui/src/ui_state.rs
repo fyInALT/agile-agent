@@ -104,6 +104,8 @@ pub struct TuiState {
     pub human_decision_overlay: Option<HumanDecisionOverlay>,
     /// Launch config overlay (for work/decision agent configuration)
     pub launch_config_overlay: Option<LaunchConfigOverlayState>,
+    /// Current decision status summary (15 chars or less) for status bar
+    pub decision_status: Option<String>,
 }
 
 impl TuiState {
@@ -134,6 +136,7 @@ impl TuiState {
             confirmation_overlay: None,
             human_decision_overlay: None,
             launch_config_overlay: None,
+            decision_status: None,
         }
     }
 
@@ -143,6 +146,17 @@ impl TuiState {
 
     pub fn app_mut(&mut self) -> &mut AppState {
         &mut self.session.app
+    }
+
+    /// Set decision status summary for display in status bar (max 15 chars)
+    pub fn set_decision_status(&mut self, status: Option<String>) {
+        self.decision_status = status.map(|s| {
+            if s.chars().count() > 15 {
+                s.chars().take(12).collect::<String>() + "..."
+            } else {
+                s
+            }
+        });
     }
 
     /// Get workplace (shared state) reference

@@ -596,7 +596,8 @@ impl HistoryCell for McpToolCallHistoryCell {
 /// Decision layer output cell
 ///
 /// Displays decision agent outputs with special formatting to distinguish
-/// from work agent outputs. Uses a purple/magenta theme for visual distinction.
+/// from work agent outputs. Uses a dark green theme with horizontal separator
+/// for clear visual separation from work agent output.
 #[derive(Debug)]
 struct DecisionHistoryCell {
     agent_id: String,
@@ -612,19 +613,28 @@ impl HistoryCell for DecisionHistoryCell {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let width_usize = width as usize;
 
-        // Decision header with special styling (purple/magenta for decision layer)
-        let decision_color = Color::Magenta;
-        let header: &str = "🧠 Decision";
+        // Decision header with special styling (green for decision layer)
+        let decision_color = Color::Green;
 
+        // Horizontal separator line before decision output
+        let separator: String = "─".repeat(width_usize.min(40));
+        lines.push(Line::from(vec![Span::styled(
+            separator,
+            Style::default()
+                .fg(decision_color)
+                .add_modifier(Modifier::DIM),
+        )]));
+
+        // Decision header line
         lines.push(Line::from(vec![
             Span::styled(
-                "• ",
+                "◆ ",
                 Style::default()
                     .fg(decision_color)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                header.to_string(),
+                "DECISION",
                 Style::default()
                     .fg(decision_color)
                     .add_modifier(Modifier::BOLD),
