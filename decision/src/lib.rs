@@ -84,6 +84,9 @@ pub mod task;
 pub mod workflow;
 pub mod automation;
 
+// Sprint 13: Task Decision Engine
+pub mod task_engine;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -176,4 +179,9 @@ pub mod persistence;
 // Re-export Persistence types
 pub use persistence::{
     ExecutionRecord, FileTaskStore, RecoveryError, StoreError, TaskRegistry, TaskStore, TaskUpdate,
+};
+
+// Sprint 13: Task Decision Engine
+pub use task_engine::{
+    AgentOutput, DecisionAction, HumanResponse, TaskDecisionEngine,
 };
