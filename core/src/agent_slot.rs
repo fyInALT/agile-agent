@@ -202,11 +202,12 @@ impl AgentSlotStatus {
             // Error can go to Idle (recovery) or Stopped
             (Self::Error { .. }, Self::Idle) => true,
             (Self::Error { .. }, Self::Stopped { .. }) => true,
-            // Blocked can go to Idle, Responding, Stopped, or Paused
+            // Blocked can go to Idle, Responding, Stopped, Paused, or BlockedForDecision (escalation)
             (Self::Blocked { .. }, Self::Idle) => true,
             (Self::Blocked { .. }, Self::Responding { .. }) => true,
             (Self::Blocked { .. }, Self::Stopped { .. }) => true,
             (Self::Blocked { .. }, Self::Paused { .. }) => true,
+            (Self::Blocked { .. }, Self::BlockedForDecision { .. }) => true,
             // BlockedForDecision can go to Idle, Responding, Stopped, or Paused
             (Self::BlockedForDecision { .. }, Self::Idle) => true,
             (Self::BlockedForDecision { .. }, Self::Responding { .. }) => true,
@@ -1423,6 +1424,21 @@ mod tests {
     fn status_blocked_can_transition_to_responding() {
         let status = AgentSlotStatus::blocked("test");
         assert!(status.can_transition_to(&AgentSlotStatus::responding_now()));
+    }
+
+    #[test]
+    fn status_blocked_can_transition_to_blocked_for_decision() {
+        // Critical transition for 429 error recovery: Blocked → BlockedForDecision escalation
+        use agent_decision::{
+            BlockedState, ErrorInfo, ErrorSituation, HumanDecisionBlocking,
+        };
+
+        let error = ErrorInfo::new("rate_limit", "API Error: Request rejected (429)");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        let status = AgentSlotStatus::blocked("API Error: Request rejected (429)");
+        assert!(status.can_transition_to(&AgentSlotStatus::blocked_for_decision(blocked_state)));
     }
 
     // Worktree tests
