@@ -1,5 +1,6 @@
 //! Built-in situation implementations
 
+use chrono::{DateTime, Utc};
 use crate::situation::{ChoiceOption, CompletionProgress, DecisionSituation, ErrorInfo};
 use crate::situation_registry::SituationRegistry;
 use crate::types::{ActionType, SituationType, UrgencyLevel};
@@ -474,6 +475,85 @@ impl DecisionSituation for AgentIdleSituation {
     }
 }
 
+/// Situation: Rate Limit Recovery
+///
+/// Triggered when an agent is in resting state due to HTTP 429 and needs to
+/// decide whether to attempt recovery (retry) or continue waiting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitRecoverySituation {
+    started_at: DateTime<Utc>,
+    retry_count: u32,
+    last_error: Option<String>,
+}
+
+impl RateLimitRecoverySituation {
+    pub fn new(started_at: DateTime<Utc>, retry_count: u32) -> Self {
+        Self {
+            started_at,
+            retry_count,
+            last_error: None,
+        }
+    }
+
+    pub fn with_last_error(self, error: impl Into<String>) -> Self {
+        Self {
+            last_error: Some(error.into()),
+            ..self
+        }
+    }
+
+    /// Minutes since first 429
+    pub fn elapsed_minutes(&self) -> i64 {
+        (Utc::now() - self.started_at).num_minutes()
+    }
+}
+
+impl Default for RateLimitRecoverySituation {
+    fn default() -> Self {
+        Self::new(Utc::now(), 0)
+    }
+}
+
+impl DecisionSituation for RateLimitRecoverySituation {
+    fn situation_type(&self) -> SituationType {
+        SituationType::new("rate_limit_recovery")
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "RateLimitRecoverySituation"
+    }
+
+    fn requires_human(&self) -> bool {
+        false
+    }
+
+    fn human_urgency(&self) -> UrgencyLevel {
+        UrgencyLevel::Low
+    }
+
+    fn to_prompt_text(&self) -> String {
+        let mins = self.elapsed_minutes();
+        let error_text = self.last_error.as_deref().unwrap_or("None");
+        format!(
+            "Rate Limit Recovery:\nFirst 429 hit: {} min ago\nRetry attempts: {}\nLast error: {}\n\n\
+            Option: retry (try LLM call to check if rate limit cleared)\n\
+            Option: request_human (ask user for manual intervention)",
+            mins, self.retry_count, error_text
+        )
+    }
+
+    fn available_actions(&self) -> Vec<ActionType> {
+        vec![
+            ActionType::new("retry"),
+            ActionType::new("request_human"),
+        ]
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
+        Box::new(self.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,5 +715,42 @@ mod tests {
         assert_eq!(claims_completion().name, "claims_completion");
         assert_eq!(claude_finished().name, "finished");
         assert_eq!(claude_finished().subtype, Some("claude".to_string()));
+    }
+
+    #[test]
+    fn test_rate_limit_recovery_situation_type() {
+        let situation = RateLimitRecoverySituation::new(Utc::now(), 0);
+        assert_eq!(situation.situation_type(), SituationType::new("rate_limit_recovery"));
+    }
+
+    #[test]
+    fn test_rate_limit_recovery_available_actions() {
+        let situation = RateLimitRecoverySituation::new(Utc::now(), 0);
+        let actions = situation.available_actions();
+        assert!(actions.contains(&ActionType::new("retry")));
+        assert!(actions.contains(&ActionType::new("request_human")));
+    }
+
+    #[test]
+    fn test_rate_limit_recovery_requires_human_false() {
+        let situation = RateLimitRecoverySituation::new(Utc::now(), 0);
+        assert!(!situation.requires_human());
+    }
+
+    #[test]
+    fn test_rate_limit_recovery_elapsed_minutes() {
+        let started = Utc::now() - chrono::Duration::minutes(15);
+        let situation = RateLimitRecoverySituation::new(started, 2);
+        let elapsed = situation.elapsed_minutes();
+        assert!(elapsed >= 14 && elapsed <= 16);
+    }
+
+    #[test]
+    fn test_rate_limit_recovery_to_prompt_text() {
+        let situation = RateLimitRecoverySituation::new(Utc::now(), 3);
+        let text = situation.to_prompt_text();
+        assert!(text.contains("Rate Limit Recovery"));
+        assert!(text.contains("retry"));
+        assert!(text.contains("request_human"));
     }
 }
