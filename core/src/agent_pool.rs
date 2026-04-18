@@ -1720,22 +1720,21 @@ impl AgentPool {
                     // Add retry prompt as a user message
                     slot.append_transcript(crate::app::TranscriptEntry::User(prompt.clone()));
 
-                    // Transition agent back to idle so it can retry
-                    if slot.status().is_blocked() {
+                    // For Resting state (rate limit recovery), retry keeps us in Resting
+                    // The agent stays resting until the retry succeeds and "continue" is called
+                    if matches!(slot.status(), AgentSlotStatus::Resting { .. }) {
+                        logging::debug_event(
+                            "decision_layer.work_agent_prompt",
+                            "retry while resting - rate limit recovery attempted",
+                            serde_json::json!({
+                                "work_agent_id": work_agent_id.as_str(),
+                                "prompt_type": "retry",
+                                "agent_status": "resting",
+                            }),
+                        );
+                    } else if slot.status().is_blocked() {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
-
-                    // Log: Work agent prompt sent
-                    logging::debug_event(
-                        "decision_layer.work_agent_prompt",
-                        "retry prompt sent to work agent",
-                        serde_json::json!({
-                            "work_agent_id": work_agent_id.as_str(),
-                            "prompt_type": "retry",
-                            "prompt": prompt,
-                            "agent_status_after": "idle",
-                        }),
-                    );
 
                     DecisionExecutionResult::CustomInstruction {
                         instruction: prompt,
