@@ -7,6 +7,7 @@ use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::agent_role::AgentRole;
@@ -45,6 +46,15 @@ pub enum AgentSlotStatus {
     Paused { reason: String },
     /// Agent is waiting for user input (idle within Responding state)
     WaitingForInput { started_at: Instant },
+    /// Agent is resting due to rate limit (💤), waiting for quota to recover
+    Resting {
+        /// When first 429 occurred
+        started_at: DateTime<Utc>,
+        /// Reference to decision layer's blocked state
+        blocked_state: BlockedState,
+        /// If true, attempt recovery immediately on snapshot restore
+        on_resume: bool,
+    },
 }
 
 impl PartialEq for AgentSlotStatus {
@@ -68,6 +78,8 @@ impl PartialEq for AgentSlotStatus {
             (Self::WaitingForInput { started_at: a }, Self::WaitingForInput { started_at: b }) => {
                 a == b
             }
+            // Resting compares by started_at only
+            (Self::Resting { started_at: a, .. }, Self::Resting { started_at: b, .. }) => a == b,
             _ => false,
         }
     }
@@ -224,6 +236,12 @@ impl AgentSlotStatus {
             (Self::WaitingForInput { .. }, Self::Blocked { .. }) => true,
             (Self::WaitingForInput { .. }, Self::BlockedForDecision { .. }) => true,
             (Self::WaitingForInput { .. }, Self::Stopped { .. }) => true,
+            // BlockedForDecision can go to Resting (rate limit escalation)
+            (Self::BlockedForDecision { .. }, Self::Resting { .. }) => true,
+            // Resting can go to Idle (recovery), Error (unrecoverable), or stay Resting
+            (Self::Resting { .. }, Self::Idle) => true,
+            (Self::Resting { .. }, Self::Error { .. }) => true,
+            (Self::Resting { .. }, Self::Resting { .. }) => true,
             // Same status is always valid
             (a, b) if a == b => true,
             // All other transitions are invalid
@@ -313,6 +331,10 @@ impl AgentSlotStatus {
             }
             Self::Paused { reason } => format!("paused:{}", reason),
             Self::WaitingForInput { .. } => "waiting_for_input".to_string(),
+            Self::Resting { started_at, .. } => {
+                let mins = (Utc::now() - *started_at).num_minutes();
+                format!("resting:{}min", mins)
+            }
         }
     }
 }
