@@ -219,6 +219,16 @@ impl RuleBasedDecisionEngine {
                 vec![ActionSpec::new("reflect")],
                 RulePriority::High,
             ),
+            // Rule: Confirm completion when max reflections reached
+            DecisionRule::new(
+                "confirm-when-max-reflections",
+                ConditionExpr::and(vec![
+                    ConditionExpr::single(Condition::situation_type("claims_completion")),
+                    ConditionExpr::single(Condition::reflection_rounds(2, 10)), // max is 2, so >=2
+                ]),
+                vec![ActionSpec::new("confirm_completion")],
+                RulePriority::High,
+            ),
             // Rule: Retry on error
             DecisionRule::new(
                 "retry-error",
@@ -479,5 +489,61 @@ mod tests {
 
         assert_eq!(rule.name, parsed.name);
         assert_eq!(rule.priority, parsed.priority);
+    }
+
+    #[test]
+    fn test_reflection_rounds_condition() {
+        use crate::builtin_situations::ClaimsCompletionSituation;
+
+        // Test reflection_rounds = 0 matches (0, 1)
+        let situation = Box::new(ClaimsCompletionSituation::new("test"));
+        let context = make_context_with_situation(situation);
+        assert!(context.reflection_round() == 0);
+
+        // Test with metadata reflection_round = 1
+        let situation2 = Box::new(ClaimsCompletionSituation::new("test"));
+        let context2 = DecisionContext::new(situation2, "test-agent").with_reflection_round(1);
+        assert_eq!(context2.reflection_round(), 1);
+
+        // Test with metadata reflection_round = 2
+        let situation3 = Box::new(ClaimsCompletionSituation::new("test"));
+        let context3 = DecisionContext::new(situation3, "test-agent").with_reflection_round(2);
+        assert_eq!(context3.reflection_round(), 2);
+    }
+
+    #[test]
+    fn test_claims_completion_reflect_on_first_round() {
+        use crate::builtin_situations::ClaimsCompletionSituation;
+
+        let mut engine = RuleBasedDecisionEngine::new();
+        let registry = make_registry();
+
+        // First round (reflection_rounds = 0) should trigger reflect
+        let situation = Box::new(ClaimsCompletionSituation::new("Task done"));
+        let context = make_context_with_situation(situation);
+        let output = engine.decide(context, &registry).unwrap();
+
+        assert!(output.has_actions());
+        // Should match "reflect-first" rule
+        let action_type = output.first_action_type().unwrap();
+        assert_eq!(action_type.name, "reflect");
+    }
+
+    #[test]
+    fn test_claims_completion_confirm_on_max_rounds() {
+        use crate::builtin_situations::ClaimsCompletionSituation;
+
+        let mut engine = RuleBasedDecisionEngine::new();
+        let registry = make_registry();
+
+        // Max rounds (reflection_rounds = 2) should trigger confirm_completion
+        let situation = Box::new(ClaimsCompletionSituation::new("Task done"));
+        let context = DecisionContext::new(situation, "test-agent").with_reflection_round(2);
+        let output = engine.decide(context, &registry).unwrap();
+
+        assert!(output.has_actions());
+        // Should match "confirm-when-max-reflections" rule
+        let action_type = output.first_action_type().unwrap();
+        assert_eq!(action_type.name, "confirm_completion");
     }
 }

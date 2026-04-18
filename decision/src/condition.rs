@@ -135,11 +135,9 @@ impl Condition {
                 context.project_rules.contains_keyword(keyword)
             }
 
-            Condition::ReflectionRounds { min: _, max: _ } => {
-                // Try to extract from situation metadata if available
-                // For now, return false as we don't have reflection_rounds in context
-                // This could be enhanced by checking situation-specific data
-                false
+            Condition::ReflectionRounds { min, max } => {
+                let rounds = context.reflection_round();
+                rounds >= *min && rounds <= *max
             }
 
             Condition::ConfidenceBelow { threshold: _ } => {
