@@ -248,7 +248,7 @@ mod tests {
     fn t14_2_t3_scroll_works_for_long_history() {
         let mut task = create_test_task_with_history();
         // Add more history
-        for i in 0..10 {
+        for _ in 0..10 {
             task.execution_history.push(ExecutionRecord::new(
                 WorkflowAction::Continue,
                 StageId::new("developing"),

@@ -70,7 +70,20 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
 /// Render focused (single agent) view - default mode
 fn render_focused_view(frame: &mut Frame<'_>, state: &mut TuiState) {
     let composer_height = state.composer.desired_height(frame.area().width, 8);
-    let committed_cells = cells::build_cells(&state.app().transcript, frame.area().width);
+
+    // Get transcript from focused agent in multi-agent mode, or from app state in single-agent mode
+    // Clone the entries to avoid borrowing conflict with subsequent mutable state usage
+    let transcript_entries: Vec<TranscriptEntry> = if state.is_multi_agent_mode() {
+        state.agent_pool
+            .as_ref()
+            .and_then(|pool| pool.focused_slot())
+            .map(|slot| slot.transcript().to_vec())
+            .unwrap_or_else(|| state.app().transcript.clone())
+    } else {
+        state.app().transcript.clone()
+    };
+
+    let committed_cells = cells::build_cells(&transcript_entries, frame.area().width);
     let committed_lines = cells::flatten_cells(&committed_cells);
     let committed_constraint = if committed_lines.is_empty() {
         Constraint::Length(0)
@@ -519,6 +532,49 @@ fn format_time_from_u32(time: u32) -> String {
     format!("{:02}:{:02}:{:02}", hours, mins, secs)
 }
 
+/// Get brief task summary for an agent (max_chars limit for status bar display)
+/// Returns the latest assistant message truncated to the specified character limit.
+fn get_agent_task_summary(state: &TuiState, agent_id: &agent_core::agent_runtime::AgentId, max_chars: usize) -> String {
+    let text = state
+        .agent_pool
+        .as_ref()
+        .and_then(|pool| pool.get_slot_by_id(agent_id))
+        .and_then(|slot| {
+            slot.transcript()
+                .iter()
+                .rev()
+                .find_map(|entry| match entry {
+                    TranscriptEntry::Assistant(text) if !text.trim().is_empty() => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+        });
+
+    match text {
+        Some(t) => {
+            let normalized = t.split_whitespace().collect::<Vec<_>>().join(" ");
+            if normalized.is_empty() {
+                String::new()
+            } else {
+                truncate_text(&normalized, max_chars)
+            }
+        }
+        None => String::new(),
+    }
+}
+
+/// Truncate text to max_chars, adding ellipsis if truncated
+fn truncate_text(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+
+    let truncated: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{truncated}…")
+}
+
 /// Render the agent status bar showing all agent indicators
 fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) {
     if area.height == 0 {
@@ -652,7 +708,51 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
     }
 
     // Add decision status if active (shown when decision layer makes a decision)
-    if let Some(ref decision_status) = state.decision_status {
+    // First check for pending decisions (decision layer is analyzing)
+    let pending_decisions: Vec<_> = state.agent_pool
+        .as_ref()
+        .map(|pool| pool.agents_with_pending_decisions())
+        .unwrap_or_default();
+
+    if !pending_decisions.is_empty() {
+        // Show decision layer analyzing status with spinner and task summary
+        for (agent_id, started_at) in &pending_decisions {
+            let elapsed_ms = started_at.elapsed().as_millis();
+            let spinner = match (elapsed_ms / 400) % 4 {
+                0 => "⠋",
+                1 => "⠙",
+                2 => "⠹",
+                3 => "⠸",
+                _ => "⠋",
+            };
+            // Get agent codename
+            let codename = state.agent_pool
+                .as_ref()
+                .and_then(|pool| pool.get_slot_by_id(agent_id))
+                .map(|slot| slot.codename().as_str())
+                .unwrap_or_else(|| agent_id.as_str());
+
+            // Get brief task summary (max 15 chars) from latest assistant message
+            let task_summary = get_agent_task_summary(state, agent_id, 15);
+
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("🧠 {}", codename),
+                Style::default().fg(Color::Green),
+            ));
+            spans.push(Span::styled(
+                spinner,
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ));
+            if !task_summary.is_empty() {
+                spans.push(Span::styled(
+                    format!(" {}", task_summary),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        }
+    } else if let Some(ref decision_status) = state.decision_status {
+        // Show completed decision status
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             format!("🧠 {}", decision_status),
@@ -1212,7 +1312,17 @@ fn render_active_cells(frame: &mut Frame<'_>, lines: &[Line<'static>], area: Rec
 }
 
 fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
-    let transcript_entries = state.app().transcript.clone();
+    // Get transcript from focused agent in multi-agent mode, or from app state in single-agent mode
+    // Clone the entries to avoid borrowing conflict with subsequent mutable state usage
+    let transcript_entries: Vec<TranscriptEntry> = if state.is_multi_agent_mode() {
+        state.agent_pool
+            .as_ref()
+            .and_then(|pool| pool.focused_slot())
+            .map(|slot| slot.transcript().to_vec())
+            .unwrap_or_else(|| state.app().transcript.clone())
+    } else {
+        state.app().transcript.clone()
+    };
     render_transcript_entries(frame, state, area, &transcript_entries);
 }
 
