@@ -79,8 +79,9 @@ pub mod maker_registry;
 pub mod pipeline;
 pub mod strategy;
 
-// Sprint 09 (Task Concept): Task Entity
+// Task Concept: Task Entity and Workflow
 pub mod task;
+pub mod workflow;
 
 // Re-export core types
 pub use error::*;
@@ -156,3 +157,12 @@ pub use task::{Task, TaskStatus};
 // Note: task::TaskId is separate from lifecycle::TaskId
 // - task::TaskId: UUID-based, for Task entity
 // - lifecycle::TaskId: String-based, for decision context tracking
+
+// Re-export Workflow types (avoiding conflict with condition::Condition)
+pub use workflow::{
+    DecisionProcess, DecisionStage, ProcessConfig, ProcessValidationError,
+    StageId, StageTransition, WorkflowAction,
+};
+// Note: workflow::Condition is separate from condition::Condition
+// - workflow::Condition: for workflow stage conditions
+// - condition::Condition: for decision logic conditions
