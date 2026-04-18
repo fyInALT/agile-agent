@@ -162,6 +162,24 @@ impl AgentSlotStatus {
         }
     }
 
+    /// Create a new Resting status (rate limited)
+    pub fn resting(blocked_state: BlockedState) -> Self {
+        Self::Resting {
+            started_at: chrono::Utc::now(),
+            blocked_state,
+            on_resume: false,
+        }
+    }
+
+    /// Create a new Resting status with on_resume flag (for resume scenarios)
+    pub fn resting_with_on_resume(blocked_state: BlockedState, on_resume: bool) -> Self {
+        Self::Resting {
+            started_at: chrono::Utc::now(),
+            blocked_state,
+            on_resume,
+        }
+    }
+
     /// Check if agent can transition to a new status
     pub fn can_transition_to(&self, target: &AgentSlotStatus) -> bool {
         match (self, target) {
@@ -287,6 +305,11 @@ impl AgentSlotStatus {
         matches!(self, Self::WaitingForInput { .. })
     }
 
+    /// Check if agent is resting (rate limited)
+    pub fn is_resting(&self) -> bool {
+        matches!(self, Self::Resting { .. })
+    }
+
     /// Check if agent is blocked for human decision
     pub fn is_blocked_for_human(&self) -> bool {
         match self {
@@ -302,6 +325,7 @@ impl AgentSlotStatus {
     pub fn blocking_reason(&self) -> Option<&dyn BlockingReason> {
         match self {
             Self::BlockedForDecision { blocked_state } => Some(blocked_state.reason()),
+            Self::Resting { blocked_state, .. } => Some(blocked_state.reason()),
             _ => None,
         }
     }
@@ -310,6 +334,24 @@ impl AgentSlotStatus {
     pub fn blocked_elapsed(&self) -> Option<std::time::Duration> {
         match self {
             Self::BlockedForDecision { blocked_state } => Some(blocked_state.elapsed()),
+            Self::Resting { blocked_state, .. } => Some(blocked_state.elapsed()),
+            _ => None,
+        }
+    }
+
+    /// Get resting start time if resting
+    pub fn resting_started_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        match self {
+            Self::Resting { started_at, .. } => Some(*started_at),
+            _ => None,
+        }
+    }
+
+    /// Get blocking state if in BlockedForDecision or Resting
+    pub fn blocked_state(&self) -> Option<&BlockedState> {
+        match self {
+            Self::BlockedForDecision { blocked_state } => Some(blocked_state),
+            Self::Resting { blocked_state, .. } => Some(blocked_state),
             _ => None,
         }
     }

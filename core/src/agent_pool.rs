@@ -1626,7 +1626,10 @@ impl AgentPool {
                 }
                 "continue" => {
                     // Continue with normal processing - agent should transition to idle
-                    if slot.status().is_blocked() {
+                    // Handle Resting state (rate limit recovery) or blocked state
+                    if matches!(slot.status(), AgentSlotStatus::Resting { .. }) {
+                        let _ = slot.transition_to(AgentSlotStatus::idle());
+                    } else if slot.status().is_blocked() {
                         let _ = slot.transition_to(AgentSlotStatus::idle());
                     }
                     // Log: Continue action executed
