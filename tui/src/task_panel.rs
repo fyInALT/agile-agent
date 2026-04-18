@@ -189,9 +189,7 @@ impl TaskPanel {
                     TaskPanelCommand::None
                 }
             }
-            KeyCode::Char('r') => {
-                TaskPanelCommand::Refresh
-            }
+            KeyCode::Char('r') => TaskPanelCommand::Refresh,
             KeyCode::Char('d') => {
                 if let Some(id) = self.selected_task_id() {
                     TaskPanelCommand::SelectTask { id }
@@ -304,10 +302,7 @@ mod tests {
 
     #[test]
     fn t14_1_t1_panel_renders_with_tasks() {
-        let tasks = vec![
-            create_test_task("Task 1"),
-            create_test_task("Task 2"),
-        ];
+        let tasks = vec![create_test_task("Task 1"), create_test_task("Task 2")];
         let panel = TaskPanel::with_tasks(tasks);
 
         assert_eq!(panel.task_count(), 2);
@@ -382,7 +377,10 @@ mod tests {
         let tasks = vec![create_test_task("Task 1")];
         let mut panel = TaskPanel::with_tasks(tasks);
 
-        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+        let cmd = panel.handle_key_event(KeyEvent::new(
+            KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert!(matches!(cmd, TaskPanelCommand::SelectTask { .. }));
     }
 
@@ -391,7 +389,10 @@ mod tests {
         let tasks = vec![create_test_task("Task 1")];
         let mut panel = TaskPanel::with_tasks(tasks);
 
-        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('r'), crossterm::event::KeyModifiers::NONE));
+        let cmd = panel.handle_key_event(KeyEvent::new(
+            KeyCode::Char('r'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(cmd, TaskPanelCommand::Refresh);
     }
 

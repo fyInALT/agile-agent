@@ -337,7 +337,10 @@ mod tests {
         assert_eq!(TaskStatus::Pending.display(), "Pending");
         assert_eq!(TaskStatus::InProgress.display(), "In Progress");
         assert_eq!(TaskStatus::Reflecting.display(), "Reflecting");
-        assert_eq!(TaskStatus::PendingConfirmation.display(), "Awaiting Confirmation");
+        assert_eq!(
+            TaskStatus::PendingConfirmation.display(),
+            "Awaiting Confirmation"
+        );
         assert_eq!(TaskStatus::NeedsHumanDecision.display(), "Needs Decision");
         assert_eq!(TaskStatus::Paused.display(), "Paused");
         assert_eq!(TaskStatus::Completed.display(), "Completed");
@@ -358,8 +361,7 @@ mod tests {
             TaskStatus::Cancelled,
         ] {
             let json = serde_json::to_string(&status).expect("Should serialize");
-            let deserialized: TaskStatus =
-                serde_json::from_str(&json).expect("Should deserialize");
+            let deserialized: TaskStatus = serde_json::from_str(&json).expect("Should deserialize");
             assert_eq!(status, deserialized, "Status should roundtrip correctly");
         }
     }
@@ -371,7 +373,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         assert_eq!(task.status, TaskStatus::Pending);
 
-        task.transition_to(TaskStatus::InProgress).expect("Should work");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::InProgress);
     }
@@ -381,7 +384,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.transition_to(TaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Reflecting).expect("Should work");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::Reflecting);
     }
@@ -391,7 +395,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.transition_to(TaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::PendingConfirmation).expect("Should work");
+        task.transition_to(TaskStatus::PendingConfirmation)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::PendingConfirmation);
     }
@@ -402,7 +407,8 @@ mod tests {
         task.transition_to(TaskStatus::InProgress).unwrap();
         task.transition_to(TaskStatus::Reflecting).unwrap();
 
-        task.transition_to(TaskStatus::InProgress).expect("Should work");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::InProgress);
     }
@@ -413,7 +419,8 @@ mod tests {
         task.transition_to(TaskStatus::InProgress).unwrap();
         task.transition_to(TaskStatus::Reflecting).unwrap();
 
-        task.transition_to(TaskStatus::NeedsHumanDecision).expect("Should work");
+        task.transition_to(TaskStatus::NeedsHumanDecision)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::NeedsHumanDecision);
     }
@@ -424,7 +431,8 @@ mod tests {
         task.transition_to(TaskStatus::InProgress).unwrap();
         task.transition_to(TaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Completed).expect("Should work");
+        task.transition_to(TaskStatus::Completed)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::Completed);
     }
@@ -435,7 +443,8 @@ mod tests {
         task.transition_to(TaskStatus::InProgress).unwrap();
         task.transition_to(TaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Reflecting).expect("Should work");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("Should work");
 
         assert_eq!(task.status, TaskStatus::Reflecting);
     }
@@ -459,7 +468,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1));
         task.transition_to(TaskStatus::InProgress).unwrap();
 
-        assert!(task.updated_at > original_updated_at, "updated_at should be updated");
+        assert!(
+            task.updated_at > original_updated_at,
+            "updated_at should be updated"
+        );
     }
 
     #[test]
@@ -491,7 +503,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.status = TaskStatus::Paused;
 
-        task.transition_to(TaskStatus::InProgress).expect("Paused -> InProgress should work");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("Paused -> InProgress should work");
 
         assert_eq!(task.status, TaskStatus::InProgress);
     }
@@ -501,7 +514,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.status = TaskStatus::Paused;
 
-        task.transition_to(TaskStatus::Cancelled).expect("Paused -> Cancelled should work");
+        task.transition_to(TaskStatus::Cancelled)
+            .expect("Paused -> Cancelled should work");
 
         assert_eq!(task.status, TaskStatus::Cancelled);
     }
@@ -511,7 +525,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.status = TaskStatus::NeedsHumanDecision;
 
-        task.transition_to(TaskStatus::InProgress).expect("NeedsHumanDecision -> InProgress should work");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("NeedsHumanDecision -> InProgress should work");
 
         assert_eq!(task.status, TaskStatus::InProgress);
     }
@@ -521,7 +536,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.status = TaskStatus::NeedsHumanDecision;
 
-        task.transition_to(TaskStatus::Cancelled).expect("NeedsHumanDecision -> Cancelled should work");
+        task.transition_to(TaskStatus::Cancelled)
+            .expect("NeedsHumanDecision -> Cancelled should work");
 
         assert_eq!(task.status, TaskStatus::Cancelled);
     }
@@ -531,7 +547,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.transition_to(TaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Paused).expect("InProgress -> Paused should work");
+        task.transition_to(TaskStatus::Paused)
+            .expect("InProgress -> Paused should work");
 
         assert_eq!(task.status, TaskStatus::Paused);
     }
@@ -541,7 +558,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         task.transition_to(TaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Cancelled).expect("InProgress -> Cancelled should work");
+        task.transition_to(TaskStatus::Cancelled)
+            .expect("InProgress -> Cancelled should work");
 
         assert_eq!(task.status, TaskStatus::Cancelled);
     }
@@ -552,7 +570,8 @@ mod tests {
         task.transition_to(TaskStatus::InProgress).unwrap();
         task.transition_to(TaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Paused).expect("PendingConfirmation -> Paused should work for timeout");
+        task.transition_to(TaskStatus::Paused)
+            .expect("PendingConfirmation -> Paused should work for timeout");
 
         assert_eq!(task.status, TaskStatus::Paused);
     }

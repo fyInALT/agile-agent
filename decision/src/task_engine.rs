@@ -4,10 +4,13 @@
 
 use std::collections::HashMap;
 
-use crate::automation::{AutoChecker, AutoCheckResult, DecisionFilter, SimulatedOutput};
+use crate::automation::{AutoCheckResult, AutoChecker, DecisionFilter, SimulatedOutput};
 use crate::persistence::{ExecutionRecord, TaskRegistry, TaskUpdate};
 use crate::task::{Task, TaskId, TaskStatus};
-use crate::workflow::{Condition, DecisionProcess, DecisionStage, StageId, WorkflowAction, WorkflowConditionContext, WorkflowConditionRegistry};
+use crate::workflow::{
+    Condition, DecisionProcess, DecisionStage, StageId, WorkflowAction, WorkflowConditionContext,
+    WorkflowConditionRegistry,
+};
 
 /// Task decision action returned by engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,12 +187,10 @@ pub struct TaskDecisionEngine {
 
 impl TaskDecisionEngine {
     /// Create a new task decision engine
-    pub fn new(
-        process: DecisionProcess,
-        task: Task,
-        registry: TaskRegistry,
-    ) -> Self {
-        let initial_stage = process.stages.first()
+    pub fn new(process: DecisionProcess, task: Task, registry: TaskRegistry) -> Self {
+        let initial_stage = process
+            .stages
+            .first()
             .map(|s| s.id.clone())
             .unwrap_or_else(|| StageId::new("start"));
 
@@ -257,7 +258,11 @@ impl TaskDecisionEngine {
 
     /// Get current stage definition (cloned to avoid borrow conflicts)
     fn stage_cloned(&self) -> Option<DecisionStage> {
-        self.process.stages.iter().find(|s| s.id == self.current_stage).cloned()
+        self.process
+            .stages
+            .iter()
+            .find(|s| s.id == self.current_stage)
+            .cloned()
     }
 
     /// Process agent output and make decision
@@ -281,16 +286,22 @@ impl TaskDecisionEngine {
             AutoCheckResult::NeedsReflection { reason } => {
                 if self.task.reflection_count < self.task.max_reflection_rounds {
                     self.task.reflection_count += 1;
-                    TaskDecisionAction::Reflect { reason: reason.clone() }
+                    TaskDecisionAction::Reflect {
+                        reason: reason.clone(),
+                    }
                 } else {
-                    TaskDecisionAction::RequestHuman { question: format!("Max reflections reached: {}", reason) }
+                    TaskDecisionAction::RequestHuman {
+                        question: format!("Max reflections reached: {}", reason),
+                    }
                 }
             }
             AutoCheckResult::NeedsHuman { reason } => {
                 // Check if filter agrees
                 let needs_human = self.filter.needs_human_decision(&self.task, &simulated);
                 if needs_human.is_some() {
-                    TaskDecisionAction::RequestHuman { question: reason.clone() }
+                    TaskDecisionAction::RequestHuman {
+                        question: reason.clone(),
+                    }
                 } else {
                     // Filter disagrees, convert WorkflowAction to TaskDecisionAction
                     let workflow_action = self.filter.auto_decide(&self.task, &simulated);
@@ -309,13 +320,19 @@ impl TaskDecisionEngine {
     }
 
     /// Evaluate stage transitions
-    fn evaluate_transition(&mut self, output: &AgentOutput, stage: &Option<DecisionStage>) -> TaskDecisionAction {
+    fn evaluate_transition(
+        &mut self,
+        output: &AgentOutput,
+        stage: &Option<DecisionStage>,
+    ) -> TaskDecisionAction {
         if let Some(stage) = stage {
             // Check exit conditions
             for transition in &stage.transitions {
                 if self.check_transition_condition(&transition.condition, output) {
                     self.current_stage = transition.target.clone();
-                    return TaskDecisionAction::AdvanceTo { stage: transition.target.clone() };
+                    return TaskDecisionAction::AdvanceTo {
+                        stage: transition.target.clone(),
+                    };
                 }
             }
         }
@@ -331,14 +348,27 @@ impl TaskDecisionEngine {
             Condition::NoCompileErrors => !output.has_compile_errors && !output.has_syntax_errors,
             Condition::NoSyntaxErrors => !output.has_syntax_errors,
             Condition::StyleConformant => !output.has_style_issues,
-            Condition::GoalsAchieved => output.tests_pass && !output.has_syntax_errors && !output.has_compile_errors && output.risky_operations.is_empty(),
-            Condition::MaxReflectionsReached => self.task.reflection_count >= self.task.max_reflection_rounds,
+            Condition::GoalsAchieved => {
+                output.tests_pass
+                    && !output.has_syntax_errors
+                    && !output.has_compile_errors
+                    && output.risky_operations.is_empty()
+            }
+            Condition::MaxReflectionsReached => {
+                self.task.reflection_count >= self.task.max_reflection_rounds
+            }
             Condition::HumanApproved => self.task.status == TaskStatus::InProgress,
             Condition::TimeoutExceeded => false,
-            Condition::All(conditions) => conditions.iter().all(|c| self.check_transition_condition(c, output)),
-            Condition::Any(conditions) => conditions.iter().any(|c| self.check_transition_condition(c, output)),
+            Condition::All(conditions) => conditions
+                .iter()
+                .all(|c| self.check_transition_condition(c, output)),
+            Condition::Any(conditions) => conditions
+                .iter()
+                .any(|c| self.check_transition_condition(c, output)),
             Condition::Not(cond) => !self.check_transition_condition(cond, output),
-            Condition::Custom(name) => self.condition_registry.evaluate(name, &self.condition_context),
+            Condition::Custom(name) => self
+                .condition_registry
+                .evaluate(name, &self.condition_context),
         }
     }
 
@@ -349,7 +379,8 @@ impl TaskDecisionEngine {
         self.condition_context.has_ai_output = !output.content.is_empty();
 
         // Update issue flags based on errors
-        self.condition_context.issue_found = output.has_syntax_errors || output.has_compile_errors || !output.tests_pass;
+        self.condition_context.issue_found =
+            output.has_syntax_errors || output.has_compile_errors || !output.tests_pass;
         self.condition_context.no_issue = !self.condition_context.issue_found;
 
         // Update test and compile status
@@ -440,15 +471,24 @@ impl TaskDecisionEngine {
 
     /// Persist task to registry
     fn persist_task(&mut self) {
-        let _ = self.registry.update(&self.task.id, TaskUpdate::status(self.task.status));
-        let _ = self.registry.update(&self.task.id, TaskUpdate::reflection_count(self.task.reflection_count));
-        let _ = self.registry.update(&self.task.id, TaskUpdate::confirmation_count(self.task.confirmation_count));
+        let _ = self
+            .registry
+            .update(&self.task.id, TaskUpdate::status(self.task.status));
+        let _ = self.registry.update(
+            &self.task.id,
+            TaskUpdate::reflection_count(self.task.reflection_count),
+        );
+        let _ = self.registry.update(
+            &self.task.id,
+            TaskUpdate::confirmation_count(self.task.confirmation_count),
+        );
     }
 
     /// Log decision to execution history
     fn log_decision(&mut self, decision: &TaskDecisionAction, check_result: &AutoCheckResult) {
         let action = decision_to_workflow(decision);
-        let record = ExecutionRecord::with_auto_check(action, self.current_stage.clone(), check_result);
+        let record =
+            ExecutionRecord::with_auto_check(action, self.current_stage.clone(), check_result);
         self.task.execution_history.push(record);
     }
 
@@ -469,8 +509,14 @@ impl TaskDecisionEngine {
 
         result = result.replace("{{task_description}}", &self.task.description);
         result = result.replace("{{task_constraints}}", &self.task.constraints.join(", "));
-        result = result.replace("{{reflection_count}}", &self.task.reflection_count.to_string());
-        result = result.replace("{{max_reflections}}", &self.task.max_reflection_rounds.to_string());
+        result = result.replace(
+            "{{reflection_count}}",
+            &self.task.reflection_count.to_string(),
+        );
+        result = result.replace(
+            "{{max_reflections}}",
+            &self.task.max_reflection_rounds.to_string(),
+        );
         result = result.replace("{{current_stage}}", self.current_stage.as_str());
 
         result
@@ -487,20 +533,28 @@ impl TaskDecisionEngine {
                 if self.task.reflection_count < self.task.max_reflection_rounds {
                     self.task.reflection_count += 1;
                     let _ = self.task.transition_to(TaskStatus::Reflecting);
-                    TaskDecisionAction::Reflect { reason: reason.clone() }
+                    TaskDecisionAction::Reflect {
+                        reason: reason.clone(),
+                    }
                 } else {
                     let _ = self.task.transition_to(TaskStatus::Cancelled);
-                    TaskDecisionAction::Cancel { reason: "Human denied after max reflections".into() }
+                    TaskDecisionAction::Cancel {
+                        reason: "Human denied after max reflections".into(),
+                    }
                 }
             }
             HumanResponse::Custom { feedback } => {
                 self.task.reflection_count += 1;
                 let _ = self.task.transition_to(TaskStatus::Reflecting);
-                TaskDecisionAction::Reflect { reason: feedback.clone() }
+                TaskDecisionAction::Reflect {
+                    reason: feedback.clone(),
+                }
             }
             HumanResponse::Cancel => {
                 let _ = self.task.transition_to(TaskStatus::Cancelled);
-                TaskDecisionAction::Cancel { reason: "Human cancelled".into() }
+                TaskDecisionAction::Cancel {
+                    reason: "Human cancelled".into(),
+                }
             }
         };
 
@@ -524,14 +578,26 @@ impl TaskDecisionEngine {
 fn decision_to_workflow(decision: &TaskDecisionAction) -> WorkflowAction {
     match decision {
         TaskDecisionAction::Continue => WorkflowAction::Continue,
-        TaskDecisionAction::Reflect { reason } => WorkflowAction::Reflect { reason: reason.clone() },
+        TaskDecisionAction::Reflect { reason } => WorkflowAction::Reflect {
+            reason: reason.clone(),
+        },
         TaskDecisionAction::ConfirmCompletion => WorkflowAction::ConfirmCompletion,
-        TaskDecisionAction::RequestHuman { question } => WorkflowAction::RequestHuman { question: question.clone() },
-        TaskDecisionAction::AdvanceTo { stage } => WorkflowAction::AdvanceTo { stage: stage.clone() },
-        TaskDecisionAction::ReturnTo { stage } => WorkflowAction::ReturnTo { stage: stage.clone() },
-        TaskDecisionAction::Cancel { reason } => WorkflowAction::Cancel { reason: reason.clone() },
+        TaskDecisionAction::RequestHuman { question } => WorkflowAction::RequestHuman {
+            question: question.clone(),
+        },
+        TaskDecisionAction::AdvanceTo { stage } => WorkflowAction::AdvanceTo {
+            stage: stage.clone(),
+        },
+        TaskDecisionAction::ReturnTo { stage } => WorkflowAction::ReturnTo {
+            stage: stage.clone(),
+        },
+        TaskDecisionAction::Cancel { reason } => WorkflowAction::Cancel {
+            reason: reason.clone(),
+        },
         TaskDecisionAction::Retry => WorkflowAction::Retry,
-        TaskDecisionAction::Wait => WorkflowAction::Wait { reason: "Waiting".to_string() },
+        TaskDecisionAction::Wait => WorkflowAction::Wait {
+            reason: "Waiting".to_string(),
+        },
     }
 }
 
@@ -554,11 +620,23 @@ fn workflow_to_decision(action: WorkflowAction) -> TaskDecisionAction {
 fn default_templates() -> HashMap<String, String> {
     let mut templates = HashMap::new();
 
-    templates.insert("start".to_string(), "Starting task: {{task_description}}\nConstraints: {{task_constraints}}".to_string());
-    templates.insert("developing".to_string(), "Working on: {{task_description}}\nConstraints: {{task_constraints}}".to_string());
+    templates.insert(
+        "start".to_string(),
+        "Starting task: {{task_description}}\nConstraints: {{task_constraints}}".to_string(),
+    );
+    templates.insert(
+        "developing".to_string(),
+        "Working on: {{task_description}}\nConstraints: {{task_constraints}}".to_string(),
+    );
     templates.insert("reflecting".to_string(), "Reflection round {{reflection_count}}/{{max_reflections}}\nTask: {{task_description}}\nPlease review and improve.".to_string());
-    templates.insert("confirming".to_string(), "Task {{task_description}} appears complete.\nPlease confirm completion.".to_string());
-    templates.insert("check_completion".to_string(), "Verifying task: {{task_description}}\nConstraints: {{task_constraints}}".to_string());
+    templates.insert(
+        "confirming".to_string(),
+        "Task {{task_description}} appears complete.\nPlease confirm completion.".to_string(),
+    );
+    templates.insert(
+        "check_completion".to_string(),
+        "Verifying task: {{task_description}}\nConstraints: {{task_constraints}}".to_string(),
+    );
     templates.insert("default".to_string(), "Task: {{task_description}}\nStage: {{current_stage}}\nReflections: {{reflection_count}}/{{max_reflections}}".to_string());
 
     templates
@@ -572,7 +650,9 @@ mod tests {
 
     fn create_test_registry() -> TaskRegistry {
         let temp = TempDir::new().expect("tempdir");
-        let store = Box::new(crate::persistence::FileTaskStore::new(temp.path().to_path_buf()));
+        let store = Box::new(crate::persistence::FileTaskStore::new(
+            temp.path().to_path_buf(),
+        ));
         TaskRegistry::new(store)
     }
 
@@ -649,12 +729,18 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::clean("All done".to_string());
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }));
+        assert!(matches!(
+            decision,
+            TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }
+        ));
     }
 
     #[test]
@@ -664,7 +750,10 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::with_syntax_errors("Bad code".to_string());
         let decision = engine.process_output(output);
@@ -679,7 +768,10 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::with_test_failures("Tests failed".to_string());
         let decision = engine.process_output(output);
@@ -690,11 +782,17 @@ mod tests {
     #[test]
     fn t13_2_t4_boundary_violation_request_human() {
         let registry = create_test_registry();
-        let task = Task::new("Test task".to_string(), vec!["only_modify_login".to_string()]);
+        let task = Task::new(
+            "Test task".to_string(),
+            vec!["only_modify_login".to_string()],
+        );
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         // Create output that violates boundary (modifies admin.rs instead of login.rs)
         let output = AgentOutput {
@@ -711,7 +809,10 @@ mod tests {
 
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, TaskDecisionAction::RequestHuman { .. } | TaskDecisionAction::Reflect { .. }));
+        assert!(matches!(
+            decision,
+            TaskDecisionAction::RequestHuman { .. } | TaskDecisionAction::Reflect { .. }
+        ));
     }
 
     #[test]
@@ -721,13 +822,19 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::clean("All goals achieved".to_string());
         let decision = engine.process_output(output);
 
         // Should either continue or advance
-        assert!(matches!(decision, TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }));
+        assert!(matches!(
+            decision,
+            TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }
+        ));
     }
 
     #[test]
@@ -739,7 +846,10 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::with_syntax_errors("Still bad".to_string());
         let decision = engine.process_output(output);
@@ -754,7 +864,10 @@ mod tests {
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
-        engine.task.transition_to(TaskStatus::InProgress).expect("transition");
+        engine
+            .task
+            .transition_to(TaskStatus::InProgress)
+            .expect("transition");
 
         let output = AgentOutput::clean("Done".to_string());
         engine.process_output(output);
@@ -832,9 +945,12 @@ mod tests {
         let registry = create_test_registry();
         let mut task = Task::new("Test task".to_string(), vec![]);
         // Transition through proper workflow: Pending → InProgress → Reflecting → NeedsHumanDecision
-        task.transition_to(TaskStatus::InProgress).expect("transition to InProgress");
-        task.transition_to(TaskStatus::Reflecting).expect("transition to Reflecting");
-        task.transition_to(TaskStatus::NeedsHumanDecision).expect("transition to NeedsHumanDecision");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("transition to InProgress");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("transition to Reflecting");
+        task.transition_to(TaskStatus::NeedsHumanDecision)
+            .expect("transition to NeedsHumanDecision");
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
@@ -850,16 +966,24 @@ mod tests {
         let registry = create_test_registry();
         let mut task = Task::new("Test task".to_string(), vec![]);
         // Transition through proper workflow
-        task.transition_to(TaskStatus::InProgress).expect("transition to InProgress");
-        task.transition_to(TaskStatus::Reflecting).expect("transition to Reflecting");
-        task.transition_to(TaskStatus::NeedsHumanDecision).expect("transition to NeedsHumanDecision");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("transition to InProgress");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("transition to Reflecting");
+        task.transition_to(TaskStatus::NeedsHumanDecision)
+            .expect("transition to NeedsHumanDecision");
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
 
-        let decision = engine.handle_human_response(HumanResponse::Deny { reason: "Not good".into() });
+        let decision = engine.handle_human_response(HumanResponse::Deny {
+            reason: "Not good".into(),
+        });
 
-        assert!(matches!(decision, TaskDecisionAction::Reflect { .. } | TaskDecisionAction::Cancel { .. }));
+        assert!(matches!(
+            decision,
+            TaskDecisionAction::Reflect { .. } | TaskDecisionAction::Cancel { .. }
+        ));
     }
 
     #[test]
@@ -867,17 +991,28 @@ mod tests {
         let registry = create_test_registry();
         let mut task = Task::new("Test task".to_string(), vec![]);
         // Transition through proper workflow
-        task.transition_to(TaskStatus::InProgress).expect("transition to InProgress");
-        task.transition_to(TaskStatus::Reflecting).expect("transition to Reflecting");
-        task.transition_to(TaskStatus::NeedsHumanDecision).expect("transition to NeedsHumanDecision");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("transition to InProgress");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("transition to Reflecting");
+        task.transition_to(TaskStatus::NeedsHumanDecision)
+            .expect("transition to NeedsHumanDecision");
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
 
-        let decision = engine.handle_human_response(HumanResponse::Custom { feedback: "Try this instead".into() });
+        let decision = engine.handle_human_response(HumanResponse::Custom {
+            feedback: "Try this instead".into(),
+        });
 
         assert!(matches!(decision, TaskDecisionAction::Reflect { .. }));
-        assert!(engine.task.execution_history.iter().any(|r| r.human_response.is_some()));
+        assert!(
+            engine
+                .task
+                .execution_history
+                .iter()
+                .any(|r| r.human_response.is_some())
+        );
     }
 
     #[test]
@@ -885,9 +1020,12 @@ mod tests {
         let registry = create_test_registry();
         let mut task = Task::new("Test task".to_string(), vec![]);
         // Transition through proper workflow
-        task.transition_to(TaskStatus::InProgress).expect("transition to InProgress");
-        task.transition_to(TaskStatus::Reflecting).expect("transition to Reflecting");
-        task.transition_to(TaskStatus::NeedsHumanDecision).expect("transition to NeedsHumanDecision");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("transition to InProgress");
+        task.transition_to(TaskStatus::Reflecting)
+            .expect("transition to Reflecting");
+        task.transition_to(TaskStatus::NeedsHumanDecision)
+            .expect("transition to NeedsHumanDecision");
         let process = default_process();
 
         let mut engine = TaskDecisionEngine::new(process, task, registry);
@@ -895,7 +1033,13 @@ mod tests {
         engine.handle_human_response(HumanResponse::Approve);
 
         // History should have a record with human_requested
-        assert!(engine.task.execution_history.iter().any(|r| r.human_requested));
+        assert!(
+            engine
+                .task
+                .execution_history
+                .iter()
+                .any(|r| r.human_requested)
+        );
     }
 
     // Story 13.5 Tests: Status Queries
@@ -927,9 +1071,12 @@ mod tests {
     fn t13_5_t3_is_complete_returns_true_when_completed() {
         let registry = create_test_registry();
         let mut task = Task::new("Test task".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).expect("transition");
-        task.transition_to(TaskStatus::PendingConfirmation).expect("transition");
-        task.transition_to(TaskStatus::Completed).expect("transition");
+        task.transition_to(TaskStatus::InProgress)
+            .expect("transition");
+        task.transition_to(TaskStatus::PendingConfirmation)
+            .expect("transition");
+        task.transition_to(TaskStatus::Completed)
+            .expect("transition");
         let process = default_process();
 
         let engine = TaskDecisionEngine::new(process, task, registry);

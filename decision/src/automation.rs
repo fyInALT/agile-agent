@@ -3,8 +3,8 @@
 //! Provides prompt templates, auto-check system, and decision filtering
 //! to automate 80% of routine decisions.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::task::{Task, TaskStatus};
 
@@ -33,7 +33,11 @@ pub struct PromptTemplate {
 impl PromptTemplate {
     /// Create a new prompt template
     pub fn new(id: String, content: String, variables: Vec<String>) -> Self {
-        Self { id, content, variables }
+        Self {
+            id,
+            content,
+            variables,
+        }
     }
 
     /// Render template with variable values
@@ -98,17 +102,26 @@ pub struct SimulatedOutput {
 impl SimulatedOutput {
     /// Create output with syntax errors
     pub fn with_syntax_errors() -> Self {
-        Self { has_syntax_errors: true, ..Default::default() }
+        Self {
+            has_syntax_errors: true,
+            ..Default::default()
+        }
     }
 
     /// Create output with test failures
     pub fn with_test_failures() -> Self {
-        Self { tests_pass: false, ..Default::default() }
+        Self {
+            tests_pass: false,
+            ..Default::default()
+        }
     }
 
     /// Create output with compile errors
     pub fn with_compile_errors() -> Self {
-        Self { has_compile_errors: true, ..Default::default() }
+        Self {
+            has_compile_errors: true,
+            ..Default::default()
+        }
     }
 
     /// Create clean output (all pass)
@@ -127,12 +140,18 @@ impl SimulatedOutput {
 
     /// Create output with boundary violation
     pub fn with_boundary_violation(modified_files: Vec<String>) -> Self {
-        Self { modified_files, ..Self::clean() }
+        Self {
+            modified_files,
+            ..Self::clean()
+        }
     }
 
     /// Create output with risky operation
     pub fn with_risky_operation(op: String) -> Self {
-        Self { risky_operations: vec![op], ..Self::clean() }
+        Self {
+            risky_operations: vec![op],
+            ..Self::clean()
+        }
     }
 
     /// Check if contains specific file modification
@@ -268,7 +287,9 @@ impl CheckRule for BoundaryCheckRule {
         };
 
         for file in &output.modified_files {
-            let is_allowed = allowed.iter().any(|pattern| file.contains(pattern) || pattern.contains(file));
+            let is_allowed = allowed
+                .iter()
+                .any(|pattern| file.contains(pattern) || pattern.contains(file));
             if !is_allowed && !allowed.is_empty() {
                 return Some(AutoCheckResult::NeedsHuman {
                     reason: format!("Boundary violation: modified {}", file),
@@ -392,7 +413,10 @@ pub struct BoundaryRule {
 impl BoundaryRule {
     /// Create a boundary rule
     pub fn new(pattern: String, description: String) -> Self {
-        Self { pattern, description }
+        Self {
+            pattern,
+            description,
+        }
     }
 
     /// Get description
@@ -405,9 +429,9 @@ impl BoundaryRule {
         // If task has explicit constraints, use them
         if !task_constraints.is_empty() {
             for file in &output.modified_files {
-                let is_allowed = task_constraints.iter().any(|c| {
-                    file.contains(c) || c.contains(file) || file == c
-                });
+                let is_allowed = task_constraints
+                    .iter()
+                    .any(|c| file.contains(c) || c.contains(file) || file == c);
                 if !is_allowed {
                     return true;
                 }
@@ -436,7 +460,10 @@ pub struct DecisionFilter {
 impl DecisionFilter {
     /// Create new filter
     pub fn new(risky_operations: Vec<String>, boundary_rules: Vec<BoundaryRule>) -> Self {
-        Self { risky_operations, boundary_rules }
+        Self {
+            risky_operations,
+            boundary_rules,
+        }
     }
 
     /// Check if human decision is needed
@@ -451,9 +478,10 @@ impl DecisionFilter {
         // Also check if any modified file is outside task constraints
         if !task.constraints.is_empty() {
             for file in &output.modified_files {
-                let is_allowed = task.constraints.iter().any(|c| {
-                    file.contains(c) || c.contains(file) || file == c
-                });
+                let is_allowed = task
+                    .constraints
+                    .iter()
+                    .any(|c| file.contains(c) || c.contains(file) || file == c);
                 if !is_allowed {
                     return Some(format!("Boundary violation: modified {}", file));
                 }
@@ -539,7 +567,10 @@ impl Default for DecisionFilter {
     fn default() -> Self {
         Self::new(
             RiskCheckRule::default_patterns(),
-            vec![BoundaryRule::new("allowed".to_string(), "Task boundary".to_string())],
+            vec![BoundaryRule::new(
+                "allowed".to_string(),
+                "Task boundary".to_string(),
+            )],
         )
     }
 }
@@ -644,7 +675,10 @@ mod tests {
 
         let result = template.render(&values);
         assert!(result.is_err(), "Should return error for missing variable");
-        assert!(matches!(result.unwrap_err(), RenderError::MissingVariable(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RenderError::MissingVariable(_)
+        ));
     }
 
     #[test]
@@ -667,11 +701,7 @@ mod tests {
 
     #[test]
     fn t11_1_t4_empty_template_returns_empty_string() {
-        let template = PromptTemplate::new(
-            "empty".to_string(),
-            "".to_string(),
-            vec![],
-        );
+        let template = PromptTemplate::new("empty".to_string(), "".to_string(), vec![]);
 
         let result = template.render(&HashMap::new()).expect("Should render");
         assert_eq!(result, "");
@@ -704,7 +734,9 @@ mod tests {
     #[test]
     fn t11_2_t2_check_quality_template_has_ai_output_constraints() {
         let templates = default_templates();
-        let quality = templates.get("check_quality").expect("Should have check_quality template");
+        let quality = templates
+            .get("check_quality")
+            .expect("Should have check_quality template");
 
         assert!(quality.variables.contains(&"ai_output".to_string()));
         assert!(quality.variables.contains(&"task_constraints".to_string()));
@@ -713,17 +745,33 @@ mod tests {
     #[test]
     fn t11_2_t3_reflecting_template_has_problem_count_max() {
         let templates = default_templates();
-        let reflecting = templates.get("reflecting").expect("Should have reflecting template");
+        let reflecting = templates
+            .get("reflecting")
+            .expect("Should have reflecting template");
 
-        assert!(reflecting.variables.contains(&"problem_description".to_string()));
-        assert!(reflecting.variables.contains(&"reflection_count".to_string()));
-        assert!(reflecting.variables.contains(&"max_reflections".to_string()));
+        assert!(
+            reflecting
+                .variables
+                .contains(&"problem_description".to_string())
+        );
+        assert!(
+            reflecting
+                .variables
+                .contains(&"reflection_count".to_string())
+        );
+        assert!(
+            reflecting
+                .variables
+                .contains(&"max_reflections".to_string())
+        );
     }
 
     #[test]
     fn t11_2_t4_check_completion_template_has_goals_status() {
         let templates = default_templates();
-        let completion = templates.get("check_completion").expect("Should have check_completion template");
+        let completion = templates
+            .get("check_completion")
+            .expect("Should have check_completion template");
 
         assert!(completion.variables.contains(&"task_goals".to_string()));
         assert!(completion.variables.contains(&"current_status".to_string()));
@@ -732,10 +780,20 @@ mod tests {
     #[test]
     fn t11_2_t5_confirming_template_has_task_changes_tests() {
         let templates = default_templates();
-        let confirming = templates.get("confirming").expect("Should have confirming template");
+        let confirming = templates
+            .get("confirming")
+            .expect("Should have confirming template");
 
-        assert!(confirming.variables.contains(&"task_description".to_string()));
-        assert!(confirming.variables.contains(&"changes_summary".to_string()));
+        assert!(
+            confirming
+                .variables
+                .contains(&"task_description".to_string())
+        );
+        assert!(
+            confirming
+                .variables
+                .contains(&"changes_summary".to_string())
+        );
         assert!(confirming.variables.contains(&"test_results".to_string()));
     }
 
@@ -763,9 +821,12 @@ mod tests {
         let result = rule.check(&task, &output);
         assert!(result.is_some());
         let check_result = result.unwrap();
-        assert_eq!(check_result, AutoCheckResult::NeedsReflection {
-            reason: "Syntax errors found".to_string(),
-        });
+        assert_eq!(
+            check_result,
+            AutoCheckResult::NeedsReflection {
+                reason: "Syntax errors found".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -776,9 +837,12 @@ mod tests {
 
         let result = rule.check(&task, &output);
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), AutoCheckResult::NeedsReflection {
-            reason: "Tests failed".to_string(),
-        });
+        assert_eq!(
+            result.unwrap(),
+            AutoCheckResult::NeedsReflection {
+                reason: "Tests failed".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -789,16 +853,22 @@ mod tests {
 
         let result = rule.check(&task, &output);
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), AutoCheckResult::NeedsReflection {
-            reason: "Compilation errors".to_string(),
-        });
+        assert_eq!(
+            result.unwrap(),
+            AutoCheckResult::NeedsReflection {
+                reason: "Compilation errors".to_string(),
+            }
+        );
     }
 
     #[test]
     fn t11_3_t4_boundary_check_detects_violations() {
         let rule = BoundaryCheckRule::new(vec!["src/auth.rs".to_string()]);
         let task = Task::new("Fix auth".to_string(), vec!["src/auth.rs".to_string()]);
-        let output = SimulatedOutput::with_boundary_violation(vec!["src/db.rs".to_string(), "src/auth.rs".to_string()]);
+        let output = SimulatedOutput::with_boundary_violation(vec![
+            "src/db.rs".to_string(),
+            "src/auth.rs".to_string(),
+        ]);
 
         let result = rule.check(&task, &output);
         assert!(result.is_some());
@@ -814,7 +884,10 @@ mod tests {
 
         let result = rule.check(&task, &output);
         assert!(result.is_some());
-        assert!(matches!(result.unwrap(), AutoCheckResult::NeedsHuman { .. }));
+        assert!(matches!(
+            result.unwrap(),
+            AutoCheckResult::NeedsHuman { .. }
+        ));
     }
 
     #[test]
@@ -824,9 +897,12 @@ mod tests {
         let output = SimulatedOutput::with_syntax_errors();
 
         let result = checker.check(&task, &output);
-        assert_eq!(result, AutoCheckResult::NeedsReflection {
-            reason: "Syntax errors found".to_string(),
-        });
+        assert_eq!(
+            result,
+            AutoCheckResult::NeedsReflection {
+                reason: "Syntax errors found".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -988,7 +1064,10 @@ mod tests {
 
         // Check finds reflection need
         let check_result = checker.check(&task, &output);
-        assert!(matches!(check_result, AutoCheckResult::NeedsReflection { .. }));
+        assert!(matches!(
+            check_result,
+            AutoCheckResult::NeedsReflection { .. }
+        ));
 
         // Auto-decide reflects
         let action = filter.auto_decide(&task, &output);
@@ -1020,7 +1099,10 @@ mod tests {
         let reflecting = templates.get("reflecting").expect("template");
 
         let values = HashMap::from([
-            ("problem_description".to_string(), "Tests failed".to_string()),
+            (
+                "problem_description".to_string(),
+                "Tests failed".to_string(),
+            ),
             ("reflection_count".to_string(), "1".to_string()),
             ("max_reflections".to_string(), "2".to_string()),
         ]);

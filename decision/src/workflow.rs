@@ -129,7 +129,11 @@ impl WorkflowConditionRegistry {
     }
 
     /// Register an evaluator for a custom condition name
-    pub fn register(&mut self, name: impl Into<String>, evaluator: Box<dyn WorkflowConditionEvaluator>) {
+    pub fn register(
+        &mut self,
+        name: impl Into<String>,
+        evaluator: Box<dyn WorkflowConditionEvaluator>,
+    ) {
         self.evaluators.insert(name.into(), evaluator);
     }
 
@@ -185,7 +189,11 @@ pub struct StageTransition {
 impl StageTransition {
     /// Create a new transition
     pub fn new(target: StageId, condition: Condition, prompt: String) -> Self {
-        Self { target, condition, prompt }
+        Self {
+            target,
+            condition,
+            prompt,
+        }
     }
 }
 
@@ -303,10 +311,18 @@ pub struct ProcessConfig {
     pub log_decisions: bool,
 }
 
-fn default_max_reflection_rounds() -> usize { 2 }
-fn default_enforce_verification() -> bool { true }
-fn default_timeout_seconds() -> u64 { 1800 }
-fn default_log_decisions() -> bool { true }
+fn default_max_reflection_rounds() -> usize {
+    2
+}
+fn default_enforce_verification() -> bool {
+    true
+}
+fn default_timeout_seconds() -> u64 {
+    1800
+}
+fn default_log_decisions() -> bool {
+    true
+}
 
 impl Default for ProcessConfig {
     fn default() -> Self {
@@ -450,14 +466,18 @@ mod tests {
         );
 
         assert_eq!(transition.target.as_str(), "developing");
-        assert_eq!(transition.condition, Condition::Custom("ai_response".to_string()));
+        assert_eq!(
+            transition.condition,
+            Condition::Custom("ai_response".to_string())
+        );
         assert_eq!(transition.prompt, "Begin implementing task");
 
         let stage = DecisionStage::new(
             StageId::new("start"),
             "Start".to_string(),
             "Start stage".to_string(),
-        ).with_transition(transition);
+        )
+        .with_transition(transition);
 
         assert_eq!(stage.transitions.len(), 1);
         assert_eq!(stage.transitions[0].target.as_str(), "developing");
@@ -469,15 +489,15 @@ mod tests {
             StageId::new("start"),
             "Start Development".to_string(),
             "Begin task execution".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("developing"),
             Condition::TestsPass,
             "Tests passed".to_string(),
         ));
 
         let json = serde_json::to_string(&stage).expect("Should serialize");
-        let deserialized: DecisionStage =
-            serde_json::from_str(&json).expect("Should deserialize");
+        let deserialized: DecisionStage = serde_json::from_str(&json).expect("Should deserialize");
 
         assert_eq!(deserialized.id, stage.id);
         assert_eq!(deserialized.name, stage.name);
@@ -512,19 +532,13 @@ mod tests {
 
     #[test]
     fn t10_2_t5_all_condition_composite() {
-        let cond = Condition::All(vec![
-            Condition::TestsPass,
-            Condition::NoCompileErrors,
-        ]);
+        let cond = Condition::All(vec![Condition::TestsPass, Condition::NoCompileErrors]);
         assert!(matches!(cond, Condition::All(_)));
     }
 
     #[test]
     fn t10_2_t6_any_condition_composite() {
-        let cond = Condition::Any(vec![
-            Condition::TestsPass,
-            Condition::GoalsAchieved,
-        ]);
+        let cond = Condition::Any(vec![Condition::TestsPass, Condition::GoalsAchieved]);
         assert!(matches!(cond, Condition::Any(_)));
     }
 
@@ -550,8 +564,7 @@ mod tests {
 
         for cond in conditions {
             let json = serde_json::to_string(&cond).expect("Should serialize");
-            let deserialized: Condition =
-                serde_json::from_str(&json).expect("Should deserialize");
+            let deserialized: Condition = serde_json::from_str(&json).expect("Should deserialize");
             assert_eq!(cond, deserialized);
         }
     }
@@ -562,14 +575,26 @@ mod tests {
     fn t10_3_t1_all_action_variants_defined() {
         let actions = [
             WorkflowAction::Continue,
-            WorkflowAction::Reflect { reason: "test".to_string() },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
             WorkflowAction::ConfirmCompletion,
-            WorkflowAction::RequestHuman { question: "test?".to_string() },
-            WorkflowAction::AdvanceTo { stage: StageId::new("next") },
-            WorkflowAction::ReturnTo { stage: StageId::new("prev") },
-            WorkflowAction::Cancel { reason: "test".to_string() },
+            WorkflowAction::RequestHuman {
+                question: "test?".to_string(),
+            },
+            WorkflowAction::AdvanceTo {
+                stage: StageId::new("next"),
+            },
+            WorkflowAction::ReturnTo {
+                stage: StageId::new("prev"),
+            },
+            WorkflowAction::Cancel {
+                reason: "test".to_string(),
+            },
             WorkflowAction::Retry,
-            WorkflowAction::Wait { reason: "test".to_string() },
+            WorkflowAction::Wait {
+                reason: "test".to_string(),
+            },
         ];
 
         // Verify distinct variants
@@ -584,22 +609,33 @@ mod tests {
 
     #[test]
     fn t10_3_t2_reflect_action_has_reason_field() {
-        let action = WorkflowAction::Reflect { reason: "Tests failed".to_string() };
+        let action = WorkflowAction::Reflect {
+            reason: "Tests failed".to_string(),
+        };
         assert_eq!(action.to_prompt(), "Reflect on and fix: Tests failed");
     }
 
     #[test]
     fn t10_3_t3_request_human_action_has_question_field() {
-        let action = WorkflowAction::RequestHuman { question: "Approve changes?".to_string() };
-        assert_eq!(action.to_prompt(), "Human decision needed: Approve changes?");
+        let action = WorkflowAction::RequestHuman {
+            question: "Approve changes?".to_string(),
+        };
+        assert_eq!(
+            action.to_prompt(),
+            "Human decision needed: Approve changes?"
+        );
     }
 
     #[test]
     fn t10_3_t4_actions_serialize_correctly() {
         let actions = vec![
             WorkflowAction::Continue,
-            WorkflowAction::Reflect { reason: "test".to_string() },
-            WorkflowAction::AdvanceTo { stage: StageId::new("next") },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
+            WorkflowAction::AdvanceTo {
+                stage: StageId::new("next"),
+            },
         ];
 
         for action in actions {
@@ -612,9 +648,18 @@ mod tests {
 
     #[test]
     fn t10_3_t5_to_prompt_generates_appropriate_text() {
-        assert_eq!(WorkflowAction::Continue.to_prompt(), "Continue with current execution.");
-        assert_eq!(WorkflowAction::ConfirmCompletion.to_prompt(), "Confirm task completion.");
-        assert_eq!(WorkflowAction::Retry.to_prompt(), "Retry the last operation.");
+        assert_eq!(
+            WorkflowAction::Continue.to_prompt(),
+            "Continue with current execution."
+        );
+        assert_eq!(
+            WorkflowAction::ConfirmCompletion.to_prompt(),
+            "Confirm task completion."
+        );
+        assert_eq!(
+            WorkflowAction::Retry.to_prompt(),
+            "Retry the last operation."
+        );
     }
 
     // Story 10.4 Tests: Decision Process Definition
@@ -622,7 +667,11 @@ mod tests {
     #[test]
     fn t10_4_t1_process_created_with_stages() {
         let stages = vec![
-            DecisionStage::new(StageId::new("start"), "Start".to_string(), "Start".to_string()),
+            DecisionStage::new(
+                StageId::new("start"),
+                "Start".to_string(),
+                "Start".to_string(),
+            ),
             DecisionStage::new(StageId::new("end"), "End".to_string(), "End".to_string()),
         ];
 
@@ -643,7 +692,11 @@ mod tests {
     #[test]
     fn t10_4_t2_initial_final_stages_valid() {
         let stages = vec![
-            DecisionStage::new(StageId::new("start"), "Start".to_string(), "Start".to_string()),
+            DecisionStage::new(
+                StageId::new("start"),
+                "Start".to_string(),
+                "Start".to_string(),
+            ),
             DecisionStage::new(StageId::new("end"), "End".to_string(), "End".to_string()),
         ];
 
@@ -664,7 +717,11 @@ mod tests {
         let process1 = DecisionProcess::new(
             "Test".to_string(),
             "Test".to_string(),
-            vec![DecisionStage::new(StageId::new("a"), "A".to_string(), "A".to_string())],
+            vec![DecisionStage::new(
+                StageId::new("a"),
+                "A".to_string(),
+                "A".to_string(),
+            )],
             StageId::new("invalid"), // doesn't exist
             StageId::new("a"),
         );
@@ -674,7 +731,11 @@ mod tests {
         let process2 = DecisionProcess::new(
             "Test".to_string(),
             "Test".to_string(),
-            vec![DecisionStage::new(StageId::new("a"), "A".to_string(), "A".to_string())],
+            vec![DecisionStage::new(
+                StageId::new("a"),
+                "A".to_string(),
+                "A".to_string(),
+            )],
             StageId::new("a"),
             StageId::new("invalid"), // doesn't exist
         );
@@ -704,7 +765,11 @@ mod tests {
             "Test".to_string(),
             "Test process".to_string(),
             vec![
-                DecisionStage::new(StageId::new("start"), "Start".to_string(), "Start".to_string()),
+                DecisionStage::new(
+                    StageId::new("start"),
+                    "Start".to_string(),
+                    "Start".to_string(),
+                ),
                 DecisionStage::new(StageId::new("end"), "End".to_string(), "End".to_string()),
             ],
             StageId::new("start"),
@@ -737,7 +802,10 @@ mod tests {
     fn t10_5_t1_default_process_creates_valid_process() {
         let process = default_process();
 
-        assert!(process.validate().is_ok(), "Default process should be valid");
+        assert!(
+            process.validate().is_ok(),
+            "Default process should be valid"
+        );
     }
 
     #[test]
@@ -786,32 +854,35 @@ pub fn default_process() -> DecisionProcess {
             StageId::new("start"),
             "Start Development".to_string(),
             "Task starts, AI begins execution".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("developing"),
             Condition::Custom("ai_response".to_string()),
             "Begin implementing task".to_string(),
         ))
         .with_action(WorkflowAction::Continue),
-
         // Stage 2: Developing
         DecisionStage::new(
             StageId::new("developing"),
             "Developing".to_string(),
             "AI developing, needs continuous decisions".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("check_quality"),
             Condition::Custom("ai_output".to_string()),
             "Check AI output for issues".to_string(),
         ))
         .with_action(WorkflowAction::Continue)
-        .with_action(WorkflowAction::Reflect { reason: "Issue found".to_string() }),
-
+        .with_action(WorkflowAction::Reflect {
+            reason: "Issue found".to_string(),
+        }),
         // Stage 3: Check Quality
         DecisionStage::new(
             StageId::new("check_quality"),
             "Quality Check".to_string(),
             "Check output quality".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("reflecting"),
             Condition::Custom("issue_found".to_string()),
             "Issue found, reflect and fix".to_string(),
@@ -821,15 +892,19 @@ pub fn default_process() -> DecisionProcess {
             Condition::Custom("no_issue".to_string()),
             "No issues, check completion".to_string(),
         ))
-        .with_action(WorkflowAction::Reflect { reason: "Quality issue".to_string() })
-        .with_action(WorkflowAction::AdvanceTo { stage: StageId::new("check_completion") }),
-
+        .with_action(WorkflowAction::Reflect {
+            reason: "Quality issue".to_string(),
+        })
+        .with_action(WorkflowAction::AdvanceTo {
+            stage: StageId::new("check_completion"),
+        }),
         // Stage 4: Reflecting
         DecisionStage::new(
             StageId::new("reflecting"),
             "Reflecting".to_string(),
             "Reflect and fix issues".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("developing"),
             Condition::Custom("fixed".to_string()),
             "Issue fixed, continue development".to_string(),
@@ -839,15 +914,19 @@ pub fn default_process() -> DecisionProcess {
             Condition::MaxReflectionsReached,
             "Reflection limit reached, need human".to_string(),
         ))
-        .with_action(WorkflowAction::Reflect { reason: "Fix issue".to_string() })
-        .with_action(WorkflowAction::RequestHuman { question: "Reflection limit".to_string() }),
-
+        .with_action(WorkflowAction::Reflect {
+            reason: "Fix issue".to_string(),
+        })
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Reflection limit".to_string(),
+        }),
         // Stage 5: Check Completion
         DecisionStage::new(
             StageId::new("check_completion"),
             "Completion Check".to_string(),
             "Check if task fully completed".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("developing"),
             Condition::Custom("not_complete".to_string()),
             "Not fully complete, continue".to_string(),
@@ -859,13 +938,13 @@ pub fn default_process() -> DecisionProcess {
         ))
         .with_action(WorkflowAction::Continue)
         .with_action(WorkflowAction::ConfirmCompletion),
-
         // Stage 6: Confirming
         DecisionStage::new(
             StageId::new("confirming"),
             "Confirming Completion".to_string(),
             "Final confirmation of completion".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("completed"),
             Condition::HumanApproved,
             "Completion confirmed".to_string(),
@@ -876,14 +955,16 @@ pub fn default_process() -> DecisionProcess {
             "Confirmation rejected, reflect".to_string(),
         ))
         .with_action(WorkflowAction::ConfirmCompletion)
-        .with_action(WorkflowAction::RequestHuman { question: "Confirm completion?".to_string() }),
-
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Confirm completion?".to_string(),
+        }),
         // Stage 7: Human Decision
         DecisionStage::new(
             StageId::new("human_decision"),
             "Human Decision".to_string(),
             "Wait for human decision".to_string(),
-        ).with_transition(StageTransition::new(
+        )
+        .with_transition(StageTransition::new(
             StageId::new("developing"),
             Condition::HumanApproved,
             "Human approved, continue".to_string(),
@@ -893,15 +974,15 @@ pub fn default_process() -> DecisionProcess {
             Condition::Custom("human_cancelled".to_string()),
             "Human cancelled".to_string(),
         ))
-        .with_action(WorkflowAction::RequestHuman { question: "Decision needed".to_string() }),
-
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Decision needed".to_string(),
+        }),
         // Stage 8: Completed
         DecisionStage::new(
             StageId::new("completed"),
             "Completed".to_string(),
             "Task completed".to_string(),
         ),
-
         // Stage 9: Cancelled
         DecisionStage::new(
             StageId::new("cancelled"),

@@ -121,7 +121,12 @@ impl TaskMetrics {
     }
 
     /// Record task completion with statistics
-    pub fn record_task_completion(&mut self, reflections: usize, confirmations: usize, duration: Duration) {
+    pub fn record_task_completion(
+        &mut self,
+        reflections: usize,
+        confirmations: usize,
+        duration: Duration,
+    ) {
         self.completed_tasks += 1;
         self.total_reflections += reflections;
         self.total_confirmations += confirmations;

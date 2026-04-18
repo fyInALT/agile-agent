@@ -43,7 +43,11 @@ pub struct TaskDecisionOption {
 
 impl TaskDecisionOption {
     /// Create a new option
-    pub fn new(id: impl Into<String>, label: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
@@ -340,7 +344,10 @@ mod tests {
     use agent_decision::Task;
 
     fn create_test_task() -> Task {
-        Task::new("Test task description".to_string(), vec!["constraint1".to_string()])
+        Task::new(
+            "Test task description".to_string(),
+            vec!["constraint1".to_string()],
+        )
     }
 
     fn create_completion_request() -> TaskDecisionRequest {
@@ -447,7 +454,8 @@ mod tests {
         let mut overlay = TaskDecisionOverlay::new(request);
 
         // Ctrl+I enters custom mode
-        let cmd = overlay.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        let cmd =
+            overlay.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
         assert_eq!(cmd, TaskDecisionCommand::None);
         assert!(overlay.custom_mode);
     }

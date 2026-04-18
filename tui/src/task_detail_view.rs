@@ -12,10 +12,10 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 
+use crate::task_panel::TaskPanel;
 use agent_decision::persistence::ExecutionRecord;
 use agent_decision::task::{Task, TaskStatus};
 use agent_decision::workflow::{StageId, WorkflowAction};
-use crate::task_panel::TaskPanel;
 
 /// Task detail view state
 #[derive(Debug, Clone)]
@@ -114,7 +114,10 @@ impl TaskDetailView {
         vec![
             format!("Task: {}", self.task.description),
             format!("Status: {} {}", status_symbol, status_text),
-            format!("Reflections: {} / {}", self.task.reflection_count, self.task.max_reflection_rounds),
+            format!(
+                "Reflections: {} / {}",
+                self.task.reflection_count, self.task.max_reflection_rounds
+            ),
             format!("Confirmations: {}", self.task.confirmation_count),
             format!("Constraints: {}", self.task.constraints.join(", ")),
             format!("History records: {}", self.task.execution_history.len()),
@@ -126,8 +129,14 @@ impl TaskDetailView {
         let action_text = format!("{:?}", record.action);
         let timestamp = record.timestamp.format("%H:%M:%S");
 
-        let human_flag = if record.human_requested { " [HUMAN]" } else { "" };
-        let auto_check = record.auto_check_result.as_ref()
+        let human_flag = if record.human_requested {
+            " [HUMAN]"
+        } else {
+            ""
+        };
+        let auto_check = record
+            .auto_check_result
+            .as_ref()
             .map(|r| format!(" [{}]", r))
             .unwrap_or_default();
 
@@ -185,11 +194,14 @@ impl TaskDetailView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_decision::{StageId, WorkflowAction};
     use crate::task_panel::TaskInfo;
+    use agent_decision::{StageId, WorkflowAction};
 
     fn create_test_task_with_history() -> Task {
-        let mut task = Task::new("Test task with history".to_string(), vec!["constraint1".to_string()]);
+        let mut task = Task::new(
+            "Test task with history".to_string(),
+            vec!["constraint1".to_string()],
+        );
         let _ = task.transition_to(TaskStatus::InProgress);
 
         // Add some history records
@@ -198,7 +210,9 @@ mod tests {
             StageId::new("developing"),
         ));
         task.execution_history.push(ExecutionRecord::new(
-            WorkflowAction::Reflect { reason: "syntax error".to_string() },
+            WorkflowAction::Reflect {
+                reason: "syntax error".to_string(),
+            },
             StageId::new("reflecting"),
         ));
         task.execution_history.push(ExecutionRecord::new(
@@ -285,10 +299,16 @@ mod tests {
         let mut view = TaskDetailView::new(task);
         view.toggle_history();
 
-        let cmd = view.handle_key_event(KeyEvent::new(KeyCode::Down, crossterm::event::KeyModifiers::NONE));
+        let cmd = view.handle_key_event(KeyEvent::new(
+            KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(cmd, TaskDetailCommand::ScrollDown);
 
-        let cmd = view.handle_key_event(KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE));
+        let cmd = view.handle_key_event(KeyEvent::new(
+            KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(cmd, TaskDetailCommand::Close);
     }
 

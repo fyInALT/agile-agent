@@ -80,9 +80,9 @@ pub mod pipeline;
 pub mod strategy;
 
 // Task Concept: Task Entity and Workflow
+pub mod automation;
 pub mod task;
 pub mod workflow;
-pub mod automation;
 
 // Sprint 13: Task Decision Engine
 pub mod task_engine;
@@ -167,9 +167,9 @@ pub use task::{Task, TaskStatus};
 
 // Re-export Workflow types (avoiding conflict with condition::Condition)
 pub use workflow::{
-    DecisionProcess, DecisionStage, ProcessConfig, ProcessValidationError,
-    StageId, StageTransition, WorkflowAction, WorkflowConditionContext,
-    WorkflowConditionEvaluator, WorkflowConditionRegistry,
+    DecisionProcess, DecisionStage, ProcessConfig, ProcessValidationError, StageId,
+    StageTransition, WorkflowAction, WorkflowConditionContext, WorkflowConditionEvaluator,
+    WorkflowConditionRegistry,
 };
 // Note: workflow::Condition is separate from condition::Condition
 // - workflow::Condition: for workflow stage conditions
@@ -186,9 +186,7 @@ pub use persistence::{
 };
 
 // Sprint 13: Task Decision Engine
-pub use task_engine::{
-    AgentOutput, HumanResponse, TaskDecisionAction, TaskDecisionEngine,
-};
+pub use task_engine::{AgentOutput, HumanResponse, TaskDecisionAction, TaskDecisionEngine};
 
 // Sprint 15: Task Metrics
 pub use task_metrics::TaskMetrics;

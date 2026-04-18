@@ -52,7 +52,11 @@ impl ExecutionRecord {
     }
 
     /// Create with auto-check result
-    pub fn with_auto_check(action: WorkflowAction, stage: StageId, result: &AutoCheckResult) -> Self {
+    pub fn with_auto_check(
+        action: WorkflowAction,
+        stage: StageId,
+        result: &AutoCheckResult,
+    ) -> Self {
         Self {
             action,
             timestamp: Utc::now(),
@@ -284,22 +288,42 @@ pub struct TaskUpdate {
 impl TaskUpdate {
     /// Create status update
     pub fn status(status: TaskStatus) -> Self {
-        Self { status: Some(status), reflection_count: None, confirmation_count: None, add_history: None }
+        Self {
+            status: Some(status),
+            reflection_count: None,
+            confirmation_count: None,
+            add_history: None,
+        }
     }
 
     /// Create reflection count update
     pub fn reflection_count(count: usize) -> Self {
-        Self { status: None, reflection_count: Some(count), confirmation_count: None, add_history: None }
+        Self {
+            status: None,
+            reflection_count: Some(count),
+            confirmation_count: None,
+            add_history: None,
+        }
     }
 
     /// Create confirmation count update
     pub fn confirmation_count(count: usize) -> Self {
-        Self { status: None, reflection_count: None, confirmation_count: Some(count), add_history: None }
+        Self {
+            status: None,
+            reflection_count: None,
+            confirmation_count: Some(count),
+            add_history: None,
+        }
     }
 
     /// Add history record
     pub fn add_history(record: ExecutionRecord) -> Self {
-        Self { status: None, reflection_count: None, confirmation_count: None, add_history: Some(record) }
+        Self {
+            status: None,
+            reflection_count: None,
+            confirmation_count: None,
+            add_history: Some(record),
+        }
     }
 
     /// Apply update to task
@@ -341,17 +365,27 @@ impl TaskRegistry {
     }
 
     /// Create a new task
-    pub fn create(&self, description: String, constraints: Vec<String>) -> Result<TaskId, RegistryError> {
+    pub fn create(
+        &self,
+        description: String,
+        constraints: Vec<String>,
+    ) -> Result<TaskId, RegistryError> {
         let task = Task::new(description, constraints);
         let id = task.id.clone();
 
         {
-            let mut active = self.active_tasks.write().map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
+            let mut active = self
+                .active_tasks
+                .write()
+                .map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
             active.insert(id.clone(), task.clone());
         }
 
         {
-            let store = self.store.read().map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
+            let store = self
+                .store
+                .read()
+                .map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
             store.save(&task)?;
         }
 
@@ -360,40 +394,64 @@ impl TaskRegistry {
 
     /// Get a task by ID
     pub fn get(&self, id: &TaskId) -> Option<Task> {
-        self.active_tasks.read().map(|active| active.get(id).cloned()).unwrap_or(None)
+        self.active_tasks
+            .read()
+            .map(|active| active.get(id).cloned())
+            .unwrap_or(None)
     }
 
     /// Get a completed task by ID
     pub fn get_completed(&self, id: &TaskId) -> Option<Task> {
-        self.completed_tasks.read().map(|completed| completed.iter().find(|t| t.id == *id).cloned()).unwrap_or(None)
+        self.completed_tasks
+            .read()
+            .map(|completed| completed.iter().find(|t| t.id == *id).cloned())
+            .unwrap_or(None)
     }
 
     /// Update a task
     pub fn update(&self, id: &TaskId, update: TaskUpdate) -> Result<(), RegistryError> {
-        let mut active = self.active_tasks.write().map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
-        let task = active.get_mut(id).ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let mut active = self
+            .active_tasks
+            .write()
+            .map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
+        let task = active
+            .get_mut(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
         update.apply(task);
 
-        let store = self.store.read().map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
+        let store = self
+            .store
+            .read()
+            .map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
         store.save(task)?;
         Ok(())
     }
 
     /// Complete a task
     pub fn complete(&self, id: &TaskId) -> Result<(), RegistryError> {
-        let mut active = self.active_tasks.write().map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
-        let task = active.remove(id).ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let mut active = self
+            .active_tasks
+            .write()
+            .map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
+        let task = active
+            .remove(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
 
         let mut task = task;
         task.transition_to(TaskStatus::Completed)?;
 
         {
-            let mut completed = self.completed_tasks.write().map_err(|_| RegistryError::LockError("completed_tasks write lock poisoned".into()))?;
+            let mut completed = self.completed_tasks.write().map_err(|_| {
+                RegistryError::LockError("completed_tasks write lock poisoned".into())
+            })?;
             completed.push(task.clone());
         }
 
         {
-            let store = self.store.read().map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
+            let store = self
+                .store
+                .read()
+                .map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
             store.move_to_completed(&task)?;
         }
 
@@ -402,27 +460,37 @@ impl TaskRegistry {
 
     /// Cancel a task
     pub fn cancel(&self, id: &TaskId, reason: String) -> Result<(), RegistryError> {
-        let mut active = self.active_tasks.write().map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
-        let task = active.get_mut(id).ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let mut active = self
+            .active_tasks
+            .write()
+            .map_err(|_| RegistryError::LockError("active_tasks write lock poisoned".into()))?;
+        let task = active
+            .get_mut(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
 
         task.transition_to(TaskStatus::Cancelled)?;
 
         // Add cancellation record
-        let record = ExecutionRecord::new(
-            WorkflowAction::Cancel { reason },
-            StageId::new("cancelled"),
-        );
+        let record =
+            ExecutionRecord::new(WorkflowAction::Cancel { reason }, StageId::new("cancelled"));
         task.execution_history.push(record);
 
         // Remove from active and add to completed
-        let task = active.remove(id).ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let task = active
+            .remove(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
         {
-            let mut completed = self.completed_tasks.write().map_err(|_| RegistryError::LockError("completed_tasks write lock poisoned".into()))?;
+            let mut completed = self.completed_tasks.write().map_err(|_| {
+                RegistryError::LockError("completed_tasks write lock poisoned".into())
+            })?;
             completed.push(task.clone());
         }
 
         {
-            let store = self.store.read().map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
+            let store = self
+                .store
+                .read()
+                .map_err(|_| RegistryError::LockError("store read lock poisoned".into()))?;
             store.move_to_completed(&task)?;
         }
 
@@ -431,21 +499,33 @@ impl TaskRegistry {
 
     /// List all active tasks
     pub fn list_active(&self) -> Vec<Task> {
-        self.active_tasks.read().map(|active| active.values().cloned().collect()).unwrap_or_default()
+        self.active_tasks
+            .read()
+            .map(|active| active.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// List all completed tasks
     pub fn list_completed(&self) -> Vec<Task> {
-        self.completed_tasks.read().map(|completed| completed.clone()).unwrap_or_default()
+        self.completed_tasks
+            .read()
+            .map(|completed| completed.clone())
+            .unwrap_or_default()
     }
 
     /// Load tasks from storage
     pub fn load(&self) -> Result<(), StoreError> {
-        let store = self.store.read().map_err(|_| StoreError::Io("store read lock poisoned".into()))?;
+        let store = self
+            .store
+            .read()
+            .map_err(|_| StoreError::Io("store read lock poisoned".into()))?;
 
         let pending = store.list_pending()?;
         {
-            let mut active = self.active_tasks.write().map_err(|_| StoreError::Io("active_tasks write lock poisoned".into()))?;
+            let mut active = self
+                .active_tasks
+                .write()
+                .map_err(|_| StoreError::Io("active_tasks write lock poisoned".into()))?;
             for task in pending {
                 active.insert(task.id.clone(), task);
             }
@@ -453,7 +533,10 @@ impl TaskRegistry {
 
         let completed = store.list_completed()?;
         {
-            let mut completed_tasks = self.completed_tasks.write().map_err(|_| StoreError::Io("completed_tasks write lock poisoned".into()))?;
+            let mut completed_tasks = self
+                .completed_tasks
+                .write()
+                .map_err(|_| StoreError::Io("completed_tasks write lock poisoned".into()))?;
             completed_tasks.extend(completed);
         }
 
@@ -462,8 +545,14 @@ impl TaskRegistry {
 
     /// Save all active tasks
     pub fn save_all(&self) -> Result<(), StoreError> {
-        let store = self.store.read().map_err(|_| StoreError::Io("store read lock poisoned".into()))?;
-        let active = self.active_tasks.read().map_err(|_| StoreError::Io("active_tasks read lock poisoned".into()))?;
+        let store = self
+            .store
+            .read()
+            .map_err(|_| StoreError::Io("store read lock poisoned".into()))?;
+        let active = self
+            .active_tasks
+            .read()
+            .map_err(|_| StoreError::Io("active_tasks read lock poisoned".into()))?;
         for task in active.values() {
             store.save(task)?;
         }
@@ -472,12 +561,18 @@ impl TaskRegistry {
 
     /// Get count of active tasks
     pub fn active_count(&self) -> usize {
-        self.active_tasks.read().map(|active| active.len()).unwrap_or(0)
+        self.active_tasks
+            .read()
+            .map(|active| active.len())
+            .unwrap_or(0)
     }
 
     /// Get count of completed tasks
     pub fn completed_count(&self) -> usize {
-        self.completed_tasks.read().map(|completed| completed.len()).unwrap_or(0)
+        self.completed_tasks
+            .read()
+            .map(|completed| completed.len())
+            .unwrap_or(0)
     }
 }
 
@@ -509,7 +604,9 @@ impl TaskRegistry {
 
         // First, identify and transition tasks needing recovery
         {
-            let mut active = self.active_tasks.write().map_err(|_| RecoveryError::Transition("active_tasks write lock poisoned".into()))?;
+            let mut active = self.active_tasks.write().map_err(|_| {
+                RecoveryError::Transition("active_tasks write lock poisoned".into())
+            })?;
             for task in active.values_mut() {
                 if matches!(task.status, TaskStatus::InProgress | TaskStatus::Reflecting) {
                     task.transition_to(TaskStatus::Paused)
@@ -525,9 +622,14 @@ impl TaskRegistry {
 
     /// Check if there are tasks needing recovery
     pub fn needs_recovery(&self) -> bool {
-        self.active_tasks.read().map(|active| {
-            active.values().any(|t| matches!(t.status, TaskStatus::InProgress | TaskStatus::Reflecting))
-        }).unwrap_or(false)
+        self.active_tasks
+            .read()
+            .map(|active| {
+                active
+                    .values()
+                    .any(|t| matches!(t.status, TaskStatus::InProgress | TaskStatus::Reflecting))
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -626,7 +728,9 @@ mod tests {
         let store = Box::new(FileTaskStore::new(temp.path().to_path_buf()));
         let registry = TaskRegistry::new(store);
 
-        let id = registry.create("Test task".to_string(), vec!["c1".to_string()]).expect("create");
+        let id = registry
+            .create("Test task".to_string(), vec!["c1".to_string()])
+            .expect("create");
 
         let task = registry.get(&id).expect("task");
         assert_eq!(task.description, "Test task");
@@ -653,7 +757,9 @@ mod tests {
         let registry = TaskRegistry::new(store);
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
-        registry.update(&id, TaskUpdate::reflection_count(3)).expect("update");
+        registry
+            .update(&id, TaskUpdate::reflection_count(3))
+            .expect("update");
 
         let task = registry.get(&id).expect("task");
         assert_eq!(task.reflection_count, 3);
@@ -667,8 +773,12 @@ mod tests {
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
         // Transition through proper workflow: Pending → InProgress → PendingConfirmation → Completed
-        registry.update(&id, TaskUpdate::status(TaskStatus::InProgress)).expect("update to InProgress");
-        registry.update(&id, TaskUpdate::status(TaskStatus::PendingConfirmation)).expect("update to PendingConfirmation");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update to InProgress");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::PendingConfirmation))
+            .expect("update to PendingConfirmation");
         registry.complete(&id).expect("complete");
 
         // Not in active
@@ -686,7 +796,9 @@ mod tests {
         let registry = TaskRegistry::new(store);
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
-        registry.cancel(&id, "User cancelled".to_string()).expect("cancel");
+        registry
+            .cancel(&id, "User cancelled".to_string())
+            .expect("cancel");
 
         let task = registry.get_completed(&id).expect("task");
         assert_eq!(task.status, TaskStatus::Cancelled);
@@ -699,9 +811,15 @@ mod tests {
         let store = Box::new(FileTaskStore::new(temp.path().to_path_buf()));
         let registry = TaskRegistry::new(store);
 
-        registry.create("Task 1".to_string(), vec![]).expect("create");
-        registry.create("Task 2".to_string(), vec![]).expect("create");
-        registry.create("Task 3".to_string(), vec![]).expect("create");
+        registry
+            .create("Task 1".to_string(), vec![])
+            .expect("create");
+        registry
+            .create("Task 2".to_string(), vec![])
+            .expect("create");
+        registry
+            .create("Task 3".to_string(), vec![])
+            .expect("create");
 
         let active = registry.list_active();
         assert_eq!(active.len(), 3);
@@ -715,7 +833,9 @@ mod tests {
         // Create and save tasks with first registry
         let store1 = Box::new(FileTaskStore::new(path.clone()));
         let registry1 = TaskRegistry::new(store1);
-        let id = registry1.create("Saved task".to_string(), vec![]).expect("create");
+        let id = registry1
+            .create("Saved task".to_string(), vec![])
+            .expect("create");
 
         // Create second registry and load
         let store2 = Box::new(FileTaskStore::new(path));
@@ -735,7 +855,9 @@ mod tests {
         let registry = TaskRegistry::new(store);
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
-        registry.update(&id, TaskUpdate::reflection_count(5)).expect("update");
+        registry
+            .update(&id, TaskUpdate::reflection_count(5))
+            .expect("update");
         registry.save_all().expect("save");
 
         // Load fresh and verify
@@ -750,7 +872,9 @@ mod tests {
     fn t12_3_t1_record_added_to_task() {
         let mut task = Task::new("Test".to_string(), vec![]);
         let record = ExecutionRecord::new(
-            WorkflowAction::Reflect { reason: "test".to_string() },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
             StageId::new("reflecting"),
         );
 
@@ -767,7 +891,9 @@ mod tests {
             StageId::new("developing"),
         ));
         task.execution_history.push(ExecutionRecord::new(
-            WorkflowAction::Reflect { reason: "test".to_string() },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
             StageId::new("reflecting"),
         ));
 
@@ -783,7 +909,9 @@ mod tests {
             StageId::new("developing"),
         ));
         task.execution_history.push(ExecutionRecord::new(
-            WorkflowAction::Reflect { reason: "test".to_string() },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
             StageId::new("reflecting"),
         ));
         task.execution_history.push(ExecutionRecord::new(
@@ -791,7 +919,9 @@ mod tests {
             StageId::new("developing"),
         ));
 
-        let developing_records: Vec<_> = task.execution_history.iter()
+        let developing_records: Vec<_> = task
+            .execution_history
+            .iter()
             .filter(|r| r.stage == StageId::new("developing"))
             .collect();
 
@@ -818,10 +948,7 @@ mod tests {
     #[test]
     fn t12_3_t5_history_timestamped_correctly() {
         let before = Utc::now();
-        let record = ExecutionRecord::new(
-            WorkflowAction::Continue,
-            StageId::new("developing"),
-        );
+        let record = ExecutionRecord::new(WorkflowAction::Continue, StageId::new("developing"));
         let after = Utc::now();
 
         assert!(record.timestamp >= before);
@@ -831,9 +958,13 @@ mod tests {
     #[test]
     fn t12_3_t6_record_with_auto_check() {
         let record = ExecutionRecord::with_auto_check(
-            WorkflowAction::Reflect { reason: "test".to_string() },
+            WorkflowAction::Reflect {
+                reason: "test".to_string(),
+            },
             StageId::new("reflecting"),
-            &AutoCheckResult::NeedsReflection { reason: "error".to_string() },
+            &AutoCheckResult::NeedsReflection {
+                reason: "error".to_string(),
+            },
         );
 
         assert!(record.auto_check_result.is_some());
@@ -843,9 +974,13 @@ mod tests {
     #[test]
     fn t12_3_t7_record_with_human_flag() {
         let record = ExecutionRecord::with_auto_check(
-            WorkflowAction::RequestHuman { question: "test".to_string() },
+            WorkflowAction::RequestHuman {
+                question: "test".to_string(),
+            },
             StageId::new("human_decision"),
-            &AutoCheckResult::NeedsHuman { reason: "boundary".to_string() },
+            &AutoCheckResult::NeedsHuman {
+                reason: "boundary".to_string(),
+            },
         );
 
         assert!(record.human_requested);
@@ -860,7 +995,9 @@ mod tests {
         let registry = TaskRegistry::new(store);
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
-        registry.update(&id, TaskUpdate::status(TaskStatus::InProgress)).expect("update");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update");
 
         let recovered = registry.recover().expect("recover");
 
@@ -879,8 +1016,12 @@ mod tests {
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
         // Transition through proper workflow: Pending → InProgress → Reflecting
-        registry.update(&id, TaskUpdate::status(TaskStatus::InProgress)).expect("update to InProgress");
-        registry.update(&id, TaskUpdate::status(TaskStatus::Reflecting)).expect("update to Reflecting");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update to InProgress");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::Reflecting))
+            .expect("update to Reflecting");
 
         let recovered = registry.recover().expect("recover");
 
@@ -915,13 +1056,21 @@ mod tests {
 
         let id = registry.create("Task".to_string(), vec![]).expect("create");
         // Transition through proper workflow to complete first task
-        registry.update(&id, TaskUpdate::status(TaskStatus::InProgress)).expect("update to InProgress");
-        registry.update(&id, TaskUpdate::status(TaskStatus::PendingConfirmation)).expect("update to PendingConfirmation");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update to InProgress");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::PendingConfirmation))
+            .expect("update to PendingConfirmation");
         registry.complete(&id).expect("complete");
 
         // Create another in-progress task
-        let id2 = registry.create("Task2".to_string(), vec![]).expect("create");
-        registry.update(&id2, TaskUpdate::status(TaskStatus::InProgress)).expect("update");
+        let id2 = registry
+            .create("Task2".to_string(), vec![])
+            .expect("create");
+        registry
+            .update(&id2, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update");
 
         let recovered = registry.recover().expect("recover");
 
@@ -939,7 +1088,9 @@ mod tests {
         let id = registry.create("Task".to_string(), vec![]).expect("create");
         assert!(!registry.needs_recovery());
 
-        registry.update(&id, TaskUpdate::status(TaskStatus::InProgress)).expect("update");
+        registry
+            .update(&id, TaskUpdate::status(TaskStatus::InProgress))
+            .expect("update");
         assert!(registry.needs_recovery());
 
         registry.recover().expect("recover");

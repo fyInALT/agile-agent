@@ -68,8 +68,15 @@ impl MetricsPanel {
     /// Format automation rate for display
     pub fn format_automation_rate(&self) -> String {
         let rate = self.automation_rate_percent();
-        let target_marker = if self.automation_target_met() { "✓" } else { "○" };
-        format!("{} Automation Rate: {:.1}% (>80% target)", target_marker, rate)
+        let target_marker = if self.automation_target_met() {
+            "✓"
+        } else {
+            "○"
+        };
+        format!(
+            "{} Automation Rate: {:.1}% (>80% target)",
+            target_marker, rate
+        )
     }
 
     /// Format completion rate for display
