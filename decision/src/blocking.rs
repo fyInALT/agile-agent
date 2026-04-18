@@ -301,6 +301,106 @@ impl BlockingReason for ResourceBlocking {
     }
 }
 
+/// Rate limit blocked reason - when agent hits HTTP 429
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitBlockedReason {
+    started_at: DateTime<Utc>,
+    last_retry_at: Option<DateTime<Utc>>,
+    retry_count: u32,
+    interval_secs: u64,
+}
+
+impl RateLimitBlockedReason {
+    pub fn new(started_at: DateTime<Utc>) -> Self {
+        Self {
+            started_at,
+            last_retry_at: None,
+            retry_count: 0,
+            interval_secs: 1800, // 30 minutes default
+        }
+    }
+
+    pub fn with_interval_secs(self, interval_secs: u64) -> Self {
+        Self { interval_secs, ..self }
+    }
+
+    pub fn with_last_retry_at(self, last_retry_at: DateTime<Utc>) -> Self {
+        Self { last_retry_at: Some(last_retry_at), ..self }
+    }
+
+    pub fn with_retry_count(self, retry_count: u32) -> Self {
+        Self { retry_count, ..self }
+    }
+
+    pub fn started_at(&self) -> DateTime<Utc> {
+        self.started_at
+    }
+
+    pub fn last_retry_at(&self) -> Option<DateTime<Utc>> {
+        self.last_retry_at
+    }
+
+    pub fn retry_count(&self) -> u32 {
+        self.retry_count
+    }
+
+    pub fn interval_secs(&self) -> u64 {
+        self.interval_secs
+    }
+
+    /// Minutes since first 429
+    pub fn elapsed_minutes(&self) -> i64 {
+        (Utc::now() - self.started_at).num_minutes()
+    }
+
+    /// Whether enough time has passed to retry
+    pub fn can_retry_now(&self) -> bool {
+        if let Some(last) = self.last_retry_at {
+            let elapsed = (Utc::now() - last).num_seconds() as u64;
+            elapsed >= self.interval_secs
+        } else {
+            true // Never tried, can retry now
+        }
+    }
+
+    /// Record a retry attempt
+    pub fn record_retry(&mut self) {
+        self.last_retry_at = Some(Utc::now());
+        self.retry_count += 1;
+    }
+}
+
+impl BlockingReason for RateLimitBlockedReason {
+    fn reason_type(&self) -> &'static str {
+        "rate_limit"
+    }
+
+    fn urgency(&self) -> UrgencyLevel {
+        UrgencyLevel::Low
+    }
+
+    fn expires_at(&self) -> Option<DateTime<Utc>> {
+        None // No expiration, wait indefinitely
+    }
+
+    fn can_auto_resolve(&self) -> bool {
+        false // Must actually try LLM call to verify recovery
+    }
+
+    fn auto_resolve_action(&self) -> Option<AutoAction> {
+        None
+    }
+
+    fn description(&self) -> String {
+        let mins = self.elapsed_minutes();
+        format!("💤 Rate limited ({} min)", mins)
+    }
+
+    fn clone_boxed(&self) -> Box<dyn BlockingReason> {
+        Box::new(self.clone())
+    }
+}
+
 /// Agent slot status - generic blocked
 #[derive(Debug)]
 pub enum AgentSlotStatus {
@@ -948,6 +1048,48 @@ mod tests {
         assert_eq!(blocking.reason_type(), "resource_waiting");
         assert_eq!(blocking.urgency(), UrgencyLevel::Low);
         assert!(blocking.can_auto_resolve());
+    }
+
+    #[test]
+    fn test_rate_limit_blocked_reason_description() {
+        let started = Utc::now() - chrono::Duration::minutes(10);
+        let reason = RateLimitBlockedReason::new(started);
+        let desc = reason.description();
+        assert!(desc.contains("Rate limited"));
+        assert!(desc.contains("💤"));
+    }
+
+    #[test]
+    fn test_rate_limit_blocked_reason_properties() {
+        let reason = RateLimitBlockedReason::new(Utc::now());
+        assert!(!reason.can_auto_resolve());
+        assert!(reason.auto_resolve_action().is_none());
+        assert_eq!(reason.urgency(), UrgencyLevel::Low);
+        assert!(reason.expires_at().is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_blocked_reason_elapsed() {
+        let started = Utc::now() - chrono::Duration::minutes(10);
+        let reason = RateLimitBlockedReason::new(started);
+        let elapsed = reason.elapsed_minutes();
+        assert!(elapsed >= 9 && elapsed <= 11);
+    }
+
+    #[test]
+    fn test_rate_limit_blocked_reason_retry_count() {
+        let reason = RateLimitBlockedReason::new(Utc::now())
+            .with_retry_count(3);
+        assert_eq!(reason.retry_count(), 3);
+    }
+
+    #[test]
+    fn test_rate_limit_blocked_reason_can_retry() {
+        let reason = RateLimitBlockedReason::new(Utc::now());
+        assert!(reason.can_retry_now()); // Never tried
+
+        let reason_with_retry = reason.with_last_retry_at(Utc::now() - chrono::Duration::seconds(1));
+        assert!(!reason_with_retry.can_retry_now()); // Tried recently
     }
 
     #[test]
