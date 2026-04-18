@@ -1,6 +1,11 @@
 //! Task decision overlay for task concept
 //!
 //! Provides modal for task-specific human decisions.
+//!
+//! NOTE: This widget is designed for future integration with the app loop.
+//! Currently not connected to the runtime - suppress dead_code warnings.
+
+#![allow(dead_code)]
 
 use agent_decision::task::{TaskId, TaskStatus};
 use crossterm::event::KeyCode;

@@ -1,6 +1,11 @@
 //! Task panel widget for TUI dashboard (Sprint 14)
 //!
 //! Displays active tasks with status and counts.
+//!
+//! NOTE: This widget is designed for future integration with the app loop.
+//! Currently not connected to the runtime - suppress dead_code warnings.
+
+#![allow(dead_code)]
 
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;

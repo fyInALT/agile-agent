@@ -1,6 +1,12 @@
 //! Task detail view widget (Sprint 14)
 //!
 //! Displays detailed task information with execution history.
+//!
+//! NOTE: This widget is designed for future integration with the app loop.
+//! Currently not connected to the runtime - suppress dead_code and unused warnings.
+
+#![allow(dead_code)]
+#![allow(unused_imports)]
 
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;

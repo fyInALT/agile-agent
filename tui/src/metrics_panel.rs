@@ -1,6 +1,11 @@
 //! Metrics panel widget for TUI dashboard (Sprint 14, Story 14.4)
 //!
 //! Displays automation statistics from TaskMetrics.
+//!
+//! NOTE: This widget is designed for future integration with the app loop.
+//! Currently not connected to the runtime - suppress dead_code warnings.
+
+#![allow(dead_code)]
 
 use agent_decision::TaskMetrics;
 
