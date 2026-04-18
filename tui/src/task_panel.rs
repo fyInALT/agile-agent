@@ -5,6 +5,7 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 
 // Import types from agent-decision
 use agent_decision::task::{Task, TaskId, TaskStatus};
@@ -162,6 +163,11 @@ impl TaskPanel {
             return TaskPanelCommand::None;
         }
 
+        // Check for Ctrl modifier for special shortcuts
+        if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+            return self.handle_ctrl_key(key_event.code);
+        }
+
         match key_event.code {
             KeyCode::Up => {
                 self.move_up();
@@ -184,6 +190,45 @@ impl TaskPanel {
             KeyCode::Char('d') => {
                 if let Some(id) = self.selected_task_id() {
                     TaskPanelCommand::SelectTask { id }
+                } else {
+                    TaskPanelCommand::None
+                }
+            }
+            _ => TaskPanelCommand::None,
+        }
+    }
+
+    /// Handle Ctrl key shortcuts
+    fn handle_ctrl_key(&mut self, code: KeyCode) -> TaskPanelCommand {
+        match code {
+            // Ctrl+D: Detail view (same as Enter/d)
+            KeyCode::Char('d') => {
+                if let Some(id) = self.selected_task_id() {
+                    TaskPanelCommand::SelectTask { id }
+                } else {
+                    TaskPanelCommand::None
+                }
+            }
+            // Ctrl+R: Force reflection on selected task
+            KeyCode::Char('r') => {
+                if let Some(id) = self.selected_task_id() {
+                    TaskPanelCommand::ForceReflect { id }
+                } else {
+                    TaskPanelCommand::None
+                }
+            }
+            // Ctrl+C: Force confirmation on selected task
+            KeyCode::Char('c') => {
+                if let Some(id) = self.selected_task_id() {
+                    TaskPanelCommand::ForceConfirm { id }
+                } else {
+                    TaskPanelCommand::None
+                }
+            }
+            // Ctrl+X: Cancel selected task
+            KeyCode::Char('x') => {
+                if let Some(id) = self.selected_task_id() {
+                    TaskPanelCommand::CancelTask { id }
                 } else {
                     TaskPanelCommand::None
                 }
@@ -343,5 +388,43 @@ mod tests {
 
         let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('r'), crossterm::event::KeyModifiers::NONE));
         assert_eq!(cmd, TaskPanelCommand::Refresh);
+    }
+
+    // Story 14.5 Tests: Keyboard Shortcuts
+
+    #[test]
+    fn t14_5_t1_ctrl_d_detail_view() {
+        let tasks = vec![create_test_task("Task 1")];
+        let mut panel = TaskPanel::with_tasks(tasks);
+
+        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert!(matches!(cmd, TaskPanelCommand::SelectTask { .. }));
+    }
+
+    #[test]
+    fn t14_5_t2_ctrl_r_force_reflect() {
+        let tasks = vec![create_test_task("Task 1")];
+        let mut panel = TaskPanel::with_tasks(tasks);
+
+        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(matches!(cmd, TaskPanelCommand::ForceReflect { .. }));
+    }
+
+    #[test]
+    fn t14_5_t3_ctrl_c_force_confirm() {
+        let tasks = vec![create_test_task("Task 1")];
+        let mut panel = TaskPanel::with_tasks(tasks);
+
+        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(matches!(cmd, TaskPanelCommand::ForceConfirm { .. }));
+    }
+
+    #[test]
+    fn t14_5_t4_ctrl_x_cancel_task() {
+        let tasks = vec![create_test_task("Task 1")];
+        let mut panel = TaskPanel::with_tasks(tasks);
+
+        let cmd = panel.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        assert!(matches!(cmd, TaskPanelCommand::CancelTask { .. }));
     }
 }
