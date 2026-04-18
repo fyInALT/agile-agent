@@ -114,6 +114,8 @@ impl Task {
 mod tests {
     use super::*;
 
+    // Story 9.1 Tests
+
     #[test]
     fn t9_1_t1_task_id_generation_is_unique() {
         let id1 = TaskId::generate();
@@ -192,5 +194,63 @@ mod tests {
         let json = serde_json::to_string(&id).expect("Should serialize");
         let deserialized: TaskId = serde_json::from_str(&json).expect("Should deserialize");
         assert_eq!(id, deserialized);
+    }
+
+    // Story 9.2 Tests: Task Status Enumeration
+
+    #[test]
+    fn t9_2_t1_all_status_variants_defined() {
+        // Verify all 8 status variants exist
+        let statuses = [
+            TaskStatus::Pending,
+            TaskStatus::InProgress,
+            TaskStatus::Reflecting,
+            TaskStatus::PendingConfirmation,
+            TaskStatus::NeedsHumanDecision,
+            TaskStatus::Paused,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ];
+
+        // Each should be distinct
+        for (i, s1) in statuses.iter().enumerate() {
+            for (j, s2) in statuses.iter().enumerate() {
+                if i != j {
+                    assert_ne!(s1, s2, "Status variants should be distinct");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t9_2_t2_status_display_returns_readable_text() {
+        assert_eq!(TaskStatus::Pending.display(), "Pending");
+        assert_eq!(TaskStatus::InProgress.display(), "In Progress");
+        assert_eq!(TaskStatus::Reflecting.display(), "Reflecting");
+        assert_eq!(TaskStatus::PendingConfirmation.display(), "Awaiting Confirmation");
+        assert_eq!(TaskStatus::NeedsHumanDecision.display(), "Needs Decision");
+        assert_eq!(TaskStatus::Paused.display(), "Paused");
+        assert_eq!(TaskStatus::Completed.display(), "Completed");
+        assert_eq!(TaskStatus::Cancelled.display(), "Cancelled");
+    }
+
+    #[test]
+    fn t9_2_t3_status_serialization_works() {
+        // Test serialization of each status
+        for status in [
+            TaskStatus::Pending,
+            TaskStatus::InProgress,
+            TaskStatus::Reflecting,
+            TaskStatus::PendingConfirmation,
+            TaskStatus::NeedsHumanDecision,
+            TaskStatus::Paused,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ] {
+            let json = serde_json::to_string(&status).expect("Should serialize");
+            let deserialized: TaskStatus =
+                serde_json::from_str(&json).expect("Should deserialize");
+            assert_eq!(status, deserialized, "Status should roundtrip correctly");
+        }
     }
 }
