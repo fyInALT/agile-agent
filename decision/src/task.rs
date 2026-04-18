@@ -6,6 +6,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// Forward reference to ExecutionRecord defined in persistence module
+// This is resolved at compile time after both modules are processed
+use crate::persistence::ExecutionRecord;
+
 /// Unique task identifier (UUID-based)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskId(String);
@@ -102,6 +106,8 @@ pub struct Task {
     pub max_reflection_rounds: usize,
     /// Retry count for error recovery
     pub retry_count: usize,
+    /// Execution history records
+    pub execution_history: Vec<ExecutionRecord>,
 }
 
 impl Task {
@@ -119,6 +125,7 @@ impl Task {
             confirmation_count: 0,
             max_reflection_rounds: 2,
             retry_count: 0,
+            execution_history: Vec::new(),
         }
     }
 
@@ -151,9 +158,10 @@ impl Task {
             (TaskStatus::InProgress, TaskStatus::Paused) => true,
             (TaskStatus::InProgress, TaskStatus::Cancelled) => true,
 
-            // Reflecting → InProgress, NeedsHumanDecision
+            // Reflecting → InProgress, NeedsHumanDecision, Paused
             (TaskStatus::Reflecting, TaskStatus::InProgress) => true,
             (TaskStatus::Reflecting, TaskStatus::NeedsHumanDecision) => true,
+            (TaskStatus::Reflecting, TaskStatus::Paused) => true, // Recovery transition
 
             // PendingConfirmation → Completed, Reflecting
             (TaskStatus::PendingConfirmation, TaskStatus::Completed) => true,

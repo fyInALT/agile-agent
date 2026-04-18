@@ -169,3 +169,11 @@ pub use workflow::{
 // - condition::Condition: for decision logic conditions
 
 pub use automation::*;
+
+// Sprint 12: Task Persistence
+pub mod persistence;
+
+// Re-export Persistence types
+pub use persistence::{
+    ExecutionRecord, FileTaskStore, RecoveryError, StoreError, TaskRegistry, TaskStore, TaskUpdate,
+};
