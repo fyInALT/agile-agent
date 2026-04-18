@@ -17,6 +17,7 @@ mod input;
 mod launch_config_overlay;
 mod markdown;
 mod markdown_stream;
+mod metrics_panel;
 mod overview_row;
 mod overview_state;
 mod provider_overlay;
