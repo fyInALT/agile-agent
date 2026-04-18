@@ -79,6 +79,9 @@ pub mod maker_registry;
 pub mod pipeline;
 pub mod strategy;
 
+// Sprint 09 (Task Concept): Task Entity
+pub mod task;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -147,3 +150,9 @@ pub use maker::*;
 pub use maker_registry::*;
 pub use pipeline::*;
 pub use strategy::*;
+
+// Re-export Task Concept types (avoiding conflict with lifecycle::TaskId)
+pub use task::{Task, TaskStatus};
+// Note: task::TaskId is separate from lifecycle::TaskId
+// - task::TaskId: UUID-based, for Task entity
+// - lifecycle::TaskId: String-based, for decision context tracking
