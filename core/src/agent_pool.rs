@@ -2640,12 +2640,21 @@ impl AgentPool {
             .get_slot_mut_by_id(agent_id)
             .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
 
-        // Set blocked status
-        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state.clone()))
-            .map_err(|e| format!("Failed to transition to blocked: {}", e))?;
-
-        // Handle by blocking type
+        // Set blocked status - check if this is a rate limit scenario
         let reason_type = blocked_state.reason().reason_type();
+        let is_rate_limit = reason_type == "rate_limit"
+            || (reason_type == "error" && blocked_state.reason().description().contains("429"));
+
+        if is_rate_limit {
+            // Rate limit - transition to Resting state instead of BlockedForDecision
+            slot.transition_to(AgentSlotStatus::resting(blocked_state.clone()))
+                .map_err(|e| format!("Failed to transition to resting: {}", e))?;
+        } else {
+            slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state.clone()))
+                .map_err(|e| format!("Failed to transition to blocked: {}", e))?;
+        }
+
+        // Handle by blocking type (for non-rate-limit cases)
         if reason_type == "human_decision" {
             // Create human decision request
             let request = self.build_human_request(agent_id, &blocked_state);

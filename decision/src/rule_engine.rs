@@ -226,6 +226,13 @@ impl RuleBasedDecisionEngine {
                 vec![ActionSpec::new("retry")],
                 RulePriority::Medium,
             ),
+            // Rule: Rate limit recovery - retry after waiting
+            DecisionRule::new(
+                "retry-rate-limit",
+                ConditionExpr::single(Condition::situation_type("rate_limit_recovery")),
+                vec![ActionSpec::new("retry")],
+                RulePriority::Medium,
+            ),
             // Rule: Continue all tasks on agent_idle (default behavior)
             // Decision layer should verify pending tasks before stopping
             DecisionRule::new(
