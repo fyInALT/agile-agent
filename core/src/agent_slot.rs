@@ -1429,9 +1429,7 @@ mod tests {
     #[test]
     fn status_blocked_can_transition_to_blocked_for_decision() {
         // Critical transition for 429 error recovery: Blocked → BlockedForDecision escalation
-        use agent_decision::{
-            BlockedState, ErrorInfo, ErrorSituation, HumanDecisionBlocking,
-        };
+        use agent_decision::{BlockedState, ErrorInfo, ErrorSituation, HumanDecisionBlocking};
 
         let error = ErrorInfo::new("rate_limit", "API Error: Request rejected (429)");
         let situation = Box::new(ErrorSituation::new(error));

@@ -6,7 +6,7 @@
 - Title: `Decision Workflow Core`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-18
 - Depends on: `decision-sprint-009` (Task Entity)
 
@@ -430,12 +430,12 @@ See full stage definitions in FR-008.
 
 ## Sprint Review Checklist
 
-- [ ] All tasks completed
-- [ ] All tests passing
-- [ ] Workflow types defined correctly
-- [ ] Default process passes validation
-- [ ] Code reviewed and merged
-- [ ] Documentation updated
+- [x] All tasks completed
+- [x] All tests passing
+- [x] Workflow types defined correctly
+- [x] Default process passes validation
+- [x] Code reviewed and merged
+- [x] Documentation updated
 
 ## Risks and Mitigation
 

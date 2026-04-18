@@ -74,7 +74,8 @@ fn render_focused_view(frame: &mut Frame<'_>, state: &mut TuiState) {
     // Get transcript from focused agent in multi-agent mode, or from app state in single-agent mode
     // Clone the entries to avoid borrowing conflict with subsequent mutable state usage
     let transcript_entries: Vec<TranscriptEntry> = if state.is_multi_agent_mode() {
-        state.agent_pool
+        state
+            .agent_pool
             .as_ref()
             .and_then(|pool| pool.focused_slot())
             .map(|slot| slot.transcript().to_vec())
@@ -534,7 +535,11 @@ fn format_time_from_u32(time: u32) -> String {
 
 /// Get brief task summary for an agent (max_chars limit for status bar display)
 /// Returns the latest assistant message truncated to the specified character limit.
-fn get_agent_task_summary(state: &TuiState, agent_id: &agent_core::agent_runtime::AgentId, max_chars: usize) -> String {
+fn get_agent_task_summary(
+    state: &TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+    max_chars: usize,
+) -> String {
     let text = state
         .agent_pool
         .as_ref()
@@ -709,7 +714,8 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
 
     // Add decision status if active (shown when decision layer makes a decision)
     // First check for pending decisions (decision layer is analyzing)
-    let pending_decisions: Vec<_> = state.agent_pool
+    let pending_decisions: Vec<_> = state
+        .agent_pool
         .as_ref()
         .map(|pool| pool.agents_with_pending_decisions())
         .unwrap_or_default();
@@ -726,7 +732,8 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
                 _ => "⠋",
             };
             // Get agent codename
-            let codename = state.agent_pool
+            let codename = state
+                .agent_pool
                 .as_ref()
                 .and_then(|pool| pool.get_slot_by_id(agent_id))
                 .map(|slot| slot.codename().as_str())
@@ -742,7 +749,9 @@ fn render_agent_status_bar(frame: &mut Frame<'_>, state: &TuiState, area: Rect) 
             ));
             spans.push(Span::styled(
                 spinner,
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ));
             if !task_summary.is_empty() {
                 spans.push(Span::styled(
@@ -1315,7 +1324,8 @@ fn render_transcript(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     // Get transcript from focused agent in multi-agent mode, or from app state in single-agent mode
     // Clone the entries to avoid borrowing conflict with subsequent mutable state usage
     let transcript_entries: Vec<TranscriptEntry> = if state.is_multi_agent_mode() {
-        state.agent_pool
+        state
+            .agent_pool
             .as_ref()
             .and_then(|pool| pool.focused_slot())
             .map(|slot| slot.transcript().to_vec())

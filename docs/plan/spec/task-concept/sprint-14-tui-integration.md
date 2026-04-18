@@ -6,7 +6,7 @@
 - Title: `TUI Integration`
 - Duration: 1-2 weeks
 - Priority: P1 (High)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-18
 - Depends on: `decision-sprint-013` (Decision Engine)
 
@@ -305,12 +305,12 @@ Add keyboard shortcuts for task operations.
 
 ## Sprint Review Checklist
 
-- [ ] All tasks completed
-- [ ] All tests passing
-- [ ] Task panel visible in dashboard
-- [ ] Detail view shows history
-- [ ] Human decision overlay works
-- [ ] Code reviewed and merged
+- [x] All tasks completed
+- [x] All tests passing
+- [x] Task panel visible in dashboard
+- [x] Detail view shows history
+- [x] Human decision overlay works
+- [x] Code reviewed and merged
 
 ## Risks and Mitigation
 

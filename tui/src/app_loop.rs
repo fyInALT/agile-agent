@@ -1973,7 +1973,13 @@ fn handle_agent_provider_event(
                 && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
             {
                 // Replace the InProgress entry with completed one
-                slot.update_last_exec_command(call_id.clone(), output_preview.clone(), status, exit_code, duration_ms);
+                slot.update_last_exec_command(
+                    call_id.clone(),
+                    output_preview.clone(),
+                    status,
+                    exit_code,
+                    duration_ms,
+                );
             }
             // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
@@ -2036,7 +2042,14 @@ fn handle_agent_provider_event(
             if let Some(pool) = state.agent_pool.as_mut()
                 && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
             {
-                slot.update_last_generic_tool_call(name.clone(), call_id.clone(), output_preview.clone(), success, exit_code, duration_ms);
+                slot.update_last_generic_tool_call(
+                    name.clone(),
+                    call_id.clone(),
+                    output_preview.clone(),
+                    success,
+                    exit_code,
+                    duration_ms,
+                );
             }
             // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
