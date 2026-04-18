@@ -560,6 +560,7 @@ impl GlobalConfigStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     #[test]
@@ -632,6 +633,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn llm_config_save_load_roundtrip() {
         let temp = TempDir::new().expect("tempdir");
         let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
@@ -659,6 +661,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn llm_config_env_override() {
         let temp = TempDir::new().expect("tempdir");
         let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
