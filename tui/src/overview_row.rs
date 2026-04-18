@@ -164,6 +164,7 @@ impl OverviewAgentRow {
             AgentSlotStatus::Stopping => "◐",
             AgentSlotStatus::Error { .. } => "⚠",
             AgentSlotStatus::WaitingForInput { .. } => "◉", // Waiting for user input
+            AgentSlotStatus::Resting { .. } => "💤", // Rate limited, resting
         }
     }
 
@@ -181,6 +182,7 @@ impl OverviewAgentRow {
             AgentSlotStatus::Stopping => "stop",
             AgentSlotStatus::Error { .. } => "err",
             AgentSlotStatus::WaitingForInput { .. } => "wait",
+            AgentSlotStatus::Resting { .. } => "rest",
         }
     }
 

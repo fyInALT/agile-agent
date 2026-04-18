@@ -284,6 +284,7 @@ impl PersistedAgentStatus {
                 reason: reason.clone(),
             },
             AgentSlotStatus::WaitingForInput { .. } => Self::WaitingForInput,
+            AgentSlotStatus::Resting { .. } => Self::WaitingForInput, // Treat as waiting state
             AgentSlotStatus::Starting
             | AgentSlotStatus::Responding { .. }
             | AgentSlotStatus::ToolExecuting { .. }
