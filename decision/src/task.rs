@@ -174,6 +174,41 @@ impl Task {
             _ => false,
         }
     }
+
+    /// Check if task is actively executing
+    pub fn is_active(&self) -> bool {
+        matches!(self.status, TaskStatus::InProgress | TaskStatus::Reflecting)
+    }
+
+    /// Check if task is completed
+    pub fn is_complete(&self) -> bool {
+        self.status == TaskStatus::Completed
+    }
+
+    /// Check if more reflection rounds are available
+    pub fn needs_reflection(&self) -> bool {
+        self.reflection_count < self.max_reflection_rounds
+    }
+
+    /// Check if task can continue execution
+    pub fn can_continue(&self) -> bool {
+        matches!(self.status, TaskStatus::InProgress | TaskStatus::Reflecting)
+    }
+
+    /// Check if task is cancelled
+    pub fn is_cancelled(&self) -> bool {
+        self.status == TaskStatus::Cancelled
+    }
+
+    /// Check if task needs human decision
+    pub fn needs_human(&self) -> bool {
+        self.status == TaskStatus::NeedsHumanDecision
+    }
+
+    /// Check if task is paused
+    pub fn is_paused(&self) -> bool {
+        self.status == TaskStatus::Paused
+    }
 }
 
 #[cfg(test)]
@@ -500,5 +535,108 @@ mod tests {
         task.transition_to(TaskStatus::Cancelled).expect("InProgress -> Cancelled should work");
 
         assert_eq!(task.status, TaskStatus::Cancelled);
+    }
+
+    // Task Helper Methods Tests
+
+    #[test]
+    fn t9_4_t1_is_active_true_for_inprogress_and_reflecting() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+
+        // Pending - not active
+        assert!(!task.is_active());
+
+        // InProgress - active
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        assert!(task.is_active());
+
+        // Reflecting - active
+        task.transition_to(TaskStatus::Reflecting).unwrap();
+        assert!(task.is_active());
+
+        // PendingConfirmation - not active
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        assert!(!task.is_active());
+    }
+
+    #[test]
+    fn t9_4_t2_is_complete_true_for_completed() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        assert!(!task.is_complete());
+
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(TaskStatus::Completed).unwrap();
+        assert!(task.is_complete());
+    }
+
+    #[test]
+    fn t9_4_t3_needs_reflection_checks_count_vs_limit() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        task.max_reflection_rounds = 2;
+
+        // 0 < 2 - needs reflection
+        assert!(task.needs_reflection());
+
+        task.reflection_count = 1;
+        // 1 < 2 - needs reflection
+        assert!(task.needs_reflection());
+
+        task.reflection_count = 2;
+        // 2 >= 2 - does not need reflection
+        assert!(!task.needs_reflection());
+    }
+
+    #[test]
+    fn t9_4_t4_can_continue_checks_appropriate_states() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+
+        // Pending - cannot continue
+        assert!(!task.can_continue());
+
+        // InProgress - can continue
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        assert!(task.can_continue());
+
+        // Reflecting - can continue
+        task.transition_to(TaskStatus::Reflecting).unwrap();
+        assert!(task.can_continue());
+
+        // NeedsHumanDecision - cannot continue
+        task.status = TaskStatus::NeedsHumanDecision;
+        assert!(!task.can_continue());
+
+        // Paused - cannot continue
+        task.status = TaskStatus::Paused;
+        assert!(!task.can_continue());
+    }
+
+    #[test]
+    fn t9_4_t5_is_cancelled_true_for_cancelled() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        assert!(!task.is_cancelled());
+
+        task.transition_to(TaskStatus::Cancelled).unwrap();
+        assert!(task.is_cancelled());
+    }
+
+    #[test]
+    fn t9_4_t6_needs_human_true_for_needs_human_decision() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        assert!(!task.needs_human());
+
+        task.status = TaskStatus::NeedsHumanDecision;
+        assert!(task.needs_human());
+    }
+
+    #[test]
+    fn t9_4_t7_is_paused_true_for_paused() {
+        let mut task = Task::new("Test".to_string(), vec![]);
+        assert!(!task.is_paused());
+
+        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(TaskStatus::Paused).unwrap();
+        assert!(task.is_paused());
     }
 }
