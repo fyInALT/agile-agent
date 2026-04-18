@@ -90,6 +90,9 @@ pub mod task_engine;
 // Sprint 15: Task Metrics
 pub mod task_metrics;
 
+// Sprint 15: YAML Configuration Loader
+pub mod yaml_loader;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -190,3 +193,6 @@ pub use task_engine::{AgentOutput, HumanResponse, TaskDecisionAction, TaskDecisi
 
 // Sprint 15: Task Metrics
 pub use task_metrics::TaskMetrics;
+
+// Sprint 15: YAML Configuration Loader
+pub use yaml_loader::{YamlLoadError, load_process_from_yaml, save_process_to_yaml};
