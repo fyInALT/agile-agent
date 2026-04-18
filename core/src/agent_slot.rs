@@ -15,6 +15,7 @@ use crate::app::TranscriptEntry;
 use crate::launch_config::AgentLaunchBundle;
 use crate::logging;
 use crate::provider::{ProviderEvent, SessionHandle};
+use crate::tool_calls::ExecCommandStatus;
 use agent_decision::{BlockedState, BlockingReason, DecisionAgentCreationPolicy};
 
 /// Status of an agent slot in the multi-agent runtime
@@ -819,6 +820,159 @@ impl AgentSlot {
     /// Append entry to transcript
     pub fn append_transcript(&mut self, entry: TranscriptEntry) {
         self.transcript.push(entry);
+        self.last_activity = Instant::now();
+    }
+
+    /// Update the last ExecCommand entry in transcript with finished state
+    ///
+    /// Finds the most recent ExecCommand with status InProgress and matching call_id,
+    /// then updates it with the finished values. If no matching entry found,
+    /// pushes a new entry with allow_exploring_group=false.
+    pub fn update_last_exec_command(
+        &mut self,
+        call_id: Option<String>,
+        output_preview: Option<String>,
+        status: crate::tool_calls::ExecCommandStatus,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::ExecCommand {
+                call_id: existing_call_id,
+                source: existing_source,
+                allow_exploring_group,
+                input_preview: existing_input_preview,
+                status: ExecCommandStatus::InProgress,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_latest_in_flight = call_id.is_none();
+                if matches_call_id || matches_latest_in_flight {
+                    *entry = TranscriptEntry::ExecCommand {
+                        call_id: existing_call_id.clone().or(call_id),
+                        source: existing_source.clone(),
+                        allow_exploring_group: *allow_exploring_group,
+                        input_preview: existing_input_preview.clone(),
+                        output_preview,
+                        status,
+                        exit_code,
+                        duration_ms,
+                    };
+                    return;
+                }
+            }
+        }
+        // Not found - push new entry
+        self.transcript.push(TranscriptEntry::ExecCommand {
+            call_id,
+            source: None,
+            allow_exploring_group: false,
+            input_preview: None,
+            output_preview,
+            status,
+            exit_code,
+            duration_ms,
+        });
+        self.last_activity = Instant::now();
+    }
+
+    /// Append output delta to the last ExecCommand entry in transcript
+    ///
+    /// Finds the most recent ExecCommand with status InProgress and matching call_id,
+    /// then appends the delta to its output_preview. If no matching entry found,
+    /// pushes a new entry.
+    pub fn append_exec_command_output_delta(&mut self, call_id: Option<String>, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::ExecCommand {
+                call_id: existing_call_id,
+                allow_exploring_group: _,
+                output_preview,
+                status: ExecCommandStatus::InProgress,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_latest_in_flight = call_id.is_none();
+                if matches_call_id || matches_latest_in_flight {
+                    output_preview
+                        .get_or_insert_with(String::new)
+                        .push_str(delta);
+                    return;
+                }
+            }
+        }
+
+        // Not found - push new entry
+        self.transcript.push(TranscriptEntry::ExecCommand {
+            call_id,
+            source: None,
+            allow_exploring_group: false,
+            input_preview: None,
+            output_preview: Some(delta.to_string()),
+            status: ExecCommandStatus::InProgress,
+            exit_code: None,
+            duration_ms: None,
+        });
+        self.last_activity = Instant::now();
+    }
+
+    /// Update the last GenericToolCall entry in transcript with finished state
+    ///
+    /// Finds the most recent GenericToolCall with started=true and matching name/call_id,
+    /// then updates it with the finished values. If no matching entry found,
+    /// pushes a new entry.
+    pub fn update_last_generic_tool_call(
+        &mut self,
+        name: String,
+        call_id: Option<String>,
+        output_preview: Option<String>,
+        success: bool,
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
+    ) {
+        for entry in self.transcript.iter_mut().rev() {
+            if let TranscriptEntry::GenericToolCall {
+                name: existing_name,
+                call_id: existing_call_id,
+                input_preview: existing_input_preview,
+                started: true,
+                ..
+            } = entry
+            {
+                let matches_call_id = call_id.is_some() && existing_call_id == &call_id;
+                let matches_name = *existing_name == name;
+                if matches_call_id || matches_name {
+                    *entry = TranscriptEntry::GenericToolCall {
+                        name: existing_name.clone(),
+                        call_id: existing_call_id.clone().or(call_id),
+                        input_preview: existing_input_preview.clone(),
+                        output_preview,
+                        success,
+                        started: false,
+                        exit_code,
+                        duration_ms,
+                    };
+                    return;
+                }
+            }
+        }
+
+        // Not found - push new entry
+        self.transcript.push(TranscriptEntry::GenericToolCall {
+            name,
+            call_id,
+            input_preview: None,
+            output_preview,
+            success,
+            started: false,
+            exit_code,
+            duration_ms,
+        });
         self.last_activity = Instant::now();
     }
 

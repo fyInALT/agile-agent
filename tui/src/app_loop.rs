@@ -1925,12 +1925,28 @@ fn handle_agent_provider_event(
                 slot.set_session_handle(handle);
             }
         }
-        // Tool call events - only update active_entries when focused on this agent
+        // Tool call events - update active_entries when focused, always add to slot transcript
         ProviderEvent::ExecCommandStarted {
             call_id,
             input_preview,
             source,
         } => {
+            // Add to slot transcript for all agents
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_transcript(TranscriptEntry::ExecCommand {
+                    call_id: call_id.clone(),
+                    source: source.clone(),
+                    allow_exploring_group: true,
+                    input_preview: input_preview.clone(),
+                    output_preview: None,
+                    status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                    exit_code: None,
+                    duration_ms: None,
+                });
+            }
+            // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.push_active_exec_started(call_id, input_preview, source);
             }
@@ -1943,6 +1959,14 @@ fn handle_agent_provider_event(
             duration_ms,
             source,
         } => {
+            // Update slot transcript for all agents by replacing the InProgress entry
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                // Replace the InProgress entry with completed one
+                slot.update_last_exec_command(call_id.clone(), output_preview.clone(), status, exit_code, duration_ms);
+            }
+            // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.finish_active_exec(
                     call_id,
@@ -1955,6 +1979,13 @@ fn handle_agent_provider_event(
             }
         }
         ProviderEvent::ExecCommandOutputDelta { call_id, delta } => {
+            // Update slot transcript output for all agents
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_exec_command_output_delta(call_id.clone(), &delta);
+            }
+            // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.append_active_exec_output(call_id, &delta);
             }
@@ -1964,6 +1995,22 @@ fn handle_agent_provider_event(
             call_id,
             input_preview,
         } => {
+            // Add to slot transcript for all agents
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.append_transcript(TranscriptEntry::GenericToolCall {
+                    name: name.clone(),
+                    call_id: call_id.clone(),
+                    input_preview: input_preview.clone(),
+                    output_preview: None,
+                    success: true,
+                    started: true,
+                    exit_code: None,
+                    duration_ms: None,
+                });
+            }
+            // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.push_active_generic_tool_call_started(name, call_id, input_preview);
             }
@@ -1976,6 +2023,13 @@ fn handle_agent_provider_event(
             exit_code,
             duration_ms,
         } => {
+            // Update slot transcript for all agents
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.update_last_generic_tool_call(name.clone(), call_id.clone(), output_preview.clone(), success, exit_code, duration_ms);
+            }
+            // Update active_entries only for focused agent
             if state.focused_agent_id().as_ref() == Some(&agent_id) {
                 state.finish_active_generic_tool_call(
                     name,
