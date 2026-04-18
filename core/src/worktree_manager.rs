@@ -6,8 +6,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::logging;
+
+/// Default timeout for git commands (30 seconds)
+const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 
 /// Worktree status information parsed from git worktree list --porcelain
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -631,17 +635,83 @@ impl WorktreeManager {
     }
 
     fn run_git_command_internal(&self, args: &[&str]) -> Result<String, WorktreeError> {
-        let output = Command::new("git")
+        let start = Instant::now();
+        let timeout = Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS);
+
+        // Spawn the process instead of using blocking .output()
+        let mut child = Command::new("git")
             .args(args)
             .current_dir(&self.repo_root)
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
 
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(WorktreeError::GitCommandFailed(stderr))
+        // Wait with timeout using try_wait in a loop
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    // Process completed
+                    let stdout = child.stdout.take().expect("stdout was piped");
+                    let stderr = child.stderr.take().expect("stderr was piped");
+                    let stdout_content = std::io::read_to_string(stdout)
+                        .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+                    let stderr_content = std::io::read_to_string(stderr)
+                        .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+                    let duration_ms = start.elapsed().as_millis();
+
+                    if status.success() {
+                        logging::debug_event(
+                            "worktree.git_command.complete",
+                            "git command completed",
+                            serde_json::json!({
+                                "args": args,
+                                "duration_ms": duration_ms,
+                                "success": true,
+                            }),
+                        );
+                        return Ok(stdout_content);
+                    } else {
+                        logging::debug_event(
+                            "worktree.git_command.failed",
+                            "git command failed",
+                            serde_json::json!({
+                                "args": args,
+                                "duration_ms": duration_ms,
+                                "stderr": stderr_content,
+                            }),
+                        );
+                        return Err(WorktreeError::GitCommandFailed(stderr_content));
+                    }
+                }
+                Ok(None) => {
+                    // Process still running, check timeout
+                    if start.elapsed() >= timeout {
+                        // Timeout - kill the process
+                        logging::warn_event(
+                            "worktree.git_command.timeout",
+                            "git command timed out, killing process",
+                            serde_json::json!({
+                                "args": args,
+                                "timeout_secs": GIT_COMMAND_TIMEOUT_SECS,
+                            }),
+                        );
+                        let _ = child.kill();
+                        let _ = child.wait(); // Wait for kill to complete
+                        return Err(WorktreeError::GitCommandFailed(format!(
+                            "Command timed out after {} seconds",
+                            GIT_COMMAND_TIMEOUT_SECS
+                        )));
+                    }
+                    // Short sleep to avoid busy-waiting
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => {
+                    // Error checking process status
+                    return Err(WorktreeError::GitCommandFailed(e.to_string()));
+                }
+            }
         }
     }
 
