@@ -54,6 +54,48 @@ pub fn stop_if_complete() -> ActionType {
     ActionType::new("stop_if_complete")
 }
 
+pub fn wake_up() -> ActionType {
+    ActionType::new("wake_up")
+}
+
+/// Action: Wake up from resting state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WakeUpAction;
+
+impl WakeUpAction {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for WakeUpAction {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl DecisionAction for WakeUpAction {
+    fn action_type(&self) -> ActionType {
+        wake_up()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "WakeUpAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        "WakeUp".to_string()
+    }
+
+    fn serialize_params(&self) -> String {
+        "{}".to_string()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
 /// Action: Select option
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -749,5 +791,18 @@ mod tests {
         assert_eq!(select_option().name, "select_option");
         assert_eq!(reflect().name, "reflect");
         assert_eq!(confirm_completion().name, "confirm_completion");
+        assert_eq!(wake_up().name, "wake_up");
+    }
+
+    #[test]
+    fn test_wake_up_action_type() {
+        let action = WakeUpAction::new();
+        assert_eq!(action.action_type(), wake_up());
+    }
+
+    #[test]
+    fn test_wake_up_action_impl() {
+        let action = WakeUpAction;
+        assert_eq!(action.implementation_type(), "WakeUpAction");
     }
 }
