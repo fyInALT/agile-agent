@@ -360,8 +360,6 @@ mod tests {
     use crate::builtin_situations::WaitingForChoiceSituation;
     use crate::context::DecisionContext;
     use crate::situation::ChoiceOption;
-    use crate::situation_registry::SituationRegistry;
-    use crate::types::SituationType;
     use tempfile::TempDir;
 
     fn make_test_context() -> DecisionContext {

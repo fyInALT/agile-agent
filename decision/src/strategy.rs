@@ -426,6 +426,7 @@ pub struct AdaptiveStrategy {
     /// Success rate per maker type
     success_rates: std::collections::HashMap<String, f64>,
     /// Minimum samples before adaptation kicks in
+    #[allow(dead_code)]
     min_samples: u32,
     /// Adaptation threshold (if success rate below this, try fallback)
     adaptation_threshold: f64,

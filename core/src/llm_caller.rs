@@ -192,8 +192,8 @@ fn run_provider_for_llm_call(
         }),
     );
 
-    // Keep a copy for fallback
-    let prompt_for_fallback = prompt.clone();
+    // Keep a copy for fallback (currently unused but kept for future fallback support)
+    let _prompt_for_fallback = prompt.clone();
 
     // Try to start the actual provider
     let result = match provider {

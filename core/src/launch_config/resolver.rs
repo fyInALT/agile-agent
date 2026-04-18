@@ -21,7 +21,7 @@ fn default_executable_name(provider: ProviderKind) -> Option<&'static str> {
 }
 
 /// Resolve the host environment variables into a captured snapshot.
-pub fn resolve_host_env(provider: ProviderKind) -> BTreeMap<String, String> {
+pub fn resolve_host_env(_provider: ProviderKind) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
     // Inherit whitelist variables

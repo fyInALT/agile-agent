@@ -398,8 +398,6 @@ mod tests {
     use crate::builtin_situations::WaitingForChoiceSituation;
     use crate::context::DecisionContext;
     use crate::output::DecisionOutput;
-    use crate::situation::DecisionSituation;
-    use crate::types::ActionType;
 
     // Mock DecisionMaker for testing
     struct MockMaker {

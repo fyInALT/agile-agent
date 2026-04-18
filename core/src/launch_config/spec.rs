@@ -168,7 +168,7 @@ pub struct AgentLaunchBundle {
 impl AgentLaunchBundle {
     /// Create a new bundle with the same config for both agents.
     pub fn symmetric(
-        provider: ProviderKind,
+        _provider: ProviderKind,
         input: LaunchInputSpec,
         resolved: ResolvedLaunchSpec,
     ) -> Self {

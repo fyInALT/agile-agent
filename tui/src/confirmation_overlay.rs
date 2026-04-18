@@ -34,6 +34,7 @@ impl ConfirmationOverlay {
     }
 
     /// Get the currently selected option label
+    #[allow(dead_code)]
     pub fn selected_label(&self) -> &'static str {
         if self.selected_index == 0 {
             "Confirm"

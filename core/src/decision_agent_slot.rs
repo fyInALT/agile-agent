@@ -173,7 +173,8 @@ pub struct DecisionAgentSlot {
     mail_receiver: DecisionMailReceiver,
     /// Provider thread handle for LLM calls (optional, created when needed)
     provider_thread: Option<JoinHandle<()>>,
-    /// Provider event receiver (optional)
+    /// Provider event receiver (optional, for future use)
+    #[allow(dead_code)]
     event_rx: Option<Receiver<ProviderEvent>>,
     /// Working directory for provider execution
     cwd: PathBuf,

@@ -174,6 +174,7 @@ impl TuiState {
     }
 
     /// Get formatted unread mail for focused agent's prompt
+    #[allow(dead_code)]
     pub fn focused_unread_mail_for_prompt(&self) -> String {
         if let Some(agent_id) = self.focused_agent_id() {
             let inbox = self.mailbox.inbox_for(&agent_id);
@@ -197,6 +198,7 @@ impl TuiState {
     }
 
     /// Mark all mail as read for focused agent (keeps mail history)
+    #[allow(dead_code)]
     pub fn mark_focused_mail_read(&mut self) {
         if let Some(agent_id) = self.focused_agent_id() {
             self.mailbox.mark_all_read(&agent_id);
@@ -235,6 +237,7 @@ impl TuiState {
     ///
     /// Saves current agent's view state and restores the new agent's state.
     /// Uses AgentPool's focus_agent_by_index if available.
+    #[allow(dead_code)]
     pub fn switch_focus_to_agent(&mut self, new_agent_id: &str) {
         // If we have an agent pool, use its focus management
         if let Some(pool) = self.agent_pool.as_mut() {
@@ -721,6 +724,7 @@ impl TuiState {
     }
 
     /// Focus a visible overview agent by number key.
+    #[allow(dead_code)]
     pub fn focus_overview_agent_by_number(&mut self, n: u8) -> Option<AgentStatusSnapshot> {
         let index = (n as usize).saturating_sub(1);
         let visible = self.overview_visible_agent_indices();
@@ -1457,6 +1461,7 @@ impl TuiState {
     ///
     /// Creates provider thread and registers event channel with AgentSlot.
     /// Returns the event receiver for polling.
+    #[allow(dead_code)]
     pub fn start_provider_for_focused_agent(
         &mut self,
         prompt: String,
@@ -1623,6 +1628,7 @@ impl TuiState {
     }
 
     /// Poll agent events with timeout
+    #[allow(dead_code)]
     pub fn poll_agent_events_with_timeout(
         &self,
         timeout: std::time::Duration,
@@ -1636,6 +1642,7 @@ impl TuiState {
     }
 
     /// Clear all cached agent view states
+    #[allow(dead_code)]
     pub fn clear_agent_view_states(&mut self) {
         self.agent_view_states.clear();
     }
@@ -1671,6 +1678,7 @@ impl TuiState {
     }
 
     /// Check if any overlay is open (transcript or provider)
+    #[allow(dead_code)]
     pub fn is_any_overlay_open(&self) -> bool {
         self.is_overlay_open()
             || self.is_provider_overlay_open()
@@ -1695,11 +1703,13 @@ impl TuiState {
     }
 
     /// Open human decision overlay for decision request
+    #[allow(dead_code)]
     pub fn open_human_decision_overlay(&mut self, request: agent_decision::HumanDecisionRequest) {
         self.human_decision_overlay = Some(HumanDecisionOverlay::new(request));
     }
 
     /// Close human decision overlay
+    #[allow(dead_code)]
     pub fn close_human_decision_overlay(&mut self) {
         self.human_decision_overlay = None;
     }
@@ -3995,7 +4005,9 @@ mod tests {
 
     #[test]
     fn multi_agent_provider_request_registers_channel_with_aggregator() {
+        #[allow(unused_imports)]
         use agent_core::provider::ProviderEvent;
+        #[allow(unused_imports)]
         use std::sync::mpsc;
 
         let temp = TempDir::new().expect("tempdir");

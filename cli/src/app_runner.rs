@@ -343,7 +343,7 @@ fn spawn_agent(provider: String) -> Result<()> {
 
     let launch_cwd = env::current_dir()?;
     let bootstrap = AgentRuntime::bootstrap_for_cwd(&launch_cwd, provider_kind)?;
-    let mut agent_runtime = bootstrap.runtime;
+    let agent_runtime = bootstrap.runtime;
 
     println!("agent: spawned {}", agent_runtime.summary());
     agent_runtime.persist()?;

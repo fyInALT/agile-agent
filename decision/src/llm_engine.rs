@@ -718,10 +718,8 @@ mod tests {
     use super::*;
     use crate::action_registry::ActionRegistry;
     use crate::builtin_actions::register_action_builtins;
-    use crate::builtin_situations::{
-        ClaimsCompletionSituation, WaitingForChoiceSituation, register_situation_builtins,
-    };
-    use crate::context::{DecisionContext, ProjectRules, RunningContextCache};
+    use crate::builtin_situations::{ClaimsCompletionSituation, WaitingForChoiceSituation};
+    use crate::context::DecisionContext;
     use crate::situation::ChoiceOption;
     use crate::situation_registry::SituationRegistry;
     use crate::types::SituationType;

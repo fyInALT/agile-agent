@@ -33,6 +33,7 @@ pub enum InputOutcome {
     /// Cycle to next view mode
     NextViewMode,
     /// Cycle to previous view mode
+    #[allow(dead_code)]
     PrevViewMode,
     /// Split view: focus left side
     SplitFocusLeft,

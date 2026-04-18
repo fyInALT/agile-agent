@@ -469,7 +469,7 @@ fn stop_preserve_keeps_worktree() {
 #[test]
 fn recovery_can_restore_missing_worktree() {
     let (_temp_repo, repo_path) = setup_test_repo();
-    let (temp_state, mut pool) = setup_worktree_pool(repo_path.clone());
+    let (_temp_state, mut pool) = setup_worktree_pool(repo_path.clone());
 
     let agent_id = pool
         .spawn_agent_with_worktree(
@@ -585,7 +585,7 @@ fn orphan_recovery_at_startup() {
     .expect("new pool");
 
     // Recovery should not find the orphan (different workplace id)
-    let report = new_pool
+    let _report = new_pool
         .recover_orphaned_worktrees(false)
         .expect("recovery");
 
@@ -602,7 +602,7 @@ fn agent_status_includes_worktree_info() {
     let (_temp_repo, repo_path) = setup_test_repo();
     let (_temp_state, mut pool) = setup_worktree_pool(repo_path.clone());
 
-    let agent_id = pool
+    let _agent_id = pool
         .spawn_agent_with_worktree(
             ProviderKind::Mock,
             Some("feature/status-test".to_string()),

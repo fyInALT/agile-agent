@@ -82,6 +82,7 @@ impl ResumeOverlay {
     }
 
     /// Get the shutdown reason
+    #[allow(dead_code)]
     pub fn shutdown_reason(&self) -> &ShutdownReason {
         &self.snapshot.shutdown_reason
     }

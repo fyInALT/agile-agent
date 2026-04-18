@@ -23,6 +23,7 @@ pub struct HumanDecisionOverlay {
 
 /// Command returned from overlay key handling
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum HumanDecisionCommand {
     /// Close overlay without action
     Cancel,
@@ -40,6 +41,7 @@ pub enum HumanDecisionCommand {
 
 impl HumanDecisionOverlay {
     /// Create new human decision overlay from request
+    #[allow(dead_code)]
     pub fn new(request: HumanDecisionRequest) -> Self {
         Self {
             request,
@@ -60,6 +62,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Get urgency color (for styling)
+    #[allow(dead_code)]
     pub fn urgency_color(&self) -> &'static str {
         match self.request.urgency {
             UrgencyLevel::Critical => "red",
@@ -84,6 +87,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Get current selection label
+    #[allow(dead_code)]
     pub fn current_selection_label(&self) -> Option<&str> {
         self.request
             .options
@@ -92,6 +96,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Move selection up (previous option)
+    #[allow(dead_code)]
     pub fn move_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
@@ -99,6 +104,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Move selection down (next option)
+    #[allow(dead_code)]
     pub fn move_down(&mut self) {
         if self.selected_index < self.request.options.len() - 1 {
             self.selected_index += 1;
@@ -106,6 +112,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Select option by letter (A, B, C, D...)
+    #[allow(dead_code)]
     pub fn select_by_letter(&mut self, letter: char) -> bool {
         let index = (letter as usize) - ('A' as usize);
         if index < self.request.options.len() {
@@ -117,18 +124,21 @@ impl HumanDecisionOverlay {
     }
 
     /// Enter custom input mode
+    #[allow(dead_code)]
     pub fn enter_custom_mode(&mut self) {
         self.custom_mode = true;
         self.custom_input.clear();
     }
 
     /// Exit custom input mode
+    #[allow(dead_code)]
     pub fn exit_custom_mode(&mut self) {
         self.custom_mode = false;
         self.custom_input.clear();
     }
 
     /// Add character to custom input
+    #[allow(dead_code)]
     pub fn add_char(&mut self, c: char) {
         if self.custom_mode {
             self.custom_input.push(c);
@@ -136,6 +146,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Remove last character from custom input
+    #[allow(dead_code)]
     pub fn remove_char(&mut self) {
         if self.custom_mode {
             self.custom_input.pop();
@@ -143,6 +154,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Handle key event
+    #[allow(dead_code)]
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> HumanDecisionCommand {
         if key_event.kind != KeyEventKind::Press {
             return HumanDecisionCommand::None;
@@ -259,6 +271,7 @@ impl HumanDecisionOverlay {
     }
 
     /// Convert command to HumanSelection
+    #[allow(dead_code)]
     pub fn command_to_selection(cmd: &HumanDecisionCommand) -> Option<HumanSelection> {
         match cmd {
             HumanDecisionCommand::Select { option_id } => Some(HumanSelection::selected(option_id)),
@@ -279,7 +292,6 @@ impl HumanDecisionOverlay {
 mod tests {
     use super::*;
     use agent_decision::{ChoiceOption, SituationType};
-    use chrono::Utc;
 
     fn make_test_request() -> HumanDecisionRequest {
         HumanDecisionRequest::new(

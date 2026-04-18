@@ -2198,7 +2198,7 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
     let header_spans: Vec<Span> = columns
         .iter()
         .enumerate()
-        .map(|(i, col)| {
+        .map(|(_i, col)| {
             Span::styled(
                 format!("  {:width$}", col, width = column_width as usize - 2),
                 Style::default()
@@ -2255,7 +2255,7 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
         ]
         .iter()
         .enumerate()
-        .map(|(col_idx, (task, color))| {
+        .map(|(_col_idx, (task, color))| {
             let task_text = if let Some(t) = task {
                 // Truncate title to fit column
                 let title = t.title();

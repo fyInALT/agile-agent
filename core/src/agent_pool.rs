@@ -4035,9 +4035,8 @@ mod tests {
         // Manually expire the request in the queue
         // (In real scenario, time would pass and check_expired would find it)
         // For now, just verify the method exists and can be called
-        let count = pool.process_expired_requests();
+        let _count = pool.process_expired_requests();
         // Request may or may not be expired yet depending on timing
-        assert!(count >= 0);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub struct ConfigPreview {
     pub source_mode: LaunchSourceMode,
     pub env_count: usize,
     pub arg_count: usize,
+    #[allow(dead_code)]
     pub executable: Option<String>,
     pub error: Option<String>,
 }
@@ -283,6 +284,7 @@ impl LaunchConfigOverlayState {
     }
 
     /// Check if configuration is valid for confirmation
+    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         self.work_preview.is_valid() && self.decision_preview.is_valid()
     }
@@ -317,6 +319,7 @@ impl LaunchConfigOverlayState {
 }
 
 /// Parse result for launch config text
+#[allow(dead_code)]
 pub fn parse_and_preview(provider: ProviderKind, text: &str) -> ConfigPreview {
     if text.trim().is_empty() {
         return ConfigPreview::success(LaunchSourceMode::HostDefault, 0, 0, None);
