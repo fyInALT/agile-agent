@@ -371,6 +371,10 @@ impl DecisionSituation for ErrorSituation {
         }
     }
 
+    fn error_info(&self) -> Option<&crate::situation::ErrorInfo> {
+        Some(&self.error)
+    }
+
     fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
         Box::new(self.clone())
     }

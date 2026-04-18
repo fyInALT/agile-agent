@@ -28,6 +28,11 @@ pub trait DecisionSituation: Send + Sync + 'static {
     /// Available actions for this situation
     fn available_actions(&self) -> Vec<ActionType>;
 
+    /// Get error info if this situation represents an error (for rate limit detection)
+    fn error_info(&self) -> Option<&crate::situation::ErrorInfo> {
+        None
+    }
+
     /// Serialize parameters for persistence (optional)
     fn serialize_params(&self) -> Option<String> {
         None

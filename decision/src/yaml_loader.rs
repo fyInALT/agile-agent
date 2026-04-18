@@ -211,6 +211,10 @@ fn parse_action(s: &str) -> Result<WorkflowAction, YamlLoadError> {
         "Retry" => Ok(WorkflowAction::Retry),
         "Reflect" => Ok(WorkflowAction::Reflect { reason: "Issue found".to_string() }),
         "RequestHuman" => Ok(WorkflowAction::RequestHuman { question: "Decision needed".to_string() }),
+        "AdvanceTo" => Ok(WorkflowAction::AdvanceTo { stage: StageId::new("next") }),
+        "ReturnTo" => Ok(WorkflowAction::ReturnTo { stage: StageId::new("prev") }),
+        "Cancel" => Ok(WorkflowAction::Cancel { reason: "Cancelled".to_string() }),
+        "Wait" => Ok(WorkflowAction::Wait { reason: "Waiting".to_string() }),
         other => Err(YamlLoadError::Parse(format!("Unknown action: {}", other))),
     }
 }
@@ -350,6 +354,8 @@ process:
       transitions:
         - target: end
           condition: GoalsAchieved
+    - id: end
+      name: End
   initial_stage: start
   final_stage: end
 ";
@@ -358,7 +364,7 @@ process:
         let process = yaml.to_process().expect("convert");
 
         assert_eq!(process.name, "Test Process");
-        assert_eq!(process.stages.len(), 1);
+        assert_eq!(process.stages.len(), 2);
     }
 
     #[test]
@@ -490,6 +496,8 @@ process:
       name: Start
       transitions:
         - target: end
+    - id: end
+      name: End
   initial_stage: start
   final_stage: end
 ";

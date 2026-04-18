@@ -51,8 +51,29 @@ impl DecisionTier {
             return DecisionTier::Critical;
         }
 
-        // Complex: error recovery, partial completion
-        if type_name == "error" || type_name == "partial_completion" {
+        // Complex: error recovery, partial completion (but NOT retriable rate limit errors)
+        // Rate limit errors (429) should use Simple tier to avoid deadlock
+        if type_name == "error" {
+            // Check if this is a rate limit error - use Simple tier to avoid LLM deadlock
+            if let Some(error_info) = situation.error_info() {
+                let msg = error_info.message.to_lowercase();
+                let err_type = error_info.error_type.to_lowercase();
+                if err_type.contains("429")
+                    || err_type.contains("rate_limit")
+                    || err_type.contains("rate limit")
+                    || msg.contains("429")
+                    || msg.contains("rate limit")
+                    || msg.contains("quota")
+                {
+                    // Rate limit error - use rule engine to avoid making another LLM call
+                    return DecisionTier::Simple;
+                }
+            }
+            // Other errors use Complex tier (LLM for recovery strategy)
+            return DecisionTier::Complex;
+        }
+
+        if type_name == "partial_completion" {
             return DecisionTier::Complex;
         }
 
@@ -534,6 +555,27 @@ mod tests {
             Box::new(ErrorSituation::new(ErrorInfo::new("test", "Test error")));
         let tier = DecisionTier::from_situation(situation.as_ref());
         assert_eq!(tier, DecisionTier::Complex);
+    }
+
+    #[test]
+    fn test_decision_tier_from_error_rate_limit() {
+        // Rate limit errors should use Simple tier to avoid LLM deadlock
+        let situation: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ErrorSituation::new(ErrorInfo::new("429", "Request rejected (429)")));
+        let tier = DecisionTier::from_situation(situation.as_ref());
+        assert_eq!(tier, DecisionTier::Simple);
+
+        // Also test "rate_limit" in error type
+        let situation2: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ErrorSituation::new(ErrorInfo::new("rate_limit", "Rate limit exceeded")));
+        let tier2 = DecisionTier::from_situation(situation2.as_ref());
+        assert_eq!(tier2, DecisionTier::Simple);
+
+        // Test rate limit in message
+        let situation3: Box<dyn crate::situation::DecisionSituation> =
+            Box::new(ErrorSituation::new(ErrorInfo::new("api_error", "rate limit exceeded")));
+        let tier3 = DecisionTier::from_situation(situation3.as_ref());
+        assert_eq!(tier3, DecisionTier::Simple);
     }
 
     #[test]
