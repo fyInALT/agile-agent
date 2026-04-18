@@ -82,6 +82,7 @@ pub mod strategy;
 // Task Concept: Task Entity and Workflow
 pub mod task;
 pub mod workflow;
+pub mod automation;
 
 // Re-export core types
 pub use error::*;
@@ -166,3 +167,5 @@ pub use workflow::{
 // Note: workflow::Condition is separate from condition::Condition
 // - workflow::Condition: for workflow stage conditions
 // - condition::Condition: for decision logic conditions
+
+pub use automation::*;
