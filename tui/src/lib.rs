@@ -23,6 +23,7 @@ mod provider_overlay;
 mod render;
 mod resume_overlay;
 mod streaming;
+mod task_decision_overlay;
 mod task_detail_view;
 mod task_panel;
 mod terminal;
