@@ -186,7 +186,7 @@ pub use persistence::{
 
 // Sprint 13: Task Decision Engine
 pub use task_engine::{
-    AgentOutput, DecisionAction, HumanResponse, TaskDecisionEngine,
+    AgentOutput, HumanResponse, TaskDecisionAction, TaskDecisionEngine,
 };
 
 // Sprint 15: Task Metrics

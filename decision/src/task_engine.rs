@@ -9,9 +9,9 @@ use crate::persistence::{ExecutionRecord, TaskRegistry, TaskUpdate};
 use crate::task::{Task, TaskId, TaskStatus};
 use crate::workflow::{Condition, DecisionProcess, DecisionStage, StageId, WorkflowAction};
 
-/// Decision action returned by engine
+/// Task decision action returned by engine
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecisionAction {
+pub enum TaskDecisionAction {
     /// Continue execution without intervention
     Continue,
     /// Reflect on output with reason
@@ -32,7 +32,7 @@ pub enum DecisionAction {
     Wait,
 }
 
-impl std::fmt::Display for DecisionAction {
+impl std::fmt::Display for TaskDecisionAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Continue => write!(f, "Continue"),
@@ -249,7 +249,7 @@ impl TaskDecisionEngine {
     }
 
     /// Process agent output and make decision
-    pub fn process_output(&mut self, output: AgentOutput) -> DecisionAction {
+    pub fn process_output(&mut self, output: AgentOutput) -> TaskDecisionAction {
         // Get current stage (cloned to avoid borrow conflicts)
         let stage = self.stage_cloned();
 
@@ -266,18 +266,18 @@ impl TaskDecisionEngine {
             AutoCheckResult::NeedsReflection { reason } => {
                 if self.task.reflection_count < self.task.max_reflection_rounds {
                     self.task.reflection_count += 1;
-                    DecisionAction::Reflect { reason: reason.clone() }
+                    TaskDecisionAction::Reflect { reason: reason.clone() }
                 } else {
-                    DecisionAction::RequestHuman { question: format!("Max reflections reached: {}", reason) }
+                    TaskDecisionAction::RequestHuman { question: format!("Max reflections reached: {}", reason) }
                 }
             }
             AutoCheckResult::NeedsHuman { reason } => {
                 // Check if filter agrees
                 let needs_human = self.filter.needs_human_decision(&self.task, &simulated);
                 if needs_human.is_some() {
-                    DecisionAction::RequestHuman { question: reason.clone() }
+                    TaskDecisionAction::RequestHuman { question: reason.clone() }
                 } else {
-                    // Filter disagrees, convert WorkflowAction to DecisionAction
+                    // Filter disagrees, convert WorkflowAction to TaskDecisionAction
                     let workflow_action = self.filter.auto_decide(&self.task, &simulated);
                     workflow_to_decision(workflow_action)
                 }
@@ -294,19 +294,19 @@ impl TaskDecisionEngine {
     }
 
     /// Evaluate stage transitions
-    fn evaluate_transition(&mut self, output: &AgentOutput, stage: &Option<DecisionStage>) -> DecisionAction {
+    fn evaluate_transition(&mut self, output: &AgentOutput, stage: &Option<DecisionStage>) -> TaskDecisionAction {
         if let Some(stage) = stage {
             // Check exit conditions
             for transition in &stage.transitions {
                 if self.check_transition_condition(&transition.condition, output) {
                     self.current_stage = transition.target.clone();
-                    return DecisionAction::AdvanceTo { stage: transition.target.clone() };
+                    return TaskDecisionAction::AdvanceTo { stage: transition.target.clone() };
                 }
             }
         }
 
         // No transition matched, continue
-        DecisionAction::Continue
+        TaskDecisionAction::Continue
     }
 
     /// Check if transition condition is met
@@ -328,26 +328,26 @@ impl TaskDecisionEngine {
     }
 
     /// Execute decision effects on task
-    fn execute_decision(&mut self, decision: &DecisionAction) {
+    fn execute_decision(&mut self, decision: &TaskDecisionAction) {
         match decision {
-            DecisionAction::Reflect { .. } => {
+            TaskDecisionAction::Reflect { .. } => {
                 let _ = self.task.transition_to(TaskStatus::Reflecting);
             }
-            DecisionAction::ConfirmCompletion => {
+            TaskDecisionAction::ConfirmCompletion => {
                 self.task.confirmation_count += 1;
                 let _ = self.task.transition_to(TaskStatus::PendingConfirmation);
             }
-            DecisionAction::RequestHuman { .. } => {
+            TaskDecisionAction::RequestHuman { .. } => {
                 let _ = self.task.transition_to(TaskStatus::NeedsHumanDecision);
             }
-            DecisionAction::AdvanceTo { stage } => {
+            TaskDecisionAction::AdvanceTo { stage } => {
                 self.current_stage = stage.clone();
                 self.update_status_for_stage(stage);
             }
-            DecisionAction::Cancel { .. } => {
+            TaskDecisionAction::Cancel { .. } => {
                 let _ = self.task.transition_to(TaskStatus::Cancelled);
             }
-            DecisionAction::ReturnTo { stage } => {
+            TaskDecisionAction::ReturnTo { stage } => {
                 self.current_stage = stage.clone();
             }
             _ => {}
@@ -382,7 +382,7 @@ impl TaskDecisionEngine {
     }
 
     /// Log decision to execution history
-    fn log_decision(&mut self, decision: &DecisionAction, check_result: &AutoCheckResult) {
+    fn log_decision(&mut self, decision: &TaskDecisionAction, check_result: &AutoCheckResult) {
         let action = decision_to_workflow(decision);
         let record = ExecutionRecord::with_auto_check(action, self.current_stage.clone(), check_result);
         self.task.execution_history.push(record);
@@ -413,30 +413,30 @@ impl TaskDecisionEngine {
     }
 
     /// Handle human response
-    pub fn handle_human_response(&mut self, response: HumanResponse) -> DecisionAction {
+    pub fn handle_human_response(&mut self, response: HumanResponse) -> TaskDecisionAction {
         let decision = match &response {
             HumanResponse::Approve => {
                 let _ = self.task.transition_to(TaskStatus::InProgress);
-                DecisionAction::Continue
+                TaskDecisionAction::Continue
             }
             HumanResponse::Deny { reason } => {
                 if self.task.reflection_count < self.task.max_reflection_rounds {
                     self.task.reflection_count += 1;
                     let _ = self.task.transition_to(TaskStatus::Reflecting);
-                    DecisionAction::Reflect { reason: reason.clone() }
+                    TaskDecisionAction::Reflect { reason: reason.clone() }
                 } else {
                     let _ = self.task.transition_to(TaskStatus::Cancelled);
-                    DecisionAction::Cancel { reason: "Human denied after max reflections".into() }
+                    TaskDecisionAction::Cancel { reason: "Human denied after max reflections".into() }
                 }
             }
             HumanResponse::Custom { feedback } => {
                 self.task.reflection_count += 1;
                 let _ = self.task.transition_to(TaskStatus::Reflecting);
-                DecisionAction::Reflect { reason: feedback.clone() }
+                TaskDecisionAction::Reflect { reason: feedback.clone() }
             }
             HumanResponse::Cancel => {
                 let _ = self.task.transition_to(TaskStatus::Cancelled);
-                DecisionAction::Cancel { reason: "Human cancelled".into() }
+                TaskDecisionAction::Cancel { reason: "Human cancelled".into() }
             }
         };
 
@@ -456,33 +456,33 @@ impl TaskDecisionEngine {
     }
 }
 
-/// Convert DecisionAction to WorkflowAction
-fn decision_to_workflow(decision: &DecisionAction) -> WorkflowAction {
+/// Convert TaskDecisionAction to WorkflowAction
+fn decision_to_workflow(decision: &TaskDecisionAction) -> WorkflowAction {
     match decision {
-        DecisionAction::Continue => WorkflowAction::Continue,
-        DecisionAction::Reflect { reason } => WorkflowAction::Reflect { reason: reason.clone() },
-        DecisionAction::ConfirmCompletion => WorkflowAction::ConfirmCompletion,
-        DecisionAction::RequestHuman { question } => WorkflowAction::RequestHuman { question: question.clone() },
-        DecisionAction::AdvanceTo { stage } => WorkflowAction::AdvanceTo { stage: stage.clone() },
-        DecisionAction::ReturnTo { stage } => WorkflowAction::ReturnTo { stage: stage.clone() },
-        DecisionAction::Cancel { reason } => WorkflowAction::Cancel { reason: reason.clone() },
-        DecisionAction::Retry => WorkflowAction::Retry,
-        DecisionAction::Wait => WorkflowAction::Wait { reason: "Waiting".to_string() },
+        TaskDecisionAction::Continue => WorkflowAction::Continue,
+        TaskDecisionAction::Reflect { reason } => WorkflowAction::Reflect { reason: reason.clone() },
+        TaskDecisionAction::ConfirmCompletion => WorkflowAction::ConfirmCompletion,
+        TaskDecisionAction::RequestHuman { question } => WorkflowAction::RequestHuman { question: question.clone() },
+        TaskDecisionAction::AdvanceTo { stage } => WorkflowAction::AdvanceTo { stage: stage.clone() },
+        TaskDecisionAction::ReturnTo { stage } => WorkflowAction::ReturnTo { stage: stage.clone() },
+        TaskDecisionAction::Cancel { reason } => WorkflowAction::Cancel { reason: reason.clone() },
+        TaskDecisionAction::Retry => WorkflowAction::Retry,
+        TaskDecisionAction::Wait => WorkflowAction::Wait { reason: "Waiting".to_string() },
     }
 }
 
-/// Convert WorkflowAction to DecisionAction
-fn workflow_to_decision(action: WorkflowAction) -> DecisionAction {
+/// Convert WorkflowAction to TaskDecisionAction
+fn workflow_to_decision(action: WorkflowAction) -> TaskDecisionAction {
     match action {
-        WorkflowAction::Continue => DecisionAction::Continue,
-        WorkflowAction::Reflect { reason } => DecisionAction::Reflect { reason },
-        WorkflowAction::ConfirmCompletion => DecisionAction::ConfirmCompletion,
-        WorkflowAction::RequestHuman { question } => DecisionAction::RequestHuman { question },
-        WorkflowAction::AdvanceTo { stage } => DecisionAction::AdvanceTo { stage },
-        WorkflowAction::ReturnTo { stage } => DecisionAction::ReturnTo { stage },
-        WorkflowAction::Cancel { reason } => DecisionAction::Cancel { reason },
-        WorkflowAction::Retry => DecisionAction::Retry,
-        WorkflowAction::Wait { reason: _ } => DecisionAction::Wait,
+        WorkflowAction::Continue => TaskDecisionAction::Continue,
+        WorkflowAction::Reflect { reason } => TaskDecisionAction::Reflect { reason },
+        WorkflowAction::ConfirmCompletion => TaskDecisionAction::ConfirmCompletion,
+        WorkflowAction::RequestHuman { question } => TaskDecisionAction::RequestHuman { question },
+        WorkflowAction::AdvanceTo { stage } => TaskDecisionAction::AdvanceTo { stage },
+        WorkflowAction::ReturnTo { stage } => TaskDecisionAction::ReturnTo { stage },
+        WorkflowAction::Cancel { reason } => TaskDecisionAction::Cancel { reason },
+        WorkflowAction::Retry => TaskDecisionAction::Retry,
+        WorkflowAction::Wait { reason: _ } => TaskDecisionAction::Wait,
     }
 }
 
@@ -590,7 +590,7 @@ mod tests {
         let output = AgentOutput::clean("All done".to_string());
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, DecisionAction::Continue | DecisionAction::AdvanceTo { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }));
     }
 
     #[test]
@@ -605,7 +605,7 @@ mod tests {
         let output = AgentOutput::with_syntax_errors("Bad code".to_string());
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, DecisionAction::Reflect { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Reflect { .. }));
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         let output = AgentOutput::with_test_failures("Tests failed".to_string());
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, DecisionAction::Reflect { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Reflect { .. }));
     }
 
     #[test]
@@ -647,7 +647,7 @@ mod tests {
 
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, DecisionAction::RequestHuman { .. } | DecisionAction::Reflect { .. }));
+        assert!(matches!(decision, TaskDecisionAction::RequestHuman { .. } | TaskDecisionAction::Reflect { .. }));
     }
 
     #[test]
@@ -663,7 +663,7 @@ mod tests {
         let decision = engine.process_output(output);
 
         // Should either continue or advance
-        assert!(matches!(decision, DecisionAction::Continue | DecisionAction::AdvanceTo { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Continue | TaskDecisionAction::AdvanceTo { .. }));
     }
 
     #[test]
@@ -680,7 +680,7 @@ mod tests {
         let output = AgentOutput::with_syntax_errors("Still bad".to_string());
         let decision = engine.process_output(output);
 
-        assert!(matches!(decision, DecisionAction::RequestHuman { .. }));
+        assert!(matches!(decision, TaskDecisionAction::RequestHuman { .. }));
     }
 
     #[test]
@@ -777,7 +777,7 @@ mod tests {
 
         let decision = engine.handle_human_response(HumanResponse::Approve);
 
-        assert!(matches!(decision, DecisionAction::Continue));
+        assert!(matches!(decision, TaskDecisionAction::Continue));
         assert_eq!(engine.get_status(), TaskStatus::InProgress);
     }
 
@@ -795,7 +795,7 @@ mod tests {
 
         let decision = engine.handle_human_response(HumanResponse::Deny { reason: "Not good".into() });
 
-        assert!(matches!(decision, DecisionAction::Reflect { .. } | DecisionAction::Cancel { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Reflect { .. } | TaskDecisionAction::Cancel { .. }));
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod tests {
 
         let decision = engine.handle_human_response(HumanResponse::Custom { feedback: "Try this instead".into() });
 
-        assert!(matches!(decision, DecisionAction::Reflect { .. }));
+        assert!(matches!(decision, TaskDecisionAction::Reflect { .. }));
         assert!(engine.task.execution_history.iter().any(|r| r.human_response.is_some()));
     }
 
