@@ -87,6 +87,9 @@ pub mod automation;
 // Sprint 13: Task Decision Engine
 pub mod task_engine;
 
+// Sprint 15: Task Metrics
+pub mod task_metrics;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -185,3 +188,6 @@ pub use persistence::{
 pub use task_engine::{
     AgentOutput, DecisionAction, HumanResponse, TaskDecisionEngine,
 };
+
+// Sprint 15: Task Metrics
+pub use task_metrics::TaskMetrics;
