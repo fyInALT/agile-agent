@@ -4544,4 +4544,41 @@ mod tests {
         let result = parse_at_command("  hello world");
         assert!(matches!(result, AtCommandResult::Normal(s) if s == "  hello world"));
     }
+
+    #[test]
+    fn set_decision_status_sets_value() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        assert!(state.decision_status.is_none());
+        state.set_decision_status(Some("test".to_string()));
+        assert_eq!(state.decision_status, Some("test".to_string()));
+    }
+
+    #[test]
+    fn set_decision_status_truncates_long_values() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // String longer than 15 chars should be truncated
+        state.set_decision_status(Some("this-is-a-very-long-status".to_string()));
+        assert_eq!(state.decision_status, Some("this-is-a-ve...".to_string()));
+    }
+
+    #[test]
+    fn set_decision_status_clears_with_none() {
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        state.set_decision_status(Some("test".to_string()));
+        assert!(state.decision_status.is_some());
+        state.set_decision_status(None);
+        assert!(state.decision_status.is_none());
+    }
 }
