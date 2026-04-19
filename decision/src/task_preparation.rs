@@ -340,11 +340,4 @@ mod tests {
         };
         assert!(rebase.summary().contains("Rebase"));
     }
-
-    #[test]
-    fn test_task_preparation_pipeline_new() {
-        let _pipeline = TaskPreparationPipeline::new();
-        // Basic creation test
-        assert!(true);
-    }
 }
