@@ -1085,4 +1085,142 @@ mod tests {
         let elapsed = slot.elapsed_since_activity();
         assert!(elapsed < std::time::Duration::from_secs(1));
     }
+
+    #[test]
+    fn test_poll_and_process_returns_zero_when_not_idle() {
+        let (mut slot, sender) = make_test_slot();
+
+        // First, set status to thinking (simulating an in-flight async decision)
+        slot.status = DecisionAgentStatus::thinking_now();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // poll_and_process should return 0 because status is not Idle
+        let processed = slot.poll_and_process();
+        assert_eq!(processed, 0, "Should return 0 when not idle");
+
+        // Request should still be in the channel (not consumed)
+        assert!(slot.try_receive_request().is_some(), "Request should still be pending");
+    }
+
+    #[test]
+    fn test_process_request_does_not_set_pending_reflection_round() {
+        // Test that the sync process_request path does NOT set pending_reflection_round
+        // This is important because only the async path uses pending_reflection_round
+        let (mut slot, sender) = make_test_slot();
+
+        // Before process_request, pending should be None
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_none(), "Pending should be None before request");
+        }
+
+        // Send and process request via sync path
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        let received = slot.try_receive_request().unwrap();
+        let _response = slot.process_request(received);
+
+        // After process_request, pending should STILL be None
+        // (sync path doesn't use the pending_reflection_round mechanism)
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_none(), "Pending should remain None after sync process_request");
+        }
+    }
+
+    #[test]
+    fn test_clear_thinking_status_is_noop_when_not_thinking() {
+        let (mut slot, _) = make_test_slot();
+
+        // Initially idle
+        assert!(slot.status().is_idle());
+
+        // Set pending_reflection_round to Some manually (simulating async state)
+        {
+            let mut pending = slot.pending_reflection_round.lock().unwrap();
+            *pending = Some(2);
+        }
+
+        // Call clear_thinking_status when NOT in thinking state
+        slot.clear_thinking_status(false);
+
+        // pending should still be Some(2) since we didn't enter the if block
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_some(), "Pending should still be Some because status was not Thinking");
+            assert_eq!(*pending, Some(2));
+        }
+
+        // Status should still be idle
+        assert!(slot.status().is_idle());
+
+        // Now simulate the correct flow: set to Thinking first, then clear
+        slot.status = DecisionAgentStatus::thinking_now();
+        slot.clear_thinking_status(false);
+
+        // Now pending should be None and status should be idle
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_none(), "Pending should be None after proper clear");
+        }
+        assert!(slot.status().is_idle());
+    }
+
+    #[test]
+    fn test_multiple_async_decisions_sequence() {
+        // Test that multiple sequential async decisions work correctly
+        let (mut slot, sender) = make_test_slot();
+
+        // First decision
+        let request1 = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request1).unwrap();
+
+        slot.poll_and_process();
+        assert!(slot.status().is_thinking());
+
+        // Receive first response
+        let timeout = std::time::Duration::from_secs(5);
+        let result1 = sender.receive_response_timeout(timeout);
+        assert!(result1.is_ok() && result1.unwrap().is_some());
+
+        slot.clear_thinking_status(false);
+        assert!(slot.status().is_idle());
+
+        // Second decision - send new request
+        let request2 = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request2).unwrap();
+
+        slot.poll_and_process();
+        assert!(slot.status().is_thinking());
+
+        // Receive second response
+        let result2 = sender.receive_response_timeout(timeout);
+        assert!(result2.is_ok() && result2.unwrap().is_some());
+
+        slot.clear_thinking_status(false);
+        assert!(slot.status().is_idle());
+
+        // Decision count should be 2
+        assert_eq!(slot.decision_count(), 2);
+    }
 }

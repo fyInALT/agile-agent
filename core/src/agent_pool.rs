@@ -3619,6 +3619,10 @@ mod tests {
         BlockedState, HumanDecisionBlocking, HumanSelection, ResourceBlocking,
         WaitingForChoiceSituation,
     };
+    use agent_decision::builtin_situations::register_situation_builtins;
+    use agent_decision::context::DecisionContext;
+    use agent_decision::situation_registry::SituationRegistry;
+    use agent_decision::types::SituationType;
 
     fn make_pool(max_slots: usize) -> AgentPool {
         AgentPool::new(WorkplaceId::new("workplace-001"), max_slots)
@@ -5702,5 +5706,137 @@ mod tests {
 
         let profile = pool.get_profile_for_agent(&agent_id);
         assert!(profile.is_none());
+    }
+
+    // Decision agent polling and status tests
+
+    #[test]
+    fn has_decision_agent_returns_true_after_spawn() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent (Claude supports decision agents)
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Should have decision agent
+        assert!(pool.has_decision_agent(&agent_id));
+    }
+
+    #[test]
+    fn has_decision_agent_returns_false_for_nonexistent() {
+        let pool = make_pool(4);
+
+        // Nonexistent agent should not have decision agent
+        assert!(!pool.has_decision_agent(&AgentId::new("nonexistent")));
+    }
+
+    #[test]
+    fn stop_decision_agent_removes_decision_agent() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Should have decision agent
+        assert!(pool.has_decision_agent(&agent_id));
+
+        // Stop decision agent
+        pool.stop_decision_agent_for(&agent_id).expect("stop decision agent");
+
+        // Should no longer have decision agent
+        assert!(!pool.has_decision_agent(&agent_id));
+    }
+
+    #[test]
+    fn poll_decision_agents_processes_pending_request() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Get the decision mail sender for this agent
+        let mail_sender = pool.decision_mail_senders.get(&agent_id).expect("mail sender exists");
+
+        // Create a decision request
+        let registry = SituationRegistry::new();
+        register_situation_builtins(&registry);
+        let situation = registry.build(SituationType::new("waiting_for_choice"));
+        let context = DecisionContext::new(situation, agent_id.as_str());
+
+        let request = crate::decision_mail::DecisionRequest::new(
+            agent_id.clone(),
+            SituationType::new("waiting_for_choice"),
+            context,
+        );
+
+        // Send request
+        mail_sender.send_request(request).expect("send request");
+
+        // First poll - spawns async thread but response not ready yet
+        let _responses = pool.poll_decision_agents();
+
+        // Wait for async thread to complete and send response
+        // The response is sent via the channel, so we need to give it time
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Second poll - collects the response that was sent
+        let responses = pool.poll_decision_agents();
+
+        // Should have received a response
+        assert_eq!(responses.len(), 1);
+
+        let (work_agent_id, response) = &responses[0];
+        assert_eq!(work_agent_id, &agent_id);
+        // Response should be either success or error (depending on engine)
+        assert!(response.is_success() || response.is_error());
+    }
+
+    #[test]
+    fn agents_with_pending_decisions_returns_empty_initially() {
+        let pool = make_pool(4);
+
+        // No pending decisions initially
+        let pending = pool.agents_with_pending_decisions();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn decision_agent_stats_initializes_correctly() {
+        let pool = make_pool(4);
+
+        let stats = pool.decision_agent_stats();
+
+        // Initially no agents
+        assert_eq!(stats.total_agents, 0);
+        assert_eq!(stats.total_decisions, 0);
+        assert_eq!(stats.total_errors, 0);
+    }
+
+    #[test]
+    fn decision_agent_stats_counts_after_spawn() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent
+        let _agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Get stats
+        let stats = pool.decision_agent_stats();
+
+        // Should have 1 agent
+        assert_eq!(stats.total_agents, 1);
+        assert_eq!(stats.idle_agents, 1);
+    }
+
+    #[test]
+    fn poll_decision_agents_returns_empty_when_no_requests() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent
+        let _agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Poll with no pending requests
+        let responses = pool.poll_decision_agents();
+
+        // Should be empty (no requests to process)
+        assert!(responses.is_empty());
     }
 }
