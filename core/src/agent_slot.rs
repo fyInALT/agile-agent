@@ -458,6 +458,8 @@ pub struct AgentSlot {
     worktree_branch: Option<String>,
     /// Worktree unique ID
     worktree_id: Option<String>,
+    /// Provider profile ID used for this agent (if profile-based)
+    profile_id: Option<String>,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -502,6 +504,7 @@ impl AgentSlot {
             worktree_path: None,
             worktree_branch: None,
             worktree_id: None,
+            profile_id: None,
         }
     }
 
@@ -529,6 +532,7 @@ impl AgentSlot {
             worktree_path: None,
             worktree_branch: None,
             worktree_id: None,
+            profile_id: None,
         }
     }
 
@@ -557,6 +561,7 @@ impl AgentSlot {
             worktree_path: None,
             worktree_branch: None,
             worktree_id: None,
+            profile_id: None,
         }
     }
 
@@ -586,6 +591,7 @@ impl AgentSlot {
             worktree_path: None,
             worktree_branch: None,
             worktree_id: None,
+            profile_id: None,
         }
     }
 
@@ -646,6 +652,7 @@ impl AgentSlot {
             worktree_path,
             worktree_branch,
             worktree_id,
+            profile_id: None,
         }
     }
 
@@ -674,6 +681,7 @@ impl AgentSlot {
             worktree_path: None,
             worktree_branch: None,
             worktree_id: None,
+            profile_id: None,
         }
     }
 
@@ -768,6 +776,22 @@ impl AgentSlot {
     /// Check if agent has a worktree assigned
     pub fn has_worktree(&self) -> bool {
         self.worktree_path.is_some()
+    }
+
+    /// Get the provider profile ID
+    pub fn profile_id(&self) -> Option<&String> {
+        self.profile_id.as_ref()
+    }
+
+    /// Set the provider profile ID
+    pub fn set_profile_id(&mut self, profile_id: String) {
+        self.profile_id = Some(profile_id);
+        self.last_activity = Instant::now();
+    }
+
+    /// Check if agent was created with a profile
+    pub fn has_profile(&self) -> bool {
+        self.profile_id.is_some()
     }
 
     /// Check if decision agent should be created eagerly
