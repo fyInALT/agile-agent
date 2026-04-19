@@ -247,4 +247,45 @@ mod tests {
         assert_eq!(profile.id, "codex-default");
         assert_eq!(profile.base_cli, CliBaseType::Codex);
     }
+
+    #[test]
+    fn test_create_launch_context_from_profile() {
+        let profile = test_profile();
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let context = create_launch_context_from_profile(&profile, cwd.clone())
+            .expect("create context");
+
+        assert_eq!(context.provider(), ProviderKind::Claude);
+        assert_eq!(context.cwd, cwd);
+        assert!(context.session_handle.is_none());
+        assert_eq!(context.extra_args(), &["--flag"]);
+    }
+
+    #[test]
+    fn test_create_launch_context_from_profile_unsupported_cli() {
+        let profile = ProviderProfile::new("test".to_string(), CliBaseType::OpenCode);
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let result = create_launch_context_from_profile(&profile, cwd);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ProfileError::UnsupportedCliType(_)));
+    }
+
+    #[test]
+    fn test_create_launch_context_with_session() {
+        use crate::provider::SessionHandle;
+
+        let profile = test_profile();
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let session = SessionHandle::ClaudeSession { session_id: "test-session".to_string() };
+        let context = create_launch_context_from_profile_with_session(
+            &profile,
+            cwd.clone(),
+            Some(session.clone()),
+        ).expect("create context with session");
+
+        assert_eq!(context.provider(), ProviderKind::Claude);
+        assert!(context.session_handle.is_some());
+        assert_eq!(context.session_handle.unwrap(), session);
+    }
 }
