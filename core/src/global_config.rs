@@ -286,6 +286,75 @@ impl GlobalConfigStore {
         self.path.join("prompts.json")
     }
 
+    /// Path to profiles config file
+    pub fn profiles_path(&self) -> PathBuf {
+        self.path.join("profiles.json")
+    }
+
+    // ========================================================================
+    // ProfileStore Load/Save
+    // ========================================================================
+
+    /// Load profile store, create with auto-detected CLI tools if not exists
+    ///
+    /// This is the main entry point for loading provider profiles.
+    /// If profiles.json doesn't exist, it:
+    /// 1. Detects available CLI tools in PATH
+    /// 2. Creates default profiles for each available CLI
+    /// 3. Always includes Mock profile
+    /// 4. Sets first detected CLI as default
+    /// 5. Saves to profiles.json
+    pub fn load_profile_store(&self) -> Result<crate::provider_profile::ProfileStore> {
+        use crate::provider_profile::{ProfilePersistence, ProfileStore};
+
+        let persistence = ProfilePersistence::for_paths(self.path.clone(), None);
+
+        // If file exists, load it
+        if self.profiles_path().exists() {
+            return persistence.load_global();
+        }
+
+        // Otherwise, create with auto-detected CLI tools and save
+        self.ensure()?;
+        let store = ProfileStore::with_detected_clis();
+        persistence.save_global(&store)?;
+
+        logging::debug_event(
+            "global_config.load_profile.created",
+            "created profiles with auto-detected CLI tools",
+            serde_json::json!({
+                "path": self.profiles_path().display().to_string(),
+                "profile_count": store.profile_count(),
+                "default_work": store.default_work_profile_id(),
+            }),
+        );
+
+        Ok(store)
+    }
+
+    /// Save profile store to profiles.json
+    pub fn save_profile_store(
+        &self,
+        store: &crate::provider_profile::ProfileStore,
+    ) -> Result<()> {
+        use crate::provider_profile::ProfilePersistence;
+
+        self.ensure()?;
+        let persistence = ProfilePersistence::for_paths(self.path.clone(), None);
+        persistence.save_global(store)?;
+
+        logging::debug_event(
+            "global_config.save_profile",
+            "saved profile store",
+            serde_json::json!({
+                "path": self.profiles_path().display().to_string(),
+                "profile_count": store.profile_count(),
+            }),
+        );
+
+        Ok(())
+    }
+
     // ========================================================================
     // GlobalConfig Load/Save
     // ========================================================================
@@ -818,5 +887,88 @@ mod tests {
         let loaded = store.load_prompts_config_raw().expect("load");
         assert!(loaded.is_object());
         assert!(loaded.as_object().unwrap().is_empty());
+    }
+
+    // Profile store tests
+
+    #[test]
+    fn profiles_path_returns_correct_location() {
+        let store = GlobalConfigStore::for_path(PathBuf::from("/test/path"));
+        assert_eq!(store.profiles_path(), PathBuf::from("/test/path/profiles.json"));
+    }
+
+    #[test]
+    fn load_profile_store_creates_with_detected_clis_if_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+
+        // File doesn't exist, should create
+        let profiles = store.load_profile_store().expect("load profile store");
+
+        // Mock is always included
+        assert!(profiles.has_profile(&"mock-default".to_string()));
+        // File should now exist
+        assert!(store.profiles_path().exists());
+    }
+
+    #[test]
+    fn load_profile_store_loads_existing_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+        store.ensure().expect("ensure");
+
+        // Create a custom profiles file
+        let custom_profiles = serde_json::json!({
+            "profiles": {
+                "custom-profile": {
+                    "id": "custom-profile",
+                    "base_cli": "claude",
+                    "env_overrides": {},
+                    "extra_args": [],
+                    "display_name": "Custom Profile"
+                }
+            },
+            "default_work_profile": "custom-profile",
+            "default_decision_profile": "custom-profile"
+        });
+        fs::write(store.profiles_path(), serde_json::to_string_pretty(&custom_profiles).unwrap())
+            .expect("write profiles");
+
+        // Load should read existing file
+        let profiles = store.load_profile_store().expect("load");
+        assert!(profiles.has_profile(&"custom-profile".to_string()));
+        assert_eq!(profiles.default_work_profile_id(), "custom-profile");
+    }
+
+    #[test]
+    fn save_profile_store_writes_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+
+        use crate::provider_profile::{ProfileStore, profile::ProviderProfile, types::CliBaseType};
+
+        let mut profiles = ProfileStore::new();
+        profiles.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+
+        store.save_profile_store(&profiles).expect("save");
+
+        // File should exist
+        assert!(store.profiles_path().exists());
+
+        // Can load back
+        let loaded = store.load_profile_store().expect("load");
+        assert!(loaded.has_profile(&"claude-default".to_string()));
+    }
+
+    #[test]
+    fn load_profile_store_default_matches_available_profile() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = GlobalConfigStore::for_path(temp.path().join(".agile-agent"));
+
+        let profiles = store.load_profile_store().expect("load");
+
+        // Default profiles must exist in store
+        assert!(profiles.has_profile(&profiles.default_work_profile_id().clone()));
+        assert!(profiles.has_profile(&profiles.default_decision_profile_id().clone()));
     }
 }
