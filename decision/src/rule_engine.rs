@@ -99,6 +99,41 @@ impl ActionSpec {
                     reason,
                 )))
             }
+            "create_task_branch" => {
+                let branch_name = self
+                    .params
+                    .get("branch_name")
+                    .cloned()
+                    .unwrap_or_default();
+                let base_branch = self
+                    .params
+                    .get("base_branch")
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string());
+                Some(Box::new(
+                    crate::builtin_actions::CreateTaskBranchAction::new(branch_name, base_branch),
+                ))
+            }
+            "rebase_to_main" => {
+                let base_branch = self
+                    .params
+                    .get("base_branch")
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string());
+                Some(Box::new(crate::builtin_actions::RebaseToMainAction::new(
+                    base_branch,
+                )))
+            }
+            "prepare_task_start" => {
+                let task_description = self
+                    .params
+                    .get("task_description")
+                    .cloned()
+                    .unwrap_or_default();
+                Some(Box::new(
+                    crate::builtin_actions::PrepareTaskStartAction::new(task_description),
+                ))
+            }
             _ => None,
         }
     }

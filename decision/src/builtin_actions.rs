@@ -58,6 +58,18 @@ pub fn wake_up() -> ActionType {
     ActionType::new("wake_up")
 }
 
+pub fn create_task_branch() -> ActionType {
+    ActionType::new("create_task_branch")
+}
+
+pub fn rebase_to_main() -> ActionType {
+    ActionType::new("rebase_to_main")
+}
+
+pub fn prepare_task_start() -> ActionType {
+    ActionType::new("prepare_task_start")
+}
+
 /// Action: Wake up from resting state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakeUpAction;
@@ -89,6 +101,152 @@ impl DecisionAction for WakeUpAction {
 
     fn serialize_params(&self) -> String {
         "{}".to_string()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Create a task-specific branch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTaskBranchAction {
+    /// Branch name to create
+    pub branch_name: String,
+    /// Base branch (main or master)
+    pub base_branch: String,
+    /// Worktree path for the branch
+    pub worktree_path: Option<String>,
+}
+
+impl CreateTaskBranchAction {
+    pub fn new(branch_name: impl Into<String>, base_branch: impl Into<String>) -> Self {
+        Self {
+            branch_name: branch_name.into(),
+            base_branch: base_branch.into(),
+            worktree_path: None,
+        }
+    }
+
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl DecisionAction for CreateTaskBranchAction {
+    fn action_type(&self) -> ActionType {
+        create_task_branch()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "CreateTaskBranchAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        format!("CreateBranch: {} from {}", self.branch_name, self.base_branch)
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Rebase current branch to main/master
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RebaseToMainAction {
+    /// Base branch to rebase onto
+    pub base_branch: String,
+}
+
+impl RebaseToMainAction {
+    pub fn new(base_branch: impl Into<String>) -> Self {
+        Self {
+            base_branch: base_branch.into(),
+        }
+    }
+}
+
+impl DecisionAction for RebaseToMainAction {
+    fn action_type(&self) -> ActionType {
+        rebase_to_main()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "RebaseToMainAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        format!("RebaseToMain: rebase to {}", self.base_branch)
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Prepare for task start (full preparation pipeline)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrepareTaskStartAction {
+    /// Task description
+    pub task_description: String,
+    /// Task ID from backlog (if available)
+    pub task_id: Option<String>,
+    /// Desired branch name (optional, will generate if not provided)
+    pub branch_name: Option<String>,
+    /// Base branch to create from
+    pub base_branch: Option<String>,
+}
+
+impl PrepareTaskStartAction {
+    pub fn new(task_description: impl Into<String>) -> Self {
+        Self {
+            task_description: task_description.into(),
+            task_id: None,
+            branch_name: None,
+            base_branch: None,
+        }
+    }
+
+    pub fn with_task_id(mut self, task_id: impl Into<String>) -> Self {
+        self.task_id = Some(task_id.into());
+        self
+    }
+
+    pub fn with_branch_name(mut self, branch_name: impl Into<String>) -> Self {
+        self.branch_name = Some(branch_name.into());
+        self
+    }
+
+    pub fn with_base_branch(mut self, base_branch: impl Into<String>) -> Self {
+        self.base_branch = Some(base_branch.into());
+        self
+    }
+}
+
+impl DecisionAction for PrepareTaskStartAction {
+    fn action_type(&self) -> ActionType {
+        prepare_task_start()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "PrepareTaskStartAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        format!("PrepareTaskStart: {}", self.task_description)
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
 
     fn clone_boxed(&self) -> Box<dyn DecisionAction> {

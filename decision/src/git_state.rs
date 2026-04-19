@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 
 /// Default timeout for git commands (30 seconds)
 const DEFAULT_GIT_TIMEOUT_MS: u64 = 30000;
