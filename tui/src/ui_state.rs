@@ -471,6 +471,53 @@ impl TuiState {
         Some(agent_id)
     }
 
+    /// Spawn a new agent using a provider profile
+    ///
+    /// The profile ID selects a pre-configured profile from the profile store.
+    /// Decision agent is spawned with the default decision profile.
+    pub fn spawn_agent_with_profile(
+        &mut self,
+        profile_id: &str,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
+        // Create agent pool if it doesn't exist
+        if self.agent_pool.is_none() {
+            self.ensure_overview_agent();
+        }
+
+        let pool = self.agent_pool.as_mut()?;
+
+        let agent_id = pool.spawn_agent_with_profile(&profile_id.to_string())
+            .map_err(|e| {
+                logging::warn_event(
+                    "tui.agent.spawn_profile_failed",
+                    "failed to spawn agent with profile",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                        "profile_id": profile_id,
+                    }),
+                );
+                e
+            })
+            .ok()?;
+
+        // Spawn decision agent for the work agent (if provider supports it)
+        // Decision agents use the default decision profile from the store
+        if let Some(pool) = self.agent_pool.as_mut() {
+            if let Err(e) = pool.spawn_decision_agent_with_profile_for(&agent_id, None) {
+                logging::warn_event(
+                    "decision_agent.spawn_failed",
+                    "failed to spawn decision agent",
+                    serde_json::json!({
+                        "work_agent_id": agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+            }
+        }
+
+        Some(agent_id)
+    }
+
     /// Spawn a new agent with launch configuration
     ///
     /// If the pool has worktree support, the agent will be created with an
@@ -3974,6 +4021,62 @@ mod tests {
         // OVERVIEW agent should be first (focused)
         let focused = pool.focused_slot().expect("focused slot");
         assert_eq!(focused.codename().as_str(), "OVERVIEW");
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_creates_agent_with_profile() {
+        use agent_core::provider_profile::{CliBaseType, ProfileStore, ProviderProfile};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Set up profile store - spawn_agent_with_profile will create pool via ensure_overview_agent
+        // So we set the store after first spawn (which creates the pool)
+        let _ = state.spawn_agent(ProviderKind::Mock); // Creates the pool
+        {
+            let pool = state.agent_pool.as_mut().expect("pool exists");
+            let mut store = ProfileStore::new();
+            store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Mock));
+            store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+            pool.set_profile_store(store);
+        }
+
+        // Spawn with profile
+        let agent_id = state.spawn_agent_with_profile("claude-default");
+        assert!(agent_id.is_some());
+
+        // Verify the agent has profile_id set
+        let pool = state.agent_pool.as_ref().expect("pool exists");
+        let slot = pool.get_slot_by_id(&agent_id.unwrap()).expect("slot exists");
+        assert!(slot.has_profile());
+        assert_eq!(slot.profile_id(), Some(&"claude-default".to_string()));
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_fails_for_nonexistent_profile() {
+        use agent_core::provider_profile::{CliBaseType, ProfileStore, ProviderProfile};
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Mock, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Create pool first
+        let _ = state.spawn_agent(ProviderKind::Mock);
+
+        // Set up store but only with Mock profile
+        {
+            let pool = state.agent_pool.as_mut().expect("pool exists");
+            let mut store = ProfileStore::new();
+            store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Mock));
+            pool.set_profile_store(store);
+        }
+
+        // Spawn with nonexistent profile should return None
+        let agent_id = state.spawn_agent_with_profile("nonexistent-profile");
+        assert!(agent_id.is_none());
     }
 
     #[test]
