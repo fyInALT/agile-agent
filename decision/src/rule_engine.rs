@@ -125,13 +125,19 @@ impl ActionSpec {
                 )))
             }
             "prepare_task_start" => {
+                let task_id = self
+                    .params
+                    .get("task_id")
+                    .cloned()
+                    .unwrap_or_else(|| "task-001".to_string());
                 let task_description = self
                     .params
                     .get("task_description")
                     .cloned()
                     .unwrap_or_default();
+                let task_meta = crate::task_metadata::TaskMetadata::new(&task_id, &task_description);
                 Some(Box::new(
-                    crate::builtin_actions::PrepareTaskStartAction::new(task_description),
+                    crate::builtin_actions::PrepareTaskStartAction::new(task_meta),
                 ))
             }
             _ => None,

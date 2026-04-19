@@ -364,38 +364,61 @@ impl DecisionAction for RebaseToMainAction {
 /// Action: Prepare for task start (full preparation pipeline)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareTaskStartAction {
-    /// Task description
-    pub task_description: String,
-    /// Task ID from backlog (if available)
-    pub task_id: Option<String>,
-    /// Desired branch name (optional, will generate if not provided)
-    pub branch_name: Option<String>,
-    /// Base branch to create from
-    pub base_branch: Option<String>,
+    /// Extracted task metadata
+    pub task_meta: crate::task_metadata::TaskMetadata,
+    /// Actions to execute before starting
+    pub pre_actions: Vec<crate::task_preparation::PreAction>,
+    /// Worktree path
+    pub worktree_path: Option<String>,
 }
 
 impl PrepareTaskStartAction {
-    pub fn new(task_description: impl Into<String>) -> Self {
+    pub fn new(task_meta: crate::task_metadata::TaskMetadata) -> Self {
         Self {
-            task_description: task_description.into(),
-            task_id: None,
-            branch_name: None,
-            base_branch: None,
+            task_meta,
+            pre_actions: Vec::new(),
+            worktree_path: None,
         }
     }
 
-    pub fn with_task_id(mut self, task_id: impl Into<String>) -> Self {
-        self.task_id = Some(task_id.into());
+    pub fn with_pre_actions(mut self, actions: Vec<crate::task_preparation::PreAction>) -> Self {
+        self.pre_actions = actions;
         self
     }
 
-    pub fn with_branch_name(mut self, branch_name: impl Into<String>) -> Self {
-        self.branch_name = Some(branch_name.into());
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
         self
     }
 
-    pub fn with_base_branch(mut self, base_branch: impl Into<String>) -> Self {
-        self.base_branch = Some(base_branch.into());
+    /// Add a pre-action for handling uncommitted changes
+    pub fn with_uncommitted_action(
+        mut self,
+        action: crate::uncommitted_handler::UncommittedAction,
+    ) -> Self {
+        self.pre_actions.push(crate::task_preparation::PreAction::HandleUncommitted {
+            action,
+            commit_message: None,
+            stash_description: None,
+        });
+        self
+    }
+
+    /// Add a pre-action for creating a branch
+    pub fn with_create_branch(mut self, branch_name: String, base_branch: String) -> Self {
+        self.pre_actions.push(crate::task_preparation::PreAction::CreateBranch {
+            branch_name,
+            base_branch,
+        });
+        self
+    }
+
+    /// Add a pre-action for rebasing to main
+    pub fn with_rebase_to_main(mut self, base_branch: String) -> Self {
+        self.pre_actions
+            .push(crate::task_preparation::PreAction::RebaseToMain {
+                base_branch,
+            });
         self
     }
 }
@@ -410,7 +433,15 @@ impl DecisionAction for PrepareTaskStartAction {
     }
 
     fn to_prompt_format(&self) -> String {
-        format!("PrepareTaskStart: {}", self.task_description)
+        let mut text = format!(
+            "PrepareTaskStart: branch={}\nPre-actions: {}",
+            self.task_meta.branch_name,
+            self.pre_actions.len()
+        );
+        for action in &self.pre_actions {
+            text.push_str(&format!("\n  - {}", action.summary()));
+        }
+        text
     }
 
     fn serialize_params(&self) -> String {
