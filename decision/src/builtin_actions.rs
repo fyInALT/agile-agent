@@ -82,6 +82,68 @@ pub fn discard_changes() -> ActionType {
     ActionType::new("discard_changes")
 }
 
+pub fn suggest_commit() -> ActionType {
+    ActionType::new("suggest_commit")
+}
+
+/// Action: Suggest committing changes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestCommitAction {
+    /// Suggested commit message
+    pub suggested_message: String,
+    /// Whether this is a mandatory suggestion
+    pub mandatory: bool,
+    /// Reason for the suggestion
+    pub reason: String,
+}
+
+impl SuggestCommitAction {
+    pub fn new(message: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            suggested_message: message.into(),
+            mandatory: false,
+            reason: reason.into(),
+        }
+    }
+
+    pub fn with_mandatory(mut self, mandatory: bool) -> Self {
+        self.mandatory = mandatory;
+        self
+    }
+}
+
+impl DecisionAction for SuggestCommitAction {
+    fn action_type(&self) -> ActionType {
+        suggest_commit()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "SuggestCommitAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        if self.mandatory {
+            format!(
+                "MANDATORY: Commit your changes now.\n{}\nReason: {}",
+                self.suggested_message, self.reason
+            )
+        } else {
+            format!(
+                "[Git Reminder] Consider committing: {}\nReason: {}",
+                self.suggested_message, self.reason
+            )
+        }
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
 /// Action: Wake up from resting state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakeUpAction;
@@ -994,6 +1056,11 @@ fn deserialize_discard_changes(params: &str) -> Option<Box<dyn DecisionAction>> 
     Some(Box::new(action))
 }
 
+fn deserialize_suggest_commit(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: SuggestCommitAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
 pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(SelectOptionAction::default()));
     registry.register(Box::new(ReflectAction::default()));
@@ -1007,6 +1074,7 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(CommitChangesAction::new("")));
     registry.register(Box::new(StashChangesAction::new("")));
     registry.register(Box::new(DiscardChangesAction::default()));
+    registry.register(Box::new(SuggestCommitAction::new("", "")));
 
     // Register parsers
     registry.register_parser(select_option(), SelectOptionAction::parse);
@@ -1024,6 +1092,7 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register_deserializer(commit_changes(), deserialize_commit_changes);
     registry.register_deserializer(stash_changes(), deserialize_stash_changes);
     registry.register_deserializer(discard_changes(), deserialize_discard_changes);
+    registry.register_deserializer(suggest_commit(), deserialize_suggest_commit);
 }
 
 #[cfg(test)]

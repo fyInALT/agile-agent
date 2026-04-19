@@ -98,6 +98,7 @@ pub mod task_metadata;
 pub mod git_state;
 pub mod uncommitted_handler;
 pub mod task_preparation;
+pub mod commit_boundary;
 
 // Re-export core types
 pub use error::*;
