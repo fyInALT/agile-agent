@@ -17,16 +17,17 @@ Implemented:
 - git worktree isolation for multi-agent development
 - launch configuration overlay for agent creation (Ctrl+N)
 - Overview mode for multi-agent activity monitoring
+- Git Flow task preparation with automatic branch naming and workspace health checks
 
 In progress:
 
-- decision-layer runtime integration and persistent human-decision workflows
 - full parallel multi-agent runtime across TUI and headless execution
 - OpenAI-backed LLM provider integration for decision support
+- workflow self-improvement
 
 Not started yet:
 
-- workflow self-improvement
+- advanced workflow automation and self-optimization
 
 ## Workspace
 
@@ -227,6 +228,28 @@ Launch modes:
 - `HostDefault`: use the provider's default executable and environment
 - `EnvOnly`: use default executable with custom environment variables
 - `CommandFragment`: specify full command with executable and arguments
+
+### Git Flow Task Preparation
+
+When agents start new tasks, the decision layer now ensures proper Git workflow:
+
+- **Automatic branch naming**: Branch names follow `<type>/<task-id>-<desc>` convention
+- **Baseline sync**: Tasks always start from latest main/master
+- **Uncommitted handling**: Changes are classified and handled (commit, stash, discard, or prompt)
+- **Workspace health checks**: Health score determines readiness before task start
+- **Conflict detection**: Merge/rebase conflicts trigger human intervention
+
+Task types detected from keywords:
+
+| Type | Keywords |
+|------|----------|
+| Feature | add, implement, create, new |
+| Bugfix | fix, bug, issue, error |
+| Refactor | refactor, simplify, optimize |
+| Docs | document, readme, doc |
+| Test | test, testing, spec |
+
+Configuration via `GitFlowConfig` (see `core/src/git_flow_config.rs`).
 
 ### Git Worktree Isolation
 

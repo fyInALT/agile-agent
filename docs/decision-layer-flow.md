@@ -198,6 +198,120 @@ The `execute_decision_action` function in `agent_pool.rs` handles each action ty
 | `continue_all_tasks` | idle | User(instruction) | Send "continue finish all tasks" |
 | `stop_if_complete` | stopped | - | Stop agent (tasks complete) |
 
+## Git Flow Task Preparation
+
+The decision layer now includes a task preparation phase that ensures proper Git workflow
+conventions when agents start new tasks.
+
+### Overview
+
+Before a work agent begins a new task, the decision layer can trigger a preparation phase
+that:
+
+1. Extracts task metadata (branch name, type, summary)
+2. Analyzes current Git state (uncommitted changes, branch status)
+3. Handles uncommitted changes (commit, stash, or prompt user)
+4. Syncs with baseline branch (main/master)
+5. Creates or switches to task-specific branch
+
+### Trigger Conditions
+
+Task preparation is triggered when:
+
+1. Agent receives a new task assignment
+2. Agent is idle with no valid feature branch
+3. Agent's current branch doesn't match task metadata
+4. Agent workspace health score is below threshold
+
+### Preparation Flow
+
+```
+Task Assignment
+       │
+       ▼
+┌─────────────────────┐
+│ TaskStarting        │
+│ Situation created   │
+└─────────────────────┘
+       │
+       ▼
+┌─────────────────────┐
+│ TaskPreparation     │
+│ Pipeline            │
+│ ├─ Extract metadata │
+│ ├─ Analyze Git state│
+│ ├─ Handle uncommitted│
+│ └─ Setup branch     │
+└─────────────────────┘
+       │
+       ├─► Ready → Agent starts task
+       ├─► NeedsUncommitted → Handle changes first
+       ├─► NeedsSync → Rebase/sync first
+       ├─► NeedsHuman → Block for user input
+       └─► Failed → Report error
+```
+
+### TaskStartingSituation
+
+- Triggered when agent is assigned a new task
+- Contains task description, metadata, and Git state
+- Available actions: `prepare_task_start`, `create_task_branch`, `rebase_to_main`, `request_human`
+
+### PrepareTaskStartAction
+
+- Executes full preparation pipeline
+- Handles uncommitted changes based on policy
+- Creates feature branch from baseline
+- Returns preparation result with branch info
+
+### Configuration
+
+Git Flow task preparation uses `GitFlowConfig` in `core/src/git_flow_config.rs`:
+
+```rust
+GitFlowConfig {
+    base_branch: "main",                // Base branch for sync
+    branch_pattern: "<type>/<task-id>-<desc>",  // Branch naming
+    auto_sync_baseline: true,           // Auto fetch/sync
+    auto_stash_changes: false,          // Auto stash uncommitted
+    auto_cleanup_merged: true,          // Cleanup merged branches
+    stale_branch_days: 30,              // Stale branch warning threshold
+}
+```
+
+### Integration Points
+
+| File | Purpose |
+|------|---------|
+| `decision/src/task_preparation.rs` | Task preparation pipeline orchestrator |
+| `decision/src/task_metadata.rs` | Task metadata extraction and branch naming |
+| `decision/src/git_state.rs` | Git state analysis (branch, uncommitted, conflicts) |
+| `decision/src/uncommitted_handler.rs` | Uncommitted changes classification and handling |
+| `core/src/git_flow_executor.rs` | Git operations executor |
+| `core/src/git_flow_config.rs` | Git Flow configuration |
+| `core/src/agent_pool.rs` | Integration with task assignment flow |
+
+### Error Handling
+
+| Error Condition | Handling |
+|-----------------|----------|
+| Uncommitted changes requiring user input | Return NeedsHuman, block agent |
+| Rebase conflicts detected | Return NeedsHuman for resolution |
+| Network failure during sync | Use local baseline, log warning |
+| Branch collision detected | Auto-suffix or prompt user |
+| Workspace health below threshold | Block agent, report issues |
+
+### Logging Events
+
+Git Flow preparation produces structured logs with prefix `git_flow.preparation.`:
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `git_flow.preparation.started` | Preparation started for task | `task_id`, `suggested_branch` |
+| `git_flow.preparation.metadata` | Task metadata extracted | `task_id`, `branch`, `task_type` |
+| `git_flow.preparation.health_checked` | Workspace health checked | `score`, `issues` |
+| `git_flow.preparation.completed` | Preparation completed successfully | `branch`, `base_commit`, `warnings` |
+
 ## Built-in Situations
 
 Defined in `decision/src/builtin_situations.rs`:

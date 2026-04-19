@@ -73,9 +73,9 @@ impl FileKanbanRepository {
             })?;
             let path = entry.path();
 
-            if path.extension().map(|e| e == "json").unwrap_or(false) {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(id) = ElementId::parse(stem) {
+            if path.extension().map(|e| e == "json").unwrap_or(false)
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    && let Ok(id) = ElementId::parse(stem) {
                         let type_ = id.type_();
                         let num = id.number();
                         let mut counters = self.counters.write().unwrap();
@@ -84,8 +84,6 @@ impl FileKanbanRepository {
                             counters.insert(type_, num);
                         }
                     }
-                }
-            }
         }
 
         Ok(())
@@ -152,7 +150,7 @@ impl KanbanElementRepository for FileKanbanRepository {
         elements.sort_by(|a, b| {
             let a_id = a.id().map(|id| id.as_str()).unwrap_or("");
             let b_id = b.id().map(|id| id.as_str()).unwrap_or("");
-            a_id.cmp(&b_id)
+            a_id.cmp(b_id)
         });
 
         Ok(elements)

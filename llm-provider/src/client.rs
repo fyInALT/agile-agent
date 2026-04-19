@@ -157,13 +157,12 @@ impl LlmClient {
                             if data == "[DONE]" {
                                 return Ok(());
                             }
-                            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
-                                if let Some(content) =
+                            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data)
+                                && let Some(content) =
                                     &chunk.choices.first().and_then(|c| c.delta.content.as_ref())
                                 {
                                     callback(content.to_string());
                                 }
-                            }
                         }
                     }
                 }

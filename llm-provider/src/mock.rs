@@ -147,7 +147,7 @@ impl MockLlmProvider {
 
     /// Get the last model type used.
     pub fn last_model(&self) -> Option<ModelType> {
-        self.last_model.lock().unwrap().clone()
+        *self.last_model.lock().unwrap()
     }
 
     /// Reset call counts and last values.
