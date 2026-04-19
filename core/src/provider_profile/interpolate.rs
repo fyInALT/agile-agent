@@ -2,17 +2,15 @@
 
 use std::collections::BTreeMap;
 
-use crate::provider_profile::error::ProfileError;
 use crate::provider_profile::profile::ProviderProfile;
 
 /// Interpolate ${ENV_VAR} references in a value string
 ///
 /// Only supports ${VAR} syntax (not $VAR or ${VAR:-default}).
-/// Missing environment variables cause an error.
-pub fn interpolate_env_value(value: &str) -> Result<String, ProfileError> {
+/// Missing environment variables are left as literal ${VAR} in the output.
+pub fn interpolate_env_value(value: &str) -> String {
     // Find all ${VAR} patterns
     let mut result = value.to_string();
-    let mut missing_vars = Vec::new();
     let mut start = 0;
 
     while start < result.len() {
@@ -33,19 +31,15 @@ pub fn interpolate_env_value(value: &str) -> Result<String, ProfileError> {
         // Extract variable name
         let var_name = &result[var_start + 2..var_end];
 
-        // Validate var_name
+        // Validate var_name (skip if invalid)
         if var_name.is_empty() {
-            return Err(ProfileError::InvalidEnvSyntax {
-                key: "unknown".to_string(),
-                value: value.to_string(),
-            });
+            start = var_start + 2;
+            continue;
         }
         let first_char = var_name.chars().next().unwrap();
         if !first_char.is_ascii_alphabetic() && first_char != '_' {
-            return Err(ProfileError::InvalidEnvSyntax {
-                key: "unknown".to_string(),
-                value: value.to_string(),
-            });
+            start = var_start + 2;
+            continue;
         }
 
         // Get environment variable value
@@ -59,31 +53,26 @@ pub fn interpolate_env_value(value: &str) -> Result<String, ProfileError> {
                 start = var_start + env_value.len();
             }
             Err(_) => {
-                missing_vars.push(var_name.to_string());
+                // Var not set - leave ${VAR} literal in place, continue after it
                 start = var_end + 1;
             }
         }
     }
 
-    if missing_vars.is_empty() {
-        Ok(result)
-    } else {
-        Err(ProfileError::MissingEnvVars(missing_vars))
-    }
+    result
 }
 
 /// Interpolate all env overrides in a profile
 ///
 /// Returns a new BTreeMap with interpolated values.
-pub fn interpolate_profile_env(
-    profile: &ProviderProfile,
-) -> Result<BTreeMap<String, String>, ProfileError> {
+/// Missing env vars are left as literal ${VAR} in the output.
+pub fn interpolate_profile_env(profile: &ProviderProfile) -> BTreeMap<String, String> {
     let mut resolved = BTreeMap::new();
     for (key, value) in &profile.env_overrides {
-        let interpolated = interpolate_env_value(value)?;
+        let interpolated = interpolate_env_value(value);
         resolved.insert(key.clone(), interpolated);
     }
-    Ok(resolved)
+    resolved
 }
 
 #[cfg(test)]
@@ -94,7 +83,7 @@ mod tests {
     fn test_interpolate_env_value_plain() {
         // Plain value (no interpolation)
         let result = interpolate_env_value("plain-value");
-        assert_eq!(result.unwrap(), "plain-value");
+        assert_eq!(result, "plain-value");
     }
 
     #[test]
@@ -105,7 +94,7 @@ mod tests {
         }
 
         let result = interpolate_env_value("${TEST_INTERPOLATE_VAR}");
-        assert_eq!(result.unwrap(), "test-value");
+        assert_eq!(result, "test-value");
 
         // SAFETY: Test-only code, cleaning up local process environment
         unsafe {
@@ -122,7 +111,7 @@ mod tests {
         }
 
         let result = interpolate_env_value("prefix-${TEST_VAR_A}-middle-${TEST_VAR_B}-suffix");
-        assert_eq!(result.unwrap(), "prefix-valueA-middle-valueB-suffix");
+        assert_eq!(result, "prefix-valueA-middle-valueB-suffix");
 
         // SAFETY: Test-only code
         unsafe {
@@ -139,13 +128,9 @@ mod tests {
             std::env::remove_var("TEST_MISSING_VAR");
         }
 
+        // Missing var is left as literal ${VAR}
         let result = interpolate_env_value("${TEST_MISSING_VAR}");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, ProfileError::MissingEnvVars(_)));
-        if let ProfileError::MissingEnvVars(vars) = err {
-            assert!(vars.contains(&"TEST_MISSING_VAR".to_string()));
-        }
+        assert_eq!(result, "${TEST_MISSING_VAR}");
     }
 
     #[test]
@@ -161,7 +146,7 @@ mod tests {
             .with_env("BASE_URL".to_string(), "${TEST_BASE_URL}".to_string())
             .with_env("PLAIN".to_string(), "plain-value".to_string());
 
-        let resolved = interpolate_profile_env(&profile).unwrap();
+        let resolved = interpolate_profile_env(&profile);
         assert_eq!(resolved.get("API_KEY"), Some(&"my-key".to_string()));
         assert_eq!(resolved.get("BASE_URL"), Some(&"https://example.com".to_string()));
         assert_eq!(resolved.get("PLAIN"), Some(&"plain-value".to_string()));
@@ -171,5 +156,17 @@ mod tests {
             std::env::remove_var("TEST_API_KEY");
             std::env::remove_var("TEST_BASE_URL");
         }
+    }
+
+    #[test]
+    fn test_interpolate_env_value_missing_var_in_middle() {
+        // SAFETY: Test-only code
+        unsafe {
+            std::env::remove_var("TEST_MISSING_VAR");
+        }
+
+        // Missing var in the middle of a string
+        let result = interpolate_env_value("prefix-${TEST_MISSING_VAR}-suffix");
+        assert_eq!(result, "prefix-${TEST_MISSING_VAR}-suffix");
     }
 }

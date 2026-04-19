@@ -19,8 +19,8 @@ use crate::provider_profile::types::CliBaseType;
 /// This creates a LaunchInputSpec from the profile configuration,
 /// with interpolated environment variables.
 pub fn profile_to_launch_input(profile: &ProviderProfile) -> Result<LaunchInputSpec, ProfileError> {
-    // Interpolate env values
-    let resolved_env = interpolate_profile_env(profile)?;
+    // Interpolate env values (missing vars left as literal ${VAR})
+    let resolved_env = interpolate_profile_env(profile);
 
     // Get ProviderKind from CliBaseType
     let provider_kind = profile
