@@ -4481,6 +4481,13 @@ mod tests {
         let cancelled = DecisionExecutionResult::Cancelled;
         let not_found = DecisionExecutionResult::AgentNotFound;
         let not_blocked = DecisionExecutionResult::NotBlocked;
+        let task_prepared = DecisionExecutionResult::TaskPrepared {
+            branch: "feature/test".to_string(),
+            worktree_path: std::path::PathBuf::from("/tmp/worktree"),
+        };
+        let prep_failed = DecisionExecutionResult::PreparationFailed {
+            reason: "health check failed".to_string(),
+        };
 
         assert!(matches!(executed, DecisionExecutionResult::Executed { .. }));
         assert!(matches!(
@@ -4495,6 +4502,8 @@ mod tests {
         assert!(matches!(cancelled, DecisionExecutionResult::Cancelled));
         assert!(matches!(not_found, DecisionExecutionResult::AgentNotFound));
         assert!(matches!(not_blocked, DecisionExecutionResult::NotBlocked));
+        assert!(matches!(task_prepared, DecisionExecutionResult::TaskPrepared { .. }));
+        assert!(matches!(prep_failed, DecisionExecutionResult::PreparationFailed { .. }));
     }
 
     #[test]

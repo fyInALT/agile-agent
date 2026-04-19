@@ -594,4 +594,22 @@ mod tests {
         let action_type = output.first_action_type().unwrap();
         assert_eq!(action_type.name, "confirm_completion");
     }
+
+    #[test]
+    fn test_task_starting_triggers_prepare_task_start() {
+        use crate::builtin_situations::TaskStartingSituation;
+
+        let mut engine = RuleBasedDecisionEngine::new();
+        let registry = make_registry();
+
+        let situation = Box::new(TaskStartingSituation::new("Implement login feature")
+            .with_task_id("PROJ-123"));
+        let context = make_context_with_situation(situation);
+        let output = engine.decide(context, &registry).unwrap();
+
+        assert!(output.has_actions());
+        // Should match "prepare-task-start" rule
+        let action_type = output.first_action_type().unwrap();
+        assert_eq!(action_type.name, "prepare_task_start");
+    }
 }

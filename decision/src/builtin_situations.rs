@@ -1005,4 +1005,51 @@ mod tests {
         assert!(text.contains("retry"));
         assert!(text.contains("request_human"));
     }
+
+    #[test]
+    fn test_task_starting_situation_type() {
+        let situation = TaskStartingSituation::default();
+        assert_eq!(situation.situation_type(), task_starting());
+    }
+
+    #[test]
+    fn test_task_starting_with_task_id() {
+        let situation = TaskStartingSituation::new("Implement login feature")
+            .with_task_id("PROJ-123");
+        assert_eq!(situation.task_id, Some("PROJ-123".to_string()));
+        assert_eq!(situation.task_description, "Implement login feature");
+    }
+
+    #[test]
+    fn test_task_starting_does_not_require_human_without_conflicts() {
+        let situation = TaskStartingSituation::new("Simple task");
+        assert!(!situation.requires_human());
+    }
+
+    #[test]
+    fn test_task_starting_available_actions() {
+        let situation = TaskStartingSituation::new("Test task");
+        let actions = situation.available_actions();
+        assert!(actions.contains(&ActionType::new("prepare_task_start")));
+        assert!(actions.contains(&ActionType::new("create_task_branch")));
+        assert!(actions.contains(&ActionType::new("rebase_to_main")));
+        assert!(actions.contains(&ActionType::new("request_human")));
+    }
+
+    #[test]
+    fn test_task_starting_to_prompt_text() {
+        let situation = TaskStartingSituation::new("Implement feature X")
+            .with_task_id("TASK-001");
+        let text = situation.to_prompt_text();
+        assert!(text.contains("Task starting"));
+        assert!(text.contains("Implement feature X"));
+        // Note: task_id is stored but not displayed in to_prompt_text (it's in task_meta for that)
+    }
+
+    #[test]
+    fn test_task_starting_with_worktree_path() {
+        let situation = TaskStartingSituation::new("Task with path")
+            .with_worktree_path("/path/to/worktree");
+        assert_eq!(situation.worktree_path, Some("/path/to/worktree".to_string()));
+    }
 }

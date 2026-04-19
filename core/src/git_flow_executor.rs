@@ -464,7 +464,11 @@ fn generate_summary(description: &str, max_len: usize) -> String {
 fn generate_branch_name(task_id: &str, task_type: TaskType, summary: &str, config: &GitFlowConfig) -> String {
     let prefix = config.get_prefix_for_type(task_type.branch_prefix());
     let sanitized = sanitize_branch_description(summary);
-    format!("{}/{}/{}", prefix, task_id, sanitized)
+    if sanitized.is_empty() {
+        format!("{}/{}", prefix, task_id)
+    } else {
+        format!("{}/{}/{}", prefix, task_id, sanitized)
+    }
 }
 
 fn sanitize_branch_description(desc: &str) -> String {
@@ -533,6 +537,14 @@ mod tests {
         let config = GitFlowConfig::default();
         let name = generate_branch_name("PROJ-123", TaskType::Feature, "add-auth", &config);
         assert_eq!(name, "feature/PROJ-123/add-auth");
+    }
+
+    #[test]
+    fn test_generate_branch_name_empty_summary() {
+        let config = GitFlowConfig::default();
+        // Empty summary should still produce valid branch name
+        let name = generate_branch_name("PROJ-123", TaskType::Feature, "", &config);
+        assert_eq!(name, "feature/PROJ-123");
     }
 
     #[test]
