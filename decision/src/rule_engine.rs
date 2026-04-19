@@ -292,6 +292,13 @@ impl RuleBasedDecisionEngine {
                 vec![ActionSpec::new("continue_all_tasks")],
                 RulePriority::Medium,
             ),
+            // Rule: Prepare task on task_starting
+            DecisionRule::new(
+                "prepare-task-start",
+                ConditionExpr::single(Condition::situation_type("task_starting")),
+                vec![ActionSpec::new("prepare_task_start")],
+                RulePriority::High,
+            ),
         ]
     }
 

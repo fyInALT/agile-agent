@@ -20,13 +20,16 @@ use crate::worktree_manager::{
 };
 use crate::worktree_state::WorktreeState;
 use crate::worktree_state_store::WorktreeStateStore;
+use crate::git_flow_executor::GitFlowExecutor;
 use chrono::Utc;
 
 // Decision layer imports
 use agent_decision::{
-    AutoAction, BlockedState, HumanDecisionQueue, HumanDecisionRequest, HumanDecisionResponse,
-    HumanDecisionTimeoutConfig, HumanSelection, SituationType,
+    AutoAction, BlockedState, DecisionSituation, HumanDecisionQueue, HumanDecisionRequest,
+    HumanDecisionResponse, HumanDecisionTimeoutConfig, HumanSelection, SituationType,
+    builtin_situations::TaskStartingSituation,
     classifier::ClassifyResult,
+    context::DecisionContext,
     initializer::{DecisionLayerComponents, initialize_decision_layer},
     provider_event::ProviderEvent as DecisionProviderEvent,
 };
@@ -298,6 +301,10 @@ pub enum DecisionExecutionResult {
     AgentNotFound,
     /// Agent not blocked
     NotBlocked,
+    /// Task preparation succeeded
+    TaskPrepared { branch: String, worktree_path: PathBuf },
+    /// Task preparation failed
+    PreparationFailed { reason: String },
 }
 
 /// Pool managing multiple agent slots
@@ -333,6 +340,8 @@ pub struct AgentPool {
     worktree_manager: Option<WorktreeManager>,
     /// Worktree state store for persistence
     worktree_state_store: Option<WorktreeStateStore>,
+    /// Git flow executor for task preparation workflow
+    git_flow_executor: Option<GitFlowExecutor>,
     /// Provider profile store (optional, for profile-based agent creation)
     profile_store: Option<ProfileStore>,
 }
@@ -371,6 +380,7 @@ impl AgentPool {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
+            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -397,6 +407,7 @@ impl AgentPool {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
+            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -419,6 +430,7 @@ impl AgentPool {
             cwd,
             worktree_manager: None,
             worktree_state_store: None,
+            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -433,6 +445,10 @@ impl AgentPool {
         let config = WorktreeConfig::default();
         let worktree_manager = WorktreeManager::new(repo_root.clone(), config)?;
         let worktree_state_store = WorktreeStateStore::new(state_dir);
+
+        // Create GitFlowExecutor for task preparation workflow
+        let git_flow_config = crate::git_flow_config::GitFlowConfig::default();
+        let git_flow_executor = GitFlowExecutor::new(worktree_manager.clone(), git_flow_config);
 
         // Sync next_agent_index with existing worktree states AND git branches
         // to avoid collision when user cancels restore but previous artifacts exist
@@ -472,6 +488,7 @@ impl AgentPool {
             cwd: repo_root,
             worktree_manager: Some(worktree_manager),
             worktree_state_store: Some(worktree_state_store),
+            git_flow_executor: Some(git_flow_executor),
             profile_store: None,
         })
     }
@@ -1640,6 +1657,46 @@ impl AgentPool {
         }
     }
 
+    /// Trigger task preparation for an agent with a newly assigned task.
+    ///
+    /// This sends a TaskStartingSituation to the decision layer, which should
+    /// return a prepare_task_start action that gets executed via execute_decision_action.
+    pub fn trigger_task_preparation(
+        &self,
+        work_agent_id: &AgentId,
+        task_id: &str,
+        task_description: &str,
+    ) -> Result<(), String> {
+        // Create TaskStartingSituation with the task info
+        let situation = TaskStartingSituation::new(task_description)
+            .with_task_id(task_id);
+
+        let situation_type = situation.situation_type();
+
+        // Create decision context
+        let context = DecisionContext::new(Box::new(situation), work_agent_id.as_str());
+
+        // Create decision request
+        let request = DecisionRequest::new(
+            work_agent_id.clone(),
+            situation_type.clone(),
+            context,
+        );
+
+        logging::debug_event(
+            "task_preparation.triggered",
+            "triggering task preparation for assigned task",
+            serde_json::json!({
+                "work_agent_id": work_agent_id.as_str(),
+                "task_id": task_id,
+                "situation_type": situation_type.name,
+            }),
+        );
+
+        // Send the request
+        self.send_decision_request(work_agent_id, request)
+    }
+
     /// Poll decision agents and process pending requests
     ///
     /// Returns responses from decision agents that have processed requests.
@@ -2031,6 +2088,80 @@ impl AgentPool {
 
                     DecisionExecutionResult::Executed {
                         option_id: "stop_if_complete".to_string(),
+                    }
+                }
+                "prepare_task_start" => {
+                    // Execute task preparation via GitFlowExecutor
+                    let Some(executor) = &self.git_flow_executor else {
+                        logging::warn_event(
+                            "git_flow.executor_missing",
+                            "git_flow_executor not available",
+                            serde_json::json!({
+                                "work_agent_id": work_agent_id.as_str(),
+                            }),
+                        );
+                        return DecisionExecutionResult::Cancelled;
+                    };
+
+                    // Parse params
+                    let params: serde_json::Value =
+                        serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+                    let task_id = params["task_id"].as_str().unwrap_or("unknown");
+                    let task_description = params["task_description"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+
+                    // Get worktree path for this agent
+                    let worktree_path = slot.cwd().to_path_buf();
+
+                    // Execute preparation
+                    match executor.prepare_for_task(&worktree_path, task_id, &task_description) {
+                        Ok(result) => {
+                            // Log success
+                            logging::debug_event(
+                                "git_flow.preparation.completed",
+                                "task preparation succeeded",
+                                serde_json::json!({
+                                    "work_agent_id": work_agent_id.as_str(),
+                                    "task_id": task_id,
+                                    "branch": result.branch_name,
+                                    "success": result.success,
+                                }),
+                            );
+
+                            // Send preparation context to the agent
+                            let context_message = result.to_context_message();
+                            slot.append_transcript(crate::app::TranscriptEntry::Status(context_message));
+
+                            DecisionExecutionResult::TaskPrepared {
+                                branch: result.branch_name,
+                                worktree_path: result.worktree_path,
+                            }
+                        }
+                        Err(e) => {
+                            // Log error
+                            logging::warn_event(
+                                "git_flow.preparation.failed",
+                                "task preparation failed",
+                                serde_json::json!({
+                                    "work_agent_id": work_agent_id.as_str(),
+                                    "task_id": task_id,
+                                    "error": e.to_string(),
+                                }),
+                            );
+
+                            // Send error context to agent
+                            let error_msg = format!(
+                                "Task preparation failed: {}. Please resolve issues manually.",
+                                e
+                            );
+                            slot.append_transcript(crate::app::TranscriptEntry::Status(error_msg));
+
+                            DecisionExecutionResult::PreparationFailed {
+                                reason: e.to_string(),
+                            }
+                        }
                     }
                 }
                 _ => {
@@ -2593,27 +2724,53 @@ impl AgentPool {
             ));
         }
 
-        // Assign to agent
-        let slot = self
-            .get_slot_mut_by_id(agent_id)
-            .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
-        let codename = slot.codename().clone();
-        slot.assign_task(task_id.clone()).map_err(|e| {
-            logging::debug_event(
-                "pool.task.assign.failed",
-                "failed to assign task",
-                serde_json::json!({
-                    "agent_id": agent_id.as_str(),
-                    "codename": codename.as_str(),
-                    "task_id": task_id.as_str(),
-                    "reason": e,
-                }),
-            );
-            e
-        })?;
+        // Get task description for git flow preparation (before slot borrow)
+        let task_description = backlog
+            .find_task(task_id.as_str())
+            .map(|t| t.objective.clone())
+            .unwrap_or_default();
+
+        // Assign to agent within a scope to release slot borrow before triggering decision
+        let codename = {
+            let slot = self
+                .get_slot_mut_by_id(agent_id)
+                .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))?;
+            let codename = slot.codename().clone();
+            slot.assign_task(task_id.clone()).map_err(|e| {
+                logging::debug_event(
+                    "pool.task.assign.failed",
+                    "failed to assign task",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "codename": codename.as_str(),
+                        "task_id": task_id.as_str(),
+                        "reason": e,
+                    }),
+                );
+                e
+            })?;
+            codename
+        }; // slot borrow released here
 
         // Update backlog status
         backlog.start_task(task_id.as_str());
+
+        // Trigger git flow task preparation via decision layer
+        if let Err(e) = self.trigger_task_preparation(
+            agent_id,
+            task_id.as_str(),
+            &task_description,
+        ) {
+            logging::warn_event(
+                "pool.task.git_flow_trigger_failed",
+                "failed to trigger git flow preparation",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "task_id": task_id.as_str(),
+                    "error": e,
+                }),
+            );
+        }
 
         logging::debug_event(
             "pool.task.assign",

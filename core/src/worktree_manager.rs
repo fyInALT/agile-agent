@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::logging;
@@ -181,6 +181,8 @@ impl Default for WorktreeConfig {
 ///
 /// Provides thread-safe operations for worktree lifecycle management.
 /// All git operations are synchronized via an internal mutex.
+/// Clone is safe since Arc<Mutex<()>> can be cloned.
+#[derive(Clone)]
 pub struct WorktreeManager {
     /// Main repository root path
     repo_root: PathBuf,
@@ -189,7 +191,7 @@ pub struct WorktreeManager {
     /// Configuration
     config: WorktreeConfig,
     /// Mutex for synchronizing git operations
-    git_lock: Mutex<()>,
+    git_lock: Arc<Mutex<()>>,
 }
 
 impl WorktreeManager {
@@ -235,7 +237,7 @@ impl WorktreeManager {
             repo_root,
             worktrees_dir,
             config,
-            git_lock: Mutex::new(()),
+            git_lock: Arc::new(Mutex::new(())),
         };
 
         Ok(manager)

@@ -369,6 +369,23 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     }
                     agent_core::agent_pool::DecisionExecutionResult::AgentNotFound
                     | agent_core::agent_pool::DecisionExecutionResult::NotBlocked => {}
+                    agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
+                        branch,
+                        worktree_path: _,
+                    } => {
+                        state.app_mut().push_status_message(format!(
+                            "🧠 {}: task prepared (branch: {})",
+                            agent_id.as_str(),
+                            branch
+                        ));
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::PreparationFailed { reason } => {
+                        state.app_mut().push_status_message(format!(
+                            "⚠️ {}: preparation failed ({})",
+                            agent_id.as_str(),
+                            reason
+                        ));
+                    }
                 }
             }
             last_decision_poll = Instant::now();
