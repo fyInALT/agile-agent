@@ -70,9 +70,31 @@ impl CliBaseType {
         [Self::Mock, Self::Claude, Self::Codex, Self::OpenCode]
     }
 
+    /// Get CLI types that should be auto-detected (excludes Mock)
+    pub fn detectable() -> [CliBaseType; 3] {
+        [Self::Claude, Self::Codex, Self::OpenCode]
+    }
+
     /// Check if this CLI type is currently supported as ProviderKind
     pub fn is_supported(&self) -> bool {
         self.to_provider_kind().is_some()
+    }
+
+    /// Check if the CLI executable is available in PATH
+    ///
+    /// Mock is always available. Other types check via `which` command.
+    pub fn is_available(&self) -> bool {
+        match self {
+            Self::Mock => true, // Mock is always available
+            Self::Claude | Self::Codex | Self::OpenCode => {
+                // Check if executable exists in PATH
+                std::process::Command::new("which")
+                    .arg(self.label())
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            }
+        }
     }
 }
 
@@ -166,5 +188,31 @@ mod tests {
     #[test]
     fn test_cli_base_type_display() {
         assert_eq!(format!("{}", CliBaseType::Claude), "Claude CLI");
+    }
+
+    #[test]
+    fn test_cli_base_type_is_available_mock_always_true() {
+        // Mock is always available
+        assert!(CliBaseType::Mock.is_available());
+    }
+
+    #[test]
+    fn test_cli_base_type_detectable_excludes_mock() {
+        let detectable = CliBaseType::detectable();
+        assert_eq!(detectable.len(), 3);
+        assert!(!detectable.contains(&CliBaseType::Mock));
+        assert!(detectable.contains(&CliBaseType::Claude));
+        assert!(detectable.contains(&CliBaseType::Codex));
+        assert!(detectable.contains(&CliBaseType::OpenCode));
+    }
+
+    #[test]
+    fn test_cli_base_type_all_includes_all_four() {
+        let all = CliBaseType::all();
+        assert_eq!(all.len(), 4);
+        assert!(all.contains(&CliBaseType::Mock));
+        assert!(all.contains(&CliBaseType::Claude));
+        assert!(all.contains(&CliBaseType::Codex));
+        assert!(all.contains(&CliBaseType::OpenCode));
     }
 }

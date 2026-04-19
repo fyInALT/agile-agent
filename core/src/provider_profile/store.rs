@@ -52,11 +52,53 @@ impl ProfileStore {
 
     /// Create store with default profiles for each CLI type
     pub fn with_defaults() -> Self {
+        Self::with_detected_clis()
+    }
+
+    /// Create store with auto-detected available CLI tools
+    ///
+    /// Scans PATH for available CLI executables and creates default
+    /// profiles only for tools that are actually installed.
+    /// Always includes Mock profile for testing.
+    /// Sets the first discovered real CLI as default.
+    pub fn with_detected_clis() -> Self {
         let mut store = Self::new();
+
+        // Always add Mock for testing
         store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Mock));
-        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
-        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Codex));
+
+        // Detect available CLI tools
+        let mut first_available: Option<CliBaseType> = None;
+        for cli_type in CliBaseType::detectable() {
+            if cli_type.is_available() {
+                if first_available.is_none() {
+                    first_available = Some(cli_type);
+                }
+                store.add_profile(ProviderProfile::default_for_cli(cli_type));
+            }
+        }
+
+        // Set default to first available CLI (or Mock if none found)
+        if let Some(cli) = first_available {
+            let default_id = format!("{}-default", cli.label());
+            store.default_work_profile = default_id.clone();
+            store.default_decision_profile = default_id;
+        } else {
+            // Fallback to Mock if no CLI tools found
+            store.default_work_profile = "mock-default".to_string();
+            store.default_decision_profile = "mock-default".to_string();
+        }
+
         store
+    }
+
+    /// Get list of available CLI types (detected in PATH)
+    pub fn available_clis() -> Vec<CliBaseType> {
+        CliBaseType::detectable()
+            .iter()
+            .filter(|c| c.is_available())
+            .copied()
+            .collect()
     }
 
     /// Add a profile to the store
@@ -183,10 +225,37 @@ mod tests {
     #[test]
     fn test_profile_store_with_defaults() {
         let store = ProfileStore::with_defaults();
-        assert_eq!(store.profile_count(), 3); // Mock, Claude, Codex
+        // Mock is always included
         assert!(store.has_profile(&"mock-default".to_string()));
-        assert!(store.has_profile(&"claude-default".to_string()));
-        assert!(store.has_profile(&"codex-default".to_string()));
+        // At least one profile (Mock)
+        assert!(store.profile_count() >= 1);
+        // Default should be set to something valid
+        assert!(store.has_profile(&store.default_work_profile_id().clone()));
+        assert!(store.has_profile(&store.default_decision_profile_id().clone()));
+    }
+
+    #[test]
+    fn test_profile_store_with_detected_clis_always_has_mock() {
+        let store = ProfileStore::with_detected_clis();
+        assert!(store.has_profile(&"mock-default".to_string()));
+    }
+
+    #[test]
+    fn test_profile_store_default_matches_available_profile() {
+        let store = ProfileStore::with_detected_clis();
+        // Default profile IDs should exist in store
+        assert!(store.has_profile(&store.default_work_profile_id().clone()));
+        assert!(store.has_profile(&store.default_decision_profile_id().clone()));
+    }
+
+    #[test]
+    fn test_available_clis_detects_correctly() {
+        let available = ProfileStore::available_clis();
+        // Result depends on what's installed on the system
+        // Just check it doesn't crash and returns a vec
+        for cli in &available {
+            assert!(cli.is_available());
+        }
     }
 
     #[test]
@@ -227,7 +296,9 @@ mod tests {
 
         let work_default = store.get_default_work_profile();
         assert!(work_default.is_ok());
-        assert_eq!(work_default.unwrap().id, "claude-default");
+        // Default profile should exist in store
+        let profile = work_default.unwrap();
+        assert!(store.has_profile(&profile.id.clone()));
 
         let decision_default = store.get_default_decision_profile();
         assert!(decision_default.is_ok());

@@ -205,7 +205,10 @@ mod tests {
 
     #[test]
     fn test_get_effective_profile_explicit() {
-        let store = ProfileStore::with_defaults();
+        // Create store with known profile
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+
         let profile_id = "claude-default".to_string();
         let profile = get_effective_profile(&store, Some(&profile_id), AgentType::Work);
         assert!(profile.is_ok());
@@ -214,7 +217,11 @@ mod tests {
 
     #[test]
     fn test_get_effective_profile_default_work() {
-        let store = ProfileStore::with_defaults();
+        // Create store with known profile and set it as default
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+        store.set_default_work_profile("claude-default".to_string()).unwrap();
+
         let profile = get_effective_profile(&store, None, AgentType::Work);
         assert!(profile.is_ok());
         assert_eq!(profile.unwrap().id, "claude-default");
@@ -222,7 +229,11 @@ mod tests {
 
     #[test]
     fn test_get_effective_profile_default_decision() {
-        let store = ProfileStore::with_defaults();
+        // Create store with known profile and set it as default
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+        store.set_default_decision_profile("claude-default".to_string()).unwrap();
+
         let profile = get_effective_profile(&store, None, AgentType::Decision);
         assert!(profile.is_ok());
         assert_eq!(profile.unwrap().id, "claude-default");
