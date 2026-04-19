@@ -42,6 +42,11 @@ pub enum Command {
         #[command(subcommand)]
         command: DecisionCommand,
     },
+    /// Manage provider profiles.
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
     /// Restore the most recent saved session.
     ResumeLast,
     /// Run the autonomous loop without the TUI.
@@ -132,6 +137,16 @@ pub enum DecisionCommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ProfileCommand {
+    /// List all available provider profiles.
+    List {
+        /// Include profile details.
+        #[arg(long, default_value_t = false)]
+        verbose: bool,
+    },
+}
+
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     execute(cli)
@@ -187,6 +202,9 @@ pub fn execute(cli: Cli) -> Result<()> {
         Some(Command::Decision {
             command: DecisionCommand::History { count },
         }) => print_decision_history(count),
+        Some(Command::Profile {
+            command: ProfileCommand::List { verbose },
+        }) => print_profile_list(verbose),
         Some(Command::RunLoop {
             max_iterations,
             resume_last,
@@ -248,6 +266,7 @@ fn run_mode_for_cli(cli: &Cli) -> RunMode {
         Some(Command::Decision {
             command: DecisionCommand::History { .. },
         }) => RunMode::DecisionHistory,
+        Some(Command::Profile { .. }) => RunMode::ProfileList,
     }
 }
 
@@ -591,6 +610,56 @@ fn print_decision_history(count: usize) -> Result<()> {
     println!("Decision History (last {} entries):", count);
     println!("");
     println!("No decision history available.");
+    Ok(())
+}
+
+fn print_profile_list(verbose: bool) -> Result<()> {
+    use agent_core::global_config::GlobalConfigStore;
+    use agent_core::provider_profile::ProfilePersistence;
+
+    let launch_cwd = env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+
+    let config_store = GlobalConfigStore::new()?;
+    let persistence = ProfilePersistence::for_paths(
+        config_store.path().clone(),
+        Some(workplace.path().to_path_buf()),
+    );
+    let store = persistence.load_merged()?;
+
+    println!("Provider Profiles:");
+    println!("");
+
+    for profile in store.list_profiles() {
+        let marker = if profile.id == *store.default_work_profile_id() {
+            " [default]"
+        } else {
+            ""
+        };
+        println!("  {} ({}){}", profile.display_name, profile.base_cli.label(), marker);
+
+        if verbose {
+            println!("    ID: {}", profile.id);
+            if !profile.env_overrides.is_empty() {
+                println!("    Env overrides:");
+                for (key, value) in &profile.env_overrides {
+                    println!("      {} = {}", key, value);
+                }
+            }
+            if !profile.extra_args.is_empty() {
+                println!("    Extra args: {:?}", profile.extra_args);
+            }
+            if let Some(ref desc) = profile.description {
+                println!("    Description: {}", desc);
+            }
+            println!("");
+        }
+    }
+
+    println!("");
+    println!("Default work profile: {}", store.default_work_profile_id());
+    println!("Default decision profile: {}", store.default_decision_profile_id());
+
     Ok(())
 }
 

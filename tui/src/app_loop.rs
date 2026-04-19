@@ -97,18 +97,30 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     )?;
     let mut state = TuiState::from_session(session);
 
-    // Load provider profiles from global config
-    if let Ok(config_store) = agent_core::global_config::GlobalConfigStore::new() {
-        if let Ok(profile_store) = config_store.load_profile_store() {
-            if let Some(pool) = state.agent_pool.as_mut() {
-                pool.set_profile_store(profile_store);
-                logging::debug_event(
-                    "app_loop.load_profiles",
-                    "loaded provider profiles into agent pool",
-                    serde_json::json!({
-                        "profile_count": pool.profile_store().map(|s| s.profile_count()).unwrap_or(0),
-                    }),
+    // Load provider profiles (global + workplace merged)
+    {
+        use agent_core::global_config::GlobalConfigStore;
+        use agent_core::provider_profile::ProfilePersistence;
+
+        if let Ok(config_store) = GlobalConfigStore::new() {
+            if let Ok(profile_store) = config_store.load_profile_store() {
+                // Merge with workplace profiles if available
+                let persistence = ProfilePersistence::for_paths(
+                    config_store.path().clone(),
+                    Some(workplace.path().to_path_buf()),
                 );
+                let merged_store = persistence.load_merged().unwrap_or(profile_store);
+
+                if let Some(pool) = state.agent_pool.as_mut() {
+                    pool.set_profile_store(merged_store);
+                    logging::debug_event(
+                        "app_loop.load_profiles",
+                        "loaded provider profiles into agent pool",
+                        serde_json::json!({
+                            "profile_count": pool.profile_store().map(|s| s.profile_count()).unwrap_or(0),
+                        }),
+                    );
+                }
             }
         }
     }
