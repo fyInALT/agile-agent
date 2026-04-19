@@ -344,6 +344,10 @@ pub struct AgentPool {
     git_flow_executor: Option<GitFlowExecutor>,
     /// Provider profile store (optional, for profile-based agent creation)
     profile_store: Option<ProfileStore>,
+    /// Timestamp when the last decision was started (for UI display)
+    /// This ensures the UI shows "Analyzing" for at least a minimum duration
+    /// even when decisions complete faster than the render interval
+    last_decision_started_at: Option<std::time::Instant>,
 }
 
 impl std::fmt::Debug for AgentPool {
@@ -382,6 +386,7 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
+            last_decision_started_at: None,
         }
     }
 
@@ -409,6 +414,7 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
+            last_decision_started_at: None,
         }
     }
 
@@ -432,6 +438,7 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
+            last_decision_started_at: None,
         }
     }
 
@@ -490,6 +497,7 @@ impl AgentPool {
             worktree_state_store: Some(worktree_state_store),
             git_flow_executor: Some(git_flow_executor),
             profile_store: None,
+            last_decision_started_at: None,
         })
     }
 
@@ -1556,19 +1564,47 @@ impl AgentPool {
     }
 
     /// Get list of agents that have decision agents in Thinking status
+    /// OR had a decision started recently (within MIN_DECISION_DISPLAY_MS)
     /// Used for UI display of pending decisions
     pub fn agents_with_pending_decisions(&self) -> Vec<(AgentId, std::time::Instant)> {
-        self.decision_agents
+        const MIN_DECISION_DISPLAY_MS: u64 = 1500; // Show "Analyzing" for at least 1.5s
+
+        let now = std::time::Instant::now();
+
+        // First, get agents in Thinking status
+        let thinking_agents: Vec<_> = self
+            .decision_agents
             .iter()
-            .filter_map(
-                |(work_agent_id, decision_agent)| match decision_agent.status() {
-                    DecisionAgentStatus::Thinking { started_at } => {
-                        Some((work_agent_id.clone(), *started_at))
-                    }
-                    _ => None,
-                },
-            )
-            .collect()
+            .filter_map(|(work_agent_id, decision_agent)| match decision_agent.status() {
+                DecisionAgentStatus::Thinking { started_at } => {
+                    Some((work_agent_id.clone(), *started_at))
+                }
+                _ => None,
+            })
+            .collect();
+
+        // If no thinking agents, check if a decision started recently
+        if thinking_agents.is_empty() {
+            if let Some(last_started) = self.last_decision_started_at {
+                let elapsed = now.duration_since(last_started);
+                if elapsed.as_millis() < MIN_DECISION_DISPLAY_MS as u128 {
+                    // Decision started recently, still show as pending
+                    // Return all agents that had decision agents
+                    return self
+                        .decision_agents
+                        .keys()
+                        .map(|id| (id.clone(), last_started))
+                        .collect();
+                }
+            }
+        }
+
+        thinking_agents
+    }
+
+    /// Get timestamp of last decision start
+    pub fn last_decision_started_at(&self) -> Option<std::time::Instant> {
+        self.last_decision_started_at
     }
 
     /// Classify an event for a specific agent
@@ -1702,10 +1738,14 @@ impl AgentPool {
     /// Returns responses from decision agents that have processed requests.
     pub fn poll_decision_agents(&mut self) -> Vec<(AgentId, DecisionResponse)> {
         let mut responses = Vec::new();
+        let mut any_decision_started = false;
 
         for (work_agent_id, decision_agent) in &mut self.decision_agents {
             // Poll and process any pending requests (spawns async threads)
-            decision_agent.poll_and_process();
+            let processed = decision_agent.poll_and_process();
+            if processed > 0 {
+                any_decision_started = true;
+            }
 
             // Try to receive any responses that were generated via channel
             let mut received_this_poll = false;
@@ -1737,6 +1777,12 @@ impl AgentPool {
             if received_this_poll {
                 decision_agent.clear_thinking_status(had_error);
             }
+        }
+
+        // Update timestamp when any decision was started
+        // This ensures UI shows "Analyzing" for at least 1.5s even for fast decisions
+        if any_decision_started {
+            self.last_decision_started_at = Some(std::time::Instant::now());
         }
 
         responses
