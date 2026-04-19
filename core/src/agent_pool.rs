@@ -5003,4 +5003,175 @@ mod tests {
         let slot = pool.get_slot_by_id(&spawned_id).unwrap();
         assert!(slot.cwd().exists(), "new worktree should exist");
     }
+
+    // Profile spawning tests
+
+    #[test]
+    fn spawn_agent_with_profile_fails_without_profile_store() {
+        let mut pool = make_pool(4);
+
+        let result = pool.spawn_agent_with_profile(&"claude-default".to_string());
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::provider_profile::ProfileError::NoProfileStore
+        ));
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_creates_agent_with_profile_id() {
+        let mut pool = make_pool(4);
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        let agent_id = pool
+            .spawn_agent_with_profile(&"claude-default".to_string())
+            .expect("spawn with profile");
+
+        assert_eq!(pool.active_count(), 1);
+        let slot = pool.get_slot_by_id(&agent_id).expect("slot exists");
+        assert!(slot.has_profile());
+        assert_eq!(slot.profile_id(), Some(&"claude-default".to_string()));
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_fails_for_nonexistent_profile() {
+        let mut pool = make_pool(4);
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        let result = pool.spawn_agent_with_profile(&"nonexistent-profile".to_string());
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::provider_profile::ProfileError::ProfileNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_fails_when_pool_full() {
+        let mut pool = make_pool(2);
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        // Spawn first agent
+        pool.spawn_agent_with_profile(&"claude-default".to_string())
+            .expect("first spawn");
+
+        // Spawn second agent
+        pool.spawn_agent_with_profile(&"claude-default".to_string())
+            .expect("second spawn");
+
+        // Third should fail
+        let result = pool.spawn_agent_with_profile(&"claude-default".to_string());
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::provider_profile::ProfileError::PersistenceError(_)
+        ));
+    }
+
+    #[test]
+    fn spawn_agent_with_profile_fails_for_unsupported_cli_type() {
+        let mut pool = make_pool(4);
+
+        // Create profile store with unsupported CLI type
+        let mut store = ProfileStore::new();
+        let unsupported_profile = crate::provider_profile::profile::ProviderProfile::new(
+            "unsupported".to_string(),
+            crate::provider_profile::types::CliBaseType::OpenCode,
+        );
+        store.add_profile(unsupported_profile);
+        pool.set_profile_store(store);
+
+        let result = pool.spawn_agent_with_profile(&"unsupported".to_string());
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::provider_profile::ProfileError::UnsupportedCliType(_)
+        ));
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_and_profile_fails_without_profile_store() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path.clone(),
+            state_dir,
+        )
+        .unwrap();
+
+        let result = pool.spawn_agent_with_worktree_and_profile(
+            &"claude-default".to_string(),
+            Some("feature/test".to_string()),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AgentPoolWorktreeError::StateStoreError(_)
+        ));
+    }
+
+    #[test]
+    fn spawn_agent_with_worktree_and_profile_creates_agent_with_profile() {
+        let (_temp_repo, repo_path) = setup_test_repo();
+        let temp_state = tempfile::TempDir::new().unwrap();
+        let state_dir = temp_state.path().to_path_buf();
+
+        let mut pool = AgentPool::new_with_worktrees(
+            WorkplaceId::new("workplace-001"),
+            4,
+            repo_path.clone(),
+            state_dir,
+        )
+        .unwrap();
+
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        let agent_id = pool
+            .spawn_agent_with_worktree_and_profile(
+                &"claude-default".to_string(),
+                Some("feature/test-profile".to_string()),
+                Some("task-123".to_string()),
+            )
+            .expect("spawn with profile");
+
+        assert_eq!(pool.active_count(), 1);
+        let slot = pool.get_slot_by_id(&agent_id).expect("slot exists");
+        assert!(slot.has_worktree());
+        assert!(slot.has_profile());
+        assert_eq!(slot.profile_id(), Some(&"claude-default".to_string()));
+    }
+
+    #[test]
+    fn load_profiles_merges_global_and_workplace() {
+        let mut pool = make_pool(4);
+
+        // Create temporary directories for profile persistence
+        let temp_global = tempfile::TempDir::new().unwrap();
+        let temp_workplace = tempfile::TempDir::new().unwrap();
+
+        let persistence = ProfilePersistence::for_paths(
+            temp_global.path().to_path_buf(),
+            Some(temp_workplace.path().to_path_buf()),
+        );
+
+        // Should succeed loading defaults
+        pool.load_profiles(&persistence).expect("load profiles");
+
+        assert!(pool.profile_store().is_some());
+        let store = pool.profile_store().unwrap();
+        assert!(store.has_profile(&"claude-default".to_string()));
+    }
 }
