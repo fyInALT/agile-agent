@@ -95,6 +95,7 @@ pub mod yaml_loader;
 
 // Git Flow Task Preparation
 pub mod task_metadata;
+pub mod git_state;
 
 // Re-export core types
 pub use error::*;
@@ -202,3 +203,4 @@ pub use yaml_loader::{YamlLoadError, load_process_from_yaml, save_process_to_yam
 
 // Git Flow Task Preparation
 pub use task_metadata::{TaskMetadata, TaskType, generate_branch_name};
+pub use git_state::{FileChangeType, FileStatus, GitState, GitStateAnalyzer, GitStateError};

@@ -176,66 +176,66 @@ const HOTFIX_KEYWORDS: &[&str] = &["hotfix", "urgent", "critical", "emergency", 
 /// Returns the classified type and confidence score (0.0-1.0)
 pub fn classify_task_type(description: &str) -> (TaskType, f64) {
     let desc_lower = description.to_lowercase();
-    
+
     // Count keyword matches for each type
     let mut matches: HashMap<TaskType, usize> = HashMap::new();
-    
+
     for keyword in FEATURE_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Feature).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Feature).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in BUGFIX_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Bugfix).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Bugfix).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in REFACTOR_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Refactor).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Refactor).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in DOCS_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Docs).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Docs).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in TEST_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Test).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Test).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in CHORE_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Chore).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Chore).or_insert(0) += 1;
         }
     }
-    
+
     for keyword in HOTFIX_KEYWORDS {
         if desc_lower.contains(keyword) {
-            *matches.get_mut(&TaskType::Hotfix).unwrap_or(&mut 0) += 1;
+            *matches.entry(TaskType::Hotfix).or_insert(0) += 1;
         }
     }
-    
+
     // Find the type with most matches
     let (best_type, best_count) = matches
         .iter()
         .max_by_key(|(_, count)| *count)
         .map(|(t, c)| (*t, *c))
         .unwrap_or((TaskType::Feature, 0));
-    
+
     // Calculate confidence: 0.5 for single match, increases with more matches
     let confidence = if best_count == 0 {
         0.5 // Default confidence when no keywords found
     } else {
         0.5 + (best_count as f64 * 0.15).min(0.45)
     };
-    
+
     (best_type, confidence)
 }
 
@@ -321,15 +321,24 @@ pub fn sanitize_branch_description(desc: &str) -> String {
 
 /// Validate branch name follows Git Flow convention
 pub fn validate_branch_name(branch_name: &str) -> Result<(), BranchNameError> {
-    // Check format: <type>/<task-id>-<desc>
+    // Check format: <type>/<task-id>-<desc> or <type>/<task-id> (for agent branches)
     let parts = branch_name.split('/').collect::<Vec<_>>();
-    
+
+    // Allow 2-part agent branches like "agent/agent_001"
+    if parts.len() == 2 && parts[0] == "agent" {
+        // Validate agent identifier (should not be empty)
+        if parts[1].is_empty() {
+            return Err(BranchNameError::EmptyTaskId);
+        }
+        return Ok(());
+    }
+
     if parts.len() != 3 {
         return Err(BranchNameError::InvalidFormat(
             "Branch name must be in format: <type>/<task-id>-<desc>".to_string()
         ));
     }
-    
+
     // Validate type prefix
     let valid_types = ["feature", "bugfix", "refactor", "docs", "test", "chore", "hotfix", "agent"];
     if !valid_types.contains(&parts[0]) {
@@ -337,24 +346,24 @@ pub fn validate_branch_name(branch_name: &str) -> Result<(), BranchNameError> {
             format!("Invalid type prefix: {}", parts[0])
         ));
     }
-    
+
     // Validate task-id (should not be empty)
     if parts[1].is_empty() {
         return Err(BranchNameError::EmptyTaskId);
     }
-    
+
     // Validate description (should not be empty)
     if parts[2].is_empty() {
         return Err(BranchNameError::EmptyDescription);
     }
-    
+
     // Check for invalid characters
     for c in branch_name.chars() {
         if !c.is_ascii_alphanumeric() && c != '/' && c != '-' && c != '_' {
             return Err(BranchNameError::InvalidCharacter(c));
         }
     }
-    
+
     Ok(())
 }
 
@@ -425,25 +434,25 @@ mod tests {
     }
     
     #[test]
-    fn sanitize_branch_description() {
+    fn test_sanitize_branch_description() {
         let sanitized = sanitize_branch_description("Add User Authentication");
         assert_eq!(sanitized, "add-user-authentication");
     }
-    
+
     #[test]
-    fn sanitize_branch_description_special_chars() {
+    fn test_sanitize_branch_description_special_chars() {
         let sanitized = sanitize_branch_description("Fix: login timeout issue!");
         assert_eq!(sanitized, "fix-login-timeout-issue");
     }
-    
+
     #[test]
-    fn sanitize_branch_description_consecutive_hyphens() {
+    fn test_sanitize_branch_description_consecutive_hyphens() {
         let sanitized = sanitize_branch_description("Add   multiple   spaces");
         assert!(!sanitized.contains("--"));
     }
-    
+
     #[test]
-    fn generate_branch_name() {
+    fn test_generate_branch_name() {
         let branch = generate_branch_name("PROJ-123", TaskType::Feature, "add auth");
         assert_eq!(branch, "feature/PROJ-123/add-auth");
     }
