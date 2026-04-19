@@ -1707,11 +1707,23 @@ impl AgentPool {
             // Poll and process any pending requests (spawns async threads)
             decision_agent.poll_and_process();
 
-            // Try to receive any responses that were generated
+            // Try to receive any responses that were generated via channel
             let mut received_this_poll = false;
             let mut had_error = false;
             if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
                 while let Some(response) = sender.try_receive_response() {
+                    if response.is_error() {
+                        had_error = true;
+                    }
+                    responses.push((work_agent_id.clone(), response));
+                    received_this_poll = true;
+                }
+            }
+
+            // If no channel response received, check for fallback response
+            // This handles the case where async thread couldn't send via channel
+            if !received_this_poll {
+                if let Some(response) = decision_agent.take_fallback_response() {
                     if response.is_error() {
                         had_error = true;
                     }

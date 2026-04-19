@@ -193,10 +193,17 @@ pub struct DecisionAgentSlot {
     /// Shared pending reflection round from async processing
     /// The async thread writes the updated reflection_round here after decision
     pending_reflection_round: std::sync::Arc<std::sync::Mutex<Option<u8>>>,
+    /// Fallback response storage for when async channel send fails
+    /// This allows the main thread to retrieve the response on next poll
+    pending_fallback_response: std::sync::Arc<std::sync::Mutex<Option<DecisionResponse>>>,
 }
 
 impl std::fmt::Debug for DecisionAgentSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let has_pending_fallback = self.pending_fallback_response
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
         f.debug_struct("DecisionAgentSlot")
             .field("work_agent_id", &self.work_agent_id)
             .field("agent_id", &self.agent_id)
@@ -208,6 +215,7 @@ impl std::fmt::Debug for DecisionAgentSlot {
             .field("error_count", &self.error_count)
             .field("profile_id", &self.profile_id)
             .field("reflection_round", &self.reflection_round)
+            .field("has_pending_fallback", &has_pending_fallback)
             .finish()
     }
 }
@@ -268,6 +276,7 @@ impl DecisionAgentSlot {
             profile_id: None,
             reflection_round: 0,
             pending_reflection_round: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            pending_fallback_response: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -555,6 +564,7 @@ impl DecisionAgentSlot {
         let agent_id = self.agent_id.clone();
         let reflection_round = self.reflection_round;
         let pending_reflection = self.pending_reflection_round.clone();
+        let pending_fallback = self.pending_fallback_response.clone();
 
         // Set status to thinking
         self.status = DecisionAgentStatus::thinking_now();
@@ -600,6 +610,17 @@ impl DecisionAgentSlot {
             let updated_reflection = engine.reflection_round();
             if let Ok(mut guard) = pending_reflection.lock() {
                 *guard = Some(updated_reflection);
+            } else {
+                // Log error instead of silently dropping - this indicates mutex poisoning
+                logging::error_event(
+                    "decision_layer.reflection_round_sync_failed",
+                    "failed to lock pending_reflection_round mutex",
+                    serde_json::json!({
+                        "decision_agent_id": agent_id,
+                        "work_agent_id": work_agent_id.as_str(),
+                        "reflection_round_lost": updated_reflection,
+                    }),
+                );
             }
 
             let response = match result {
@@ -631,15 +652,34 @@ impl DecisionAgentSlot {
             };
 
             // Send response via channel (non-blocking for TUI)
+            // Clone response first so we can use it for fallback if send fails
+            let response_clone = response.clone();
             if let Err(e) = response_tx.send(response) {
-                logging::warn_event(
-                    "decision_layer.async_response_send_failed",
-                    "failed to send async decision response",
-                    serde_json::json!({
-                        "decision_agent_id": agent_id,
-                        "error": e.to_string(),
-                    }),
-                );
+                // Channel send failed - store in fallback for main thread to retrieve
+                // This ensures the decision is not lost even if the channel is full
+                if let Ok(mut guard) = pending_fallback.lock() {
+                    // Overwrite any previous fallback (shouldn't happen, but be safe)
+                    *guard = Some(response_clone);
+                    logging::warn_event(
+                        "decision_layer.async_response_fallback_stored",
+                        "response stored in fallback due to channel send failure",
+                        serde_json::json!({
+                            "decision_agent_id": agent_id,
+                            "work_agent_id": work_agent_id.as_str(),
+                        }),
+                    );
+                } else {
+                    // Even fallback lock failed - this is a critical error
+                    logging::error_event(
+                        "decision_layer.async_response_lost",
+                        "failed to store response in fallback - decision lost",
+                        serde_json::json!({
+                            "decision_agent_id": agent_id,
+                            "work_agent_id": work_agent_id.as_str(),
+                            "error": e.to_string(),
+                        }),
+                    );
+                }
             }
         });
     }
@@ -650,8 +690,36 @@ impl DecisionAgentSlot {
     /// If we were thinking and responses were collected, we can return to idle.
     pub fn mark_response_collected(&mut self) {
         if self.status.is_thinking() {
+            // Also sync reflection_round like clear_thinking_status does
+            if let Ok(mut guard) = self.pending_reflection_round.lock() {
+                if let Some(r) = *guard {
+                    self.reflection_round = r;
+                }
+                *guard = None;
+            }
             self.status = DecisionAgentStatus::idle();
         }
+    }
+
+    /// Take and return any pending fallback response
+    ///
+    /// This is called by the owner when the channel-based response wasn't received
+    /// but a fallback was stored (due to channel send failure).
+    /// Returns Some(response) if a fallback exists, None otherwise.
+    pub fn take_fallback_response(&mut self) -> Option<DecisionResponse> {
+        if let Ok(mut guard) = self.pending_fallback_response.lock() {
+            guard.take()
+        } else {
+            None
+        }
+    }
+
+    /// Check if a fallback response is available
+    pub fn has_fallback_response(&self) -> bool {
+        self.pending_fallback_response
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
     }
 
     /// Stop the decision agent
