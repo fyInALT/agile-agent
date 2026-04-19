@@ -33,6 +33,7 @@ pub mod multi_agent_session;
 pub mod persistence_coordinator;
 pub mod probe;
 pub mod provider;
+pub mod provider_profile;
 pub mod provider_thread;
 pub mod providers;
 pub mod runtime_mode;
