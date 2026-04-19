@@ -49,11 +49,12 @@ use agent_decision::action_registry::ActionRegistry;
 use agent_decision::builtin_actions::register_action_builtins;
 use agent_decision::engine::DecisionEngine;
 use agent_decision::initializer::DecisionLayerComponents;
-use agent_decision::llm_caller::LLMCaller;
-use agent_decision::llm_engine::LLMEngineConfig;
-use agent_decision::provider_event::ProviderEvent;
-use agent_decision::provider_kind::ProviderKind as DecisionProviderKind;
-use agent_decision::tiered_engine::{TieredDecisionEngine, TieredEngineConfig};
+use agent_decision::LLMCaller;
+use agent_decision::LLMEngineConfig;
+use agent_decision::provider::ProviderEvent;
+use agent_decision::provider::ProviderKind as DecisionProviderKind;
+use agent_decision::TieredDecisionEngine;
+use agent_decision::TieredEngineConfig;
 
 /// Status of a decision agent slot
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +243,7 @@ impl DecisionAgentSlot {
             llm_provider: decision_provider,
             llm_config: LLMEngineConfig::default(),
             use_cli_for_critical: false, // Decision agents don't use CLI
-            fallback_tier: agent_decision::tiered_engine::DecisionTier::Medium,
+            fallback_tier: agent_decision::engine::DecisionTier::Medium,
         };
         let engine = TieredDecisionEngine::new(engine_config);
 

@@ -6,7 +6,7 @@
 - Title: `Core Data Model`
 - Duration: 1 week
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-19
 - Depends On: None
 - Design Reference: `docs/plan/provider-profile-requirements.md`

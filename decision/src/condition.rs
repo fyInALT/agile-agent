@@ -1,6 +1,6 @@
 //! Condition expressions for rule-based decisions
 
-use crate::context::DecisionContext;
+use crate::core::context::DecisionContext;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -201,8 +201,8 @@ impl Default for ConditionEvaluatorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtin_situations::WaitingForChoiceSituation;
-    use crate::context::DecisionContext;
+    use crate::model::situation::builtin_situations::WaitingForChoiceSituation;
+    use crate::core::context::DecisionContext;
 
     fn make_context() -> DecisionContext {
         DecisionContext::new(Box::new(WaitingForChoiceSituation::default()), "test-agent")

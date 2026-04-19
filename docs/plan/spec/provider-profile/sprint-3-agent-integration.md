@@ -6,7 +6,7 @@
 - Title: `Agent Integration`
 - Duration: 1 week
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-19
 - Depends On: `provider-profile-sprint-02`
 - Design Reference: `docs/plan/provider-profile-requirements.md`

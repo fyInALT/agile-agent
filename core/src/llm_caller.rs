@@ -10,8 +10,8 @@ use std::time::Duration;
 use crate::logging;
 use crate::provider::{ProviderEvent, ProviderKind};
 
-use agent_decision::error::DecisionError;
-use agent_decision::llm_caller::LLMCaller;
+use agent_decision::DecisionError;
+use agent_decision::LLMCaller;
 
 /// Provider-based LLM caller
 ///

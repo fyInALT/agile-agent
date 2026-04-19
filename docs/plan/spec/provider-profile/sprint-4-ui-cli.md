@@ -6,7 +6,7 @@
 - Title: `UI & CLI Integration`
 - Duration: 1 week
 - Priority: P1 (High)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-19
 - Depends On: `provider-profile-sprint-03`
 - Design Reference: `docs/plan/provider-profile-requirements.md`

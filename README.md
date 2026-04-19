@@ -18,12 +18,15 @@ Implemented:
 - launch configuration overlay for agent creation (Ctrl+N)
 - Overview mode for multi-agent activity monitoring
 - Git Flow task preparation with automatic branch naming and workspace health checks
+- multi-agent headless execution mode with `--multi-agent` flag
+- modular decision layer architecture (Core → Model → Pipeline → Engine → Classifier → Provider → State → Runtime → Config)
+- provider profile system for configurable LLM backends
 
 In progress:
 
-- full parallel multi-agent runtime across TUI and headless execution
 - OpenAI-backed LLM provider integration for decision support
 - workflow self-improvement
+- full parallel multi-agent runtime across TUI execution
 
 Not started yet:
 

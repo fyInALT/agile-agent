@@ -7,7 +7,9 @@ use agent_core::logging;
 use agent_core::logging::RunMode;
 use agent_core::loop_runner;
 use agent_core::loop_runner::LoopGuardrails;
+use agent_core::multi_agent_session::MultiAgentSession;
 use agent_core::probe;
+use agent_core::runtime_mode::RuntimeMode;
 use agent_core::session_store;
 use agent_core::skills::SkillRegistry;
 use agent_core::workplace_store::WorkplaceStore;
@@ -440,11 +442,17 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool, multi_agent: bool
     let launch_cwd = env::current_dir()?;
 
     if multi_agent {
-        eprintln!("multi-agent mode enabled");
-        // TODO: Implement multi-agent headless mode
-        eprintln!("warning: multi-agent headless mode not yet fully implemented");
+        run_loop_headless_multi_agent(max_iterations, resume_last, launch_cwd)
+    } else {
+        run_loop_headless_single_agent(max_iterations, resume_last, launch_cwd)
     }
+}
 
+fn run_loop_headless_single_agent(
+    max_iterations: usize,
+    resume_last: bool,
+    launch_cwd: std::path::PathBuf,
+) -> Result<()> {
     let bootstrap =
         AgentRuntime::bootstrap_for_cwd(&launch_cwd, agent_core::provider::default_provider())?;
     let mut state = AppState::with_skills(
@@ -527,6 +535,175 @@ fn run_loop_headless(max_iterations: usize, resume_last: bool, multi_agent: bool
     }
 
     Ok(())
+}
+
+fn run_loop_headless_multi_agent(
+    max_iterations: usize,
+    resume_last: bool,
+    launch_cwd: std::path::PathBuf,
+) -> Result<()> {
+    use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownReason, ShutdownSnapshot};
+    use agent_core::backlog::{TaskStatus, TodoStatus};
+    use agent_core::agent_runtime::AgentStatus;
+
+    eprintln!("multi-agent mode enabled");
+
+    let max_agents = RuntimeMode::MultiAgent.max_agents();
+    let mut session = MultiAgentSession::bootstrap(
+        launch_cwd.clone(),
+        agent_core::provider::default_provider(),
+        resume_last,
+        max_agents,
+    )?;
+
+    eprintln!(
+        "agents: {} active, {} max",
+        session.agents.active_count(),
+        max_agents
+    );
+
+    // Load backlog into shared workplace state
+    let workplace_store = WorkplaceStore::for_cwd(&launch_cwd)?;
+    session.workplace.backlog =
+        backlog_store::load_backlog_for_workplace(&workplace_store)?;
+
+    let todo_count = session.workplace.backlog.todos.iter()
+        .filter(|t| t.status == TodoStatus::Ready).count();
+    let task_count = session.workplace.backlog.tasks.iter()
+        .filter(|t| t.status == TaskStatus::Ready).count();
+    eprintln!(
+        "workplace: {} (backlog: {} ready todos, {} ready tasks)",
+        session.workplace.workplace_id.as_str(),
+        todo_count,
+        task_count
+    );
+
+    // Run multi-agent loop
+    let mut iteration = 0;
+
+    while iteration < max_iterations && session.any_active() {
+        iteration += 1;
+        eprintln!("iteration: {} / {}", iteration, max_iterations);
+
+        // Poll for events from all agents with timeout
+        let poll_result = session.poll_events_with_timeout(std::time::Duration::from_millis(100));
+
+        for event in poll_result.events {
+            // Process events through the session (which handles state transitions)
+            match session.process_event(event) {
+                Ok(_) => {}
+                Err(e) => eprintln!("event processing error: {}", e),
+            }
+        }
+
+        // Check for idle agents and assign ready tasks
+        let ready_tasks: Vec<(String, TaskStatus)> = session.workplace.backlog.ready_tasks()
+            .iter()
+            .map(|t| (t.id.clone(), t.status))
+            .collect();
+        if !ready_tasks.is_empty() {
+            for slot_idx in 0..session.agents.active_count() {
+                if let Some(slot) = session.agents.get_slot(slot_idx) {
+                    let status = slot.status();
+                    let has_task = slot.assigned_task_id().is_some();
+                    if status.is_idle() && !has_task {
+                        // Find a ready task
+                        for (task_id, task_status) in &ready_tasks {
+                            if *task_status == TaskStatus::Ready {
+                                if let Some(slot_mut) = session.agents.get_slot_mut(slot_idx) {
+                                    let tid = agent_core::agent_slot::TaskId::new(task_id);
+                                    if slot_mut.assign_task(tid).is_ok() {
+                                        eprintln!(
+                                            "task: assigned {} to agent {}",
+                                            task_id,
+                                            slot_mut.agent_id().as_str()
+                                        );
+                                        // Mark task as started in backlog (after collecting IDs)
+                                        session.workplace.backlog.start_task(task_id);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Small delay between iterations
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // Create shutdown snapshot for persistence
+    let agents_snapshots: Vec<_> = (0..session.agents.active_count())
+        .filter_map(|idx| session.agents.get_slot(idx))
+        .map(|slot| {
+            AgentShutdownSnapshot {
+                meta: agent_core::agent_runtime::AgentMeta {
+                    agent_id: slot.agent_id().clone(),
+                    codename: slot.codename().clone(),
+                    workplace_id: session.workplace.workplace_id.clone(),
+                    provider_type: slot.provider_type(),
+                    provider_session_id: None,
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    status: AgentStatus::Idle,
+                },
+                assigned_task_id: slot.assigned_task_id().map(|id| id.as_str().to_string()),
+                was_active: !slot.status().is_terminal(),
+                had_error: slot.status().is_blocked(),
+                provider_thread_state: None,
+                captured_at: String::new(),
+            }
+        })
+        .collect();
+
+    let snapshot = ShutdownSnapshot::new(
+        session.workplace.workplace_id.as_str().to_string(),
+        agents_snapshots,
+        session.workplace.backlog.clone(),
+        Vec::new(),
+        ShutdownReason::CleanExit,
+    );
+
+    workplace_store.save_shutdown_snapshot(&snapshot)?;
+    backlog_store::save_backlog_for_workplace(&session.workplace.backlog, &workplace_store)?;
+
+    println!("iterations: {}", iteration);
+    println!("agents_active: {}", session.agents.active_count());
+    println!("backlog_remaining: {} todos, {} tasks",
+        session.workplace.backlog.todos.len(),
+        session.workplace.backlog.tasks.len());
+
+    Ok(())
+}
+
+fn handle_multi_agent_event(_session: &mut MultiAgentSession, event: agent_core::event_aggregator::AgentEvent) {
+    use agent_core::event_aggregator::AgentEvent;
+
+    match event {
+        AgentEvent::FromProvider { agent_id, event: _ } => {
+            logging::debug_event(
+                "multi_agent.event",
+                "provider event received",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                }),
+            );
+        }
+        AgentEvent::StatusChanged { agent_id, old_status, new_status } => {
+            eprintln!(
+                "agent {}: {} -> {}",
+                agent_id.as_str(),
+                old_status.label(),
+                new_status.label()
+            );
+        }
+        AgentEvent::AgentError { agent_id, error } => {
+            eprintln!("agent {}: error {}", agent_id.as_str(), error);
+        }
+        _ => {}
+    }
 }
 
 fn announce_bootstrap_kind(kind: &AgentBootstrapKind, runtime: &AgentRuntime) {
