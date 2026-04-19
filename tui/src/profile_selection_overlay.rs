@@ -38,8 +38,6 @@ pub struct ProfileDisplayInfo {
     pub display_name: String,
     /// Base CLI type label
     pub cli_label: String,
-    /// Description (optional)
-    pub description: Option<String>,
 }
 
 /// Command returned from overlay key handling
@@ -69,7 +67,6 @@ impl ProfileSelectionOverlay {
                     id: p.id.clone(),
                     display_name: p.display_name.clone(),
                     cli_label,
-                    description: p.description.clone(),
                 }
             })
             .collect();

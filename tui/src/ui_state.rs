@@ -479,6 +479,9 @@ impl TuiState {
     ///
     /// The profile ID selects a pre-configured profile from the profile store.
     /// Decision agent is spawned with the default decision profile.
+    /// This is a convenience method that calls spawn_agent_with_profiles with
+    /// the same profile for both work and decision agents.
+    #[allow(dead_code)]
     pub fn spawn_agent_with_profile(
         &mut self,
         profile_id: &str,
