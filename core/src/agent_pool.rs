@@ -1583,19 +1583,24 @@ impl AgentPool {
             })
             .collect();
 
-        // If no thinking agents, check if a decision started recently
+        // If no thinking agents, check if any decision agent had a decision recently
         if thinking_agents.is_empty() {
-            if let Some(last_started) = self.last_decision_started_at {
-                let elapsed = now.duration_since(last_started);
-                if elapsed.as_millis() < MIN_DECISION_DISPLAY_MS as u128 {
-                    // Decision started recently, still show as pending
-                    // Return all agents that had decision agents
-                    return self
-                        .decision_agents
-                        .keys()
-                        .map(|id| (id.clone(), last_started))
-                        .collect();
-                }
+            let recent_agents: Vec<_> = self
+                .decision_agents
+                .iter()
+                .filter_map(|(work_agent_id, decision_agent)| {
+                    if let Some(started_at) = decision_agent.last_decision_started_at() {
+                        let elapsed = now.duration_since(started_at);
+                        if elapsed.as_millis() < MIN_DECISION_DISPLAY_MS as u128 {
+                            return Some((work_agent_id.clone(), started_at));
+                        }
+                    }
+                    None
+                })
+                .collect();
+
+            if !recent_agents.is_empty() {
+                return recent_agents;
             }
         }
 

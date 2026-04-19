@@ -196,6 +196,9 @@ pub struct DecisionAgentSlot {
     /// Fallback response storage for when async channel send fails
     /// This allows the main thread to retrieve the response on next poll
     pending_fallback_response: std::sync::Arc<std::sync::Mutex<Option<DecisionResponse>>>,
+    /// Timestamp when the last decision started for this agent
+    /// Used by UI to show "Analyzing" for a minimum duration even for fast decisions
+    last_decision_started_at: Option<std::time::Instant>,
 }
 
 impl std::fmt::Debug for DecisionAgentSlot {
@@ -216,6 +219,7 @@ impl std::fmt::Debug for DecisionAgentSlot {
             .field("profile_id", &self.profile_id)
             .field("reflection_round", &self.reflection_round)
             .field("has_pending_fallback", &has_pending_fallback)
+            .field("has_recent_decision", &self.last_decision_started_at.is_some())
             .finish()
     }
 }
@@ -277,6 +281,7 @@ impl DecisionAgentSlot {
             reflection_round: 0,
             pending_reflection_round: std::sync::Arc::new(std::sync::Mutex::new(None)),
             pending_fallback_response: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            last_decision_started_at: None,
         }
     }
 
@@ -569,6 +574,8 @@ impl DecisionAgentSlot {
         // Set status to thinking
         self.status = DecisionAgentStatus::thinking_now();
         self.last_activity = Instant::now();
+        // Record when decision started for UI display (ensures "Analyzing" shows even for fast decisions)
+        self.last_decision_started_at = Some(Instant::now());
 
         // Log: Decision triggered
         logging::debug_event(
@@ -720,6 +727,29 @@ impl DecisionAgentSlot {
             .lock()
             .map(|g| g.is_some())
             .unwrap_or(false)
+    }
+
+    /// Get timestamp when the last decision started
+    pub fn last_decision_started_at(&self) -> Option<std::time::Instant> {
+        self.last_decision_started_at
+    }
+
+    /// Check if there's a recent decision that should still show "Analyzing"
+    /// Returns Some(started_at) if decision started within the display window
+    pub fn has_recent_decision(&self) -> bool {
+        const MIN_DECISION_DISPLAY_MS: u64 = 1500;
+        if let Some(started_at) = self.last_decision_started_at {
+            let elapsed = std::time::Instant::now().duration_since(started_at);
+            elapsed.as_millis() < MIN_DECISION_DISPLAY_MS as u128
+        } else {
+            false
+        }
+    }
+
+    /// Clear the recent decision timestamp
+    /// Called when the decision display window has passed
+    pub fn clear_recent_decision(&mut self) {
+        self.last_decision_started_at = None;
     }
 
     /// Stop the decision agent
@@ -1290,6 +1320,68 @@ mod tests {
 
         // Decision count should be 2
         assert_eq!(slot.decision_count(), 2);
+    }
+
+    #[test]
+    fn test_has_recent_decision_initially_false() {
+        let (slot, _) = make_test_slot();
+
+        // Initially no recent decision
+        assert!(!slot.has_recent_decision());
+        assert!(slot.last_decision_started_at().is_none());
+    }
+
+    #[test]
+    fn test_has_recent_decision_set_after_poll_and_process() {
+        let (mut slot, sender) = make_test_slot();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // poll_and_process should set last_decision_started_at
+        slot.poll_and_process();
+        assert!(slot.has_recent_decision());
+        assert!(slot.last_decision_started_at().is_some());
+
+        // Status should be thinking
+        assert!(slot.status().is_thinking());
+    }
+
+    #[test]
+    fn test_has_recent_decision_still_true_after_response_received() {
+        let (mut slot, sender) = make_test_slot();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // poll_and_process - spawns thread
+        slot.poll_and_process();
+
+        // Receive response
+        let timeout = std::time::Duration::from_secs(5);
+        let result = sender.receive_response_timeout(timeout);
+        assert!(result.is_ok() && result.unwrap().is_some());
+
+        // After receiving response but BEFORE clearing status
+        // has_recent_decision should still be true
+        assert!(slot.has_recent_decision());
+
+        // Clear thinking status
+        slot.clear_thinking_status(false);
+
+        // After clearing, has_recent_decision should still be true
+        // (because within the 1.5s window)
+        assert!(slot.has_recent_decision());
     }
 
     #[test]
