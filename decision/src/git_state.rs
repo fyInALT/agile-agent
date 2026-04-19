@@ -494,6 +494,149 @@ impl GitStateAnalyzer {
     pub fn get_diff_summary(&self, worktree_path: &Path) -> Result<String, GitStateError> {
         self.executor.execute(worktree_path, &["diff", "--stat"])
     }
+
+    /// Check if a branch exists locally
+    pub fn branch_exists(&self, worktree_path: &Path, branch_name: &str) -> Result<bool, GitStateError> {
+        let output = self.executor.execute(
+            worktree_path,
+            &["rev-parse", "--verify", &format!("refs/heads/{}", branch_name)],
+        )?;
+        Ok(!output.trim().is_empty())
+    }
+
+    /// Get list of all local branches
+    pub fn get_local_branches(&self, worktree_path: &Path) -> Result<Vec<String>, GitStateError> {
+        let output = self.executor.execute(worktree_path, &["branch", "--list"])?;
+        Ok(output
+            .lines()
+            .map(|l| l.trim_start_matches('*').trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect())
+    }
+}
+
+/// Branch collision info for handling duplicate branch names
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchCollisionInfo {
+    /// The branch name that collides
+    pub existing_branch: String,
+    /// Path where branch is checked out (if any)
+    pub checked_out_at: Option<String>,
+    /// Whether the branch has uncommitted changes
+    pub has_changes: bool,
+    /// Suggested alternative branch name
+    pub suggested_alternative: Option<String>,
+}
+
+impl BranchCollisionInfo {
+    /// Create new collision info
+    pub fn new(existing_branch: impl Into<String>) -> Self {
+        Self {
+            existing_branch: existing_branch.into(),
+            checked_out_at: None,
+            has_changes: false,
+            suggested_alternative: None,
+        }
+    }
+
+    /// Set checked out location
+    pub fn with_checked_out_at(mut self, path: impl Into<String>) -> Self {
+        self.checked_out_at = Some(path.into());
+        self
+    }
+
+    /// Set whether branch has changes
+    pub fn with_has_changes(mut self, has: bool) -> Self {
+        self.has_changes = has;
+        self
+    }
+
+    /// Set suggested alternative
+    pub fn with_alternative(mut self, alt: impl Into<String>) -> Self {
+        self.suggested_alternative = Some(alt.into());
+        self
+    }
+}
+
+/// Context for branch setup decisions
+///
+/// Aggregates all information needed to decide on branch creation strategy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchSetupContext {
+    /// Task metadata with desired branch name
+    pub task_meta: crate::task_metadata::TaskMetadata,
+
+    /// Current git state
+    pub git_state: GitState,
+
+    /// Whether rebase is needed (branch is behind base)
+    pub needs_rebase: bool,
+
+    /// Branch collision info (if branch name already exists)
+    pub collision_info: Option<BranchCollisionInfo>,
+
+    /// Base branch name (main or master)
+    pub base_branch: String,
+
+    /// Worktree path for operations
+    pub worktree_path: String,
+}
+
+impl BranchSetupContext {
+    /// Create new branch setup context
+    pub fn new(
+        task_meta: crate::task_metadata::TaskMetadata,
+        git_state: GitState,
+        worktree_path: impl Into<String>,
+    ) -> Self {
+        let base_branch = if git_state.current_branch == "main" || git_state.current_branch == "master" {
+            git_state.current_branch.clone()
+        } else {
+            "main".to_string()
+        };
+
+        Self {
+            task_meta,
+            git_state,
+            needs_rebase: false,
+            collision_info: None,
+            base_branch,
+            worktree_path: worktree_path.into(),
+        }
+    }
+
+    /// Set whether rebase is needed
+    pub fn with_needs_rebase(mut self, needs: bool) -> Self {
+        self.needs_rebase = needs;
+        self
+    }
+
+    /// Set collision info
+    pub fn with_collision_info(mut self, info: BranchCollisionInfo) -> Self {
+        self.collision_info = Some(info);
+        self
+    }
+
+    /// Set base branch explicitly
+    pub fn with_base_branch(mut self, branch: impl Into<String>) -> Self {
+        self.base_branch = branch.into();
+        self
+    }
+
+    /// Check if branch creation is safe (no conflicts, no issues)
+    pub fn is_ready_for_creation(&self) -> bool {
+        !self.git_state.has_conflicts && self.collision_info.is_none()
+    }
+
+    /// Get the branch name to use (preferred or alternative)
+    pub fn effective_branch_name(&self) -> String {
+        if let Some(ref collision) = self.collision_info {
+            if let Some(ref alt) = collision.suggested_alternative {
+                return alt.clone();
+            }
+        }
+        self.task_meta.branch_name.clone()
+    }
 }
 
 #[cfg(test)]
@@ -672,5 +815,106 @@ mod tests {
         assert_eq!(file.change_type, FileChangeType::Untracked);
         assert!(!file.is_staged);
         assert!(file.is_new);
+    }
+
+    #[test]
+    fn test_branch_collision_info_new() {
+        let info = BranchCollisionInfo::new("feature/PROJ-123/add-auth");
+        assert_eq!(info.existing_branch, "feature/PROJ-123/add-auth");
+        assert!(info.checked_out_at.is_none());
+        assert!(!info.has_changes);
+        assert!(info.suggested_alternative.is_none());
+    }
+
+    #[test]
+    fn test_branch_collision_info_builder() {
+        let info = BranchCollisionInfo::new("feature/PROJ-123/add-auth")
+            .with_checked_out_at("/path/to/worktree")
+            .with_has_changes(true)
+            .with_alternative("feature/PROJ-123/add-auth-2");
+
+        assert_eq!(info.existing_branch, "feature/PROJ-123/add-auth");
+        assert_eq!(info.checked_out_at, Some("/path/to/worktree".to_string()));
+        assert!(info.has_changes);
+        assert_eq!(info.suggested_alternative, Some("feature/PROJ-123/add-auth-2".to_string()));
+    }
+
+    #[test]
+    fn test_branch_setup_context_new() {
+        use crate::task_metadata::TaskMetadata;
+
+        let meta = TaskMetadata::new("PROJ-123", "Add user authentication");
+        let git_state = GitState::default();
+
+        let context = BranchSetupContext::new(meta, git_state, "/path/to/worktree");
+
+        assert_eq!(context.task_meta.task_id, "PROJ-123");
+        assert!(!context.needs_rebase);
+        assert!(context.collision_info.is_none());
+        assert_eq!(context.base_branch, "main"); // default since git_state.current_branch is empty
+        assert_eq!(context.worktree_path, "/path/to/worktree");
+    }
+
+    #[test]
+    fn test_branch_setup_context_effective_branch_name() {
+        use crate::task_metadata::TaskMetadata;
+
+        let meta = TaskMetadata::new("PROJ-123", "Add user authentication");
+        let git_state = GitState::default();
+
+        // Without collision - returns task_meta branch name
+        let context = BranchSetupContext::new(meta.clone(), git_state.clone(), "/path/to/worktree");
+        assert_eq!(context.effective_branch_name(), context.task_meta.branch_name);
+
+        // With collision but no alternative
+        let collision = BranchCollisionInfo::new("feature/PROJ-123/add-auth");
+        let context_with_collision = BranchSetupContext::new(meta.clone(), git_state.clone(), "/path/to/worktree")
+            .with_collision_info(collision);
+        assert_eq!(context_with_collision.effective_branch_name(), context.task_meta.branch_name);
+
+        // With collision and alternative
+        let collision_with_alt = BranchCollisionInfo::new("feature/PROJ-123/add-auth")
+            .with_alternative("feature/PROJ-123/add-auth-2");
+        let context_with_alt = BranchSetupContext::new(meta, git_state, "/path/to/worktree")
+            .with_collision_info(collision_with_alt);
+        assert_eq!(context_with_alt.effective_branch_name(), "feature/PROJ-123/add-auth-2");
+    }
+
+    #[test]
+    fn test_branch_setup_context_is_ready() {
+        use crate::task_metadata::TaskMetadata;
+
+        let meta = TaskMetadata::new("PROJ-123", "Add user authentication");
+        let mut git_state = GitState::default();
+
+        // No conflicts, no collision - ready
+        let context = BranchSetupContext::new(meta.clone(), git_state.clone(), "/path/to/worktree");
+        assert!(context.is_ready_for_creation());
+
+        // With conflicts - not ready
+        git_state.has_conflicts = true;
+        let context_with_conflicts = BranchSetupContext::new(meta.clone(), git_state.clone(), "/path/to/worktree");
+        assert!(!context_with_conflicts.is_ready_for_creation());
+
+        // With collision - not ready (needs decision)
+        git_state.has_conflicts = false;
+        let collision = BranchCollisionInfo::new("feature/PROJ-123/add-auth");
+        let context_with_collision = BranchSetupContext::new(meta, git_state, "/path/to/worktree")
+            .with_collision_info(collision);
+        assert!(!context_with_collision.is_ready_for_creation());
+    }
+
+    #[test]
+    fn test_branch_setup_context_with_base_branch() {
+        use crate::task_metadata::TaskMetadata;
+
+        let meta = TaskMetadata::new("PROJ-123", "Add user authentication");
+        let mut git_state = GitState::default();
+        git_state.current_branch = "main".to_string();
+
+        let context = BranchSetupContext::new(meta, git_state, "/path/to/worktree")
+            .with_base_branch("main");
+
+        assert_eq!(context.base_branch, "main");
     }
 }

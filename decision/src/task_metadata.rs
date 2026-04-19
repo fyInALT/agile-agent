@@ -367,6 +367,54 @@ pub fn validate_branch_name(branch_name: &str) -> Result<(), BranchNameError> {
     Ok(())
 }
 
+/// Branch name collision handling result
+#[derive(Debug, Clone)]
+pub enum CollisionResolution {
+    /// Branch name is available
+    Available(String),
+    /// Branch exists but not checked out - can use
+    ExistsNotCheckedOut(String),
+    /// Branch is checked out elsewhere
+    CheckedOutElsewhere { existing: String, alternative: String },
+    /// Max collision attempts reached
+    MaxCollisionsReached(String),
+}
+
+/// Generate unique branch name by handling collisions
+///
+/// Uses numeric suffixing to generate unique branch names when collisions occur.
+/// Returns the next available candidate branch name.
+pub fn generate_unique_branch_name(base_name: &str) -> String {
+    // If no numeric suffix exists, append -2
+    if has_numeric_suffix(base_name).is_none() {
+        return format!("{}-2", base_name);
+    }
+
+    // Increment existing suffix
+    increment_branch_suffix(base_name)
+}
+
+/// Check if branch name has a numeric suffix
+pub fn has_numeric_suffix(branch_name: &str) -> Option<u8> {
+    let parts: Vec<&str> = branch_name.rsplitn(2, '-').collect();
+    if parts.len() == 2 {
+        parts[0].parse().ok()
+    } else {
+        None
+    }
+}
+
+/// Generate next branch name with incremented suffix
+pub fn increment_branch_suffix(branch_name: &str) -> String {
+    let parts: Vec<&str> = branch_name.rsplitn(2, '-').collect();
+    if parts.len() == 2 {
+        if let Ok(suffix) = parts[0].parse::<u8>() {
+            return format!("{}-{}", parts[1], suffix + 1);
+        }
+    }
+    format!("{}-2", branch_name)
+}
+
 /// Branch name validation errors
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BranchNameError {
@@ -479,8 +527,52 @@ mod tests {
     fn task_metadata_with_type() {
         let metadata = TaskMetadata::new("PROJ-123", "Add user authentication")
             .with_type(TaskType::Bugfix);
-        
+
         assert_eq!(metadata.task_type, TaskType::Bugfix);
         assert!(metadata.branch_name.starts_with("bugfix/"));
+    }
+
+    #[test]
+    fn test_has_numeric_suffix_none() {
+        assert!(has_numeric_suffix("feature/PROJ-123/add-auth").is_none());
+        assert!(has_numeric_suffix("add-auth").is_none());
+    }
+
+    #[test]
+    fn test_has_numeric_suffix_some() {
+        assert_eq!(has_numeric_suffix("add-auth-2"), Some(2));
+        assert_eq!(has_numeric_suffix("add-auth-10"), Some(10));
+        assert_eq!(has_numeric_suffix("feature/proj-123/test-1"), Some(1));
+    }
+
+    #[test]
+    fn test_increment_branch_suffix_no_suffix() {
+        assert_eq!(increment_branch_suffix("add-auth"), "add-auth-2");
+    }
+
+    #[test]
+    fn test_increment_branch_suffix_with_suffix() {
+        assert_eq!(increment_branch_suffix("add-auth-2"), "add-auth-3");
+        assert_eq!(increment_branch_suffix("add-auth-9"), "add-auth-10");
+    }
+
+    #[test]
+    fn test_generate_unique_branch_name_no_collision() {
+        // No suffix - adds -2
+        assert_eq!(generate_unique_branch_name("add-auth"), "add-auth-2");
+    }
+
+    #[test]
+    fn test_generate_unique_branch_name_with_suffix() {
+        // Has suffix - increments
+        assert_eq!(generate_unique_branch_name("add-auth-2"), "add-auth-3");
+        assert_eq!(generate_unique_branch_name("add-auth-9"), "add-auth-10");
+    }
+
+    #[test]
+    fn test_generate_unique_branch_name_complex() {
+        // Full branch name
+        let name = generate_unique_branch_name("feature/PROJ-123/add-auth");
+        assert!(name.starts_with("feature/PROJ-123/add-auth-"));
     }
 }
