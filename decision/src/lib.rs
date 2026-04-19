@@ -96,6 +96,7 @@ pub mod yaml_loader;
 // Git Flow Task Preparation
 pub mod task_metadata;
 pub mod git_state;
+pub mod uncommitted_handler;
 
 // Re-export core types
 pub use error::*;

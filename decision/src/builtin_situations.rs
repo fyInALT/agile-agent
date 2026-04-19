@@ -46,6 +46,11 @@ pub fn task_starting() -> SituationType {
     SituationType::new("task_starting")
 }
 
+/// Uncommitted changes detected situation
+pub fn uncommitted_changes_detected() -> SituationType {
+    SituationType::new("uncommitted_changes_detected")
+}
+
 /// Situation: Task starting - needs git preparation before work begins
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskStartingSituation {
@@ -185,6 +190,101 @@ impl DecisionSituation for TaskStartingSituation {
         }
 
         text
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
+        Box::new(self.clone())
+    }
+}
+
+/// Situation: Uncommitted changes detected - needs handling before task switch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncommittedChangesSituation {
+    /// Git state with uncommitted files
+    pub git_state: crate::git_state::GitState,
+
+    /// Analysis of the changes
+    pub analysis: crate::uncommitted_handler::UncommittedAnalysis,
+
+    /// Current task ID (if switching tasks)
+    pub pending_task_id: Option<String>,
+
+    /// Worktree path for operations
+    pub worktree_path: Option<String>,
+}
+
+impl UncommittedChangesSituation {
+    /// Create a new uncommitted changes situation
+    pub fn new(
+        git_state: crate::git_state::GitState,
+        analysis: crate::uncommitted_handler::UncommittedAnalysis,
+    ) -> Self {
+        Self {
+            git_state,
+            analysis,
+            pending_task_id: None,
+            worktree_path: None,
+        }
+    }
+
+    /// Set pending task ID
+    pub fn with_pending_task(mut self, task_id: impl Into<String>) -> Self {
+        self.pending_task_id = Some(task_id.into());
+        self
+    }
+
+    /// Set worktree path
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl DecisionSituation for UncommittedChangesSituation {
+    fn situation_type(&self) -> SituationType {
+        uncommitted_changes_detected()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "UncommittedChangesSituation"
+    }
+
+    fn requires_human(&self) -> bool {
+        self.analysis.suggested_action == crate::uncommitted_handler::UncommittedAction::RequestHuman
+    }
+
+    fn human_urgency(&self) -> UrgencyLevel {
+        match self.analysis.changes_context {
+            crate::uncommitted_handler::ChangesContext::Temporary => UrgencyLevel::Low,
+            _ => UrgencyLevel::Medium,
+        }
+    }
+
+    fn available_actions(&self) -> Vec<ActionType> {
+        vec![
+            crate::builtin_actions::commit_changes(),
+            crate::builtin_actions::stash_changes(),
+            crate::builtin_actions::discard_changes(),
+            crate::builtin_actions::request_human(),
+        ]
+    }
+
+    fn to_prompt_text(&self) -> String {
+        format!(
+            "Uncommitted changes detected:\n\
+             Files: {}\n\
+             Context: {}\n\
+             Value: {}\n\
+             Suggested: {}",
+            self.git_state.uncommitted_files.len(),
+            self.analysis.changes_context,
+            if self.analysis.is_valuable {
+                "valuable"
+            } else {
+                "low value"
+            },
+            self.analysis.suggested_action
+        )
     }
 
     fn clone_boxed(&self) -> Box<dyn DecisionSituation> {

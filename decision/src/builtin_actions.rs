@@ -70,6 +70,18 @@ pub fn prepare_task_start() -> ActionType {
     ActionType::new("prepare_task_start")
 }
 
+pub fn commit_changes() -> ActionType {
+    ActionType::new("commit_changes")
+}
+
+pub fn stash_changes() -> ActionType {
+    ActionType::new("stash_changes")
+}
+
+pub fn discard_changes() -> ActionType {
+    ActionType::new("discard_changes")
+}
+
 /// Action: Wake up from resting state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakeUpAction;
@@ -97,6 +109,162 @@ impl DecisionAction for WakeUpAction {
 
     fn to_prompt_format(&self) -> String {
         "WakeUp".to_string()
+    }
+
+    fn serialize_params(&self) -> String {
+        "{}".to_string()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Commit uncommitted changes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitChangesAction {
+    /// Commit message
+    pub commit_message: String,
+    /// Whether this is a WIP commit
+    pub is_wip: bool,
+    /// Worktree path
+    pub worktree_path: Option<String>,
+}
+
+impl CommitChangesAction {
+    pub fn new(commit_message: impl Into<String>) -> Self {
+        Self {
+            commit_message: commit_message.into(),
+            is_wip: false,
+            worktree_path: None,
+        }
+    }
+
+    pub fn with_wip(mut self, is_wip: bool) -> Self {
+        self.is_wip = is_wip;
+        self
+    }
+
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl DecisionAction for CommitChangesAction {
+    fn action_type(&self) -> ActionType {
+        commit_changes()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "CommitChangesAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        if self.is_wip {
+            format!("Commit (WIP): {}", self.commit_message)
+        } else {
+            format!("Commit: {}", self.commit_message)
+        }
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Stash uncommitted changes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashChangesAction {
+    /// Stash description
+    pub description: String,
+    /// Whether to include untracked files
+    pub include_untracked: bool,
+    /// Worktree path
+    pub worktree_path: Option<String>,
+}
+
+impl StashChangesAction {
+    pub fn new(description: impl Into<String>) -> Self {
+        Self {
+            description: description.into(),
+            include_untracked: true,
+            worktree_path: None,
+        }
+    }
+
+    pub fn with_include_untracked(mut self, include: bool) -> Self {
+        self.include_untracked = include;
+        self
+    }
+
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl DecisionAction for StashChangesAction {
+    fn action_type(&self) -> ActionType {
+        stash_changes()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "StashChangesAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        format!("Stash: {}", self.description)
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
+/// Action: Discard uncommitted changes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscardChangesAction {
+    /// Worktree path
+    pub worktree_path: Option<String>,
+}
+
+impl DiscardChangesAction {
+    pub fn new() -> Self {
+        Self { worktree_path: None }
+    }
+
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl Default for DiscardChangesAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DecisionAction for DiscardChangesAction {
+    fn action_type(&self) -> ActionType {
+        discard_changes()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "DiscardChangesAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        "Discard all uncommitted changes".to_string()
     }
 
     fn serialize_params(&self) -> String {
@@ -780,6 +948,21 @@ fn deserialize_stop_if_complete(params: &str) -> Option<Box<dyn DecisionAction>>
     Some(Box::new(action))
 }
 
+fn deserialize_commit_changes(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: CommitChangesAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
+fn deserialize_stash_changes(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: StashChangesAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
+fn deserialize_discard_changes(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: DiscardChangesAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
 pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(SelectOptionAction::default()));
     registry.register(Box::new(ReflectAction::default()));
@@ -790,6 +973,9 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(CustomInstructionAction::default()));
     registry.register(Box::new(ContinueAllTasksAction::default()));
     registry.register(Box::new(StopIfCompleteAction::default()));
+    registry.register(Box::new(CommitChangesAction::new("")));
+    registry.register(Box::new(StashChangesAction::new("")));
+    registry.register(Box::new(DiscardChangesAction::default()));
 
     // Register parsers
     registry.register_parser(select_option(), SelectOptionAction::parse);
@@ -804,6 +990,9 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register_deserializer(custom_instruction(), deserialize_custom_instruction);
     registry.register_deserializer(continue_all_tasks(), deserialize_continue_all_tasks);
     registry.register_deserializer(stop_if_complete(), deserialize_stop_if_complete);
+    registry.register_deserializer(commit_changes(), deserialize_commit_changes);
+    registry.register_deserializer(stash_changes(), deserialize_stash_changes);
+    registry.register_deserializer(discard_changes(), deserialize_discard_changes);
 }
 
 #[cfg(test)]
