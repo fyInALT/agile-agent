@@ -149,7 +149,7 @@ pub struct ProviderProfile {
 
 Syntax: `${ENV_VAR_NAME}`
 - Interpolation happens at profile resolution time
-- Missing env vars cause resolution error
+- Missing env vars are left as literal `${VAR}` (no error)
 - Only ${} syntax supported (not $VAR or ${VAR:-default})
 
 ### TR-4: Profile Resolution Flow

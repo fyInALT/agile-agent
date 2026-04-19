@@ -69,6 +69,8 @@ Key docs:
 - `codex` via an app-server stdio bridge
 - `mock` for local development, tests, and headless fallback
 
+**Provider Profiles**: Configure different LLM backends using named profiles. See [docs/profile-configuration.md](docs/profile-configuration.md) for details.
+
 Default provider selection order:
 
 1. `claude`
@@ -92,6 +94,7 @@ Session continuity is reused when available:
 - headless autonomous loop via `cargo run -p agent-cli -- run-loop ...`
 - agent and workplace inspection via `cargo run -p agent-cli -- agent ...` and `cargo run -p agent-cli -- workplace current`
 - decision request inspection via `cargo run -p agent-cli -- decision ...`
+- profile management via `cargo run -p agent-cli -- profile list [--verbose]`
 - structured environment probing via `cargo run -p agent-cli -- doctor` and `cargo run -p agent-cli -- probe --json`
 
 Current CLI limitations:
