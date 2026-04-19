@@ -184,6 +184,8 @@ pub struct DecisionAgentSlot {
     decision_count: u64,
     /// Error count for monitoring
     error_count: u64,
+    /// Profile ID for decision layer (optional)
+    profile_id: Option<String>,
 }
 
 impl std::fmt::Debug for DecisionAgentSlot {
@@ -197,6 +199,7 @@ impl std::fmt::Debug for DecisionAgentSlot {
             .field("cwd", &self.cwd)
             .field("decision_count", &self.decision_count)
             .field("error_count", &self.error_count)
+            .field("profile_id", &self.profile_id)
             .finish()
     }
 }
@@ -254,6 +257,7 @@ impl DecisionAgentSlot {
             last_activity: Instant::now(),
             decision_count: 0,
             error_count: 0,
+            profile_id: None,
         }
     }
 
@@ -285,6 +289,21 @@ impl DecisionAgentSlot {
     /// Get error count
     pub fn error_count(&self) -> u64 {
         self.error_count
+    }
+
+    /// Get profile ID
+    pub fn profile_id(&self) -> Option<&String> {
+        self.profile_id.as_ref()
+    }
+
+    /// Set profile ID
+    pub fn set_profile_id(&mut self, id: String) {
+        self.profile_id = Some(id);
+    }
+
+    /// Check if agent has a profile set
+    pub fn has_profile(&self) -> bool {
+        self.profile_id.is_some()
     }
 
     /// Check if agent is active (thinking or responding)
