@@ -373,6 +373,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         branch,
                         worktree_path: _,
                     } => {
+                        state.set_decision_status(Some("prepared".to_string()));
                         state.app_mut().push_status_message(format!(
                             "🧠 {}: task prepared (branch: {})",
                             agent_id.as_str(),
@@ -380,6 +381,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         ));
                     }
                     agent_core::agent_pool::DecisionExecutionResult::PreparationFailed { reason } => {
+                        state.set_decision_status(Some("prep-fail".to_string()));
                         state.app_mut().push_status_message(format!(
                             "⚠️ {}: preparation failed ({})",
                             agent_id.as_str(),
