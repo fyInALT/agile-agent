@@ -14,6 +14,7 @@ use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
 use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
 use crate::logging;
 use crate::provider::{ProviderEvent, ProviderKind};
+use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, get_effective_profile, AgentType as ProfileAgentType};
 use crate::worktree_manager::{
     WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
 };
@@ -332,6 +333,8 @@ pub struct AgentPool {
     worktree_manager: Option<WorktreeManager>,
     /// Worktree state store for persistence
     worktree_state_store: Option<WorktreeStateStore>,
+    /// Provider profile store (optional, for profile-based agent creation)
+    profile_store: Option<ProfileStore>,
 }
 
 impl std::fmt::Debug for AgentPool {
@@ -368,6 +371,7 @@ impl AgentPool {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
+            profile_store: None,
         }
     }
 
@@ -393,6 +397,7 @@ impl AgentPool {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
+            profile_store: None,
         }
     }
 
@@ -414,6 +419,7 @@ impl AgentPool {
             cwd,
             worktree_manager: None,
             worktree_state_store: None,
+            profile_store: None,
         }
     }
 
@@ -466,6 +472,7 @@ impl AgentPool {
             cwd: repo_root,
             worktree_manager: Some(worktree_manager),
             worktree_state_store: Some(worktree_state_store),
+            profile_store: None,
         })
     }
 
@@ -601,6 +608,107 @@ impl AgentPool {
         Ok(agent_id)
     }
 
+    /// Load provider profiles from persistence
+    ///
+    /// Loads merged profiles (global + workplace override).
+    pub fn load_profiles(&mut self, persistence: &ProfilePersistence) -> anyhow::Result<()> {
+        let store = persistence.load_merged()?;
+        self.profile_store = Some(store);
+        logging::debug_event(
+            "pool.profile.load",
+            "loaded provider profiles",
+            serde_json::json!({
+                "profile_count": self.profile_store.as_ref().map(|s| s.profile_count()).unwrap_or(0),
+            }),
+        );
+        Ok(())
+    }
+
+    /// Set profile store directly (for testing or custom configuration)
+    pub fn set_profile_store(&mut self, store: ProfileStore) {
+        self.profile_store = Some(store);
+    }
+
+    /// Get the profile store (if loaded)
+    pub fn profile_store(&self) -> Option<&ProfileStore> {
+        self.profile_store.as_ref()
+    }
+
+    /// Spawn a new agent using a specific provider profile
+    ///
+    /// The profile defines the CLI type and environment configuration.
+    pub fn spawn_agent_with_profile(
+        &mut self,
+        profile_id: &ProfileId,
+    ) -> Result<AgentId, crate::provider_profile::ProfileError> {
+        let store = self.profile_store.as_ref()
+            .ok_or(crate::provider_profile::ProfileError::NoProfileStore)?;
+
+        let profile = get_effective_profile(store, Some(profile_id), ProfileAgentType::Work)?;
+
+        // Resolve profile to get ProviderKind
+        let provider_kind = profile.base_cli.to_provider_kind()
+            .ok_or_else(|| crate::provider_profile::ProfileError::UnsupportedCliType(
+                profile.base_cli.label().to_string()
+            ))?;
+
+        if !self.can_spawn() {
+            logging::debug_event(
+                "pool.agent.spawn_profile.failed",
+                "failed to spawn agent with profile - pool is full",
+                serde_json::json!({
+                    "reason": "pool_full",
+                    "profile_id": profile_id,
+                }),
+            );
+            return Err(crate::provider_profile::ProfileError::PersistenceError(
+                "Agent pool is full".to_string()
+            ));
+        }
+
+        let agent_id = self.generate_agent_id();
+        let codename = Self::generate_codename(self.next_agent_index - 1);
+        let provider_type = ProviderType::from_provider_kind(provider_kind);
+
+        let mut slot = AgentSlot::new(agent_id.clone(), codename.clone(), provider_type);
+        slot.set_profile_id(profile_id.clone());
+
+        self.slots.push(slot);
+
+        logging::debug_event(
+            "pool.agent.spawn_profile",
+            "spawned new agent with profile",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "codename": codename.as_str(),
+                "profile_id": profile_id,
+                "provider_type": provider_type.label(),
+                "pool_size": self.slots.len(),
+            }),
+        );
+
+        // Focus on the newly spawned agent if this is the first one
+        if self.slots.len() == 1 {
+            self.focused_slot = 0;
+        }
+
+        // Spawn decision agent for this work agent (if provider supports it)
+        if provider_kind != ProviderKind::Mock {
+            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+                logging::warn_event(
+                    "pool.agent.decision_agent_failed",
+                    "failed to spawn decision agent for work agent",
+                    serde_json::json!({
+                        "agent_id": agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
+            }
+        }
+
+        Ok(agent_id)
+    }
+
     /// Spawn a new agent with an isolated worktree workspace
     ///
     /// Creates a new git worktree for the agent and spawns the agent
@@ -616,21 +724,71 @@ impl AgentPool {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
+        // Use internal helper without profile
+        self.spawn_agent_with_worktree_internal(provider_kind, branch_name, task_id, None)
+    }
+
+    /// Spawn a new agent with worktree and a specific provider profile
+    ///
+    /// Creates a new git worktree for the agent using the specified profile.
+    pub fn spawn_agent_with_worktree_and_profile(
+        &mut self,
+        profile_id: &ProfileId,
+        branch_name: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<AgentId, AgentPoolWorktreeError> {
+        // Check worktree manager is available first
+        if self.worktree_manager.is_none() || self.worktree_state_store.is_none() {
+            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
+        }
+
+        // Check profile store is loaded
+        let store = self.profile_store.as_ref()
+            .ok_or_else(|| AgentPoolWorktreeError::StateStoreError(
+                "Profile store not loaded".to_string()
+            ))?;
+
+        let profile = get_effective_profile(store, Some(profile_id), ProfileAgentType::Work)
+            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
+
+        // Resolve profile to get ProviderKind
+        let provider_kind = profile.base_cli.to_provider_kind()
+            .ok_or_else(|| AgentPoolWorktreeError::StateStoreError(
+                format!("CLI type '{}' not supported", profile.base_cli.label())
+            ))?;
+
+        // Use existing spawn_agent_with_worktree logic with resolved provider_kind
+        let agent_id = self.spawn_agent_with_worktree_internal(
+            provider_kind,
+            branch_name,
+            task_id,
+            Some(profile_id.clone()),
+        )?;
+
+        Ok(agent_id)
+    }
+
+    /// Internal helper for spawning agent with worktree (shared logic)
+    fn spawn_agent_with_worktree_internal(
+        &mut self,
+        provider_kind: ProviderKind,
+        branch_name: Option<String>,
+        task_id: Option<String>,
+        profile_id: Option<ProfileId>,
+    ) -> Result<AgentId, AgentPoolWorktreeError> {
+        // This is the core logic extracted from spawn_agent_with_worktree
         // Check if pool has capacity
         if !self.can_spawn() {
             return Err(AgentPoolWorktreeError::PoolFull);
         }
 
-        // Generate agent ID (this needs mutable borrow)
         let agent_id = self.generate_agent_id();
         let codename = Self::generate_codename(self.next_agent_index - 1);
         let provider_type = ProviderType::from_provider_kind(provider_kind);
-
-        // Generate worktree ID and branch name
         let worktree_id = format!("wt-{}", agent_id.as_str());
         let actual_branch = branch_name.unwrap_or_else(|| format!("agent/{}", agent_id.as_str()));
 
-        // Now get worktree_manager and state_store (immutable borrows)
+        // Get worktree_manager and state_store (immutable borrows)
         let worktree_manager = self.worktree_manager.as_ref().unwrap();
         let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
 
@@ -666,13 +824,16 @@ impl AgentPool {
             .save(agent_id.as_str(), &worktree_state)
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
 
-        // Create agent slot with worktree
+        // Create agent slot with worktree and profile
         let mut slot = AgentSlot::new(agent_id.clone(), codename.clone(), provider_type);
         slot.set_worktree(
             worktree_info.path.clone(),
             Some(actual_branch.clone()),
             worktree_id.clone(),
         );
+        if let Some(ref pid) = profile_id {
+            slot.set_profile_id(pid.clone());
+        }
 
         self.slots.push(slot);
 
@@ -685,6 +846,7 @@ impl AgentPool {
                 "worktree_id": worktree_id,
                 "branch": actual_branch,
                 "path": worktree_info.path.to_string_lossy(),
+                "profile_id": profile_id,
                 "pool_size": self.slots.len(),
             }),
         );
@@ -695,7 +857,6 @@ impl AgentPool {
         }
 
         // Spawn decision agent for this work agent (if provider supports it)
-        // All non-Mock agents should have decision layer support
         if provider_kind != ProviderKind::Mock {
             if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                 logging::warn_event(
