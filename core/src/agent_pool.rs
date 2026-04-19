@@ -5239,4 +5239,53 @@ mod tests {
         let store = pool.profile_store().unwrap();
         assert!(store.has_profile(&"claude-default".to_string()));
     }
+
+    // Decision agent profile tests
+
+    #[test]
+    fn spawn_decision_agent_with_profile_sets_profile_id() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent first (Claude supports decision agents)
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Spawn decision agent with profile
+        let profile_id = "claude-default".to_string();
+        pool.spawn_decision_agent_with_profile_for(&agent_id, Some(&profile_id))
+            .expect("spawn decision agent with profile");
+
+        // Check decision agent has profile
+        let decision_agent = pool.decision_agent_for(&agent_id).expect("decision agent exists");
+        assert!(decision_agent.has_profile());
+        assert_eq!(decision_agent.profile_id(), Some(&profile_id));
+    }
+
+    #[test]
+    fn spawn_decision_agent_without_profile_has_no_profile_id() {
+        let mut pool = make_pool(4);
+
+        // Spawn work agent first (Claude supports decision agents)
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Spawn decision agent without profile
+        pool.spawn_decision_agent_with_profile_for(&agent_id, None)
+            .expect("spawn decision agent");
+
+        // Check decision agent has no profile
+        let decision_agent = pool.decision_agent_for(&agent_id).expect("decision agent exists");
+        assert!(!decision_agent.has_profile());
+        assert_eq!(decision_agent.profile_id(), None);
+    }
+
+    #[test]
+    fn spawn_decision_agent_for_nonexistent_work_agent_fails() {
+        let mut pool = make_pool(4);
+
+        let result = pool.spawn_decision_agent_with_profile_for(
+            &AgentId::new("nonexistent"),
+            Some(&"claude-default".to_string()),
+        );
+
+        assert!(result.is_err());
+    }
 }
