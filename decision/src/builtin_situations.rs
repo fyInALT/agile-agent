@@ -41,6 +41,157 @@ pub fn agent_idle() -> SituationType {
     SituationType::new("agent_idle")
 }
 
+/// Task starting situation - triggered when new task is about to begin
+pub fn task_starting() -> SituationType {
+    SituationType::new("task_starting")
+}
+
+/// Situation: Task starting - needs git preparation before work begins
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskStartingSituation {
+    /// Task description
+    pub task_description: String,
+
+    /// Task ID from backlog (if available)
+    pub task_id: Option<String>,
+
+    /// Extracted task metadata (branch name, type, etc.)
+    pub task_meta: Option<crate::task_metadata::TaskMetadata>,
+
+    /// Current git state (if analyzed)
+    pub git_state: Option<crate::git_state::GitState>,
+
+    /// Whether git state has been analyzed
+    pub git_state_analyzed: bool,
+
+    /// Current worktree path
+    pub worktree_path: Option<String>,
+}
+
+impl TaskStartingSituation {
+    pub fn new(task_description: impl Into<String>) -> Self {
+        Self {
+            task_description: task_description.into(),
+            task_id: None,
+            task_meta: None,
+            git_state: None,
+            git_state_analyzed: false,
+            worktree_path: None,
+        }
+    }
+
+    pub fn with_task_id(mut self, task_id: impl Into<String>) -> Self {
+        self.task_id = Some(task_id.into());
+        self
+    }
+
+    pub fn with_task_meta(mut self, meta: crate::task_metadata::TaskMetadata) -> Self {
+        self.task_meta = Some(meta);
+        self
+    }
+
+    pub fn with_git_state(mut self, state: crate::git_state::GitState) -> Self {
+        self.git_state = Some(state);
+        self.git_state_analyzed = true;
+        self
+    }
+
+    pub fn with_worktree_path(mut self, path: impl Into<String>) -> Self {
+        self.worktree_path = Some(path.into());
+        self
+    }
+}
+
+impl Default for TaskStartingSituation {
+    fn default() -> Self {
+        Self::new("Untitled task")
+    }
+}
+
+impl DecisionSituation for TaskStartingSituation {
+    fn situation_type(&self) -> SituationType {
+        task_starting()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "TaskStartingSituation"
+    }
+
+    fn requires_human(&self) -> bool {
+        // Only if there are git conflicts or critical decisions
+        self.git_state
+            .as_ref()
+            .map(|g| g.has_conflicts)
+            .unwrap_or(false)
+    }
+
+    fn human_urgency(&self) -> UrgencyLevel {
+        if self.git_state
+            .as_ref()
+            .map(|g| g.has_conflicts)
+            .unwrap_or(false)
+        {
+            UrgencyLevel::High
+        } else {
+            UrgencyLevel::Low
+        }
+    }
+
+    fn available_actions(&self) -> Vec<ActionType> {
+        let mut actions = vec![
+            crate::builtin_actions::prepare_task_start(),
+            crate::builtin_actions::create_task_branch(),
+            crate::builtin_actions::rebase_to_main(),
+        ];
+
+        if self.git_state
+            .as_ref()
+            .map(|g| g.has_uncommitted)
+            .unwrap_or(false)
+        {
+            actions.push(crate::builtin_actions::custom_instruction());
+        }
+
+        actions.push(crate::builtin_actions::request_human());
+
+        actions
+    }
+
+    fn to_prompt_text(&self) -> String {
+        let mut text = format!("Task starting: {}", self.task_description);
+
+        if let Some(ref meta) = self.task_meta {
+            text.push_str(&format!("\nBranch: {}", meta.branch_name));
+            text.push_str(&format!("\nType: {}", meta.task_type));
+        }
+
+        if let Some(ref git_state) = self.git_state {
+            text.push_str(&format!("\nCurrent branch: {}", git_state.current_branch));
+            if git_state.has_uncommitted {
+                text.push_str(&format!(
+                    "\nUncommitted changes: {} files",
+                    git_state.uncommitted_files.len()
+                ));
+            }
+            if git_state.has_conflicts {
+                text.push_str("\n⚠️ Conflicts detected!");
+            }
+            if git_state.commits_behind > 0 {
+                text.push_str(&format!(
+                    "\n⚠️ Branch is {} commits behind base",
+                    git_state.commits_behind
+                ));
+            }
+        }
+
+        text
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionSituation> {
+        Box::new(self.clone())
+    }
+}
+
 /// Situation 1: Waiting for choice
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaitingForChoiceSituation {
