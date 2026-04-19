@@ -3348,6 +3348,7 @@ pub enum AgentPoolWorktreeError {
 mod tests {
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
+    use crate::provider_profile::{ProfileStore, ProviderProfile, CliBaseType};
     use crate::worktree_state_store::WorktreeStateStore;
     use agent_decision::{
         BlockedState, HumanDecisionBlocking, HumanSelection, ResourceBlocking,
@@ -5126,7 +5127,9 @@ mod tests {
     #[test]
     fn spawn_agent_with_profile_creates_agent_with_profile_id() {
         let mut pool = make_pool(4);
-        let store = ProfileStore::with_defaults();
+        // Manually create store with Claude profile (not auto-detect)
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         let agent_id = pool
@@ -5142,7 +5145,9 @@ mod tests {
     #[test]
     fn spawn_agent_with_profile_fails_for_nonexistent_profile() {
         let mut pool = make_pool(4);
-        let store = ProfileStore::with_defaults();
+        // Manually create store (even empty store would work for this test)
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         let result = pool.spawn_agent_with_profile(&"nonexistent-profile".to_string());
@@ -5157,7 +5162,9 @@ mod tests {
     #[test]
     fn spawn_agent_with_profile_fails_when_pool_full() {
         let mut pool = make_pool(2);
-        let store = ProfileStore::with_defaults();
+        // Manually create store
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         // Spawn first agent
@@ -5185,7 +5192,7 @@ mod tests {
         let mut store = ProfileStore::new();
         let unsupported_profile = crate::provider_profile::profile::ProviderProfile::new(
             "unsupported".to_string(),
-            crate::provider_profile::types::CliBaseType::OpenCode,
+            CliBaseType::OpenCode,
         );
         store.add_profile(unsupported_profile);
         pool.set_profile_store(store);
