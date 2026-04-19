@@ -111,6 +111,35 @@ pub fn create_default_profile_for_kind(kind: ProviderKind) -> ProviderProfile {
     ProviderProfile::default_for_cli(cli_type)
 }
 
+/// Create ProviderLaunchContext from a profile
+///
+/// This creates a complete launch context from a profile,
+/// ready to be used for provider startup.
+pub fn create_launch_context_from_profile(
+    profile: &ProviderProfile,
+    cwd: std::path::PathBuf,
+) -> Result<crate::launch_config::context::ProviderLaunchContext, ProfileError> {
+    use crate::launch_config::context::ProviderLaunchContext;
+    use crate::provider::SessionHandle;
+
+    let resolved = resolve_profile(profile)?;
+    Ok(ProviderLaunchContext::new(resolved, cwd)
+        .with_opt_session_handle(None::<SessionHandle>))
+}
+
+/// Create ProviderLaunchContext from a profile with optional session handle
+pub fn create_launch_context_from_profile_with_session(
+    profile: &ProviderProfile,
+    cwd: std::path::PathBuf,
+    session_handle: Option<crate::provider::SessionHandle>,
+) -> Result<crate::launch_config::context::ProviderLaunchContext, ProfileError> {
+    use crate::launch_config::context::ProviderLaunchContext;
+
+    let resolved = resolve_profile(profile)?;
+    Ok(ProviderLaunchContext::new(resolved, cwd)
+        .with_opt_session_handle(session_handle))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

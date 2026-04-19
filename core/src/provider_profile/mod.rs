@@ -40,6 +40,6 @@ pub use error::ProfileError;
 pub use interpolate::{interpolate_env_value, interpolate_profile_env};
 pub use persistence::ProfilePersistence;
 pub use profile::{ProviderProfile, ProfileId};
-pub use resolver::{resolve_profile, resolve_profile_by_id, profile_to_launch_input, get_effective_profile, AgentType};
+pub use resolver::{resolve_profile, resolve_profile_by_id, profile_to_launch_input, get_effective_profile, AgentType, create_launch_context_from_profile, create_launch_context_from_profile_with_session};
 pub use store::ProfileStore;
 pub use types::CliBaseType;
