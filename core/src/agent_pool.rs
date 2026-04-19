@@ -5247,7 +5247,9 @@ mod tests {
         )
         .unwrap();
 
-        let store = ProfileStore::with_defaults();
+        // Manually create store with Claude profile
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         let agent_id = pool
@@ -5340,7 +5342,9 @@ mod tests {
     #[test]
     fn get_launch_context_for_agent_with_profile() {
         let mut pool = make_pool(4);
-        let store = ProfileStore::with_defaults();
+        // Manually create store with Claude profile
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         // Spawn agent with profile
@@ -5399,7 +5403,9 @@ mod tests {
     #[test]
     fn get_profile_for_agent_returns_correct_profile() {
         let mut pool = make_pool(4);
-        let store = ProfileStore::with_defaults();
+        // Manually create store with Claude profile
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
         pool.set_profile_store(store);
 
         // Spawn agent with profile
