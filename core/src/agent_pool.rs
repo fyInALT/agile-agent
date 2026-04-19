@@ -5858,6 +5858,41 @@ mod tests {
     }
 
     #[test]
+    fn last_decision_started_at_is_set_after_poll() {
+        let mut pool = make_pool(4);
+
+        // Initially None
+        assert!(pool.last_decision_started_at().is_none());
+
+        // Spawn work agent
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Get the decision mail sender for this agent
+        let mail_sender = pool.decision_mail_senders.get(&agent_id).expect("mail sender exists");
+
+        // Create a decision request
+        let registry = SituationRegistry::new();
+        register_situation_builtins(&registry);
+        let situation = registry.build(SituationType::new("waiting_for_choice"));
+        let context = DecisionContext::new(situation, agent_id.as_str());
+
+        let request = crate::decision_mail::DecisionRequest::new(
+            agent_id.clone(),
+            SituationType::new("waiting_for_choice"),
+            context,
+        );
+
+        // Send request
+        mail_sender.send_request(request).expect("send request");
+
+        // First poll - spawns async thread, should set last_decision_started_at
+        pool.poll_decision_agents();
+
+        // Now should be set
+        assert!(pool.last_decision_started_at().is_some());
+    }
+
+    #[test]
     fn decision_agent_stats_initializes_correctly() {
         let pool = make_pool(4);
 

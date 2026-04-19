@@ -1291,4 +1291,85 @@ mod tests {
         // Decision count should be 2
         assert_eq!(slot.decision_count(), 2);
     }
+
+    #[test]
+    fn test_has_fallback_response_initially_false() {
+        let (slot, _) = make_test_slot();
+
+        // Initially no fallback
+        assert!(!slot.has_fallback_response());
+    }
+
+    #[test]
+    fn test_take_fallback_response_returns_none_when_empty() {
+        let (mut slot, _) = make_test_slot();
+
+        // Should return None when no fallback
+        let result = slot.take_fallback_response();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_has_fallback_response_after_storing() {
+        let (slot, _) = make_test_slot();
+
+        // Manually store a fallback response
+        let response = DecisionResponse::success(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            agent_decision::output::DecisionOutput::new(Vec::new(), "test"),
+        );
+        {
+            let mut guard = slot.pending_fallback_response.lock().unwrap();
+            *guard = Some(response);
+        }
+
+        // Now should have fallback
+        assert!(slot.has_fallback_response());
+    }
+
+    #[test]
+    fn test_take_fallback_response_returns_stored_response() {
+        let (mut slot, _) = make_test_slot();
+
+        // Store a fallback response
+        let response = DecisionResponse::success(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            agent_decision::output::DecisionOutput::new(Vec::new(), "test"),
+        );
+        {
+            let mut guard = slot.pending_fallback_response.lock().unwrap();
+            *guard = Some(response.clone());
+        }
+
+        // Should return the stored response
+        let result = slot.take_fallback_response();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().output().unwrap().reasoning, "test");
+
+        // After taking, should be empty
+        assert!(!slot.has_fallback_response());
+    }
+
+    #[test]
+    fn test_take_fallback_response_can_only_be_called_once() {
+        let (mut slot, _) = make_test_slot();
+
+        // Store a fallback response
+        let response = DecisionResponse::success(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            agent_decision::output::DecisionOutput::new(Vec::new(), "test"),
+        );
+        {
+            let mut guard = slot.pending_fallback_response.lock().unwrap();
+            *guard = Some(response);
+        }
+
+        // First call returns response
+        let result1 = slot.take_fallback_response();
+        assert!(result1.is_some());
+
+        // Second call returns None
+        let result2 = slot.take_fallback_response();
+        assert!(result2.is_none());
+    }
 }
