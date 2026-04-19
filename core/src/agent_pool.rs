@@ -14,7 +14,7 @@ use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
 use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
 use crate::logging;
 use crate::provider::{ProviderEvent, ProviderKind};
-use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, get_effective_profile, AgentType as ProfileAgentType};
+use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};
 use crate::worktree_manager::{
     WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
 };
@@ -2490,6 +2490,45 @@ impl AgentPool {
             .iter()
             .position(|s| s.agent_id() == agent_id)
             .ok_or_else(|| format!("Agent {} not found in pool", agent_id.as_str()))
+    }
+
+    /// Get ProviderLaunchContext for an agent from its profile
+    ///
+    /// Returns None if:
+    /// - Agent doesn't exist
+    /// - Agent has no profile set
+    /// - Profile store is not loaded
+    /// - Profile not found in store
+    ///
+    /// If agent has no profile, falls back to default launch context from ProviderKind.
+    pub fn get_launch_context_for_agent(
+        &self,
+        agent_id: &AgentId,
+        cwd: PathBuf,
+    ) -> Option<crate::launch_config::context::ProviderLaunchContext> {
+        use crate::provider_profile::create_launch_context_from_profile;
+
+        let slot = self.get_slot_by_id(agent_id)?;
+
+        // If agent has a profile, use it
+        if let Some(profile_id) = slot.profile_id() {
+            let store = self.profile_store.as_ref()?;
+            let profile = store.get_profile(profile_id)?;
+
+            return create_launch_context_from_profile(profile, cwd).ok();
+        }
+
+        // Fallback: create context from ProviderKind
+        let provider_kind = slot.provider_type().to_provider_kind()?;
+        crate::launch_config::context::ProviderLaunchContext::from_provider(provider_kind, cwd).ok()
+    }
+
+    /// Get resolved profile for an agent (for inspection/debugging)
+    pub fn get_profile_for_agent(&self, agent_id: &AgentId) -> Option<&ProviderProfile> {
+        let slot = self.get_slot_by_id(agent_id)?;
+        let profile_id = slot.profile_id()?;
+        let store = self.profile_store.as_ref()?;
+        store.get_profile(profile_id)
     }
 
     /// Assign a task to an idle agent
@@ -5287,5 +5326,94 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    // Launch context tests
+
+    #[test]
+    fn get_launch_context_for_agent_with_profile() {
+        let mut pool = make_pool(4);
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        // Spawn agent with profile
+        let agent_id = pool
+            .spawn_agent_with_profile(&"claude-default".to_string())
+            .expect("spawn with profile");
+
+        // Get launch context
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let context = pool.get_launch_context_for_agent(&agent_id, cwd.clone());
+        assert!(context.is_some());
+
+        let ctx = context.unwrap();
+        assert_eq!(ctx.provider(), ProviderKind::Claude);
+        assert_eq!(ctx.cwd, cwd);
+    }
+
+    #[test]
+    fn get_launch_context_for_agent_without_profile_fallback() {
+        let mut pool = make_pool(4);
+
+        // Spawn agent without profile (using ProviderKind directly)
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn agent");
+
+        // Get launch context (should fallback to default)
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let context = pool.get_launch_context_for_agent(&agent_id, cwd.clone());
+        assert!(context.is_some());
+
+        let ctx = context.unwrap();
+        assert_eq!(ctx.provider(), ProviderKind::Claude);
+    }
+
+    #[test]
+    fn get_launch_context_for_nonexistent_agent_returns_none() {
+        let pool = make_pool(4);
+
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let context = pool.get_launch_context_for_agent(&AgentId::new("nonexistent"), cwd);
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn get_launch_context_for_agent_without_profile_store_returns_fallback() {
+        let mut pool = make_pool(4);
+
+        // Spawn agent with profile but no profile store loaded
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn agent");
+
+        // Should still return fallback context
+        let cwd = std::path::PathBuf::from("/tmp/test");
+        let context = pool.get_launch_context_for_agent(&agent_id, cwd);
+        assert!(context.is_some());
+    }
+
+    #[test]
+    fn get_profile_for_agent_returns_correct_profile() {
+        let mut pool = make_pool(4);
+        let store = ProfileStore::with_defaults();
+        pool.set_profile_store(store);
+
+        // Spawn agent with profile
+        let agent_id = pool
+            .spawn_agent_with_profile(&"claude-default".to_string())
+            .expect("spawn with profile");
+
+        // Get profile
+        let profile = pool.get_profile_for_agent(&agent_id);
+        assert!(profile.is_some());
+        assert_eq!(profile.unwrap().id, "claude-default");
+    }
+
+    #[test]
+    fn get_profile_for_agent_without_profile_returns_none() {
+        let mut pool = make_pool(4);
+
+        // Spawn agent without profile
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn agent");
+
+        let profile = pool.get_profile_for_agent(&agent_id);
+        assert!(profile.is_none());
     }
 }
