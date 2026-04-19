@@ -23,6 +23,7 @@ pub mod escalation;
 pub mod event;
 pub mod event_aggregator;
 pub mod git_flow_config;
+// pub mod git_flow_executor; // TODO: fix missing WorktreeManager methods
 pub mod global_config;
 pub mod launch_config;
 pub mod llm_caller;
