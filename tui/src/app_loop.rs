@@ -97,7 +97,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     )?;
     let mut state = TuiState::from_session(session);
 
-    // Load provider profiles (global + workplace merged)
+    if let Some(snapshot) = tui_resume_snapshot {
+        state.restore_from_resume_snapshot(snapshot)?;
+        workplace.clear_shutdown_snapshot()?;
+        clear_resume_snapshot(&workplace)?;
+    } else {
+        // Ensure OVERVIEW agent exists on startup (always at index 0)
+        state.ensure_overview_agent();
+    }
+
+    // Load provider profiles (global + workplace merged) after agent_pool is created
     {
         use agent_core::global_config::GlobalConfigStore;
         use agent_core::provider_profile::ProfilePersistence;
@@ -123,15 +132,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 }
             }
         }
-    }
-
-    if let Some(snapshot) = tui_resume_snapshot {
-        state.restore_from_resume_snapshot(snapshot)?;
-        workplace.clear_shutdown_snapshot()?;
-        clear_resume_snapshot(&workplace)?;
-    } else {
-        // Ensure OVERVIEW agent exists on startup (always at index 0)
-        state.ensure_overview_agent();
     }
 
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
