@@ -335,6 +335,19 @@ impl TieredDecisionEngine {
     pub fn reset_reflection_round(&mut self) {
         self.llm_engine.reset_reflection_round();
     }
+
+    /// Get a clone of the engine config
+    ///
+    /// This allows creating a new engine with the same configuration,
+    /// useful for async processing where we need to move ownership.
+    pub fn config(&self) -> TieredEngineConfig {
+        TieredEngineConfig {
+            llm_provider: self.config.llm_provider,
+            llm_config: self.config.llm_config.clone(),
+            use_cli_for_critical: self.config.use_cli_for_critical,
+            fallback_tier: self.config.fallback_tier,
+        }
+    }
 }
 
 /// Tier statistics

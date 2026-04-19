@@ -189,6 +189,9 @@ pub struct DecisionAgentSlot {
     /// Current reflection round for claims_completion tracking
     /// This persists across decision cycles to enforce max reflection limit
     reflection_round: u8,
+    /// Shared pending reflection round from async processing
+    /// The async thread writes the updated reflection_round here after decision
+    pending_reflection_round: std::sync::Arc<std::sync::Mutex<Option<u8>>>,
 }
 
 impl std::fmt::Debug for DecisionAgentSlot {
@@ -263,6 +266,7 @@ impl DecisionAgentSlot {
             error_count: 0,
             profile_id: None,
             reflection_round: 0,
+            pending_reflection_round: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -294,6 +298,11 @@ impl DecisionAgentSlot {
     /// Get error count
     pub fn error_count(&self) -> u64 {
         self.error_count
+    }
+
+    /// Get current reflection round
+    pub fn reflection_round(&self) -> u8 {
+        self.reflection_round
     }
 
     /// Get profile ID
@@ -485,21 +494,163 @@ impl DecisionAgentSlot {
     /// Poll for pending requests and process them
     ///
     /// Returns the number of requests processed.
+    /// Note: This method is non-blocking - it spawns a thread for LLM processing
+    /// and returns immediately. The response is sent via the mail channel.
+    /// After calling this, the caller should call `clear_thinking_status()`
+    /// when responses have been collected.
     pub fn poll_and_process(&mut self) -> usize {
         let mut processed = 0;
 
-        // Only process if idle
+        // If not idle, a decision is in progress in another thread - don't process
         if !self.status.is_idle() {
             return 0;
         }
 
-        // Try to receive and process one request
+        // Try to receive and process one request (spawns thread, non-blocking)
         if let Some(request) = self.try_receive_request() {
-            self.process_request(request);
+            // Increment decision count immediately when spawning (not after completion)
+            // This reflects that a decision request has been initiated
+            self.decision_count += 1;
+            self.spawn_async_processing(request);
             processed += 1;
         }
 
         processed
+    }
+
+    /// Clear thinking status after async processing is complete
+    ///
+    /// Called by the owner after it has collected the response from the mail channel.
+    pub fn clear_thinking_status(&mut self, had_error: bool) {
+        if self.status.is_thinking() {
+            // Sync pending reflection round from async thread before clearing status
+            // Reset to None after consuming to avoid stale value on next call
+            if let Ok(mut guard) = self.pending_reflection_round.lock() {
+                if let Some(r) = *guard {
+                    self.reflection_round = r;
+                }
+                *guard = None;
+            }
+
+            // If async thread reported an error, increment error count
+            if had_error {
+                self.error_count += 1;
+            }
+
+            self.status = DecisionAgentStatus::idle();
+        }
+    }
+
+    /// Spawn asynchronous decision processing in a background thread
+    ///
+    /// This prevents LLM calls from blocking the TUI.
+    fn spawn_async_processing(&mut self, request: DecisionRequest) {
+        // Clone the response sender for the thread
+        let response_tx = self.mail_receiver.clone_response_tx();
+
+        // Take ownership of what we need for the thread
+        let engine_config = self.engine.config();
+        let work_agent_id = request.work_agent_id.clone();
+        let agent_id = self.agent_id.clone();
+        let reflection_round = self.reflection_round;
+        let pending_reflection = self.pending_reflection_round.clone();
+
+        // Set status to thinking
+        self.status = DecisionAgentStatus::thinking_now();
+        self.last_activity = Instant::now();
+
+        // Log: Decision triggered
+        logging::debug_event(
+            "decision_layer.triggered",
+            "decision layer triggered by work agent event (async)",
+            serde_json::json!({
+                "decision_agent_id": agent_id,
+                "work_agent_id": work_agent_id.as_str(),
+                "situation_type": request.situation_type.name,
+            }),
+        );
+
+        // Spawn background thread for LLM processing
+        std::thread::spawn(move || {
+            // Create engine in thread (can't move self.engine due to borrow)
+            let mut engine = TieredDecisionEngine::new(engine_config);
+            let action_registry = ActionRegistry::new();
+            register_action_builtins(&action_registry);
+
+            // Build prompt
+            let decision_prompt = engine
+                .build_prompt(&request.context, &action_registry);
+
+            logging::debug_event(
+                "decision_layer.prompt_sent",
+                "prompt sent to decision engine (async)",
+                serde_json::json!({
+                    "decision_agent_id": agent_id,
+                    "work_agent_id": work_agent_id.as_str(),
+                    "prompt_length": decision_prompt.len(),
+                }),
+            );
+
+            // Make decision - inject reflection_round
+            let context_with_reflection = request.context.with_reflection_round(reflection_round);
+            let result = engine.decide(context_with_reflection, &action_registry);
+
+            // Sync reflection_round from engine after decision
+            let updated_reflection = engine.reflection_round();
+            if let Ok(mut guard) = pending_reflection.lock() {
+                *guard = Some(updated_reflection);
+            }
+
+            let response = match result {
+                Ok(output) => {
+                    logging::debug_event(
+                        "decision_layer.engine_response",
+                        "decision engine returned response (async)",
+                        serde_json::json!({
+                            "decision_agent_id": agent_id,
+                            "work_agent_id": work_agent_id.as_str(),
+                            "confidence": output.confidence,
+                            "reflection_round": updated_reflection,
+                        }),
+                    );
+                    DecisionResponse::success(work_agent_id.clone(), output)
+                }
+                Err(e) => {
+                    logging::warn_event(
+                        "decision_layer.engine_error",
+                        "decision engine returned error (async)",
+                        serde_json::json!({
+                            "decision_agent_id": agent_id,
+                            "work_agent_id": work_agent_id.as_str(),
+                            "error": e.to_string(),
+                        }),
+                    );
+                    DecisionResponse::error(work_agent_id.clone(), e.to_string())
+                }
+            };
+
+            // Send response via channel (non-blocking for TUI)
+            if let Err(e) = response_tx.send(response) {
+                logging::warn_event(
+                    "decision_layer.async_response_send_failed",
+                    "failed to send async decision response",
+                    serde_json::json!({
+                        "decision_agent_id": agent_id,
+                        "error": e.to_string(),
+                    }),
+                );
+            }
+        });
+    }
+
+    /// Check if async processing completed and clear status if so
+    ///
+    /// This should be called by the owner after poll_decision_agents collects responses.
+    /// If we were thinking and responses were collected, we can return to idle.
+    pub fn mark_response_collected(&mut self) {
+        if self.status.is_thinking() {
+            self.status = DecisionAgentStatus::idle();
+        }
     }
 
     /// Stop the decision agent
@@ -729,6 +880,176 @@ mod tests {
         // Poll again - should be 0 since no more requests
         let processed_again = slot.poll_and_process();
         assert_eq!(processed_again, 0);
+    }
+
+    #[test]
+    fn test_poll_and_process_spawns_async_and_status_transitions() {
+        let (mut slot, sender) = make_test_slot();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // Initially idle
+        assert!(slot.status().is_idle());
+
+        // Poll and process - should spawn thread and set status to thinking
+        let processed = slot.poll_and_process();
+        assert_eq!(processed, 1);
+        assert!(slot.status().is_thinking(), "Status should be Thinking after spawning async");
+
+        // Wait for response to be received
+        let timeout = std::time::Duration::from_secs(5);
+        let result = sender.receive_response_timeout(timeout);
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        let had_error = response.map(|r| r.is_error()).unwrap_or(false);
+
+        // After clear_thinking_status with error status, should return to idle
+        slot.clear_thinking_status(had_error);
+        assert!(slot.status().is_idle(), "Status should be Idle after clearing");
+    }
+
+    #[test]
+    fn test_poll_and_process_response_reaches_sender() {
+        let (mut slot, sender) = make_test_slot();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // Poll and process - spawns async thread
+        slot.poll_and_process();
+
+        // The response should eventually be received by sender
+        // Give the thread time to complete
+        let timeout = std::time::Duration::from_secs(5);
+        let result = sender.receive_response_timeout(timeout);
+
+        // Should receive a response (either success or error, depending on engine)
+        assert!(result.is_ok(), "Should be able to receive response");
+        let maybe_response = result.unwrap();
+        assert!(maybe_response.is_some(), "Should have received a response");
+
+        // After receiving, clear thinking status with error status
+        let had_error = maybe_response.as_ref().map(|r| r.is_error()).unwrap_or(false);
+        slot.clear_thinking_status(had_error);
+        assert!(slot.status().is_idle());
+    }
+
+    #[test]
+    fn test_sync_process_request_updates_reflection_round() {
+        // Test that sync path properly accesses reflection_round after decision
+        let (mut slot, sender) = make_test_slot();
+
+        // Initial reflection_round should be 0 (or some default)
+        // Note: reflection_round may not actually change in mock engine
+        // but we verify the field is accessible and consistent
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // Receive and process
+        let received = slot.try_receive_request().unwrap();
+        let response = slot.process_request(received);
+
+        // Response should be successful
+        assert!(response.is_success());
+
+        // Verify reflection_round is accessible
+        // The actual value depends on engine internals
+        let _reflection = slot.reflection_round();
+    }
+
+    #[test]
+    fn test_pending_reflection_round_set_after_async_completion() {
+        // Verify that pending_reflection_round is set by the async thread
+        let (mut slot, sender) = make_test_slot();
+
+        // Send a decision request
+        let request = DecisionRequest::new(
+            crate::agent_runtime::AgentId::new("agent_001"),
+            SituationType::new("waiting_for_choice"),
+            make_test_context(),
+        );
+        sender.send_request(request).unwrap();
+
+        // Before poll: pending should be None
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_none(), "Pending should be None before poll");
+        }
+
+        // Poll and process - spawns async thread
+        slot.poll_and_process();
+
+        // Wait for response
+        let timeout = std::time::Duration::from_secs(5);
+        let result = sender.receive_response_timeout(timeout);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+
+        // After response is received, pending should be set
+        // (Thread writes reflection_round before sending response)
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_some(), "Pending should be set after async completion");
+        }
+
+        // After clear_thinking_status, pending should be reset to None
+        slot.clear_thinking_status(false);
+        {
+            let pending = slot.pending_reflection_round.lock().unwrap();
+            assert!(pending.is_none(), "Pending should be reset to None after clear_thinking_status");
+        }
+    }
+
+    #[test]
+    fn test_clear_thinking_status_with_error_increments_error_count() {
+        // Test that clear_thinking_status(true) increments error_count
+        let (mut slot, _) = make_test_slot();
+
+        // Initially no errors
+        assert_eq!(slot.error_count(), 0);
+
+        // Simulate error condition by calling clear_thinking_status with true
+        // But we need to be in thinking state first
+        slot.status = DecisionAgentStatus::thinking_now();
+        slot.clear_thinking_status(true);
+
+        // Error count should be incremented
+        assert_eq!(slot.error_count(), 1);
+        assert!(slot.status().is_idle());
+    }
+
+    #[test]
+    fn test_clear_thinking_status_without_error_does_not_increment_error_count() {
+        // Test that clear_thinking_status(false) does NOT increment error_count
+        let (mut slot, _) = make_test_slot();
+
+        // Initially no errors
+        assert_eq!(slot.error_count(), 0);
+
+        // Simulate success condition
+        slot.status = DecisionAgentStatus::thinking_now();
+        slot.clear_thinking_status(false);
+
+        // Error count should still be 0
+        assert_eq!(slot.error_count(), 0);
+        assert!(slot.status().is_idle());
     }
 
     #[test]

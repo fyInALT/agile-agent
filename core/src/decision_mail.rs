@@ -300,6 +300,14 @@ impl DecisionMailReceiver {
             .send(response)
             .map_err(|e| format!("Failed to send decision response: {}", e))
     }
+
+    /// Clone the response sender for use in async processing
+    ///
+    /// This allows sending responses from spawned threads without
+    /// blocking the main TUI loop.
+    pub fn clone_response_tx(&self) -> Sender<DecisionResponse> {
+        self.response_tx.clone()
+    }
 }
 
 #[cfg(test)]

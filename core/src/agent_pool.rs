@@ -1704,14 +1704,26 @@ impl AgentPool {
         let mut responses = Vec::new();
 
         for (work_agent_id, decision_agent) in &mut self.decision_agents {
-            // Poll and process any pending requests
+            // Poll and process any pending requests (spawns async threads)
             decision_agent.poll_and_process();
 
             // Try to receive any responses that were generated
+            let mut received_this_poll = false;
+            let mut had_error = false;
             if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
                 while let Some(response) = sender.try_receive_response() {
+                    if response.is_error() {
+                        had_error = true;
+                    }
                     responses.push((work_agent_id.clone(), response));
+                    received_this_poll = true;
                 }
+            }
+
+            // Only clear thinking status if we actually received a response
+            // This prevents premature reset when async thread is still running
+            if received_this_poll {
+                decision_agent.clear_thinking_status(had_error);
             }
         }
 
