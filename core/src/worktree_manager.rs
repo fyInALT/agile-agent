@@ -864,6 +864,507 @@ impl WorktreeManager {
             _ => None,
         }
     }
+
+    // ========================================================================
+    // Git Flow Operations for Task Preparation
+    // ========================================================================
+
+    /// Fetch from origin to update remote tracking branches
+    ///
+    /// This is a prerequisite for sync_base_branch and getting latest remote HEAD.
+    pub fn fetch_origin(&self) -> Result<(), WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.fetch.started",
+            "fetching from origin",
+            serde_json::json!({}),
+        );
+
+        self.run_git_command_internal(&["fetch", "origin", "--quiet"])?;
+
+        logging::debug_event(
+            "git_flow.fetch.completed",
+            "fetch completed successfully",
+            serde_json::json!({}),
+        );
+
+        Ok(())
+    }
+
+    /// Get the remote HEAD commit SHA for a branch
+    ///
+    /// Returns the commit that origin/<branch> points to.
+    pub fn get_remote_head(&self, branch: &str) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+        let output = self.run_git_command_internal(&[
+            "rev-parse",
+            &format!("origin/{}", branch),
+        ])?;
+        Ok(output.trim().to_string())
+    }
+
+    /// Check if local branch is synced with remote
+    ///
+    /// Returns true if local branch HEAD equals remote HEAD.
+    pub fn is_branch_synced(&self, branch: &str) -> Result<bool, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Get local HEAD
+        let local_head = self.run_git_command_internal(&[
+            "rev-parse",
+            &format!("refs/heads/{}", branch),
+        ])?;
+
+        // Get remote HEAD (may not exist for new branches)
+        let remote_result = self.run_git_command_internal(&[
+            "rev-parse",
+            &format!("origin/{}", branch),
+        ]);
+
+        match remote_result {
+            Ok(remote_head) => Ok(local_head.trim() == remote_head.trim()),
+            Err(_) => {
+                // Remote doesn't exist - considered synced for new branches
+                Ok(true)
+            }
+        }
+    }
+
+    /// Sync the base branch by resetting to origin
+    ///
+    /// This updates the local base branch to match remote.
+    /// Should only be called on base branch (main/master).
+    pub fn sync_base_branch(&self, branch: &str) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.sync.started",
+            "syncing base branch",
+            serde_json::json!({"branch": branch}),
+        );
+
+        // First ensure we have fetched
+        self.run_git_command_internal(&["fetch", "origin", "--quiet"])?;
+
+        // Check if we're on the base branch
+        let current_branch = self.run_git_command_internal(&["branch", "--show-current"])?;
+        if current_branch.trim() != branch {
+            // Checkout base branch first
+            self.run_git_command_internal(&["checkout", branch])?;
+        }
+
+        // Reset to origin
+        self.run_git_command_internal(&[
+            "reset",
+            "--hard",
+            &format!("origin/{}", branch),
+        ])?;
+
+        // Get new HEAD
+        let new_head = self.run_git_command_internal(&["rev-parse", "HEAD"])?;
+        let head_sha = new_head.trim().to_string();
+
+        logging::debug_event(
+            "git_flow.sync.completed",
+            "base branch synced",
+            serde_json::json!({"branch": branch, "head": head_sha}),
+        );
+
+        Ok(head_sha)
+    }
+
+    /// Create a feature branch from base branch HEAD
+    ///
+    /// Creates a new branch from the specified base branch.
+    /// Returns the created branch info.
+    pub fn create_feature_branch(
+        &self,
+        branch_name: &str,
+        base_branch: &str,
+    ) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Check if branch already exists
+        if self.branch_exists_internal(branch_name)? {
+            return Err(WorktreeError::BranchAlreadyExists(branch_name.to_string()));
+        }
+
+        logging::debug_event(
+            "git_flow.branch.create.started",
+            "creating feature branch",
+            serde_json::json!({
+                "branch": branch_name,
+                "base": base_branch,
+            }),
+        );
+
+        // Create branch from base
+        self.run_git_command_internal(&[
+            "branch",
+            branch_name,
+            &format!("origin/{}", base_branch),
+        ])?;
+
+        // Get the commit SHA
+        let head = self.run_git_command_internal(&[
+            "rev-parse",
+            branch_name,
+        ])?;
+
+        logging::debug_event(
+            "git_flow.branch.create.completed",
+            "feature branch created",
+            serde_json::json!({
+                "branch": branch_name,
+                "base": base_branch,
+                "head": head.trim(),
+            }),
+        );
+
+        Ok(head.trim().to_string())
+    }
+
+    /// Rebase a branch to the base branch
+    ///
+    /// Returns the new HEAD after rebase, or error with conflict info.
+    pub fn rebase_to_base(
+        &self,
+        branch: &str,
+        base_branch: &str,
+    ) -> Result<RebaseResult, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.rebase.started",
+            "rebasing branch to base",
+            serde_json::json!({"branch": branch, "base": base_branch}),
+        );
+
+        // Checkout the branch
+        self.run_git_command_internal(&["checkout", branch])?;
+
+        // Fetch latest
+        self.run_git_command_internal(&["fetch", "origin", "--quiet"])?;
+
+        // Attempt rebase
+        let rebase_result = self.run_git_command_internal(&[
+            "rebase",
+            &format!("origin/{}", base_branch),
+        ]);
+
+        match rebase_result {
+            Ok(_) => {
+                let new_head = self.run_git_command_internal(&["rev-parse", "HEAD"])?;
+                logging::debug_event(
+                    "git_flow.rebase.completed",
+                    "rebase successful",
+                    serde_json::json!({"branch": branch, "new_head": new_head.trim()}),
+                );
+                Ok(RebaseResult::Success {
+                    new_head: new_head.trim().to_string(),
+                })
+            }
+            Err(e) => {
+                // Check if it's a conflict
+                let status = self.run_git_command_internal(&["status", "--porcelain"])?;
+                let has_conflicts = status.lines().any(|line| line.starts_with("UU") || line.starts_with("AA"));
+
+                if has_conflicts {
+                    // Abort rebase to clean state
+                    self.run_git_command_internal(&["rebase", "--abort"]).ok();
+
+                    logging::warn_event(
+                        "git_flow.rebase.conflict",
+                        "rebase had conflicts, aborted",
+                        serde_json::json!({"branch": branch, "base": base_branch}),
+                    );
+
+                    Ok(RebaseResult::Conflict {
+                        message: "Rebase conflicts detected. Branch restored to pre-rebase state.".to_string(),
+                    })
+                } else {
+                    // Other error
+                    logging::warn_event(
+                        "git_flow.rebase.failed",
+                        "rebase failed",
+                        serde_json::json!({"branch": branch, "error": e.to_string()}),
+                    );
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Stash uncommitted changes with a descriptive message
+    ///
+    /// Returns the stash reference (e.g., "stash@{0}")
+    pub fn stash_changes(&self, worktree_path: &Path, message: &str) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.stash.started",
+            "stashing uncommitted changes",
+            serde_json::json!({"path": worktree_path.to_string_lossy(), "message": message}),
+        );
+
+        // Create stash
+        let output = Command::new("git")
+            .args(["stash", "push", "-m", message])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // "No local changes to save" is not an error
+            if stderr.contains("No local changes") {
+                return Ok("none".to_string());
+            }
+            return Err(WorktreeError::GitCommandFailed(stderr.to_string()));
+        }
+
+        // Get the stash ref
+        let stash_list = Command::new("git")
+            .args(["stash", "list"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        let list_output = String::from_utf8_lossy(&stash_list.stdout);
+        let stash_ref = list_output.lines().next()
+            .map(|line| line.split(':').next().unwrap_or("stash@{0}"))
+            .unwrap_or("stash@{0}");
+
+        logging::debug_event(
+            "git_flow.stash.completed",
+            "changes stashed",
+            serde_json::json!({"stash_ref": stash_ref}),
+        );
+
+        Ok(stash_ref.to_string())
+    }
+
+    /// Pop the most recent stash
+    pub fn stash_pop(&self, worktree_path: &Path) -> Result<(), WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.stash.pop.started",
+            "popping stash",
+            serde_json::json!({"path": worktree_path.to_string_lossy()}),
+        );
+
+        let output = Command::new("git")
+            .args(["stash", "pop"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(WorktreeError::GitCommandFailed(stderr.to_string()));
+        }
+
+        logging::debug_event(
+            "git_flow.stash.pop.completed",
+            "stash restored",
+            serde_json::json!({}),
+        );
+
+        Ok(())
+    }
+
+    /// Get detailed uncommitted changes information
+    ///
+    /// Returns list of files with their status.
+    pub fn get_uncommitted_info(&self, worktree_path: &Path) -> Result<UncommittedChangesInfo, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitCommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        let status_output = String::from_utf8_lossy(&output.stdout);
+        let files: Vec<UncommittedFile> = status_output
+            .lines()
+            .filter_map(|line| {
+                let status = line.chars().next()?;
+                let file_path = line[3..].to_string();
+                Some(UncommittedFile {
+                    path: file_path,
+                    status: FileChangeStatus::from_git_status(status),
+                })
+            })
+            .collect();
+
+        // Calculate flags before moving files
+        let has_staged = files.iter().any(|f| f.status.is_staged());
+        let has_unstaged = files.iter().any(|f| f.status.is_unstaged());
+        let has_untracked = files.iter().any(|f| f.status == FileChangeStatus::Untracked);
+
+        Ok(UncommittedChangesInfo {
+            files,
+            has_staged,
+            has_unstaged,
+            has_untracked,
+        })
+    }
+
+    /// Delete a merged branch
+    ///
+    /// Only deletes branches that have been merged to base.
+    pub fn delete_merged_branch(&self, branch: &str, base_branch: &str) -> Result<bool, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Check if branch is merged
+        let merge_check = self.run_git_command_internal(&[
+            "branch",
+            "--merged",
+            base_branch,
+            "--list",
+            branch,
+        ])?;
+
+        if !merge_check.trim().contains(branch) {
+            logging::warn_event(
+                "git_flow.branch.delete.not_merged",
+                "branch not merged, refusing to delete",
+                serde_json::json!({"branch": branch, "base": base_branch}),
+            );
+            return Ok(false);
+        }
+
+        logging::debug_event(
+            "git_flow.branch.delete.started",
+            "deleting merged branch",
+            serde_json::json!({"branch": branch}),
+        );
+
+        self.run_git_command_internal(&["branch", "-d", branch])?;
+
+        logging::debug_event(
+            "git_flow.branch.delete.completed",
+            "branch deleted",
+            serde_json::json!({"branch": branch}),
+        );
+
+        Ok(true)
+    }
+}
+
+/// Result of a rebase operation
+#[derive(Debug, Clone)]
+pub enum RebaseResult {
+    /// Rebase completed successfully
+    Success { new_head: String },
+    /// Rebase had conflicts (aborted)
+    Conflict { message: String },
+}
+
+/// Information about uncommitted changes
+#[derive(Debug, Clone)]
+pub struct UncommittedChangesInfo {
+    /// List of changed files
+    pub files: Vec<UncommittedFile>,
+    /// Has staged changes
+    pub has_staged: bool,
+    /// Has unstaged changes
+    pub has_unstaged: bool,
+    /// Has untracked files
+    pub has_untracked: bool,
+}
+
+impl UncommittedChangesInfo {
+    /// Check if there are any changes
+    pub fn has_changes(&self) -> bool {
+        !self.files.is_empty()
+    }
+
+    /// Get count of changed files
+    pub fn count(&self) -> usize {
+        self.files.len()
+    }
+}
+
+/// Information about a single uncommitted file
+#[derive(Debug, Clone)]
+pub struct UncommittedFile {
+    /// File path
+    pub path: String,
+    /// Change status
+    pub status: FileChangeStatus,
+}
+
+/// Git file change status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileChangeStatus {
+    /// Staged for addition
+    Added,
+    /// Staged for modification
+    ModifiedStaged,
+    /// Modified but not staged
+    ModifiedUnstaged,
+    /// Staged for deletion
+    DeletedStaged,
+    /// Deleted but not staged
+    DeletedUnstaged,
+    /// Renamed
+    Renamed,
+    /// Copied
+    Copied,
+    /// Untracked file
+    Untracked,
+    /// Both modified (conflict)
+    BothModified,
+    /// Unknown status
+    Unknown,
+}
+
+impl FileChangeStatus {
+    /// Convert git status character to enum
+    fn from_git_status(status: char) -> Self {
+        match status {
+            'A' => FileChangeStatus::Added,
+            'M' => FileChangeStatus::ModifiedStaged,
+            'm' => FileChangeStatus::ModifiedUnstaged,
+            'D' => FileChangeStatus::DeletedStaged,
+            'd' => FileChangeStatus::DeletedUnstaged,
+            'R' => FileChangeStatus::Renamed,
+            'C' => FileChangeStatus::Copied,
+            '?' => FileChangeStatus::Untracked,
+            'U' => FileChangeStatus::BothModified,
+            _ => FileChangeStatus::Unknown,
+        }
+    }
+
+    /// Check if this is a staged change
+    pub fn is_staged(&self) -> bool {
+        matches!(
+            self,
+            FileChangeStatus::Added
+                | FileChangeStatus::ModifiedStaged
+                | FileChangeStatus::DeletedStaged
+                | FileChangeStatus::Renamed
+                | FileChangeStatus::Copied
+        )
+    }
+
+    /// Check if this is an unstaged change
+    pub fn is_unstaged(&self) -> bool {
+        matches!(
+            self,
+            FileChangeStatus::ModifiedUnstaged | FileChangeStatus::DeletedUnstaged
+        )
+    }
 }
 
 #[cfg(test)]

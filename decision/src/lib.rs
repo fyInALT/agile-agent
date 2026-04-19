@@ -93,6 +93,9 @@ pub mod task_metrics;
 // Sprint 15: YAML Configuration Loader
 pub mod yaml_loader;
 
+// Git Flow Task Preparation
+pub mod task_metadata;
+
 // Re-export core types
 pub use error::*;
 pub use situation::*;
@@ -196,3 +199,6 @@ pub use task_metrics::TaskMetrics;
 
 // Sprint 15: YAML Configuration Loader
 pub use yaml_loader::{YamlLoadError, load_process_from_yaml, save_process_to_yaml};
+
+// Git Flow Task Preparation
+pub use task_metadata::{TaskMetadata, TaskType, generate_branch_name};

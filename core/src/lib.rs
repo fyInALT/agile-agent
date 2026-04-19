@@ -22,6 +22,7 @@ pub mod decision_mail;
 pub mod escalation;
 pub mod event;
 pub mod event_aggregator;
+pub mod git_flow_config;
 pub mod global_config;
 pub mod launch_config;
 pub mod llm_caller;
