@@ -1256,6 +1256,45 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
                 return None;
             };
 
+            // In multi-agent mode, assign task to an idle agent to trigger git flow preparation
+            if state.is_multi_agent_mode() {
+                let task_id = task.id.clone();
+                // Use a scope to ensure only one mutable borrow at a time
+                // by projecting the session reference directly
+                {
+                    let backlog_ref = &mut state.session.app.backlog;
+                    if let Some(pool) = state.agent_pool.as_mut() {
+                        if let Some(idle_agent_id) = pool.find_idle_agent_id() {
+                            // Assign task to agent via assign_task_with_backlog to trigger trigger_task_preparation
+                            if let Err(e) = pool.assign_task_with_backlog(
+                                &idle_agent_id,
+                                agent_core::agent_slot::TaskId::new(&task_id),
+                                backlog_ref,
+                            ) {
+                                logging::warn_event(
+                                    "tui.task.assign_failed",
+                                    "failed to assign task to agent",
+                                    serde_json::json!({
+                                        "task_id": task_id,
+                                        "agent_id": idle_agent_id.as_str(),
+                                        "error": e,
+                                    }),
+                                );
+                            } else {
+                                logging::debug_event(
+                                    "tui.task.assigned",
+                                    "task assigned to agent for git flow preparation",
+                                    serde_json::json!({
+                                        "task_id": task_id,
+                                        "agent_id": idle_agent_id.as_str(),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             state
                 .app_mut()
                 .push_status_message(format!("running task: {}", task.id));
