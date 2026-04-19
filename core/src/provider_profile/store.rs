@@ -237,7 +237,13 @@ mod tests {
     #[test]
     fn test_profile_store_with_detected_clis_always_has_mock() {
         let store = ProfileStore::with_detected_clis();
+        // Mock is ALWAYS included regardless of other CLI availability
         assert!(store.has_profile(&"mock-default".to_string()));
+        // Mock profile should be properly configured
+        let mock_profile = store.get_profile(&"mock-default".to_string()).unwrap();
+        assert_eq!(mock_profile.base_cli, CliBaseType::Mock);
+        // display_name includes "(Default)" suffix
+        assert_eq!(mock_profile.display_name, "Mock Provider (Default)");
     }
 
     #[test]
@@ -246,16 +252,119 @@ mod tests {
         // Default profile IDs should exist in store
         assert!(store.has_profile(&store.default_work_profile_id().clone()));
         assert!(store.has_profile(&store.default_decision_profile_id().clone()));
+        // Work and decision defaults should be the same
+        assert_eq!(
+            store.default_work_profile_id(),
+            store.default_decision_profile_id()
+        );
     }
 
     #[test]
-    fn test_available_clis_detects_correctly() {
+    fn test_profile_store_defaults_are_valid_profiles() {
+        let store = ProfileStore::with_detected_clis();
+        // Default profiles must exist and be retrievable
+        let work_default = store.get_default_work_profile();
+        assert!(work_default.is_ok());
+        let decision_default = store.get_default_decision_profile();
+        assert!(decision_default.is_ok());
+        // Both defaults should point to same profile
+        assert_eq!(
+            work_default.unwrap().id,
+            decision_default.unwrap().id
+        );
+    }
+
+    #[test]
+    fn test_available_clis_returns_only_available() {
         let available = ProfileStore::available_clis();
-        // Result depends on what's installed on the system
-        // Just check it doesn't crash and returns a vec
+        // All returned CLIs should actually be available
         for cli in &available {
             assert!(cli.is_available());
         }
+        // Mock should NOT be in available_clis (it's special)
+        assert!(!available.contains(&CliBaseType::Mock));
+    }
+
+    #[test]
+    fn test_available_clis_subset_of_detectable() {
+        let available = ProfileStore::available_clis();
+        let detectable = CliBaseType::detectable();
+        // Available should be subset of detectable
+        for cli in &available {
+            assert!(detectable.contains(cli));
+        }
+    }
+
+    #[test]
+    fn test_profile_store_no_cli_tools_fallback_to_mock() {
+        // Create a store manually without any real CLI profiles
+        let mut store = ProfileStore::new();
+        // Only add Mock (simulate no CLI tools available)
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Mock));
+        store.default_work_profile = "mock-default".to_string();
+        store.default_decision_profile = "mock-default".to_string();
+
+        // Verify fallback behavior
+        assert_eq!(store.profile_count(), 1);
+        assert_eq!(store.default_work_profile_id(), "mock-default");
+        assert_eq!(store.default_decision_profile_id(), "mock-default");
+    }
+
+    #[test]
+    fn test_profile_store_explicit_profiles_override_detected() {
+        // Test that manually added profiles work correctly
+        let mut store = ProfileStore::new();
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+        store.add_profile(ProviderProfile::default_for_cli(CliBaseType::Codex));
+        store.set_default_work_profile("claude-default".to_string()).unwrap();
+        store.set_default_decision_profile("codex-default".to_string()).unwrap();
+
+        // Verify explicit setup
+        assert_eq!(store.profile_count(), 2);
+        assert_eq!(store.default_work_profile_id(), "claude-default");
+        assert_eq!(store.default_decision_profile_id(), "codex-default");
+    }
+
+    #[test]
+    fn test_profile_store_empty_new_has_invalid_default() {
+        // ProfileStore::new() creates empty store with placeholder defaults
+        let store = ProfileStore::new();
+        // Default IDs are set but profiles don't exist
+        assert_eq!(store.default_work_profile_id(), "claude-default");
+        assert_eq!(store.default_decision_profile_id(), "claude-default");
+        // Getting default should fail because profile doesn't exist
+        assert!(store.get_default_work_profile().is_err());
+        assert!(store.get_default_decision_profile().is_err());
+        // Error should be DefaultNotFound
+        match store.get_default_work_profile() {
+            Err(ProfileError::DefaultNotFound { profile_type, profile_id }) => {
+                assert_eq!(profile_type, "work");
+                assert_eq!(profile_id, "claude-default");
+            }
+            _ => panic!("Expected DefaultNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_profile_store_merge_preserves_defaults() {
+        // Test merge behavior for defaults
+        let mut global = ProfileStore::new();
+        global.add_profile(ProviderProfile::default_for_cli(CliBaseType::Mock));
+        global.add_profile(ProviderProfile::default_for_cli(CliBaseType::Claude));
+        global.set_default_work_profile("mock-default".to_string()).unwrap();
+
+        let mut workplace = ProfileStore::new();
+        workplace.add_profile(ProviderProfile::default_for_cli(CliBaseType::Codex));
+        workplace.set_default_work_profile("codex-default".to_string()).unwrap();
+
+        global.merge(&workplace);
+
+        // Workplace default should override global
+        assert_eq!(global.default_work_profile_id(), "codex-default");
+        // All profiles should be present
+        assert!(global.has_profile(&"mock-default".to_string()));
+        assert!(global.has_profile(&"claude-default".to_string()));
+        assert!(global.has_profile(&"codex-default".to_string()));
     }
 
     #[test]

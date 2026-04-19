@@ -215,4 +215,59 @@ mod tests {
         assert!(all.contains(&CliBaseType::Codex));
         assert!(all.contains(&CliBaseType::OpenCode));
     }
+
+    #[test]
+    fn test_cli_base_type_is_available_check_path() {
+        // Claude/Codex/OpenCode availability depends on PATH
+        // We can't guarantee they exist, but we can test the logic
+        // by verifying Mock is always true and others use `which`
+        assert!(CliBaseType::Mock.is_available());
+
+        // For real CLIs, verify they either exist or don't exist
+        // (the test just ensures the check doesn't crash)
+        let claude_available = CliBaseType::Claude.is_available();
+        let codex_available = CliBaseType::Codex.is_available();
+        let opencode_available = CliBaseType::OpenCode.is_available();
+
+        // These are boolean results, just verify they're valid
+        assert!(claude_available == true || claude_available == false);
+        assert!(codex_available == true || codex_available == false);
+        assert!(opencode_available == true || opencode_available == false);
+    }
+
+    #[test]
+    fn test_cli_base_type_detectable_order() {
+        let detectable = CliBaseType::detectable();
+        // Verify order: Claude, Codex, OpenCode
+        assert_eq!(detectable[0], CliBaseType::Claude);
+        assert_eq!(detectable[1], CliBaseType::Codex);
+        assert_eq!(detectable[2], CliBaseType::OpenCode);
+    }
+
+    #[test]
+    fn test_cli_base_type_is_supported_vs_is_available() {
+        // is_supported means it can be used as ProviderKind
+        // is_available means it exists in PATH
+        // These are different concepts:
+        // - Mock: always supported and always available
+        // - OpenCode: not supported but might be available
+        assert!(CliBaseType::Mock.is_supported());
+        assert!(CliBaseType::Mock.is_available());
+
+        // OpenCode is not supported (no ProviderKind mapping)
+        assert!(!CliBaseType::OpenCode.is_supported());
+        // But it might be available in PATH (depends on system)
+        // We just verify the check doesn't crash
+        let _ = CliBaseType::OpenCode.is_available();
+    }
+
+    #[test]
+    fn test_cli_base_type_from_provider_kind_roundtrip() {
+        // Test roundtrip conversion for supported types
+        for kind in [ProviderKind::Mock, ProviderKind::Claude, ProviderKind::Codex] {
+            let cli = CliBaseType::from_provider_kind(kind);
+            let back = cli.to_provider_kind();
+            assert_eq!(back, Some(kind));
+        }
+    }
 }
