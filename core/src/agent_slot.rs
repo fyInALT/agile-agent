@@ -189,7 +189,7 @@ impl AgentSlotStatus {
             (Self::Idle, Self::BlockedForDecision { .. }) => true,
             (Self::Idle, Self::Stopped { .. }) => true,
             (Self::Idle, Self::Paused { .. }) => true,
-            // Starting can go to Idle, Responding, Stopping, Blocked, BlockedForDecision, Error, or Paused
+            // Starting can go to Idle, Responding, Stopping, Blocked, BlockedForDecision, Error, Paused, or Stopped
             (Self::Starting, Self::Idle) => true,
             (Self::Starting, Self::Responding { .. }) => true,
             (Self::Starting, Self::Stopping) => true,
@@ -197,7 +197,8 @@ impl AgentSlotStatus {
             (Self::Starting, Self::BlockedForDecision { .. }) => true,
             (Self::Starting, Self::Error { .. }) => true,
             (Self::Starting, Self::Paused { .. }) => true,
-            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, BlockedForDecision, Error, Paused, or WaitingForInput
+            (Self::Starting, Self::Stopped { .. }) => true,
+            // Responding can go to Idle, ToolExecuting, Finishing, Stopping, Blocked, BlockedForDecision, Error, Paused, WaitingForInput, or Stopped
             (Self::Responding { .. }, Self::Idle) => true,
             (Self::Responding { .. }, Self::ToolExecuting { .. }) => true,
             (Self::Responding { .. }, Self::Finishing) => true,
@@ -207,7 +208,8 @@ impl AgentSlotStatus {
             (Self::Responding { .. }, Self::Error { .. }) => true,
             (Self::Responding { .. }, Self::Paused { .. }) => true,
             (Self::Responding { .. }, Self::WaitingForInput { .. }) => true,
-            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/BlockedForDecision/Error/Paused/WaitingForInput
+            (Self::Responding { .. }, Self::Stopped { .. }) => true,
+            // ToolExecuting can go back to Responding or to Idle/Finishing/Stopping/Blocked/BlockedForDecision/Error/Paused/WaitingForInput/Stopped
             (Self::ToolExecuting { .. }, Self::Idle) => true,
             (Self::ToolExecuting { .. }, Self::Responding { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Finishing) => true,
@@ -217,13 +219,15 @@ impl AgentSlotStatus {
             (Self::ToolExecuting { .. }, Self::Error { .. }) => true,
             (Self::ToolExecuting { .. }, Self::Paused { .. }) => true,
             (Self::ToolExecuting { .. }, Self::WaitingForInput { .. }) => true,
-            // Finishing can go to Idle, Stopping, Blocked, BlockedForDecision, Error, or Paused
+            (Self::ToolExecuting { .. }, Self::Stopped { .. }) => true,
+            // Finishing can go to Idle, Stopping, Blocked, BlockedForDecision, Error, Paused, or Stopped
             (Self::Finishing, Self::Idle) => true,
             (Self::Finishing, Self::Stopping) => true,
             (Self::Finishing, Self::Blocked { .. }) => true,
             (Self::Finishing, Self::BlockedForDecision { .. }) => true,
             (Self::Finishing, Self::Error { .. }) => true,
             (Self::Finishing, Self::Paused { .. }) => true,
+            (Self::Finishing, Self::Stopped { .. }) => true,
             // Stopping can go to Stopped or Error
             (Self::Stopping, Self::Stopped { .. }) => true,
             (Self::Stopping, Self::Error { .. }) => true,
@@ -256,9 +260,10 @@ impl AgentSlotStatus {
             (Self::WaitingForInput { .. }, Self::Stopped { .. }) => true,
             // BlockedForDecision can go to Resting (rate limit escalation)
             (Self::BlockedForDecision { .. }, Self::Resting { .. }) => true,
-            // Resting can go to Idle (recovery), Error (unrecoverable), or stay Resting
+            // Resting can go to Idle (recovery), Error (unrecoverable), Stopped (user cancel), or stay Resting
             (Self::Resting { .. }, Self::Idle) => true,
             (Self::Resting { .. }, Self::Error { .. }) => true,
+            (Self::Resting { .. }, Self::Stopped { .. }) => true,
             (Self::Resting { .. }, Self::Resting { .. }) => true,
             // Same status is always valid
             (a, b) if a == b => true,
