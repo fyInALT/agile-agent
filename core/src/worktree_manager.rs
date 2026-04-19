@@ -240,7 +240,7 @@ impl WorktreeManager {
     /// Returns a list of WorktreeInfo parsed from git worktree list --porcelain
     pub fn list(&self) -> Result<Vec<WorktreeInfo>, WorktreeError> {
         let _lock = self.git_lock.lock().unwrap();
-        let output = self.run_git_command(&["worktree", "list", "--porcelain"])?;
+        let output = self.run_git_command_internal(&["worktree", "list", "--porcelain"])?;
         self.parse_porcelain_output(&output)
     }
 
@@ -626,12 +626,6 @@ impl WorktreeManager {
     pub fn count_worktrees(&self) -> Result<usize, WorktreeError> {
         let all = self.list()?;
         Ok(all.len().saturating_sub(1)) // Subtract main worktree
-    }
-
-    /// Run a git command and return stdout
-    fn run_git_command(&self, args: &[&str]) -> Result<String, WorktreeError> {
-        let _lock = self.git_lock.lock().unwrap();
-        self.run_git_command_internal(args)
     }
 
     fn run_git_command_internal(&self, args: &[&str]) -> Result<String, WorktreeError> {
