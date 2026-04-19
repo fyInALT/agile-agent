@@ -35,6 +35,7 @@ use crate::input::handle_key_event;
 use crate::input::handle_paste_event;
 use crate::launch_config_overlay::LaunchConfigOverlayCommand;
 use crate::provider_overlay::ProviderSelectionCommand;
+use crate::profile_selection_overlay::ProfileSelectionCommand;
 use crate::render::render_app;
 use crate::resume_overlay::{ResumeCommand, ResumeOverlay};
 use crate::terminal::AppTerminal;
@@ -390,7 +391,35 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key_event) => {
-                    // Handle provider selection overlay
+                    // Handle profile selection overlay (primary agent creation)
+                    if state.is_profile_selection_overlay_open() {
+                        if let Some(overlay) = state.profile_selection_overlay.as_mut()
+                            && let Some(command) = overlay.handle_key_event(key_event)
+                        {
+                            match command {
+                                ProfileSelectionCommand::Close => {
+                                    state.close_profile_selection_overlay();
+                                }
+                                ProfileSelectionCommand::Select(profile_id) => {
+                                    state.close_profile_selection_overlay();
+                                    if let Some(agent_id) = state.spawn_agent_with_profile(&profile_id) {
+                                        state.app_mut().push_status_message(format!(
+                                            "spawned {} with profile {}",
+                                            agent_id.as_str(),
+                                            profile_id
+                                        ));
+                                    } else {
+                                        state.app_mut().push_error_message(
+                                            "failed to spawn agent with profile (pool full or profile invalid)",
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Handle provider selection overlay (legacy/fallback)
                     if state.is_provider_overlay_open() {
                         if let Some(overlay) = state.provider_overlay.as_mut()
                             && let Some(command) = overlay.handle_key_event(key_event)
@@ -582,7 +611,12 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
                         }
                         InputOutcome::SpawnAgent => {
-                            state.open_provider_overlay();
+                            // Primary: open profile selection overlay
+                            state.open_profile_selection_overlay();
+                            // Fallback to provider overlay if no profiles available
+                            if state.profile_selection_overlay.is_none() {
+                                state.open_provider_overlay();
+                            }
                         }
                         InputOutcome::StopFocusedAgent => {
                             let codename = state.focused_agent_codename().to_string();

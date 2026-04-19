@@ -54,6 +54,10 @@ pub fn render_app(frame: &mut Frame<'_>, state: &mut TuiState) {
         render_provider_selection_overlay(frame, state);
     }
 
+    if state.is_profile_selection_overlay_open() {
+        render_profile_selection_overlay(frame, state);
+    }
+
     if state.is_launch_config_overlay_open() {
         render_launch_config_overlay(frame, state);
     }
@@ -858,6 +862,72 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     )));
 
     let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner_area);
+}
+
+/// Render profile selection overlay for agent creation
+fn render_profile_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    let overlay = state
+        .profile_selection_overlay
+        .as_ref()
+        .expect("overlay should be open");
+
+    let profile_count = overlay.profiles().len();
+    // Dynamic height: header(3) + profiles + hint(3), min 10
+    let height = (3 + profile_count + 3).max(10).min(20) as u16;
+    let area = centered_rect(60, height, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let title = " New Agent - Select Profile ";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    for (index, profile) in overlay.profiles().iter().enumerate() {
+        let selected = index == overlay.selected_index();
+        let marker = if selected { ">" } else { " " };
+        let style = if selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+
+        // Format: [>] profile-name (cli-type)
+        let line = format!(
+            "{} {} ({})",
+            marker, profile.display_name, profile.cli_label
+        );
+        lines.push(Line::from(vec![Span::styled(line, style)]));
+
+        // Show description on selected line
+        if selected {
+            if let Some(ref desc) = profile.description {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("    {}", desc),
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+        }
+    }
+
+    // Add hint line
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Enter: select profile  Esc: cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines)
+        .alignment(ratatui::layout::Alignment::Left);
     frame.render_widget(paragraph, inner_area);
 }
 

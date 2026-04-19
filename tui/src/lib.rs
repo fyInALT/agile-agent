@@ -21,6 +21,7 @@ mod metrics_panel;
 mod overview_row;
 mod overview_state;
 mod provider_overlay;
+mod profile_selection_overlay;
 mod render;
 mod resume_overlay;
 mod streaming;

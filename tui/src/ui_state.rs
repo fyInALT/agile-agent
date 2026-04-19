@@ -38,6 +38,7 @@ use crate::human_decision_overlay::HumanDecisionOverlay;
 use crate::launch_config_overlay::LaunchConfigOverlayState;
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::provider_overlay::ProviderSelectionOverlay;
+use crate::profile_selection_overlay::ProfileSelectionOverlay;
 use crate::streaming::AdaptiveChunkingPolicy;
 use crate::streaming::QueueSnapshot;
 use crate::transcript::cells;
@@ -98,6 +99,8 @@ pub struct TuiState {
     pub view_state: TuiViewState,
     /// Provider selection overlay (for agent creation)
     pub provider_overlay: Option<ProviderSelectionOverlay>,
+    /// Profile selection overlay (primary agent creation UI)
+    pub profile_selection_overlay: Option<ProfileSelectionOverlay>,
     /// Confirmation overlay (for agent stop)
     pub confirmation_overlay: Option<ConfirmationOverlay>,
     /// Human decision overlay (for decision layer)
@@ -133,6 +136,7 @@ impl TuiState {
             mailbox: AgentMailbox::new(),
             view_state: TuiViewState::new(),
             provider_overlay: None,
+            profile_selection_overlay: None,
             confirmation_overlay: None,
             human_decision_overlay: None,
             launch_config_overlay: None,
@@ -1723,6 +1727,33 @@ impl TuiState {
         self.provider_overlay.is_some()
     }
 
+    /// Open profile selection overlay for agent creation
+    pub fn open_profile_selection_overlay(&mut self) {
+        let pool = match self.agent_pool.as_ref() {
+            Some(pool) => pool,
+            None => return,
+        };
+
+        let store = match pool.profile_store() {
+            Some(store) => store,
+            None => return,
+        };
+
+        let profiles = store.list_profiles().into_iter().cloned().collect();
+        let default_id = store.default_work_profile_id().clone();
+        self.profile_selection_overlay = Some(ProfileSelectionOverlay::new(profiles, &default_id));
+    }
+
+    /// Close profile selection overlay
+    pub fn close_profile_selection_overlay(&mut self) {
+        self.profile_selection_overlay = None;
+    }
+
+    /// Check if profile selection overlay is open
+    pub fn is_profile_selection_overlay_open(&self) -> bool {
+        self.profile_selection_overlay.is_some()
+    }
+
     /// Open launch config overlay for selected provider
     pub fn open_launch_config_overlay(&mut self, provider: ProviderKind) {
         self.launch_config_overlay = Some(LaunchConfigOverlayState::new(provider));
@@ -1743,6 +1774,7 @@ impl TuiState {
     pub fn is_any_overlay_open(&self) -> bool {
         self.is_overlay_open()
             || self.is_provider_overlay_open()
+            || self.is_profile_selection_overlay_open()
             || self.is_confirmation_overlay_open()
             || self.is_human_decision_overlay_open()
             || self.is_launch_config_overlay_open()
