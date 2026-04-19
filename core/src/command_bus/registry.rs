@@ -26,6 +26,13 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     },
     CommandSpec {
         namespace: CommandNamespace::Local,
+        path: &["clear"],
+        summary: "Clear context for decision layer and work agent",
+        requires_target: false,
+        provider_passthrough: false,
+    },
+    CommandSpec {
+        namespace: CommandNamespace::Local,
         path: &["kanban", "list"],
         summary: "List current kanban tasks",
         requires_target: false,
@@ -117,6 +124,7 @@ pub fn render_local_help_lines() -> Vec<String> {
         "available slash commands:".to_string(),
         "/local help".to_string(),
         "/local status".to_string(),
+        "/local clear".to_string(),
         "/local kanban list".to_string(),
         "/local config get <key>".to_string(),
         "/local config set <key> <value>".to_string(),

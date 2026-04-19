@@ -31,6 +31,18 @@ pub trait BlockingReason: Send + Sync + 'static {
 
     /// Clone into boxed
     fn clone_boxed(&self) -> Box<dyn BlockingReason>;
+
+    /// Try to downcast to RateLimitBlockedReason (immutable).
+    /// Returns None if this is not a RateLimitBlockedReason.
+    fn as_rate_limit_reason(&self) -> Option<&RateLimitBlockedReason> {
+        None
+    }
+
+    /// Try to downcast to RateLimitBlockedReason (mutable).
+    /// Returns None if this is not a RateLimitBlockedReason.
+    fn as_rate_limit_reason_mut(&mut self) -> Option<&mut RateLimitBlockedReason> {
+        None
+    }
 }
 
 /// Auto-resolve action
@@ -70,6 +82,17 @@ impl BlockedState {
 
     pub fn reason(&self) -> &dyn BlockingReason {
         self.reason.as_ref()
+    }
+
+    /// Get mutable reference to the blocking reason.
+    /// Needed for updating rate limit retry state.
+    pub fn reason_mut(&mut self) -> &mut dyn BlockingReason {
+        self.reason.as_mut()
+    }
+
+    /// Check if blocked due to rate limit (HTTP 429).
+    pub fn is_rate_limit(&self) -> bool {
+        self.reason.reason_type() == "rate_limit"
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -398,6 +421,14 @@ impl BlockingReason for RateLimitBlockedReason {
 
     fn clone_boxed(&self) -> Box<dyn BlockingReason> {
         Box::new(self.clone())
+    }
+
+    fn as_rate_limit_reason(&self) -> Option<&RateLimitBlockedReason> {
+        Some(self)
+    }
+
+    fn as_rate_limit_reason_mut(&mut self) -> Option<&mut RateLimitBlockedReason> {
+        Some(self)
     }
 }
 
@@ -920,6 +951,16 @@ impl HumanDecisionQueue {
 
     pub fn timeout_config(&self) -> &HumanDecisionTimeoutConfig {
         &self.timeout_config
+    }
+
+    /// Clear all pending requests and history
+    pub fn clear(&mut self) {
+        self.critical.clear();
+        self.high.clear();
+        self.medium.clear();
+        self.low.clear();
+        self.id_index.clear();
+        self.history.clear();
     }
 }
 

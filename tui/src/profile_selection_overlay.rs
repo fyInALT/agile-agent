@@ -216,7 +216,7 @@ impl Default for ProfileSelectionOverlay {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProfileDisplayInfo, ProfileSection, ProfileSelectionCommand, ProfileSelectionOverlay};
+    use super::{ProfileSection, ProfileSelectionCommand, ProfileSelectionOverlay};
     use agent_core::provider_profile::{CliBaseType, ProviderProfile};
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;

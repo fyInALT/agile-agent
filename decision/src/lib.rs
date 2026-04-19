@@ -110,8 +110,9 @@ pub use types::*;
 // Re-export builtin situation types and implementations
 pub use builtin_situations::{
     AgentIdleSituation, ClaimsCompletionSituation, ErrorSituation, PartialCompletionSituation,
-    WaitingForChoiceSituation, acp_permission, agent_idle, claims_completion, claude_finished,
-    codex_approval, error, partial_completion, register_situation_builtins, waiting_for_choice,
+    TaskStartingSituation, WaitingForChoiceSituation, acp_permission, agent_idle, claims_completion,
+    claude_finished, codex_approval, error, partial_completion, register_situation_builtins,
+    task_starting, uncommitted_changes_detected, waiting_for_choice,
 };
 
 pub use action::*;
@@ -120,10 +121,10 @@ pub use action_registry::*;
 // Re-export builtin action types and implementations
 pub use builtin_actions::{
     ConfirmCompletionAction, ContinueAction, ContinueAllTasksAction, CustomInstructionAction,
-    ReflectAction, RequestHumanAction, RetryAction, SelectOptionAction, StopIfCompleteAction,
-    abort, confirm_completion, continue_action, continue_all_tasks, custom_instruction, reflect,
-    register_action_builtins, reject_all, request_human, retry, select_first, select_option,
-    stop_if_complete,
+    PrepareTaskStartAction, ReflectAction, RequestHumanAction, RetryAction, SelectOptionAction,
+    StopIfCompleteAction, abort, confirm_completion, continue_action, continue_all_tasks,
+    create_task_branch, custom_instruction, prepare_task_start, reflect, register_action_builtins,
+    reject_all, request_human, retry, select_first, select_option, stop_if_complete,
 };
 
 pub use blocking::*;

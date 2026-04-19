@@ -639,6 +639,7 @@ pub fn register_situation_builtins(registry: &SituationRegistry) {
     registry.register_default(Box::new(PartialCompletionSituation::default()));
     registry.register_default(Box::new(ErrorSituation::default()));
     registry.register_default(Box::new(AgentIdleSituation::default()));
+    registry.register_default(Box::new(TaskStartingSituation::default()));
 }
 
 /// Situation: Agent Idle

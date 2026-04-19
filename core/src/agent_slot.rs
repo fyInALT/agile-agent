@@ -1179,6 +1179,187 @@ impl AgentSlot {
         self.assigned_task_id = None;
     }
 
+    // === Resting State Methods ===
+
+    /// Enter resting state due to rate limit (HTTP 429).
+    ///
+    /// Transitions the agent to Resting status with a BlockedState containing
+    /// RateLimitBlockedReason. The agent will wait for the retry interval
+    /// before attempting recovery.
+    pub fn enter_resting(&mut self, blocked_state: BlockedState) -> Result<(), String> {
+        let old_status = self.status.clone();
+        let new_status = AgentSlotStatus::resting(blocked_state);
+
+        if !old_status.can_transition_to(&new_status) {
+            return Err(format!(
+                "Cannot enter resting from {}",
+                old_status.label()
+            ));
+        }
+
+        logging::debug_event(
+            "slot.resting.enter",
+            "agent entering resting state due to rate limit",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": old_status.label(),
+                "new_status": new_status.label()
+            }),
+        );
+
+        self.status = new_status;
+        self.last_activity = Instant::now();
+        Ok(())
+    }
+
+    /// Check if resting agent should attempt recovery now.
+    ///
+    /// Returns true if:
+    /// - The agent is in Resting state
+    /// - Either on_resume is true (immediate recovery on snapshot restore)
+    ///   OR enough time has passed since the resting started
+    ///
+    /// The retry interval is configurable via AgentLaunchBundle.
+    pub fn should_attempt_recovery(&self, retry_interval_secs: u64) -> bool {
+        match &self.status {
+            AgentSlotStatus::Resting {
+                on_resume,
+                blocked_state,
+                started_at,
+                ..
+            } => {
+                if *on_resume {
+                    return true;
+                }
+                // Check if it's a rate limit and enough time has passed
+                if let Some(rate_limit_reason) = blocked_state.reason().as_rate_limit_reason() {
+                    let reference_time = rate_limit_reason.last_retry_at().unwrap_or(*started_at);
+                    let elapsed_secs = (Utc::now() - reference_time).num_seconds() as u64;
+                    elapsed_secs >= retry_interval_secs
+                } else {
+                    // Unknown reason type - don't auto-retry
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Record a recovery attempt while in Resting state.
+    ///
+    /// Resets the on_resume flag to false after the attempt.
+    pub fn record_recovery_attempt(&mut self) {
+        match &mut self.status {
+            AgentSlotStatus::Resting {
+                started_at,
+                blocked_state,
+                on_resume,
+            } => {
+                // Just check it's a rate limit - we don't need to update internal state
+                // since we're using the elapsed time from started_at
+                let _ = blocked_state.is_rate_limit();
+
+                // Reset on_resume flag
+                *on_resume = false;
+
+                logging::debug_event(
+                    "slot.resting.attempt",
+                    "rate limit recovery attempt recorded",
+                    serde_json::json!({
+                        "agent_id": self.agent_id.as_str(),
+                        "codename": self.codename.as_str(),
+                        "started_at": started_at.to_rfc3339(),
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Transition from Resting to Idle after successful recovery.
+    pub fn recover_from_resting(&mut self) -> Result<(), String> {
+        let old_status = self.status.clone();
+        let new_status = AgentSlotStatus::idle();
+
+        if !old_status.can_transition_to(&new_status) {
+            return Err(format!(
+                "Cannot recover from {} to {}",
+                old_status.label(),
+                new_status.label()
+            ));
+        }
+
+        logging::debug_event(
+            "slot.resting.recover",
+            "agent recovered from resting state",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": old_status.label(),
+                "new_status": new_status.label()
+            }),
+        );
+
+        self.status = new_status;
+        self.last_activity = Instant::now();
+        Ok(())
+    }
+
+    /// Transition from Resting to Error when recovery fails.
+    pub fn resting_to_error(&mut self, message: impl Into<String>) -> Result<(), String> {
+        let old_status = self.status.clone();
+        let new_status = AgentSlotStatus::error(message);
+
+        if !old_status.can_transition_to(&new_status) {
+            return Err(format!(
+                "Cannot transition from {} to Error",
+                old_status.label()
+            ));
+        }
+
+        logging::debug_event(
+            "slot.resting.error",
+            "resting agent transitioned to error state",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": old_status.label(),
+            }),
+        );
+
+        self.status = new_status;
+        self.last_activity = Instant::now();
+        Ok(())
+    }
+
+    /// Transition from Resting to Stopped when user cancels.
+    pub fn resting_to_stopped(&mut self, reason: impl Into<String>) -> Result<(), String> {
+        let old_status = self.status.clone();
+        let new_status = AgentSlotStatus::stopped(reason);
+
+        if !old_status.can_transition_to(&new_status) {
+            return Err(format!(
+                "Cannot transition from {} to Stopped",
+                old_status.label()
+            ));
+        }
+
+        logging::debug_event(
+            "slot.resting.stop",
+            "resting agent stopped by user",
+            serde_json::json!({
+                "agent_id": self.agent_id.as_str(),
+                "codename": self.codename.as_str(),
+                "old_status": old_status.label(),
+            }),
+        );
+
+        self.status = new_status;
+        self.last_activity = Instant::now();
+        Ok(())
+    }
+
     /// Summary string for display
     pub fn summary(&self) -> String {
         format!(
@@ -1703,5 +1884,159 @@ mod tests {
         ));
         let status = AgentSlotStatus::resting(blocked_state);
         assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
+    }
+
+    // Resting state method tests
+    #[test]
+    fn slot_enter_resting() {
+        let mut slot = make_slot();
+        // First transition to BlockedForDecision (rate limit escalation path)
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error: Request rejected (429)");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        // Now transition to Resting
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.enter_resting(resting_blocked_state).unwrap();
+        assert!(slot.status().is_resting());
+    }
+
+    #[test]
+    fn slot_enter_resting_from_blocked_for_decision() {
+        let mut slot = make_slot();
+        // First transition to BlockedForDecision
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error: Request rejected (429)");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        // Now transition to Resting
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.enter_resting(resting_blocked_state).unwrap();
+        assert!(slot.status().is_resting());
+    }
+
+    #[test]
+    fn slot_should_attempt_recovery_with_on_resume() {
+        let mut slot = make_slot();
+        // Transition via BlockedForDecision -> Resting
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.transition_to(AgentSlotStatus::resting_with_on_resume(resting_blocked_state, true)).unwrap();
+
+        // Should attempt recovery immediately when on_resume is true
+        assert!(slot.should_attempt_recovery(1800));
+    }
+
+    #[test]
+    fn slot_should_attempt_recovery_after_interval() {
+        let mut slot = make_slot();
+        // Transition via BlockedForDecision -> Resting
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        // Create a reason with last_retry_at in the past (30+ minutes ago)
+        let reason = agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now())
+            .with_last_retry_at(chrono::Utc::now() - chrono::Duration::minutes(35));
+        let resting_blocked_state = BlockedState::new(Box::new(reason));
+        slot.transition_to(AgentSlotStatus::resting(resting_blocked_state)).unwrap();
+
+        // Should attempt recovery since interval has passed
+        assert!(slot.should_attempt_recovery(1800)); // 30 min default
+    }
+
+    #[test]
+    fn slot_recover_from_resting() {
+        let mut slot = make_slot();
+        // Transition via BlockedForDecision -> Resting
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.transition_to(AgentSlotStatus::resting(resting_blocked_state)).unwrap();
+        assert!(slot.status().is_resting());
+
+        slot.recover_from_resting().unwrap();
+        assert!(slot.status().is_idle());
+    }
+
+    #[test]
+    fn slot_resting_to_error() {
+        let mut slot = make_slot();
+        // Transition via BlockedForDecision -> Resting
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.transition_to(AgentSlotStatus::resting(resting_blocked_state)).unwrap();
+
+        slot.resting_to_error("quota exceeded permanently").unwrap();
+        assert!(matches!(slot.status(), AgentSlotStatus::Error { .. }));
+    }
+
+    #[test]
+    fn slot_resting_to_stopped() {
+        let mut slot = make_slot();
+        // Transition via BlockedForDecision -> Resting
+        use agent_decision::{ErrorInfo, ErrorSituation, HumanDecisionBlocking};
+        let error = ErrorInfo::new("rate_limit", "API Error");
+        let situation = Box::new(ErrorSituation::new(error));
+        let blocking = HumanDecisionBlocking::new("req-001", situation, vec![]);
+        let blocked_state = BlockedState::new(Box::new(blocking));
+        slot.transition_to(AgentSlotStatus::blocked_for_decision(blocked_state)).unwrap();
+
+        let resting_blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        slot.transition_to(AgentSlotStatus::resting(resting_blocked_state)).unwrap();
+
+        slot.resting_to_stopped("user cancelled").unwrap();
+        assert!(matches!(slot.status(), AgentSlotStatus::Stopped { .. }));
+    }
+
+    #[test]
+    fn slot_status_resting_label_shows_minutes() {
+        let blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(
+                chrono::Utc::now() - chrono::Duration::minutes(5)
+            ),
+        ));
+        let status = AgentSlotStatus::resting(blocked_state);
+        let label = status.label();
+        assert!(label.contains("resting"));
+        assert!(label.contains("min"));
     }
 }

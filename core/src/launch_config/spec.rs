@@ -163,6 +163,14 @@ pub struct AgentLaunchBundle {
     pub decision_input: LaunchInputSpec,
     /// Resolved spec for the decision agent.
     pub decision_resolved: ResolvedLaunchSpec,
+    /// Interval in seconds between rate limit recovery attempts.
+    /// Default: 1800 (30 minutes).
+    #[serde(default = "default_rate_limit_retry_interval")]
+    pub rate_limit_retry_interval_secs: u64,
+}
+
+fn default_rate_limit_retry_interval() -> u64 {
+    1800 // 30 minutes
 }
 
 impl AgentLaunchBundle {
@@ -177,6 +185,7 @@ impl AgentLaunchBundle {
             work_resolved: resolved.clone(),
             decision_input: input,
             decision_resolved: resolved,
+            rate_limit_retry_interval_secs: default_rate_limit_retry_interval(),
         }
     }
 
@@ -192,6 +201,15 @@ impl AgentLaunchBundle {
             work_resolved,
             decision_input,
             decision_resolved,
+            rate_limit_retry_interval_secs: default_rate_limit_retry_interval(),
+        }
+    }
+
+    /// Set a custom rate limit retry interval.
+    pub fn with_rate_limit_retry_interval(self, interval_secs: u64) -> Self {
+        Self {
+            rate_limit_retry_interval_secs: interval_secs,
+            ..self
         }
     }
 }
@@ -279,6 +297,7 @@ mod tests {
         let bundle = AgentLaunchBundle::symmetric(ProviderKind::Claude, input, resolved);
         assert_eq!(bundle.work_input.provider, ProviderKind::Claude);
         assert_eq!(bundle.decision_input.provider, ProviderKind::Claude);
+        assert_eq!(bundle.rate_limit_retry_interval_secs, 1800); // Default 30 min
     }
 
     #[test]
@@ -307,5 +326,21 @@ mod tests {
         );
         assert_eq!(bundle.work_input.provider, ProviderKind::Claude);
         assert_eq!(bundle.decision_input.provider, ProviderKind::Codex);
+        assert_eq!(bundle.rate_limit_retry_interval_secs, 1800); // Default 30 min
+    }
+
+    #[test]
+    fn test_agent_launch_bundle_with_custom_retry_interval() {
+        let input = LaunchInputSpec::new(ProviderKind::Claude);
+        let resolved = ResolvedLaunchSpec::new(
+            ProviderKind::Claude,
+            "/usr/bin/claude".to_string(),
+            BTreeMap::new(),
+            vec![],
+            LaunchSourceMode::HostDefault,
+        );
+        let bundle = AgentLaunchBundle::symmetric(ProviderKind::Claude, input, resolved)
+            .with_rate_limit_retry_interval(600); // 10 min
+        assert_eq!(bundle.rate_limit_retry_interval_secs, 600);
     }
 }

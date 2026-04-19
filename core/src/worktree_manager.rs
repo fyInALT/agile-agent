@@ -13,6 +13,27 @@ use crate::logging;
 /// Default timeout for git commands (30 seconds)
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 
+/// Ahead/behind commit count for branch comparison
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AheadBehindCount {
+    /// Number of commits ahead of base branch
+    pub ahead: u32,
+    /// Number of commits behind base branch
+    pub behind: u32,
+}
+
+impl AheadBehindCount {
+    /// Check if branch is synced (neither ahead nor behind)
+    pub fn is_synced(&self) -> bool {
+        self.ahead == 0 && self.behind == 0
+    }
+
+    /// Check if branch needs rebase (behind base)
+    pub fn needs_rebase(&self) -> bool {
+        self.behind > 0
+    }
+}
+
 /// Worktree status information parsed from git worktree list --porcelain
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
@@ -841,6 +862,159 @@ impl WorktreeManager {
         Ok(!status_output.trim().is_empty())
     }
 
+    /// Check if a worktree has merge/rebase conflicts
+    ///
+    /// Returns true if there are unmerged paths
+    pub fn has_conflicts(&self, worktree_path: &Path) -> Result<bool, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitCommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        let status_output = String::from_utf8_lossy(&output.stdout);
+        // Check for conflict markers: UU, AA, DD
+        Ok(status_output.lines().any(|line| {
+            line.starts_with("UU") || line.starts_with("AA") || line.starts_with("DD")
+        }))
+    }
+
+    /// Get the current branch name for a worktree
+    ///
+    /// Returns "detached" if on detached HEAD
+    pub fn get_current_branch(&self, worktree_path: &Path) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        let output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitCommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(if branch.is_empty() { "detached".to_string() } else { branch })
+    }
+
+    /// Checkout a branch in a worktree
+    ///
+    /// Switches to the specified branch
+    pub fn checkout_branch(&self, worktree_path: &Path, branch: &str) -> Result<(), WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        logging::debug_event(
+            "git_flow.checkout.started",
+            "checking out branch",
+            serde_json::json!({"branch": branch}),
+        );
+
+        let output = Command::new("git")
+            .args(["checkout", branch])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(WorktreeError::GitCommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        logging::debug_event(
+            "git_flow.checkout.completed",
+            "branch checked out",
+            serde_json::json!({"branch": branch}),
+        );
+
+        Ok(())
+    }
+
+    /// Get ahead/behind count relative to base branch
+    ///
+    /// Returns (ahead, behind) counts
+    pub fn get_ahead_behind_count(&self, worktree_path: &Path, base_branch: &str) -> Result<AheadBehindCount, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Try origin/base first
+        let origin_base = format!("origin/{}", base_branch);
+        let base_rev = if self.run_git_command_internal(&["rev-parse", "--verify", &origin_base]).is_ok() {
+            origin_base
+        } else if self.run_git_command_internal(&["rev-parse", "--verify", base_branch]).is_ok() {
+            base_branch.to_string()
+        } else {
+            "HEAD".to_string()
+        };
+
+        let output = Command::new("git")
+            .args(["rev-list", "--left-right", "--count", &format!("{}...HEAD", base_rev)])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Ok(AheadBehindCount { ahead: 0, behind: 0 });
+        }
+
+        let count_output = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = count_output.trim().split('\t').collect();
+
+        let ahead = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let behind = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        Ok(AheadBehindCount { ahead, behind })
+    }
+
+    /// Commit all changes with a message
+    ///
+    /// Adds all tracked changes and commits
+    pub fn commit_all(&self, worktree_path: &Path, message: &str) -> Result<String, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap();
+
+        // Add all tracked changes
+        Command::new("git")
+            .args(["add", "-u"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        // Commit
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("nothing to commit") {
+                return Ok("no-changes".to_string());
+            }
+            return Err(WorktreeError::GitCommandFailed(stderr.to_string()));
+        }
+
+        // Get commit SHA
+        let sha_output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommandFailed(e.to_string()))?;
+
+        Ok(String::from_utf8_lossy(&sha_output.stdout).trim().to_string())
+    }
+
     /// Get the HEAD commit SHA for a worktree
     ///
     /// Returns None if unable to determine HEAD
@@ -1263,6 +1437,7 @@ pub enum RebaseResult {
     /// Rebase had conflicts (aborted)
     Conflict { message: String },
 }
+
 
 /// Information about uncommitted changes
 #[derive(Debug, Clone)]

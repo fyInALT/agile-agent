@@ -1,5 +1,8 @@
+use std::fs;
+
 use agent_core::command_bus::registry::render_local_help_lines;
 use agent_core::provider::ProviderKind;
+use agent_core::workplace_store::WorkplaceStore;
 use anyhow::{Result, anyhow};
 
 use crate::ui_state::TuiState;
@@ -70,6 +73,7 @@ pub fn execute_local_command(
             ),
             format!("loop phase: {:?}", state.app().loop_phase),
         ]),
+        ["clear"] => execute_clear_command(state, args),
         ["kanban", "list"] => Ok(state.app().render_backlog_lines()),
         ["config", "get"] => execute_config_get(state, args),
         ["config", "set"] => execute_config_set(state, args),
@@ -231,6 +235,119 @@ fn execute_config_set(state: &mut TuiState, args: &[&str]) -> Result<Vec<String>
         [other, _] => Err(anyhow!("unsupported config key: {other}")),
         _ => Err(anyhow!("usage: /local config set <key> <value>")),
     }
+}
+
+/// Execute /clear command to reset agent context
+///
+/// This clears:
+/// - Work agent's transcript and session handle
+/// - Decision agent's context
+/// - AppState session IDs (claude_session_id, codex_thread_id)
+/// - Saved session files on disk
+///
+/// Usage:
+/// - `/local clear` - Clear focused agent's context
+/// - `/local clear all` - Clear all agents' context
+fn execute_clear_command(state: &mut TuiState, args: &[&str]) -> Result<Vec<String>> {
+    match args {
+        [] | ["focused"] => {
+            // Clear focused agent's context
+            let focused_id = state
+                .focused_agent_id()
+                .ok_or_else(|| anyhow!("no focused agent to clear"))?;
+
+            let codename = state.focused_agent_codename().to_string();
+
+            // Clear agent pool context if available
+            if let Some(pool) = state.agent_pool.as_mut() {
+                pool.clear_agent_context(&focused_id)
+                    .map_err(|e| anyhow!("{}", e))?;
+            }
+
+            // Clear TUI transcript view state for this agent
+            state.agent_view_states.remove(&codename);
+
+            // Reset scroll state
+            state.transcript_scroll_offset = 0;
+            state.transcript_follow_tail = true;
+
+            // Clear active cell since transcript is now empty
+            state.active_cell = None;
+
+            // Clear session IDs in AppState
+            state.session.app.claude_session_id = None;
+            state.session.app.codex_thread_id = None;
+
+            // Delete saved session files
+            clear_saved_sessions(&state)?;
+
+            Ok(vec![
+                format!("cleared context for agent: {}", codename),
+                "transcript, session handle, decision context, and saved sessions reset".to_string(),
+            ])
+        }
+        ["all"] => {
+            // Clear all agents' context
+            let agent_count = if let Some(pool) = state.agent_pool.as_ref() {
+                pool.active_count()
+            } else {
+                0
+            };
+
+            if let Some(pool) = state.agent_pool.as_mut() {
+                pool.clear_all_agent_contexts();
+            }
+
+            // Clear all TUI view states
+            state.agent_view_states.clear();
+            state.transcript_scroll_offset = 0;
+            state.transcript_follow_tail = true;
+            state.active_cell = None;
+
+            // Clear session IDs in AppState
+            state.session.app.claude_session_id = None;
+            state.session.app.codex_thread_id = None;
+
+            // Delete saved session files
+            clear_saved_sessions(&state)?;
+
+            Ok(vec![
+                format!("cleared context for {} agents", agent_count),
+                "all transcripts, session handles, decision contexts, and saved sessions reset".to_string(),
+            ])
+        }
+        [other, ..] => Err(anyhow!("unknown clear target: {other}. Use 'focused' or 'all'")),
+    }
+}
+
+/// Clear saved session files from the workplace directory
+fn clear_saved_sessions(state: &TuiState) -> Result<()> {
+    let cwd = &state.session.app.cwd;
+    let workplace_store = WorkplaceStore::for_cwd(cwd);
+
+    if let Ok(store) = workplace_store {
+        let sessions_dir = store.path().join("sessions");
+        let recent_session_file = store.path().join("recent-session.json");
+
+        // Delete individual session files
+        if sessions_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&sessions_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "json").unwrap_or(false) {
+                        let _ = fs::remove_file(path);
+                    }
+                }
+            }
+        }
+
+        // Delete recent session pointer
+        if recent_session_file.exists() {
+            let _ = fs::remove_file(&recent_session_file);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

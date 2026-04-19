@@ -3167,6 +3167,102 @@ impl AgentPool {
         self.human_queue.check_expired();
     }
 
+    /// Clear agent context (transcript, session handle) for a specific agent
+    ///
+    /// This clears both the work agent and its associated decision agent context.
+    /// Used by /clear command to reset the conversation state.
+    pub fn clear_agent_context(&mut self, agent_id: &AgentId) -> Result<(), String> {
+        // Clear work agent context
+        if let Some(slot) = self.get_slot_mut_by_id(agent_id) {
+            // Clear transcript
+            slot.clear_transcript();
+
+            // Clear session handle (provider session)
+            slot.clear_session_handle();
+
+            // Clear any assigned task
+            slot.clear_task();
+
+            // Transition to idle if not already
+            if !slot.status().is_idle() {
+                slot.transition_to(AgentSlotStatus::Idle)?;
+            }
+
+            logging::debug_event(
+                "pool.clear_context",
+                "cleared work agent context",
+                serde_json::json!({
+                    "agent_id": agent_id.as_str(),
+                    "codename": slot.codename().as_str(),
+                }),
+            );
+        } else {
+            return Err(format!("agent {} not found", agent_id.as_str()));
+        }
+
+        // Clear decision agent context if exists
+        if let Some(decision_agent) = self.decision_agents.get_mut(agent_id) {
+            // Reset decision agent to idle state
+            if decision_agent.status().has_error() {
+                decision_agent.reset_error();
+            }
+
+            logging::debug_event(
+                "pool.clear_context.decision",
+                "cleared decision agent context",
+                serde_json::json!({
+                    "work_agent_id": agent_id.as_str(),
+                    "decision_agent_id": decision_agent.agent_id(),
+                }),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Clear context for all agents (both work agents and decision agents)
+    ///
+    /// This is used when user wants to reset all conversation state.
+    pub fn clear_all_agent_contexts(&mut self) {
+        for slot in &mut self.slots {
+            slot.clear_transcript();
+            slot.clear_session_handle();
+            slot.clear_task();
+
+            if !slot.status().is_idle() {
+                let _ = slot.transition_to(AgentSlotStatus::Idle);
+            }
+        }
+
+        // Clear all decision agents
+        for (work_agent_id, decision_agent) in &mut self.decision_agents {
+            if decision_agent.status().has_error() {
+                decision_agent.reset_error();
+            }
+
+            logging::debug_event(
+                "pool.clear_all_contexts.decision",
+                "cleared decision agent context",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                    "decision_agent_id": decision_agent.agent_id(),
+                }),
+            );
+        }
+
+        // Clear human decision queue
+        self.human_queue.clear();
+
+        logging::debug_event(
+            "pool.clear_all_contexts",
+            "cleared all agent contexts",
+            serde_json::json!({
+                "agent_count": self.slots.len(),
+                "decision_agent_count": self.decision_agents.len(),
+            }),
+        );
+    }
+
     /// Check for expired human decision requests
     pub fn check_expired_requests(&mut self) -> Vec<HumanDecisionRequest> {
         self.human_queue.check_expired()
