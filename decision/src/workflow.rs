@@ -198,10 +198,11 @@ impl StageTransition {
 }
 
 /// Decision action taken at a stage
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", content = "data")]
 pub enum WorkflowAction {
     /// Continue execution
+    #[default]
     Continue,
     /// Reflect and fix issues
     Reflect { reason: String },
@@ -235,12 +236,6 @@ impl WorkflowAction {
             Self::Retry => "Retry the last operation.".to_string(),
             Self::Wait { reason } => format!("Wait: {}", reason),
         }
-    }
-}
-
-impl Default for WorkflowAction {
-    fn default() -> Self {
-        Self::Continue
     }
 }
 

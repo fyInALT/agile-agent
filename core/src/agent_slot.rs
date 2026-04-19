@@ -1219,6 +1219,12 @@ mod tests {
     }
 
     #[test]
+    fn status_starting_can_transition_to_stopped() {
+        let status = AgentSlotStatus::starting();
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
+    }
+
+    #[test]
     fn status_responding_can_transition_to_tool_executing() {
         let status = AgentSlotStatus::responding_now();
         assert!(status.can_transition_to(&AgentSlotStatus::tool_executing("read_file")));
@@ -1234,6 +1240,12 @@ mod tests {
     fn status_responding_can_transition_to_stopping() {
         let status = AgentSlotStatus::responding_now();
         assert!(status.can_transition_to(&AgentSlotStatus::stopping()));
+    }
+
+    #[test]
+    fn status_responding_can_transition_to_stopped() {
+        let status = AgentSlotStatus::responding_now();
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
     }
 
     #[test]
@@ -1255,6 +1267,12 @@ mod tests {
     }
 
     #[test]
+    fn status_tool_executing_can_transition_to_stopped() {
+        let status = AgentSlotStatus::tool_executing("bash");
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
+    }
+
+    #[test]
     fn status_finishing_can_transition_to_idle() {
         let status = AgentSlotStatus::finishing();
         assert!(status.can_transition_to(&AgentSlotStatus::idle()));
@@ -1264,6 +1282,12 @@ mod tests {
     fn status_finishing_can_transition_to_stopping() {
         let status = AgentSlotStatus::finishing();
         assert!(status.can_transition_to(&AgentSlotStatus::stopping()));
+    }
+
+    #[test]
+    fn status_finishing_can_transition_to_stopped() {
+        let status = AgentSlotStatus::finishing();
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
     }
 
     #[test]
@@ -1646,5 +1670,14 @@ mod tests {
         // Simulate idle by not calling touch_activity
         // In real test we'd need to wait, but for unit test we just check the logic
         // The actual timeout check depends on elapsed time
+    }
+
+    #[test]
+    fn status_resting_can_transition_to_stopped() {
+        let blocked_state = BlockedState::new(Box::new(
+            agent_decision::blocking::RateLimitBlockedReason::new(chrono::Utc::now()),
+        ));
+        let status = AgentSlotStatus::resting(blocked_state);
+        assert!(status.can_transition_to(&AgentSlotStatus::stopped("user requested")));
     }
 }

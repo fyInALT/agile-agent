@@ -564,12 +564,12 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
             InputOutcome::SpawnAgent
         }
-        // Ctrl+X to stop focused agent
+        // Ctrl+X to stop focused agent (works at any time, user can always cancel)
         KeyEvent {
             code: KeyCode::Char('x'),
             modifiers,
             ..
-        } if modifiers.contains(KeyModifiers::CONTROL) && state.app().status == AppStatus::Idle => {
+        } if modifiers.contains(KeyModifiers::CONTROL) => {
             InputOutcome::StopFocusedAgent
         }
         // Ctrl+Shift+P to pause focused agent with worktree preservation

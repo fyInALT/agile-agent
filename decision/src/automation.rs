@@ -344,7 +344,7 @@ impl CheckRule for RiskCheckRule {
             }
         }
         // Also check output's risky_operations field
-        for op in &output.risky_operations {
+        if let Some(op) = output.risky_operations.first() {
             return Some(AutoCheckResult::NeedsHuman {
                 reason: format!("High-risk operation: {}", op),
             });
@@ -494,7 +494,7 @@ impl DecisionFilter {
                 return Some(format!("High-risk: {}", op));
             }
         }
-        for op in &output.risky_operations {
+        if let Some(op) = output.risky_operations.first() {
             return Some(format!("High-risk: {}", op));
         }
 

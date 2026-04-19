@@ -238,7 +238,7 @@ impl ProcessYaml {
     /// Create YAML representation from DecisionProcess
     pub fn from_process(process: &DecisionProcess) -> Self {
         let stages = process.stages.iter()
-            .map(|s| StageYaml::from_stage(s))
+            .map(StageYaml::from_stage)
             .collect();
 
         let config = Some(ConfigYaml::from_config(&process.config));
@@ -260,11 +260,11 @@ impl StageYaml {
     /// Create YAML representation from DecisionStage
     pub fn from_stage(stage: &DecisionStage) -> Self {
         let transitions = stage.transitions.iter()
-            .map(|t| TransitionYaml::from_transition(t))
+            .map(TransitionYaml::from_transition)
             .collect();
 
         let actions = stage.actions.iter()
-            .map(|a| format_action(a))
+            .map(format_action)
             .collect();
 
         Self {
