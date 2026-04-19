@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_task_preparation_pipeline_new() {
-        let pipeline = TaskPreparationPipeline::new();
+        let _pipeline = TaskPreparationPipeline::new();
         // Basic creation test
         assert!(true);
     }
