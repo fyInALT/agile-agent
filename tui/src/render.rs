@@ -867,15 +867,17 @@ fn render_provider_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
 /// Render profile selection overlay for agent creation
 fn render_profile_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
+    use crate::profile_selection_overlay::ProfileSection;
+
     let overlay = state
         .profile_selection_overlay
         .as_ref()
         .expect("overlay should be open");
 
     let profile_count = overlay.profiles().len();
-    // Dynamic height: header(3) + profiles + hint(3), min 10
-    let height = (3 + profile_count + 3).max(10).min(20) as u16;
-    let area = centered_rect(60, height, frame.area());
+    // Height: title(1) + section headers(2) + profiles + hints(3) + gap(1)
+    let height = (1 + 2 + profile_count + 4).max(12).min(22) as u16;
+    let area = centered_rect(65, height, frame.area());
 
     frame.render_widget(Clear, area);
 
@@ -889,40 +891,70 @@ fn render_profile_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     frame.render_widget(block, area);
 
     let mut lines = Vec::new();
+
+    // Section header
+    let work_marker = if overlay.section() == ProfileSection::Work { "[" } else { " " };
+    let decision_marker = if overlay.section() == ProfileSection::Decision { "[" } else { " " };
+    let work_selected = overlay.selected_work_profile_id().unwrap_or_default();
+    let decision_selected = overlay.selected_decision_profile_id().unwrap_or_default();
+
+    lines.push(Line::from(vec![
+        Span::raw("  Work Agent: "),
+        Span::styled(format!("{}>{} ", work_marker, if overlay.section() == ProfileSection::Work { "*" } else { " " }), Style::default().fg(Color::Cyan)),
+        Span::raw(format!("{} ", work_selected)),
+        Span::raw("     "),
+        Span::raw("Decision Agent: "),
+        Span::styled(format!("{}>{} ", decision_marker, if overlay.section() == ProfileSection::Decision { "*" } else { " " }), Style::default().fg(Color::Magenta)),
+        Span::raw(decision_selected),
+    ]));
+
+    // Separator
+    lines.push(Line::from(vec![Span::styled(
+        "  ──────────────────────────────────────────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )]));
+
+    // Profile list
     for (index, profile) in overlay.profiles().iter().enumerate() {
-        let selected = index == overlay.selected_index();
-        let marker = if selected { ">" } else { " " };
-        let style = if selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::White)
-                .add_modifier(Modifier::BOLD)
+        let is_work_selected = index == overlay.work_selected_index();
+        let is_decision_selected = index == overlay.decision_selected_index();
+        let is_work_focused = overlay.section() == ProfileSection::Work;
+        let is_decision_focused = overlay.section() == ProfileSection::Decision;
+
+        // Determine marker based on which section is focused and selected
+        let marker = if is_work_focused && is_work_selected {
+            ">"
+        } else if is_decision_focused && is_decision_selected {
+            ">"
         } else {
-            Style::default()
+            " "
         };
 
-        // Format: [>] profile-name (cli-type)
+        // Determine style
+        let (fg, bg) = if is_work_focused && is_work_selected {
+            (Color::Black, Color::Cyan)
+        } else if is_decision_focused && is_decision_selected {
+            (Color::Black, Color::Magenta)
+        } else {
+            (Color::Reset, Color::Reset)
+        };
+
+        let style = Style::default()
+            .fg(fg)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+
         let line = format!(
             "{} {} ({})",
             marker, profile.display_name, profile.cli_label
         );
         lines.push(Line::from(vec![Span::styled(line, style)]));
-
-        // Show description on selected line
-        if selected {
-            if let Some(ref desc) = profile.description {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("    {}", desc),
-                    Style::default().fg(Color::DarkGray),
-                )]));
-            }
-        }
     }
 
-    // Add hint line
+    // Hints
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Enter: select profile  Esc: cancel",
+        "  Up/Down: select  Left/Right: switch section  Enter: confirm  Esc: cancel",
         Style::default().fg(Color::DarkGray),
     )));
 

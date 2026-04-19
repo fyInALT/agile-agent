@@ -412,13 +412,19 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 ProfileSelectionCommand::Close => {
                                     state.close_profile_selection_overlay();
                                 }
-                                ProfileSelectionCommand::Select(profile_id) => {
+                                ProfileSelectionCommand::Select {
+                                    work_profile_id,
+                                    decision_profile_id,
+                                } => {
                                     state.close_profile_selection_overlay();
-                                    if let Some(agent_id) = state.spawn_agent_with_profile(&profile_id) {
+                                    if let Some(agent_id) =
+                                        state.spawn_agent_with_profiles(&work_profile_id, &decision_profile_id)
+                                    {
                                         state.app_mut().push_status_message(format!(
-                                            "spawned {} with profile {}",
+                                            "spawned {} with work={} decision={}",
                                             agent_id.as_str(),
-                                            profile_id
+                                            work_profile_id,
+                                            decision_profile_id
                                         ));
                                     } else {
                                         state.app_mut().push_error_message(

@@ -522,6 +522,56 @@ impl TuiState {
         Some(agent_id)
     }
 
+    /// Spawn a new agent using specific work and decision profiles
+    ///
+    /// The profile IDs select pre-configured profiles from the profile store.
+    pub fn spawn_agent_with_profiles(
+        &mut self,
+        work_profile_id: &str,
+        decision_profile_id: &str,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
+        // Create agent pool if it doesn't exist
+        if self.agent_pool.is_none() {
+            self.ensure_overview_agent();
+        }
+
+        let pool = self.agent_pool.as_mut()?;
+
+        let agent_id = pool
+            .spawn_agent_with_profile(&work_profile_id.to_string())
+            .map_err(|e| {
+                logging::warn_event(
+                    "tui.agent.spawn_profile_failed",
+                    "failed to spawn agent with work profile",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                        "work_profile_id": work_profile_id,
+                    }),
+                );
+                e
+            })
+            .ok()?;
+
+        // Spawn decision agent with specified profile
+        if let Some(pool) = self.agent_pool.as_mut() {
+            if let Err(e) =
+                pool.spawn_decision_agent_with_profile_for(&agent_id, Some(&decision_profile_id.to_string()))
+            {
+                logging::warn_event(
+                    "decision_agent.spawn_failed",
+                    "failed to spawn decision agent with profile",
+                    serde_json::json!({
+                        "work_agent_id": agent_id.as_str(),
+                        "decision_profile_id": decision_profile_id,
+                        "error": e,
+                    }),
+                );
+            }
+        }
+
+        Some(agent_id)
+    }
+
     /// Spawn a new agent with launch configuration
     ///
     /// If the pool has worktree support, the agent will be created with an
@@ -1740,8 +1790,13 @@ impl TuiState {
         };
 
         let profiles = store.list_profiles().into_iter().cloned().collect();
-        let default_id = store.default_work_profile_id().clone();
-        self.profile_selection_overlay = Some(ProfileSelectionOverlay::new(profiles, &default_id));
+        let default_work_id = store.default_work_profile_id().clone();
+        let default_decision_id = store.default_decision_profile_id().clone();
+        self.profile_selection_overlay = Some(ProfileSelectionOverlay::new(
+            profiles,
+            &default_work_id,
+            &default_decision_id,
+        ));
     }
 
     /// Close profile selection overlay
