@@ -96,6 +96,22 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     )?;
     let mut state = TuiState::from_session(session);
 
+    // Load provider profiles from global config
+    if let Ok(config_store) = agent_core::global_config::GlobalConfigStore::new() {
+        if let Ok(profile_store) = config_store.load_profile_store() {
+            if let Some(pool) = state.agent_pool.as_mut() {
+                pool.set_profile_store(profile_store);
+                logging::debug_event(
+                    "app_loop.load_profiles",
+                    "loaded provider profiles into agent pool",
+                    serde_json::json!({
+                        "profile_count": pool.profile_store().map(|s| s.profile_count()).unwrap_or(0),
+                    }),
+                );
+            }
+        }
+    }
+
     if let Some(snapshot) = tui_resume_snapshot {
         state.restore_from_resume_snapshot(snapshot)?;
         workplace.clear_shutdown_snapshot()?;
