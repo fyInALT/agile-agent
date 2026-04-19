@@ -97,6 +97,7 @@ pub mod yaml_loader;
 pub mod task_metadata;
 pub mod git_state;
 pub mod uncommitted_handler;
+pub mod task_preparation;
 
 // Re-export core types
 pub use error::*;
