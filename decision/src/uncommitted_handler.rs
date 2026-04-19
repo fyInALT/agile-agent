@@ -110,22 +110,6 @@ const TEMPORARY_PATTERNS: &[&str] = &[
     "dbg!(",
 ];
 
-/// Patterns that indicate valuable changes
-const VALUABLE_PATTERNS: &[&str] = &[
-    "impl ",
-    "fn ",
-    "struct ",
-    "enum ",
-    "trait ",
-    "mod ",
-    "use ",
-    "pub ",
-    "async ",
-    "-> Result",
-    "#[derive",
-    "#[test]",
-];
-
 /// Uncommitted changes analyzer
 pub struct UncommittedAnalyzer;
 

@@ -99,6 +99,7 @@ pub struct CommitBoundaryDetector {
     /// Minimum changes threshold for suggesting commit
     min_changes_threshold: usize,
     /// Time window to batch changes (avoid noisy prompts)
+    #[allow(dead_code)]
     batch_window_secs: u64,
     /// Last suggestion timestamp (to avoid spam)
     last_suggestion: Option<DateTime<Utc>>,
