@@ -31,7 +31,27 @@ Key principles:
 - Prioritize project rules and guidelines (CLAUDE.md, AGENTS.md)
 - Make decisions that advance the current story/task
 - Be conservative with high-impact decisions (escalate to human if uncertain)
-- Learn from recent decision history to improve consistency";
+- Learn from recent decision history to improve consistency
+
+Decision Guidelines:
+1. CONTINUATION AFTER REFLECTION: When the work agent reports that documents or requirements
+   have been understood and provides analysis or modification suggestions, and after
+   ReflectAction confirms there are no issues, immediately guide the agent to IMPLEMENT
+   these requirements. Do not stop at understanding - push for implementation.
+
+2. EXPERT-BASED CHOICE SELECTION: When the work agent presents multiple options, evaluate them
+   based on:
+   - Years of development experience: Consider maintainability, scalability, testability
+   - Systems engineering thinking: Consider integration, dependencies, failure modes
+   - Agile principles: Favor iterative delivery, working software, respond to change
+   - Embrace change: Prefer flexible solutions over rigid ones
+   Make confident decisions using your engineering judgment - don't just pick randomly.
+
+3. EXECUTION MODE PREFERENCE: When the work agent asks to choose between execution modes:
+   - ALWAYS choose 'Inline Execution' over 'Subagent-Driven'
+   - Inline Execution keeps work flowing in the current context
+   - Subagent-Driven adds overhead and breaks context
+   This preference ensures faster, more coherent development progress.";
 
 /// Default prompt for waiting_for_choice situations
 pub const DEFAULT_CHOICE_PROMPT: &str = "\
@@ -58,15 +78,41 @@ The development agent is waiting for your selection. Choose the most appropriate
 {decision_history}
 
 ## Instructions
-1. Analyze each option against project rules and task requirements
+
+### Option Selection Strategy
+Apply these principles when evaluating options:
+
+1. **Engineering Experience**: Consider maintainability, testability, and scalability.
+   - Prefer well-tested, documented solutions
+   - Avoid clever but fragile approaches
+
+2. **Systems Thinking**: Evaluate integration and dependency impacts.
+   - Consider how changes affect existing components
+   - Think about failure modes and edge cases
+
+3. **Agile Mindset**: Favor working, iterative progress.
+   - Prefer incremental delivery over big-bang changes
+   - Choose options that can be verified quickly
+
+4. **Embrace Change**: Select flexible, adaptable solutions.
+   - Avoid over-engineering for hypothetical future needs
+   - Prefer reversible or low-cost decisions when uncertain
+
+### Special Cases
+- If options include 'Inline Execution' vs 'Subagent-Driven' → ALWAYS select Inline Execution
+- If this is a confirmation after reflection (agent understood requirements) → proceed to implementation
+- If uncertain about HIGH-IMPACT decisions (irreversible, multi-agent, risky) → consider escalating to human
+
+### Decision Process
+1. Analyze each option against the principles above
 2. Consider which option best advances the current task
-3. If uncertain about impact, consider escalating to human
+3. Make a confident decision using engineering judgment
 4. Select ONE option and explain your reasoning
 
 ## Output Format
 ACTION: select_option
 PARAMETERS: {\"option_id\": \"<selected_option_id>\"}
-REASONING: <brief explanation of why this option was selected>
+REASONING: <brief explanation applying the decision principles>
 CONFIDENCE: <number between 0.0 and 1.0>
 
 Respond in this exact format.";
@@ -98,6 +144,10 @@ The agent claims completion but we need verification. Request reflection with th
 2. Are edge cases handled properly?
 3. Does the implementation follow project rules?
 4. Are tests added or updated as needed?
+
+**IMPORTANT**: If the agent reports that documents/requirements have been understood and provides
+analysis or suggestions WITHOUT actual implementation code changes, this is NOT completion.
+Request reflection to confirm understanding, then explicitly instruct to PROCEED WITH IMPLEMENTATION.
 
 If you see obvious gaps, point them out. If the claim seems reasonable, ask for brief reflection.
 
@@ -173,10 +223,17 @@ The development agent has made partial progress. Determine what remains and guid
 
 ## Instructions
 Analyze the partial progress and provide clear continuation instructions:
-1. Identify what has been completed
+1. Identify what has been completed (actual code changes vs just analysis)
 2. Identify what remains to be done
 3. Provide specific next steps
 4. Consider dependencies between items
+
+**IMPORTANT**: If 'progress' is only requirements understanding/analysis without code changes:
+- This is NOT partial completion - it's just preparation
+- Instruct the agent to proceed with IMPLEMENTATION
+- Provide explicit instruction: \"Your analysis is correct. Now implement the changes.\"
+
+If actual implementation work has started, identify remaining items.
 
 ## Output Format
 ACTION: continue
@@ -303,24 +360,33 @@ This is the final verification before confirming task completion.
 ## Instructions
 Perform final verification:
 1. Check each Definition of Done item
-2. Verify file modifications are appropriate
+2. Verify file modifications are appropriate (actual code changes, not just analysis)
 3. Confirm tests are passing or added
 4. Check for integration concerns
 5. Verify project rules compliance
 
+**CRITICAL CHECK**: Ensure the work includes actual IMPLEMENTATION, not just:
+- Requirements understanding/analysis
+- Document review
+- Modification suggestions without code
+- Planning without execution
+
+If the agent only understood requirements but didn't implement, this is NOT completion.
+Explicitly instruct to continue with implementation.
+
 If all criteria met, confirm completion. If gaps remain, list them.
 
 ## Output Format
-For confirmed completion:
+For confirmed completion (actual implementation done):
 ACTION: confirm_completion
 PARAMETERS: {\"verified\": true, \"summary\": \"<verification summary>\"}
 REASONING: <why completion is verified>
 CONFIDENCE: <number between 0.0 and 1.0>
 
-For incomplete:
+For incomplete (analysis only, no implementation):
 ACTION: continue
-PARAMETERS: {\"instruction\": \"<list of remaining items>\"}
-REASONING: <what gaps were found>
+PARAMETERS: {\"instruction\": \"Proceed with implementation. Your analysis is correct, now implement the changes as planned.\"}
+REASONING: <Agent understood requirements but didn't implement yet>
 CONFIDENCE: <number between 0.0 and 1.0>
 
 Respond in this exact format.";
