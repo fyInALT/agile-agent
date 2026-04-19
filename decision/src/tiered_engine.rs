@@ -321,6 +321,20 @@ impl TieredDecisionEngine {
         stats.total = self.history.len() as u64;
         stats
     }
+
+    /// Get current reflection round from LLM engine
+    ///
+    /// This allows callers to track the reflection round across decision cycles.
+    pub fn reflection_round(&self) -> u8 {
+        self.llm_engine.reflection_round()
+    }
+
+    /// Reset reflection round (for new task)
+    ///
+    /// Call this when starting a new task to reset the reflection counter.
+    pub fn reset_reflection_round(&mut self) {
+        self.llm_engine.reset_reflection_round();
+    }
 }
 
 /// Tier statistics

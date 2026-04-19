@@ -186,6 +186,9 @@ pub struct DecisionAgentSlot {
     error_count: u64,
     /// Profile ID for decision layer (optional)
     profile_id: Option<String>,
+    /// Current reflection round for claims_completion tracking
+    /// This persists across decision cycles to enforce max reflection limit
+    reflection_round: u8,
 }
 
 impl std::fmt::Debug for DecisionAgentSlot {
@@ -200,6 +203,7 @@ impl std::fmt::Debug for DecisionAgentSlot {
             .field("decision_count", &self.decision_count)
             .field("error_count", &self.error_count)
             .field("profile_id", &self.profile_id)
+            .field("reflection_round", &self.reflection_round)
             .finish()
     }
 }
@@ -258,6 +262,7 @@ impl DecisionAgentSlot {
             decision_count: 0,
             error_count: 0,
             profile_id: None,
+            reflection_round: 0,
         }
     }
 
@@ -378,11 +383,15 @@ impl DecisionAgentSlot {
         );
 
         // Make decision using engine - pass context directly (not cloned)
-        let result = self.engine.decide(request.context, &self.action_registry);
+        // First, inject current reflection_round into context for proper tracking
+        let context_with_reflection = request.context.with_reflection_round(self.reflection_round);
+        let result = self.engine.decide(context_with_reflection, &self.action_registry);
 
         match result {
             Ok(output) => {
                 self.decision_count += 1;
+                // Sync reflection_round from engine after decision (engine increments on reflect)
+                self.reflection_round = self.engine.reflection_round();
                 self.status = DecisionAgentStatus::responding();
 
                 // Log: Decision engine response
