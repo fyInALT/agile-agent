@@ -144,6 +144,66 @@ impl DecisionAction for SuggestCommitAction {
     }
 }
 
+pub fn prepare_pr() -> ActionType {
+    ActionType::new("prepare_pr")
+}
+
+/// Action: Prepare PR for task completion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreparePrAction {
+    /// PR title
+    pub title: String,
+    /// PR description
+    pub description: String,
+    /// Base branch to merge into
+    pub base_branch: String,
+    /// Whether to create draft PR
+    pub as_draft: bool,
+}
+
+impl PreparePrAction {
+    pub fn new(title: impl Into<String>, description: impl Into<String>, base_branch: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            description: description.into(),
+            base_branch: base_branch.into(),
+            as_draft: true,
+        }
+    }
+
+    pub fn with_draft(mut self, as_draft: bool) -> Self {
+        self.as_draft = as_draft;
+        self
+    }
+}
+
+impl DecisionAction for PreparePrAction {
+    fn action_type(&self) -> ActionType {
+        prepare_pr()
+    }
+
+    fn implementation_type(&self) -> &'static str {
+        "PreparePrAction"
+    }
+
+    fn to_prompt_format(&self) -> String {
+        format!(
+            "PreparePR: {}\nBase: {}\nDraft: {}",
+            self.title,
+            self.base_branch,
+            self.as_draft
+        )
+    }
+
+    fn serialize_params(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    fn clone_boxed(&self) -> Box<dyn DecisionAction> {
+        Box::new(self.clone())
+    }
+}
+
 /// Action: Wake up from resting state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakeUpAction;
@@ -1061,6 +1121,11 @@ fn deserialize_suggest_commit(params: &str) -> Option<Box<dyn DecisionAction>> {
     Some(Box::new(action))
 }
 
+fn deserialize_prepare_pr(params: &str) -> Option<Box<dyn DecisionAction>> {
+    let action: PreparePrAction = serde_json::from_str(params).ok()?;
+    Some(Box::new(action))
+}
+
 pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(SelectOptionAction::default()));
     registry.register(Box::new(ReflectAction::default()));
@@ -1075,6 +1140,7 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register(Box::new(StashChangesAction::new("")));
     registry.register(Box::new(DiscardChangesAction::default()));
     registry.register(Box::new(SuggestCommitAction::new("", "")));
+    registry.register(Box::new(PreparePrAction::new("", "", "main")));
 
     // Register parsers
     registry.register_parser(select_option(), SelectOptionAction::parse);
@@ -1093,6 +1159,7 @@ pub fn register_action_builtins(registry: &ActionRegistry) {
     registry.register_deserializer(stash_changes(), deserialize_stash_changes);
     registry.register_deserializer(discard_changes(), deserialize_discard_changes);
     registry.register_deserializer(suggest_commit(), deserialize_suggest_commit);
+    registry.register_deserializer(prepare_pr(), deserialize_prepare_pr);
 }
 
 #[cfg(test)]
