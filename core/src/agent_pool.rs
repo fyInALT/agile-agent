@@ -1445,6 +1445,71 @@ impl AgentPool {
         Ok(())
     }
 
+    /// Spawn decision agent for a work agent with optional profile
+    ///
+    /// Creates a decision agent with an optional profile_id for independent
+    /// decision layer LLM backend configuration.
+    pub fn spawn_decision_agent_with_profile_for(
+        &mut self,
+        work_agent_id: &AgentId,
+        profile_id: Option<&ProfileId>,
+    ) -> Result<(), String> {
+        // Find the work agent slot
+        let slot_index = self.find_slot_index(work_agent_id)?;
+        let work_slot = &self.slots[slot_index];
+        let provider_kind_opt = work_slot.provider_type().to_provider_kind();
+
+        // Handle Opencode provider which doesn't have ProviderKind mapping
+        let provider_kind = provider_kind_opt.ok_or_else(|| {
+            format!(
+                "Provider type {} doesn't have a ProviderKind mapping",
+                work_slot.provider_type().label()
+            )
+        })?;
+
+        // Create decision mail channel
+        let mail = DecisionMail::new();
+        let (sender, receiver) = mail.split();
+
+        // Create decision agent slot
+        let mut decision_agent = DecisionAgentSlot::new(
+            work_agent_id.as_str().to_string(),
+            provider_kind,
+            receiver,
+            self.cwd.clone(),
+            &self.decision_components,
+        );
+
+        // Set profile_id if provided
+        if let Some(pid) = profile_id {
+            decision_agent.set_profile_id(pid.clone());
+        }
+
+        // Inject ProviderLLMCaller for real LLM calls
+        use crate::llm_caller::ProviderLLMCaller;
+        use std::sync::Arc;
+        let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
+        decision_agent.set_llm_caller(llm_caller);
+
+        // Store the decision agent and mail sender
+        self.decision_agents
+            .insert(work_agent_id.clone(), decision_agent);
+        self.decision_mail_senders
+            .insert(work_agent_id.clone(), sender);
+
+        logging::debug_event(
+            "pool.decision_agent.spawn_with_profile",
+            "spawned decision agent for work agent with profile",
+            serde_json::json!({
+                "work_agent_id": work_agent_id.as_str(),
+                "provider_kind": provider_kind.label(),
+                "profile_id": profile_id,
+            }),
+        );
+
+        Ok(())
+    }
+
     /// Stop the decision agent for a work agent
     pub fn stop_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
         if let Some(decision_agent) = self.decision_agents.get_mut(work_agent_id) {
