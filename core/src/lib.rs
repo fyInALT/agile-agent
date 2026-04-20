@@ -89,7 +89,7 @@ pub use agent_backlog::{
 pub use agent_storage::app_data_root;
 
 // Re-export slot types for backward compatibility
-pub use slot::{AgentSlotStatus, TaskCompletionResult, ThreadOutcome};
+pub use slot::{AgentSlotStatus, TaskCompletionResult, ThreadOutcome, AgentStateMachine, DefaultStateMachine};
 
 // Re-export pool types for backward compatibility
 pub use pool::{
@@ -97,7 +97,10 @@ pub use pool::{
     BlockedHandler, BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot,
     DecisionExecutionResult, DecisionAgentCoordinator, DecisionAgentStats,
-    WorktreeCoordinator,
+    WorktreeCoordinator, AgentLifecycleManager, LifecycleError,
+    TaskAssignmentCoordinator, AssignmentError,
+    FocusManager, FocusError,
+    PoolQueries,
 };
 
 #[cfg(test)]
@@ -338,5 +341,93 @@ mod backward_compatibility_tests {
         let coord = DecisionAgentCoordinator::new();
         let count = _accept_decision_coordinator(coord);
         assert_eq!(count, 0, "DecisionAgentCoordinator should have zero agents");
+    }
+
+    // Test lifecycle types are accessible AND functional from core
+    #[test]
+    fn lifecycle_types_accessible_and_functional() {
+        // AgentLifecycleManager - is accessible (zero-sized type)
+        let _manager = AgentLifecycleManager;
+
+        // LifecycleError - verify all variants exist and display works
+        let err = LifecycleError::PoolFull;
+        assert_eq!(err.to_string(), "Agent pool is full");
+
+        let err = LifecycleError::AgentNotFound("test-agent".to_string());
+        assert!(err.to_string().contains("test-agent"), "LifecycleError::AgentNotFound should contain agent id");
+
+        let err = LifecycleError::WorktreeNotEnabled;
+        assert_eq!(err.to_string(), "Worktree support not enabled");
+
+        let err = LifecycleError::NoWorktree("agent-1".to_string());
+        assert!(err.to_string().contains("agent-1"), "LifecycleError::NoWorktree should contain agent id");
+
+        // LifecycleError implements std::error::Error
+        let err: &dyn std::error::Error = &LifecycleError::PoolFull;
+        assert!(err.to_string().contains("pool"), "LifecycleError as Error should display correctly");
+    }
+
+    // Test lifecycle manager can be used in function signatures
+    fn _accept_lifecycle_manager(_manager: AgentLifecycleManager) {
+        // AgentLifecycleManager is ZST, no operations needed
+    }
+
+    fn _accept_lifecycle_error(err: LifecycleError) -> String {
+        err.to_string()
+    }
+
+    #[test]
+    fn lifecycle_manager_works_in_function_signatures() {
+        // AgentLifecycleManager - can be passed to function
+        _accept_lifecycle_manager(AgentLifecycleManager);
+
+        // LifecycleError - function returns display string
+        let err = LifecycleError::StateNotFound("agent-1".to_string());
+        let msg = _accept_lifecycle_error(err);
+        assert!(msg.contains("agent-1"), "LifecycleError function should return display string");
+    }
+
+    // Test task assignment types are accessible AND functional from core
+    #[test]
+    fn task_assignment_types_accessible_and_functional() {
+        // TaskAssignmentCoordinator - is accessible (zero-sized type)
+        let _coordinator = TaskAssignmentCoordinator;
+
+        // AssignmentError - verify all variants exist and display works
+        let err = AssignmentError::AgentNotFound("test-agent".to_string());
+        assert!(err.to_string().contains("test-agent"), "AssignmentError::AgentNotFound should contain agent id");
+
+        let err = AssignmentError::TaskNotReady("task-1".to_string());
+        assert!(err.to_string().contains("task-1"), "AssignmentError::TaskNotReady should contain task id");
+
+        let err = AssignmentError::AgentNotIdle("agent-1".to_string());
+        assert!(err.to_string().contains("agent-1"), "AssignmentError::AgentNotIdle should contain agent id");
+
+        let err = AssignmentError::NoAssignedTask("agent-1".to_string());
+        assert!(err.to_string().contains("agent-1"), "AssignmentError::NoAssignedTask should contain agent id");
+
+        // AssignmentError implements std::error::Error
+        let err: &dyn std::error::Error = &AssignmentError::AgentNotFound("test".to_string());
+        assert!(err.to_string().contains("Agent"), "AssignmentError as Error should display correctly");
+    }
+
+    // Test task assignment coordinator methods work
+    fn _accept_task_assignment_coordinator(_coord: TaskAssignmentCoordinator) {
+        // TaskAssignmentCoordinator is ZST, no operations needed
+    }
+
+    fn _accept_assignment_error(err: AssignmentError) -> String {
+        err.to_string()
+    }
+
+    #[test]
+    fn task_assignment_coordinator_works_in_function_signatures() {
+        // TaskAssignmentCoordinator - can be passed to function
+        _accept_task_assignment_coordinator(TaskAssignmentCoordinator);
+
+        // AssignmentError - function returns display string
+        let err = AssignmentError::SlotTransitionError("test error".to_string());
+        let msg = _accept_assignment_error(err);
+        assert!(msg.contains("test error"), "AssignmentError function should return display string");
     }
 }
