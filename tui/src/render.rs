@@ -348,10 +348,18 @@ fn render_overview_agent_list(frame: &mut Frame<'_>, state: &TuiState, area: Rec
 
         let is_overview_agent = snapshot.role == AgentRole::ProductOwner;
         let is_focused = focused_index == Some(*index);
+        let has_pending_decision = state
+            .agent_pool
+            .as_ref()
+            .map(|pool| pool.agents_with_pending_decisions())
+            .unwrap_or_default()
+            .iter()
+            .any(|(id, _)| *id == snapshot.agent_id);
         let mut row = crate::overview_row::OverviewAgentRow::from_snapshot(
             snapshot,
             is_focused,
             is_overview_agent,
+            has_pending_decision,
         );
         row.truncate_to(max_width);
 
@@ -1957,6 +1965,13 @@ fn render_dashboard_cards(frame: &mut Frame<'_>, state: &mut TuiState, area: Rec
     let scroll_offset = state.view_state.dashboard.scroll_offset;
 
     // Render each agent as a card
+    // Get pending decisions for indicator
+    let pending_decisions = state
+        .agent_pool
+        .as_ref()
+        .map(|pool| pool.agents_with_pending_decisions())
+        .unwrap_or_default();
+
     for (i, status) in statuses.iter().enumerate() {
         let row = i / cards_per_row;
         let col = i % cards_per_row;
@@ -1978,11 +1993,16 @@ fn render_dashboard_cards(frame: &mut Frame<'_>, state: &mut TuiState, area: Rec
             break;
         }
 
+        let has_pending_decision = pending_decisions
+            .iter()
+            .any(|(id, _)| *id == status.agent_id);
+
         render_agent_card(
             frame,
             status,
             card_area,
             state.view_state.dashboard.selected_card_index == i,
+            has_pending_decision,
         );
     }
 }
@@ -1992,6 +2012,7 @@ fn render_agent_card(
     status: &AgentStatusSnapshot,
     area: Rect,
     is_selected: bool,
+    has_pending_decision: bool,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
@@ -2027,13 +2048,19 @@ fn render_agent_card(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Card content - base lines
+    // Card content - base lines (add decision indicator to codename if pending)
+    let codename_with_decision = if has_pending_decision {
+        format!("{} 🧠", status.codename.as_str())
+    } else {
+        status.codename.as_str().to_string()
+    };
+
     let mut lines = vec![
         Line::from(vec![
             Span::styled(indicator, Style::default().fg(status_color)),
             Span::raw(" "),
             Span::styled(
-                status.codename.as_str(),
+                codename_with_decision,
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),

@@ -344,10 +344,6 @@ pub struct AgentPool {
     git_flow_executor: Option<GitFlowExecutor>,
     /// Provider profile store (optional, for profile-based agent creation)
     profile_store: Option<ProfileStore>,
-    /// Timestamp when the last decision was started (for UI display)
-    /// This ensures the UI shows "Analyzing" for at least a minimum duration
-    /// even when decisions complete faster than the render interval
-    last_decision_started_at: Option<std::time::Instant>,
 }
 
 impl std::fmt::Debug for AgentPool {
@@ -386,7 +382,6 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
-            last_decision_started_at: None,
         }
     }
 
@@ -414,7 +409,6 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
-            last_decision_started_at: None,
         }
     }
 
@@ -438,7 +432,6 @@ impl AgentPool {
             worktree_state_store: None,
             git_flow_executor: None,
             profile_store: None,
-            last_decision_started_at: None,
         }
     }
 
@@ -497,7 +490,6 @@ impl AgentPool {
             worktree_state_store: Some(worktree_state_store),
             git_flow_executor: Some(git_flow_executor),
             profile_store: None,
-            last_decision_started_at: None,
         })
     }
 
@@ -1607,11 +1599,6 @@ impl AgentPool {
         thinking_agents
     }
 
-    /// Get timestamp of last decision start
-    pub fn last_decision_started_at(&self) -> Option<std::time::Instant> {
-        self.last_decision_started_at
-    }
-
     /// Classify an event for a specific agent
     ///
     /// Uses the classifier registry to determine if the event needs a decision.
@@ -1743,14 +1730,10 @@ impl AgentPool {
     /// Returns responses from decision agents that have processed requests.
     pub fn poll_decision_agents(&mut self) -> Vec<(AgentId, DecisionResponse)> {
         let mut responses = Vec::new();
-        let mut any_decision_started = false;
 
         for (work_agent_id, decision_agent) in &mut self.decision_agents {
             // Poll and process any pending requests (spawns async threads)
-            let processed = decision_agent.poll_and_process();
-            if processed > 0 {
-                any_decision_started = true;
-            }
+            decision_agent.poll_and_process();
 
             // Try to receive any responses that were generated via channel
             let mut received_this_poll = false;
@@ -1784,10 +1767,16 @@ impl AgentPool {
             }
         }
 
-        // Update timestamp when any decision was started
-        // This ensures UI shows "Analyzing" for at least 1.5s even for fast decisions
-        if any_decision_started {
-            self.last_decision_started_at = Some(std::time::Instant::now());
+        // Cleanup: Clear old timestamps that are past the display window (1.5s)
+        // This prevents memory accumulation of stale timestamps
+        const MIN_DECISION_DISPLAY_MS: u64 = 1500;
+        for decision_agent in self.decision_agents.values_mut() {
+            if let Some(started_at) = decision_agent.last_decision_started_at() {
+                let elapsed = std::time::Instant::now().duration_since(started_at);
+                if elapsed.as_millis() >= MIN_DECISION_DISPLAY_MS as u128 {
+                    decision_agent.clear_recent_decision();
+                }
+            }
         }
 
         responses
@@ -5863,14 +5852,17 @@ mod tests {
     }
 
     #[test]
-    fn last_decision_started_at_is_set_after_poll() {
+    fn agents_with_pending_decisions_returns_agent_after_poll() {
+        // After starting a decision, the agent should appear in pending decisions
+        // This verifies per-agent timestamp tracking (not global)
         let mut pool = make_pool(4);
-
-        // Initially None
-        assert!(pool.last_decision_started_at().is_none());
 
         // Spawn work agent
         let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Initially no pending decisions
+        let pending = pool.agents_with_pending_decisions();
+        assert!(pending.is_empty());
 
         // Get the decision mail sender for this agent
         let mail_sender = pool.decision_mail_senders.get(&agent_id).expect("mail sender exists");
@@ -5890,11 +5882,13 @@ mod tests {
         // Send request
         mail_sender.send_request(request).expect("send request");
 
-        // First poll - spawns async thread, should set last_decision_started_at
+        // First poll - spawns async thread, should set per-agent timestamp
         pool.poll_decision_agents();
 
-        // Now should be set
-        assert!(pool.last_decision_started_at().is_some());
+        // Now the agent should appear in pending decisions (either Thinking or has recent decision)
+        let pending = pool.agents_with_pending_decisions();
+        assert_eq!(pending.len(), 1, "Should have one pending decision");
+        assert_eq!(pending[0].0, agent_id, "Pending decision should be for our agent");
     }
 
     #[test]
@@ -5936,5 +5930,39 @@ mod tests {
 
         // Should be empty (no requests to process)
         assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn clear_recent_decision_called_after_display_window_expires() {
+        // Bug 2: Memory leak - clear_recent_decision should be called after 1.5s window
+        // This test verifies that old timestamps are cleaned up after poll_decision_agents
+        let mut pool = make_pool(4);
+
+        // Spawn work agent
+        let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
+
+        // Manually set last_decision_started_at to a past time (>1.5s ago)
+        // This simulates a decision that started long ago and already completed
+        if let Some(decision_agent) = pool.decision_agents.get_mut(&agent_id) {
+            // Set to 2 seconds ago
+            decision_agent.set_last_decision_started_at_for_test(Some(
+                std::time::Instant::now() - std::time::Duration::from_millis(2000)
+            ));
+        }
+
+        // Verify the timestamp exists before poll
+        let pending_before = pool.agents_with_pending_decisions();
+        assert!(pending_before.is_empty(), "Should be empty because elapsed > 1.5s");
+
+        // Poll decision agents - should clean up old timestamps
+        let _responses = pool.poll_decision_agents();
+
+        // After poll, the old timestamp should be cleared
+        if let Some(decision_agent) = pool.decision_agents.get(&agent_id) {
+            assert!(
+                decision_agent.last_decision_started_at().is_none(),
+                "Old timestamp should be cleared after poll_decision_agents cleanup"
+            );
+        }
     }
 }

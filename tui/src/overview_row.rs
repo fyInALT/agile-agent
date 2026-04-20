@@ -21,6 +21,7 @@ impl OverviewAgentRow {
         snapshot: &AgentStatusSnapshot,
         _focused: bool,
         is_overview_agent: bool,
+        has_pending_decision: bool,
     ) -> Self {
         let indicator = if is_overview_agent {
             "◎" // Overview Agent always uses ◎
@@ -35,23 +36,32 @@ impl OverviewAgentRow {
         let task_desc = Self::task_description(snapshot);
         let elapsed = Self::elapsed_time(&snapshot.status);
 
-        // Build full row: │ Indicator │ Name │ Status │ Task Description [+ Duration] │
+        // Decision indicator suffix
+        let decision_suffix = if has_pending_decision {
+            " 🧠"
+        } else {
+            ""
+        };
+
+        // Build full row: │ Indicator │ Name │ Status │ Task Description [+ Duration] │ Decision Indicator │
         let full = if elapsed.is_empty() {
             format!(
-                "{} {} {} {}",
-                indicator,
-                snapshot.codename.as_str(),
-                status_label,
-                task_desc
-            )
-        } else {
-            format!(
-                "{} {} {} {} ({})",
+                "{} {} {} {}{}",
                 indicator,
                 snapshot.codename.as_str(),
                 status_label,
                 task_desc,
-                elapsed
+                decision_suffix
+            )
+        } else {
+            format!(
+                "{} {} {} {} ({}){}",
+                indicator,
+                snapshot.codename.as_str(),
+                status_label,
+                task_desc,
+                elapsed,
+                decision_suffix
             )
         };
 
@@ -325,7 +335,7 @@ mod tests {
     #[test]
     fn row_format_idle_agent() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("○"));
         assert!(row.full.contains("alpha"));
         assert!(row.full.contains("idle"));
@@ -334,7 +344,7 @@ mod tests {
     #[test]
     fn row_format_blocked_agent() {
         let snapshot = make_snapshot(AgentSlotStatus::blocked("API design not confirmed"));
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("🔶"));
         assert!(row.full.contains("blk"));
         assert!(row.full.contains("API design not confirmed"));
@@ -343,7 +353,7 @@ mod tests {
     #[test]
     fn row_format_overview_agent() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, true);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, true, false);
         assert!(row.full.contains("◎"));
         assert!(row.full.contains("alpha"));
         assert!(row.full.contains("ovw"));
@@ -352,7 +362,7 @@ mod tests {
     #[test]
     fn row_truncate_preserves_indicator() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         row.truncate_to(5);
         assert!(row.truncated.starts_with("○"));
     }
@@ -360,7 +370,7 @@ mod tests {
     #[test]
     fn row_truncate_preserves_overview_indicator() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, true);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, true, false);
         row.truncate_to(5);
         assert!(row.truncated.starts_with("◎"));
     }
@@ -368,7 +378,7 @@ mod tests {
     #[test]
     fn row_truncate_preserves_name_prefix() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         row.truncate_to(4);
         assert!(row.truncated.contains("al")); // "alpha" prefix
     }
@@ -376,7 +386,7 @@ mod tests {
     #[test]
     fn row_truncate_minimum_width() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         row.truncate_to(2);
         assert!(row.unicode_width <= 2);
     }
@@ -384,7 +394,7 @@ mod tests {
     #[test]
     fn row_truncate_keeps_status_before_falling_back_to_name_only() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let mut row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         row.truncate_to(18);
         assert!(row.truncated.contains("idle"));
     }
@@ -407,7 +417,7 @@ mod tests {
             Some("feature/test".to_string()),
             true,
         );
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("◈")); // Paused indicator
         assert!(row.full.contains("pause"));
         assert!(row.full.contains("wt:feature/test"));
@@ -420,14 +430,14 @@ mod tests {
             Some("feature/my-task".to_string()),
             true,
         );
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("wt:feature/my-task"));
     }
 
     #[test]
     fn row_format_agent_without_worktree_waiting() {
         let snapshot = make_snapshot(AgentSlotStatus::Idle);
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("Waiting for task"));
         assert!(!row.full.contains("wt:"));
     }
@@ -441,7 +451,24 @@ mod tests {
             Some("dev/123".to_string()),
             true,
         );
-        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
         assert!(row.full.contains("[wt:dev/123]"));
+    }
+
+    #[test]
+    fn row_format_with_pending_decision_shows_indicator() {
+        // Bug 3: Decision status missing in Overview view
+        // This test expects the brain emoji indicator when agent has pending decision
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, true);
+        assert!(row.full.contains("🧠"), "Should contain decision indicator when pending");
+    }
+
+    #[test]
+    fn row_format_without_pending_decision_no_indicator() {
+        // Verify no indicator when no pending decision
+        let snapshot = make_snapshot(AgentSlotStatus::Idle);
+        let row = OverviewAgentRow::from_snapshot(&snapshot, false, false, false);
+        assert!(!row.full.contains("🧠"), "Should not contain decision indicator when not pending");
     }
 }

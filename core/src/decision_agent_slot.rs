@@ -752,6 +752,12 @@ impl DecisionAgentSlot {
         self.last_decision_started_at = None;
     }
 
+    /// Set last_decision_started_at for testing purposes
+    #[cfg(test)]
+    pub fn set_last_decision_started_at_for_test(&mut self, instant: Option<std::time::Instant>) {
+        self.last_decision_started_at = instant;
+    }
+
     /// Stop the decision agent
     ///
     /// Gracefully shuts down any provider thread and marks as stopped.

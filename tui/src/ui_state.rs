@@ -109,10 +109,6 @@ pub struct TuiState {
     pub launch_config_overlay: Option<LaunchConfigOverlayState>,
     /// Current decision status summary (15 chars or less) for status bar
     pub decision_status: Option<String>,
-    /// Timestamp when the last decision was triggered
-    /// Used to show "Analyzing..." indicator even after decision completes
-    /// This ensures fast decisions (<1ms) still show status briefly
-    pub last_decision_started_at: Option<std::time::Instant>,
 }
 
 impl TuiState {
@@ -145,7 +141,6 @@ impl TuiState {
             human_decision_overlay: None,
             launch_config_overlay: None,
             decision_status: None,
-            last_decision_started_at: None,
         }
     }
 
