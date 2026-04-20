@@ -80,7 +80,78 @@ pub use agent_worktree::{
 // Re-export backlog types from agent-backlog for backward compatibility
 pub use agent_backlog::{
     BacklogState, ThreadSafeBacklog,
+    TaskStatus, TodoStatus, TodoItem, TaskItem,
 };
 
 // Re-export storage utilities from agent-storage for backward compatibility
 pub use agent_storage::app_data_root;
+
+#[cfg(test)]
+mod backward_compatibility_tests {
+    //! Tests to verify backward compatibility of re-exports
+    //!
+    //! These tests ensure that external code using `agent_core::TypeName`
+    //! continues to work after the crate split.
+
+    use super::*;
+
+    // Test that toolkit types are accessible from core
+    #[test]
+    fn toolkit_types_accessible_from_core() {
+        let _kind: PatchChangeKind = PatchChangeKind::Add;
+        let _status: PatchApplyStatus = PatchApplyStatus::Completed;
+        let _exec: ExecCommandStatus = ExecCommandStatus::InProgress;
+        let _mcp: McpToolCallStatus = McpToolCallStatus::Completed;
+    }
+
+    // Test that provider types are accessible from core
+    #[test]
+    fn provider_types_accessible_from_core() {
+        let _kind: ProviderKind = ProviderKind::Claude;
+        // ProviderEvent can be instantiated
+        let _event = ProviderEvent::Finished;
+    }
+
+    // Test that worktree types are accessible from core
+    #[test]
+    fn worktree_types_accessible_from_core() {
+        let _config: WorktreeConfig = WorktreeConfig::default();
+        let _task_type: TaskType = TaskType::Feature;
+        let _priority: TaskPriority = TaskPriority::High;
+    }
+
+    // Test that backlog types are accessible from core
+    #[test]
+    fn backlog_types_accessible_from_core() {
+        let _state: BacklogState = BacklogState::default();
+        let _task_status: TaskStatus = TaskStatus::Ready;
+        let _todo_status: TodoStatus = TodoStatus::Ready;
+    }
+
+    // Test that storage function is accessible from core
+    #[test]
+    fn storage_function_accessible_from_core() {
+        let result = app_data_root();
+        assert!(result.is_ok());
+    }
+
+    // Test that types can be used in function signatures
+    fn _accept_provider_kind(kind: ProviderKind) -> ProviderKind {
+        kind
+    }
+
+    fn _accept_backlog_state(state: BacklogState) -> BacklogState {
+        state
+    }
+
+    #[test]
+    fn types_work_in_function_signatures() {
+        let kind = ProviderKind::Mock;
+        let result = _accept_provider_kind(kind);
+        assert_eq!(result, ProviderKind::Mock);
+
+        let state = BacklogState::default();
+        let result = _accept_backlog_state(state);
+        assert!(result.todos.is_empty());
+    }
+}
