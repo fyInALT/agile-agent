@@ -5,5 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-types = { path = "../types" }
 anyhow.workspace = true
+chrono.workspace = true
 dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

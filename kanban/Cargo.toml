@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+agent-backlog = { path = "../agent/backlog" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }

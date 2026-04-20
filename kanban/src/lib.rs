@@ -3,6 +3,7 @@
 //! A kanban system for multi-agent Scrum development.
 
 pub mod builtin;
+pub mod decision_kanban;
 pub mod domain;
 pub mod elements;
 pub mod error;
@@ -19,6 +20,7 @@ pub mod transition;
 pub mod types;
 
 pub use builtin::*;
+pub use decision_kanban::*;
 pub use domain::*;
 pub use elements::*;
 pub use error::*;

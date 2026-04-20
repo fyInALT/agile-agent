@@ -24,6 +24,7 @@ agent-kanban = { path = "../kanban" }
 agent-decision = { path = "../decision" }
 agent-backlog = { path = "../agent/backlog" }
 agent-storage = { path = "../agent/storage" }
+agent-commands = { path = "../agent/commands" }
 
 [dev-dependencies]
 serial_test.workspace = true

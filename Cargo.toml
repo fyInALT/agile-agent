@@ -6,6 +6,7 @@ members = [
     "agent/worktree",
     "agent/backlog",
     "agent/storage",
+    "agent/commands",
     "cli",
     "core",
     "decision",

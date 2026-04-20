@@ -10,6 +10,8 @@ pub mod probe;
 pub mod llm_caller;
 pub mod providers;
 pub mod launch_config;
+pub mod profile;
 
 pub use provider::*;
 pub use provider_thread::*;
+pub use profile::*;
