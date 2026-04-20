@@ -165,7 +165,7 @@ impl DecisionExecutor {
             let response = HumanDecisionResponse::new(request.id.clone(), selection);
 
             // Process the response (this will update the slot status)
-            Self::process_human_response_internal(slots, human_queue, response);
+            Self::process_human_response_internal(slots, human_queue, response, work_agent_id);
 
             // Log: Selection executed
             logging::debug_event(
@@ -201,7 +201,7 @@ impl DecisionExecutor {
         if let Some(request) = pending_request {
             let response =
                 HumanDecisionResponse::new(request.id.clone(), HumanSelection::skip());
-            Self::process_human_response_internal(slots, human_queue, response);
+            Self::process_human_response_internal(slots, human_queue, response, work_agent_id);
         }
         // Log: Skip action executed
         logging::debug_event(
@@ -567,41 +567,37 @@ impl DecisionExecutor {
         slots: &mut [AgentSlot],
         human_queue: &mut HumanDecisionQueue,
         response: HumanDecisionResponse,
+        work_agent_id: &AgentId,
     ) {
-        // Find the request
-        let request = human_queue.find_by_agent_id(&response.request_id);
-        if let Some(request) = request.cloned() {
-            // Find the agent slot
-            let agent_id = AgentId::new(&request.agent_id);
-            let slot = slots.iter_mut().find(|s| s.agent_id() == &agent_id);
-            if let Some(slot) = slot {
-                // Apply the selection based on response
-                match &response.selection {
-                    HumanSelection::Selected { option_id: _ } => {
-                        // Execute the selected option - transition to idle
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
-                    }
-                    HumanSelection::Skipped => {
-                        // Skip - transition to idle
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
-                    }
-                    HumanSelection::Cancelled => {
-                        // Cancelled - transition to idle
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
-                    }
-                    HumanSelection::AcceptedRecommendation => {
-                        // Accepted - transition to idle
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
-                    }
-                    HumanSelection::Custom { instruction: _ } => {
-                        // Custom instruction - transition to idle
-                        let _ = slot.transition_to(AgentSlotStatus::idle());
-                    }
+        // Find the agent slot using the work_agent_id (passed from caller)
+        let slot = slots.iter_mut().find(|s| s.agent_id() == work_agent_id);
+        if let Some(slot) = slot {
+            // Apply the selection based on response
+            match &response.selection {
+                HumanSelection::Selected { option_id: _ } => {
+                    // Execute the selected option - transition to idle
+                    let _ = slot.transition_to(AgentSlotStatus::idle());
+                }
+                HumanSelection::Skipped => {
+                    // Skip - transition to idle
+                    let _ = slot.transition_to(AgentSlotStatus::idle());
+                }
+                HumanSelection::Cancelled => {
+                    // Cancelled - transition to idle
+                    let _ = slot.transition_to(AgentSlotStatus::idle());
+                }
+                HumanSelection::AcceptedRecommendation => {
+                    // Accepted - transition to idle
+                    let _ = slot.transition_to(AgentSlotStatus::idle());
+                }
+                HumanSelection::Custom { instruction: _ } => {
+                    // Custom instruction - transition to idle
+                    let _ = slot.transition_to(AgentSlotStatus::idle());
                 }
             }
-            // Complete the request (removes from queue and adds to history)
-            human_queue.complete(response);
         }
+        // Complete the request (removes from queue and adds to history)
+        human_queue.complete(response);
     }
 }
 

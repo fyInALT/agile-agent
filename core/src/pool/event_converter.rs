@@ -64,8 +64,8 @@ pub fn convert_provider_event_to_decision(event: &ProviderEvent) -> DecisionProv
             output: output_preview.clone(),
             success: *success,
         },
-        // FIX: Extract first change path instead of empty string
         ProviderEvent::PatchApplyStarted { changes, .. } => {
+            // Extract first change path if available
             let path = changes.first()
                 .map(|c| c.path.clone())
                 .unwrap_or_default();
@@ -79,7 +79,6 @@ pub fn convert_provider_event_to_decision(event: &ProviderEvent) -> DecisionProv
                 PatchApplyStatus::InProgress => "patch in progress".to_string(),
             },
         },
-        // FIX: Include server:tool as input for better context
         ProviderEvent::McpToolCallStarted { invocation, .. } => {
             DecisionProviderEvent::ClaudeToolCallStarted {
                 name: "mcp".to_string(),
@@ -91,7 +90,6 @@ pub fn convert_provider_event_to_decision(event: &ProviderEvent) -> DecisionProv
             output: error.clone(),
             success: error.is_none(),
         },
-        // FIX: Distinguish started vs finished for WebSearch
         ProviderEvent::WebSearchStarted { .. } => DecisionProviderEvent::StatusUpdate {
             status: "websearch started".to_string(),
         },
@@ -246,7 +244,7 @@ mod tests {
         };
         let result = convert_provider_event_to_decision(&event);
         match result {
-            DecisionProviderEvent::ClaudeToolCallFinished { name, output, success } => {
+            DecisionProviderEvent::ClaudeToolCallFinished { name, output: _, success } => {
                 assert_eq!(name, "exec");
                 assert!(!success, "Failed status should map to success=false");
             }
