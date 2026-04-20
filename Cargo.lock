@@ -72,9 +72,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "dirs",
  "futures",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -130,9 +132,15 @@ name = "agent-protocol"
 version = "1.0.0"
 dependencies = [
  "agent-types",
+ "anyhow",
+ "chrono",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

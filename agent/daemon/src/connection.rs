@@ -10,6 +10,9 @@ use crate::router::RouterHandle;
 /// Unique identifier for a connection.
 pub type ConnectionId = String;
 
+/// Heartbeat timeout: close connection after 120s of silence.
+const HEARTBEAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// State of a single client connection.
 pub struct Connection {
     pub id: ConnectionId,
@@ -51,8 +54,11 @@ impl Connection {
             };
 
             loop {
-                match read.next().await {
-                    Some(Ok(Message::Text(text))) => {
+                // Wait for next message with heartbeat timeout.
+                let next_msg = tokio::time::timeout(HEARTBEAT_TIMEOUT, read.next()).await;
+
+                match next_msg {
+                    Ok(Some(Ok(Message::Text(text)))) => {
                         match conn.handle_message(&text, &router).await {
                             Ok(Some(response)) => {
                                 let json = match serde_json::to_string(&response) {
@@ -92,17 +98,17 @@ impl Connection {
                             }
                         }
                     }
-                    Some(Ok(Message::Ping(_))) |
-                    Some(Ok(Message::Pong(_))) |
-                    Some(Ok(Message::Frame(_))) => {
-                        // Ignore control frames
+                    Ok(Some(Ok(Message::Ping(_)))) |
+                    Ok(Some(Ok(Message::Pong(_)))) |
+                    Ok(Some(Ok(Message::Frame(_)))) => {
+                        // Ignore control frames — they count as activity
                         continue;
                     }
-                    Some(Ok(Message::Close(_))) => {
+                    Ok(Some(Ok(Message::Close(_)))) => {
                         tracing::debug!("Client {} sent close frame", conn.id);
                         break;
                     }
-                    Some(Ok(Message::Binary(_))) => {
+                    Ok(Some(Ok(Message::Binary(_)))) => {
                         // Reject binary frames per spec
                         let _ = write
                             .send(Message::Close(Some(
@@ -114,12 +120,29 @@ impl Connection {
                             .await;
                         break;
                     }
-                    Some(Err(e)) => {
+                    Ok(Some(Err(e))) => {
                         tracing::warn!("WebSocket error on {}: {}", conn.id, e);
                         break;
                     }
-                    None => {
+                    Ok(None) => {
                         // Stream closed
+                        break;
+                    }
+                    Err(_) => {
+                        // Heartbeat timeout
+                        tracing::warn!(
+                            "Connection {} timed out after {:?} of inactivity",
+                            conn.id,
+                            HEARTBEAT_TIMEOUT
+                        );
+                        let _ = write
+                            .send(Message::Close(Some(
+                                tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away,
+                                    reason: "Heartbeat timeout".into(),
+                                },
+                            )))
+                            .await;
                         break;
                     }
                 }

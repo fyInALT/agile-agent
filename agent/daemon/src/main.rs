@@ -1,30 +1,99 @@
 //! agent-daemon entry point
 
-use agent_daemon::handler::SessionHandler;
+use agent_daemon::handler::{HeartbeatHandler, SessionHandler};
+use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
-use agent_daemon::server::WebSocketServer;
+use agent_daemon::workplace;
 use std::sync::Arc;
+
+#[derive(Debug)]
+struct CliArgs {
+    workplace_id: Option<String>,
+    alias: Option<String>,
+    log_file: Option<String>,
+}
+
+fn parse_args() -> CliArgs {
+    let mut args = CliArgs {
+        workplace_id: None,
+        alias: None,
+        log_file: None,
+    };
+    let mut iter = std::env::args().skip(1);
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--workplace-id" => args.workplace_id = iter.next(),
+            "--alias" => args.alias = iter.next(),
+            "--log-file" => args.log_file = iter.next(),
+            _ => {}
+        }
+    }
+    args
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let server = WebSocketServer::bind().await?;
+    let args = parse_args();
+
+    // Resolve workplace.
+    let workplace = if let Some(_id) = args.workplace_id {
+        let cwd = std::env::current_dir()?;
+        let root = workplace::resolve_workplaces_root()?;
+        workplace::ResolvedWorkplace::for_cwd(
+            &cwd,
+            root,
+        )?
+    } else {
+        workplace::resolve_workplace()?
+    };
+
+    let config_path = workplace.daemon_json_path();
+    let snapshot_path = workplace.snapshot_path();
+
+    let mut lifecycle = DaemonLifecycle::new(config_path.clone());
+    let (server, _config) = lifecycle.start(&workplace, args.alias).await?;
+
     let addr = server.local_addr();
     tracing::info!("agent-daemon listening on ws://{}/v1/session", addr);
 
     let mut router = Router::new();
     router.register("session.initialize", Arc::new(SessionHandler));
+    router.register("session.heartbeat", Arc::new(HeartbeatHandler));
     let router_handle = router.handle();
 
-    server
-        .run(|stream, peer_addr| {
-            let router = router_handle.clone();
-            async move {
-                agent_daemon::connection::Connection::spawn(stream, peer_addr, router);
-            }
-        })
-        .await?;
+    // Spawn the server run loop in a separate task so we can wait for signals.
+    let server_handle = tokio::spawn(async move {
+        let res = lifecycle
+            .run(server, |stream, peer_addr| {
+                let router = router_handle.clone();
+                async move {
+                    agent_daemon::connection::Connection::spawn(stream, peer_addr, router);
+                }
+            })
+            .await;
+        (lifecycle, res)
+    });
 
+    // Wait for SIGTERM or SIGINT.
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    tokio::select! {
+        _ = sigterm.recv() => {
+            tracing::info!("received SIGTERM");
+        }
+        _ = sigint.recv() => {
+            tracing::info!("received SIGINT");
+        }
+    }
+
+    // Trigger graceful shutdown.
+    let (mut lifecycle, server_res) = server_handle.await?;
+    server_res?;
+    lifecycle.shutdown(Some(snapshot_path)).await?;
+
+    tracing::info!("daemon exited cleanly");
     Ok(())
 }

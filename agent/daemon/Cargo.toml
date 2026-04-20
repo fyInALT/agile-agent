@@ -20,6 +20,7 @@ async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = { workspace = true }
+dirs = { workspace = true }
 uuid = { workspace = true }
 
 agent-protocol = { path = "../protocol" }
@@ -27,3 +28,4 @@ agent-types = { path = "../types" }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+tempfile = { workspace = true }

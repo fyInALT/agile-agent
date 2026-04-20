@@ -2,8 +2,10 @@
 
 use agent_protocol::jsonrpc::*;
 
+mod heartbeat;
 mod session;
 
+pub use heartbeat::HeartbeatHandler;
 pub use session::SessionHandler;
 
 /// Trait for handling JSON-RPC requests.
