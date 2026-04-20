@@ -20,12 +20,11 @@ pub use crate::pool::{
     AgentBlockedEvent, AgentBlockedNotifier, AgentStatusSnapshot, AgentTaskAssignment,
     BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
-    BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats,
+    BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
-    WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
-    WorktreeState, WorktreeStateStore, GitFlowExecutor,
+    WorktreeCreateOptions, WorktreeError, WorktreeState,
 };
 use chrono::Utc;
 
@@ -165,14 +164,10 @@ pub struct AgentPool {
     blocked_handler: BlockedHandler,
     /// Decision agent coordinator (manages agents, mail senders, components)
     decision_coordinator: DecisionAgentCoordinator,
+    /// Worktree coordinator (manages manager, state store, git flow executor)
+    worktree_coordinator: WorktreeCoordinator,
     /// Working directory for decision agents
     cwd: PathBuf,
-    /// Worktree manager (optional, for isolated worktrees)
-    worktree_manager: Option<WorktreeManager>,
-    /// Worktree state store for persistence
-    worktree_state_store: Option<WorktreeStateStore>,
-    /// Git flow executor for task preparation workflow
-    git_flow_executor: Option<GitFlowExecutor>,
     /// Provider profile store (optional, for profile-based agent creation)
     profile_store: Option<ProfileStore>,
 }
@@ -188,6 +183,7 @@ impl std::fmt::Debug for AgentPool {
             .field("human_queue", &self.human_queue)
             .field("blocked_handler", &self.blocked_handler)
             .field("decision_coordinator", &self.decision_coordinator)
+            .field("worktree_coordinator", &self.worktree_coordinator)
             .finish()
     }
 }
@@ -204,10 +200,8 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
+            worktree_coordinator: WorktreeCoordinator::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            worktree_manager: None,
-            worktree_state_store: None,
-            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -227,10 +221,8 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
             blocked_handler: BlockedHandler::with_config(config),
             decision_coordinator: DecisionAgentCoordinator::new(),
+            worktree_coordinator: WorktreeCoordinator::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            worktree_manager: None,
-            worktree_state_store: None,
-            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -246,10 +238,8 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
+            worktree_coordinator: WorktreeCoordinator::new(),
             cwd,
-            worktree_manager: None,
-            worktree_state_store: None,
-            git_flow_executor: None,
             profile_store: None,
         }
     }
@@ -261,34 +251,11 @@ impl AgentPool {
         repo_root: PathBuf,
         state_dir: PathBuf,
     ) -> Result<Self, WorktreeError> {
-        let config = WorktreeConfig::default();
-        let worktree_manager = WorktreeManager::new(repo_root.clone(), config)?;
-        let worktree_state_store = WorktreeStateStore::new(state_dir);
-
-        // Create GitFlowExecutor for task preparation workflow
-        let git_flow_config = crate::GitFlowConfig::default();
-        let git_flow_executor = GitFlowExecutor::new(worktree_manager.clone(), git_flow_config);
+        let worktree_coordinator = WorktreeCoordinator::with_worktrees(repo_root.clone(), state_dir)?;
 
         // Sync next_agent_index with existing worktree states AND git branches
         // to avoid collision when user cancels restore but previous artifacts exist
-        let existing_states = worktree_state_store.list_all().unwrap_or_default();
-        let max_state_index = existing_states
-            .iter()
-            .filter_map(|(agent_id, _)| parse_agent_index(agent_id))
-            .max();
-
-        // Also check existing agent branches (agent/agent_XXX pattern)
-        let existing_branches = worktree_manager.list_agent_branches().unwrap_or_default();
-        let max_branch_index = existing_branches
-            .iter()
-            .filter_map(|branch| {
-                // Branch format: "agent/agent_001"
-                branch.strip_prefix("agent/").and_then(parse_agent_index)
-            })
-            .max();
-
-        // Use the maximum index found from both sources
-        let max_existing_index = max_state_index.max(max_branch_index);
+        let max_existing_index = worktree_coordinator.find_max_agent_index();
         let next_agent_index = max_existing_index.map_or(1, |idx| idx + 1);
 
         Ok(Self {
@@ -300,10 +267,8 @@ impl AgentPool {
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
+            worktree_coordinator,
             cwd: repo_root,
-            worktree_manager: Some(worktree_manager),
-            worktree_state_store: Some(worktree_state_store),
-            git_flow_executor: Some(git_flow_executor),
             profile_store: None,
         })
     }
@@ -345,7 +310,7 @@ impl AgentPool {
 
     /// Check if pool has worktree support enabled
     pub fn has_worktree_support(&self) -> bool {
-        self.worktree_manager.is_some() && self.worktree_state_store.is_some()
+        self.worktree_coordinator.is_enabled()
     }
 
     /// Generate a new unique agent ID
@@ -552,7 +517,7 @@ impl AgentPool {
         task_id: Option<String>,
     ) -> Result<AgentId, AgentPoolWorktreeError> {
         // Check worktree manager is available first (before any mutable borrows)
-        if self.worktree_manager.is_none() || self.worktree_state_store.is_none() {
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
@@ -569,8 +534,8 @@ impl AgentPool {
         branch_name: Option<String>,
         task_id: Option<String>,
     ) -> Result<AgentId, AgentPoolWorktreeError> {
-        // Check worktree manager is available first
-        if self.worktree_manager.is_none() || self.worktree_state_store.is_none() {
+        // Check worktree coordinator is enabled first
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
@@ -620,9 +585,9 @@ impl AgentPool {
         let worktree_id = format!("wt-{}", agent_id.as_str());
         let actual_branch = branch_name.unwrap_or_else(|| format!("agent/{}", agent_id.as_str()));
 
-        // Get worktree_manager and state_store (immutable borrows)
-        let worktree_manager = self.worktree_manager.as_ref().unwrap();
-        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
+        // Get worktree manager and state store via coordinator
+        let worktree_manager = self.worktree_coordinator.manager().unwrap();
+        let worktree_state_store = self.worktree_coordinator.state_store().unwrap();
 
         // Create worktree
         let options = WorktreeCreateOptions {
@@ -714,7 +679,7 @@ impl AgentPool {
         agent_id: &AgentId,
     ) -> Result<(), AgentPoolWorktreeError> {
         // Check worktree support is available
-        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
@@ -737,8 +702,8 @@ impl AgentPool {
             return Err(AgentPoolWorktreeError::WorktreeNotFound(worktree_path));
         }
 
-        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
-        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+        let worktree_state_store = self.worktree_coordinator.state_store().unwrap();
+        let worktree_manager = self.worktree_coordinator.manager().unwrap();
 
         // Load existing worktree state
         let mut worktree_state = worktree_state_store
@@ -796,12 +761,12 @@ impl AgentPool {
         agent_id: &AgentId,
     ) -> Result<(), AgentPoolWorktreeError> {
         // Check worktree support is available
-        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
-        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
-        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+        let worktree_state_store = self.worktree_coordinator.state_store().unwrap();
+        let worktree_manager = self.worktree_coordinator.manager().unwrap();
 
         // Load saved worktree state
         let mut worktree_state = worktree_state_store
@@ -940,12 +905,12 @@ impl AgentPool {
         recreate_missing: bool,
     ) -> Result<WorktreeRecoveryReport, AgentPoolWorktreeError> {
         // Check worktree support is available
-        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
-        let worktree_state_store = self.worktree_state_store.as_ref().unwrap();
-        let worktree_manager = self.worktree_manager.as_ref().unwrap();
+        let worktree_state_store = self.worktree_coordinator.state_store().unwrap();
+        let worktree_manager = self.worktree_coordinator.manager().unwrap();
 
         let all_states = worktree_state_store
             .list_all()
@@ -1044,14 +1009,14 @@ impl AgentPool {
         idle_duration: chrono::Duration,
     ) -> Result<Vec<String>, AgentPoolWorktreeError> {
         // Check worktree support is available first
-        if self.worktree_state_store.is_none() || self.worktree_manager.is_none() {
+        if !self.worktree_coordinator.is_enabled() {
             return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
         }
 
         // Get all states first (this borrows the store)
         let all_states = self
-            .worktree_state_store
-            .as_ref()
+            .worktree_coordinator
+            .state_store()
             .unwrap()
             .list_all()
             .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
@@ -1085,14 +1050,14 @@ impl AgentPool {
         for (agent_id, state, in_pool) in cleanup_list {
             // Remove worktree if it exists
             if state.exists() {
-                if let Some(wm) = &self.worktree_manager {
+                if let Some(wm) = self.worktree_coordinator.manager() {
                     wm.remove(&state.worktree_id, true)
                         .map_err(AgentPoolWorktreeError::WorktreeError)?;
                 }
             }
 
             // Delete state
-            if let Some(store) = &self.worktree_state_store {
+            if let Some(store) = self.worktree_coordinator.state_store() {
                 store
                     .delete(&agent_id)
                     .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
@@ -1951,7 +1916,7 @@ impl AgentPool {
                 }
                 "prepare_task_start" => {
                     // Execute task preparation via GitFlowExecutor
-                    let Some(executor) = &self.git_flow_executor else {
+                    let Some(executor) = self.worktree_coordinator.git_flow_executor() else {
                         logging::warn_event(
                             "git_flow.executor_missing",
                             "git_flow_executor not available",
@@ -2111,9 +2076,9 @@ impl AgentPool {
 
         // Handle worktree cleanup
         if has_worktree && cleanup_worktree && worktree_id.is_some() {
-            // Get worktree manager and state store
+            // Get worktree manager and state store via coordinator
             if let (Some(worktree_manager), Some(worktree_state_store)) =
-                (&self.worktree_manager, &self.worktree_state_store)
+                (self.worktree_coordinator.manager(), self.worktree_coordinator.state_store())
             {
                 let wt_id = worktree_id.unwrap();
 
@@ -3385,7 +3350,7 @@ mod tests {
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
     use crate::provider_profile::{ProfileStore, ProviderProfile, CliBaseType};
-    use crate::WorktreeStateStore;
+    use crate::{WorktreeStateStore, WorktreeManager, WorktreeConfig};
     use agent_decision::{
         BlockedState, HumanDecisionBlocking, HumanSelection, ResourceBlocking,
         WaitingForChoiceSituation,
@@ -4439,8 +4404,7 @@ mod tests {
 
         assert!(pool.is_ok());
         let pool = pool.unwrap();
-        assert!(pool.worktree_manager.is_some());
-        assert!(pool.worktree_state_store.is_some());
+        assert!(pool.has_worktree_support());
         assert_eq!(pool.max_slots(), 4);
     }
 
