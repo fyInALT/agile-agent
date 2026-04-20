@@ -194,9 +194,13 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[serial_test::serial]  // Prevent race condition with file operations
     fn detect_version_reads_fake_binary_output() {
         let temp = TempDir::new().expect("tempdir");
         let executable = write_fake_executable(&temp, "fake-codex", "codex-cli 9.9.9");
+
+        // Small delay to ensure file is fully written and synced
+        std::thread::sleep(std::time::Duration::from_millis(10));
 
         let version = detect_version(&executable).expect("read version");
 

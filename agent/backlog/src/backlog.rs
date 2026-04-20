@@ -478,6 +478,121 @@ mod tests {
         assert_eq!(task.result_summary, Some("blocked reason".to_string()));
     }
 
+    // Edge case tests - missing status transitions
+
+    #[test]
+    fn complete_task_from_verifying_status() {
+        // complete_task should work from Verifying status too
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Verifying));
+
+        let result = backlog.complete_task("task-1", Some("verified and completed".to_string()));
+        assert!(result);
+        let task = backlog.find_task("task-1").unwrap();
+        assert_eq!(task.status, TaskStatus::Done);
+    }
+
+    #[test]
+    fn complete_task_fails_for_ready_task() {
+        // cannot complete a task that hasn't started
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Ready));
+
+        let result = backlog.complete_task("task-1", Some("summary".to_string()));
+        assert!(!result);
+        // Status should remain Ready
+        assert_eq!(backlog.find_task("task-1").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn complete_task_fails_for_done_task() {
+        // cannot re-complete an already done task
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Done));
+
+        let result = backlog.complete_task("task-1", Some("new summary".to_string()));
+        assert!(!result);
+    }
+
+    #[test]
+    fn fail_task_fails_for_ready_task() {
+        // cannot fail a task that hasn't started
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Ready));
+
+        let result = backlog.fail_task("task-1", "error".to_string());
+        assert!(!result);
+        assert_eq!(backlog.find_task("task-1").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn fail_task_fails_for_done_task() {
+        // cannot fail an already completed task
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Done));
+
+        let result = backlog.fail_task("task-1", "error".to_string());
+        assert!(!result);
+    }
+
+    #[test]
+    fn block_task_fails_for_ready_task() {
+        // cannot block a task that hasn't started
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Ready));
+
+        let result = backlog.block_task("task-1", "reason".to_string());
+        assert!(!result);
+    }
+
+    #[test]
+    fn block_task_fails_for_done_task() {
+        // cannot block an already completed task
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Done));
+
+        let result = backlog.block_task("task-1", "reason".to_string());
+        assert!(!result);
+    }
+
+    #[test]
+    fn empty_backlog_operations() {
+        // Read-only operations on empty backlog should return empty results
+        let backlog = BacklogState::default();
+
+        assert_eq!(backlog.ready_todos().len(), 0);
+        assert_eq!(backlog.ready_tasks().len(), 0);
+        assert_eq!(backlog.running_tasks().len(), 0);
+        assert!(!backlog.can_assign_task("nonexistent"));
+        assert!(backlog.find_task("nonexistent").is_none());
+    }
+
+    #[test]
+    fn empty_backlog_write_operations() {
+        // Write operations on empty backlog should fail gracefully
+        let mut backlog = BacklogState::default();
+
+        assert!(!backlog.start_task("nonexistent"));
+        assert!(!backlog.complete_task("nonexistent", None));
+        assert!(!backlog.fail_task("nonexistent", "error".to_string()));
+        assert!(!backlog.block_task("nonexistent", "reason".to_string()));
+        assert!(backlog.find_todo_mut("nonexistent").is_none());
+    }
+
+    #[test]
+    fn operations_on_nonexistent_task() {
+        // All operations on nonexistent task should fail gracefully
+        let mut backlog = BacklogState::default();
+        backlog.push_task(task("task-1", TaskStatus::Ready));
+
+        // Operations on nonexistent task ID
+        assert!(!backlog.start_task("task-999"));
+        assert!(!backlog.complete_task("task-999", None));
+        assert!(!backlog.fail_task("task-999", "error".to_string()));
+        assert!(!backlog.block_task("task-999", "reason".to_string()));
+        assert!(backlog.find_task("task-999").is_none());
+    }
+
     #[test]
     fn ready_tasks_returns_only_ready_tasks() {
         let mut backlog = BacklogState::default();
@@ -592,5 +707,91 @@ mod tests {
         // Clone should have 2 tasks
         let guard2 = clone.read_with_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(guard2.tasks.len(), 2);
+    }
+
+    #[test]
+    fn thread_safe_backlog_concurrent_access() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let backlog = Arc::new(ThreadSafeBacklog::empty());
+        let mut handles = vec![];
+
+        // Spawn 10 threads that each add a task
+        for i in 0..10 {
+            let backlog_clone = Arc::clone(&backlog);
+            let handle = thread::spawn(move || {
+                backlog_clone.update(|state| {
+                    state.push_task(task(&format!("task-{}", i), TaskStatus::Ready));
+                });
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // All 10 tasks should be present
+        let guard = backlog
+            .read_with_timeout(Duration::from_millis(100))
+            .unwrap();
+        assert_eq!(guard.tasks.len(), 10);
+    }
+
+    #[test]
+    fn thread_safe_backlog_timeout_when_locked() {
+        use std::sync::Arc;
+
+        let backlog = Arc::new(ThreadSafeBacklog::empty());
+
+        // Hold the lock in one thread
+        let backlog_clone = Arc::clone(&backlog);
+        let lock_holder = backlog_clone.read_with_timeout(Duration::from_secs(10)).unwrap();
+
+        // Try to acquire with short timeout in another thread - should fail
+        let backlog_clone2 = Arc::clone(&backlog);
+        let result = backlog_clone2.read_with_timeout(Duration::from_millis(1));
+        assert!(result.is_none());
+
+        // Drop the lock to release
+        drop(lock_holder);
+
+        // Now acquisition should succeed
+        let result = backlog_clone2.read_with_timeout(Duration::from_millis(100));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn thread_safe_backlog_poisoned_recovery() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let backlog = Arc::new(ThreadSafeBacklog::empty());
+
+        // Add a task first
+        backlog.update(|state| {
+            state.push_task(task("task-before-panic", TaskStatus::Ready));
+        });
+
+        // Spawn a thread that will panic while holding the lock
+        let backlog_clone = Arc::clone(&backlog);
+        let handle = thread::spawn(move || {
+            let _guard = backlog_clone.read_with_timeout(Duration::from_secs(10)).unwrap();
+            // Panic while holding the lock
+            panic!("intentional panic for test");
+        });
+
+        // Wait for the panic thread (join will catch the panic)
+        let _ = handle.join();
+
+        // The backlog should still be accessible (poison recovery)
+        // read_with_timeout handles poisoned locks by returning the data
+        let result = backlog.read_with_timeout(Duration::from_millis(100));
+        assert!(result.is_some());
+        let guard = result.unwrap();
+        // The task added before panic should still be there
+        assert_eq!(guard.tasks.len(), 1);
     }
 }
