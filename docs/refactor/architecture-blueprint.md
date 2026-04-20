@@ -32,11 +32,12 @@ This means:
 
 The current dependency direction is backwards:
 
-```
-TUI ──owns──► RuntimeSession ──drives──► Provider Threads
-  │                                         ▲
-  │                                         │
-  └── EventAggregator (mpsc polling) ───────┘
+```mermaid
+flowchart LR
+    TUI -->|owns| RS["RuntimeSession"]
+    RS -->|drives| PT["Provider Threads"]
+    TUI -->|mpsc polling| EA["EventAggregator"]
+    EA -->|polls| PT
 ```
 
 The TUI is both the **view** and the **controller**. The event loop runs inside `app_loop.rs`, which directly mutates `AgentPool`, `AppState`, and `Mailbox` on every frame tick.
@@ -67,68 +68,60 @@ There is no clear internal boundary — any module can import any other.
 
 We introduce **four layers** with strict dependency rules:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 4: Presentation                                                       │
-│ ┌────────────┐  ┌────────────┐  ┌────────────┐                             │
-│ │  TUI       │  │  CLI       │  │  IDE / Web │  (future)                   │
-│ │  ratatui   │  │  headless  │  │  plugins   │                             │
-│ └─────┬──────┘  └─────┬──────┘  └─────┬──────┘                             │
-│       │               │               │                                     │
-│       └───────────────┴───────────────┘                                     │
-│                       │                                                     │
-│                       ▼                                                     │
-│              ┌────────────────────┐                                         │
-│              │  agent-protocol    │  ← Message contract (WebSocket types)   │
-│              └────────────────────┘                                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 3: Service                                                            │
-│ ┌─────────────────────────────────────────────────────────────┐             │
-│ │  agent-daemon  (one process per workspace directory)        │             │
-│ │                                                             │             │
-│ │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │             │
-│ │  │ SessionMgr   │  │ WebSocket    │  │ EventBus     │     │             │
-│ │  │              │  │ Server       │  │              │     │             │
-│ │  │ - per-cwd    │  │              │  │ - broadcast  │     │             │
-│ │  │ - snapshot   │  │ - 127.0.0.1  │  │ - subscribe  │     │             │
-│ │  │ - auto-link  │  │ - ephemeral  │  │ - persist    │     │             │
-│ │  └──────────────┘  └──────────────┘  └──────────────┘     │             │
-│ └─────────────────────────────────────────────────────────────┘             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 2: Domain                                                             │
-│ ┌─────────────────────────────────────────────────────────────┐             │
-│ │  agent-core  (library — consumed by daemon, not by TUI)     │             │
-│ │                                                             │             │
-│ │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │             │
-│ │  │ AgentPool    │  │ AppState     │  │ TaskEngine   │     │             │
-│ │  │ AgentSlot    │  │ Backlog      │  │ LoopRunner   │     │             │
-│ │  │ AgentRuntime │  │ Mailbox      │  │ Verifier     │     │             │
-│ │  └──────────────┘  └──────────────┘  └──────────────┘     │             │
-│ └─────────────────────────────────────────────────────────────┘             │
-│                                                                             │
-│ ┌─────────────────────────────────────────────────────────────┐             │
-│ │  agent-decision  │  agent-kanban  │  (domain plugins)       │             │
-│ └─────────────────────────────────────────────────────────────┘             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 1: Infrastructure                                                     │
-│ ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│ │ agent-types  │  │ agent-toolkit│  │ agent-provider│  │ agent-storage│    │
-│ │ (identity)   │  │ (tool calls) │  │ (LLM proc)   │  │ (persistence)│    │
-│ └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘     │
-│ ┌──────────────┐  ┌──────────────┐                                          │
-│ │ agent-backlog│  │ agent-worktree│                                         │
-│ │ (task model) │  │ (git isolation)│                                        │
-│ └──────────────┘  └──────────────┘                                          │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph L4["LAYER 4: Presentation"]
+        TUI["TUI (ratatui)"]
+        CLI["CLI (headless)"]
+        IDE["IDE / Web (future)"]
+    end
+
+    subgraph PROTOCOL["agent-protocol"]
+        P["Message Contract (WebSocket types)"]
+    end
+
+    subgraph L3["LAYER 3: Service"]
+        subgraph DAEMON["agent-daemon (one process per workspace)"]
+            SM["SessionMgr<br/>- per-cwd<br/>- snapshot<br/>- auto-link"]
+            WS["WebSocket Server<br/>- 127.0.0.1<br/>- ephemeral port"]
+            EB["EventBus<br/>- broadcast<br/>- subscribe<br/>- persist"]
+        end
+    end
+
+    subgraph L2["LAYER 2: Domain"]
+        subgraph CORE["agent-core (library)"]
+            AP["AgentPool<br/>AgentSlot<br/>AgentRuntime"]
+            AS["AppState<br/>Backlog<br/>Mailbox"]
+            TE["TaskEngine<br/>LoopRunner<br/>Verifier"]
+        end
+        DEC["agent-decision"]
+        KAN["agent-kanban"]
+    end
+
+    subgraph L1["LAYER 1: Infrastructure"]
+        TYPES["agent-types (identity)"]
+        TK["agent-toolkit (tool calls)"]
+        PROV["agent-provider (LLM proc)"]
+        STOR["agent-storage (persistence)"]
+        BLOG["agent-backlog (task model)"]
+        WT["agent-worktree (git isolation)"]
+    end
+
+    TUI --> P
+    CLI --> P
+    IDE --> P
+    P --> DAEMON
+    DAEMON --> CORE
+    DAEMON --> DEC
+    DAEMON --> KAN
+    CORE --> TYPES
+    CORE --> TK
+    CORE --> PROV
+    CORE --> STOR
+    CORE --> BLOG
+    CORE --> WT
+    DEC --> TYPES
+    KAN --> TYPES
 ```
 
 ### 2.2 Dependency Rules
@@ -162,20 +155,15 @@ Each working directory gets its own **completely isolated** daemon process:
 
 **Auto-link flow**:
 
-```
-User runs `agent-cli` in ~/projects/api-server
-    │
-    ▼
-WorkplaceStore::for_cwd() resolves workplace ID
-    │
-    ▼
-Check ~/.agile-agent/workplaces/<id>/daemon.json
-    │
-    ├── Exists + heartbeat fresh ──► Connect to ws://127.0.0.1:<port>
-    │
-    ├── Exists + heartbeat stale ──► Remove stale, spawn new daemon, connect
-    │
-    └── Missing ───────────────────► Spawn new daemon, write config, connect
+```mermaid
+flowchart TD
+    A["User runs agent-cli in ~/projects/api-server"] --> B["WorkplaceStore::for_cwd()<br/>resolves workplace ID"]
+    B --> C["Check ~/.agile-agent/workplaces/&lt;id&gt;/daemon.json"]
+    C -->|Exists + heartbeat fresh| D["Connect to ws://127.0.0.1:&lt;port&gt;"]
+    C -->|Exists + heartbeat stale| E["Remove stale config"]
+    E --> F["Spawn new daemon<br/>write config"]
+    F --> D
+    C -->|Missing| F
 ```
 
 ### 2.4 Communication Model
@@ -184,18 +172,13 @@ Check ~/.agile-agent/workplaces/<id>/daemon.json
 
 **After**: Daemon pushes events over WebSocket; TUI receives them asynchronously.
 
-```
-Provider Threads
-    │
-    ▼ mpsc
-EventAggregator (inside daemon)
-    │
-    ▼ convert + broadcast
-WebSocket Server ──► TUI #1 (event stream)
-              │
-              └──► TUI #2 (same event stream)
-              │
-              └──► CLI    (headless mode)
+```mermaid
+flowchart TD
+    PT["Provider Threads"] -->|mpsc| EA["EventAggregator<br/>(inside daemon)"]
+    EA -->|convert + broadcast| WS["WebSocket Server"]
+    WS -->|event stream| TUI1["TUI #1"]
+    WS -->|event stream| TUI2["TUI #2"]
+    WS -->|headless mode| CLI["CLI"]
 ```
 
 The TUI's render loop becomes:
@@ -257,18 +240,22 @@ This simplifies reasoning, debugging, and resource cleanup.
 
 After separation, both CLI and TUI are **thin clients** that speak the same protocol:
 
-```
-┌────────────┐      ┌────────────┐
-│  CLI       │      │  TUI       │
-│  (clap)    │      │  (ratatui) │
-└─────┬──────┘      └─────┬──────┘
-      │                   │
-      └───────┬───────────┘
-              │ agent-protocol
-              ▼
-         ┌────────────┐
-         │  Daemon    │
-         └────────────┘
+```mermaid
+flowchart TD
+    subgraph Clients["Thin Clients"]
+        CLI["CLI (clap)"]
+        TUI["TUI (ratatui)"]
+    end
+
+    subgraph Protocol["agent-protocol"]
+        P["WebSocket Message Contract"]
+    end
+
+    DAEMON["agent-daemon"]
+
+    CLI --> P
+    TUI --> P
+    P --> DAEMON
 ```
 
 The CLI no longer depends on the TUI crate. It depends only on `agent-protocol`.
@@ -310,9 +297,11 @@ The overhead is negligible for localhost communication.
 
 The protocol crate is the **linchpin** of the entire architecture:
 
-```
-        agent-tui ──► agent-protocol ◄── agent-daemon
-        agent-cli ──► agent-protocol ◄── agent-daemon
+```mermaid
+flowchart LR
+    TUI["agent-tui"] --> P["agent-protocol"]
+    CLI["agent-cli"] --> P
+    P --> D["agent-daemon"]
 ```
 
 Without it, we would have:
