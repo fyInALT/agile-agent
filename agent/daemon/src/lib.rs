@@ -2,7 +2,9 @@
 //!
 //! Serves JSON-RPC 2.0 over WebSocket to thin clients (TUI, CLI, IDE plugins).
 
+pub mod broadcaster;
 pub mod connection;
+pub mod event_log;
 pub mod event_pump;
 pub mod handler;
 pub mod lifecycle;

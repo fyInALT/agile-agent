@@ -1,0 +1,160 @@
+//! Append-only event log — `events.jsonl` persistence and replay.
+
+use agent_protocol::events::Event;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
+
+/// Append-only JSONL event log.
+pub struct EventLog {
+    path: PathBuf,
+}
+
+impl EventLog {
+    /// Open or create the event log at `path`.
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        // Ensure parent directory exists.
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.with_context(|| {
+                format!("create event log parent directory {}", parent.display())
+            })?;
+        }
+        // Touch the file if it doesn't exist.
+        if !path.exists() {
+            tokio::fs::write(&path, b"")
+                .await
+                .with_context(|| format!("create event log {}", path.display()))?;
+        }
+        Ok(Self { path })
+    }
+
+    /// Append a single event atomically (newline-delimited JSON).
+    pub async fn append(&self, event: &Event) -> Result<()> {
+        let line = serde_json::to_string(event).context("serialize event")?;
+        let mut bytes = line.into_bytes();
+        bytes.push(b'\n');
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&self.path)
+            .await
+            .with_context(|| format!("open event log {}", self.path.display()))?
+            .write_all(&bytes)
+            .await
+            .with_context(|| format!("append to event log {}", self.path.display()))?;
+        Ok(())
+    }
+
+    /// Replay all events with `seq >= from_seq` in order.
+    pub async fn replay_from(&self, from_seq: u64) -> Result<Vec<Event>> {
+        let bytes = tokio::fs::read(&self.path)
+            .await
+            .with_context(|| format!("read event log {}", self.path.display()))?;
+        let mut events = Vec::new();
+        for (line_no, line) in bytes.split(|&b| b == b'\n').enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_slice::<Event>(line) {
+                Ok(event) => {
+                    if event.seq >= from_seq {
+                        events.push(event);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "skipping corrupted event log line {}: {}",
+                        line_no + 1,
+                        e
+                    );
+                }
+            }
+        }
+        Ok(events)
+    }
+
+    /// Replay events in a specific seq range `[start_seq, end_seq)`.
+    pub async fn replay_range(&self, start_seq: u64, end_seq: u64) -> Result<Vec<Event>> {
+        let all = self.replay_from(start_seq).await?;
+        Ok(all.into_iter().filter(|e| e.seq < end_seq).collect())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_protocol::events::{Event, EventPayload, ErrorData};
+
+    fn make_event(seq: u64) -> Event {
+        Event {
+            seq,
+            payload: EventPayload::Error(ErrorData {
+                message: format!("event-{}", seq),
+                source: None,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn append_produces_valid_jsonl() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        let event = make_event(1);
+        log.append(&event).await.unwrap();
+
+        let bytes = tokio::fs::read(tmp.path().join("events.jsonl")).await.unwrap();
+        let lines: Vec<&[u8]> = bytes.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 1);
+
+        let parsed: Event = serde_json::from_slice(lines[0]).unwrap();
+        assert_eq!(parsed.seq, 1);
+    }
+
+    #[tokio::test]
+    async fn replay_from_filters_correctly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        for seq in 1..=5 {
+            log.append(&make_event(seq)).await.unwrap();
+        }
+
+        let replayed = log.replay_from(3).await.unwrap();
+        assert_eq!(replayed.len(), 3);
+        assert_eq!(replayed[0].seq, 3);
+        assert_eq!(replayed[2].seq, 5);
+    }
+
+    #[tokio::test]
+    async fn replay_corrupted_line_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("events.jsonl");
+        tokio::fs::write(&path, b"not-json\n")
+            .await
+            .unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+
+        let replayed = log.replay_from(1).await.unwrap();
+        assert!(replayed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_range_exclusive_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        for seq in 1..=5 {
+            log.append(&make_event(seq)).await.unwrap();
+        }
+
+        let replayed = log.replay_range(2, 4).await.unwrap();
+        assert_eq!(replayed.len(), 2);
+        assert_eq!(replayed[0].seq, 2);
+        assert_eq!(replayed[1].seq, 3);
+    }
+}

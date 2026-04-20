@@ -1,5 +1,7 @@
 //! agent-daemon entry point
 
+use agent_daemon::broadcaster::EventBroadcaster;
+use agent_daemon::event_log::EventLog;
 use agent_daemon::handler::{AgentHandler, HeartbeatHandler, SessionHandler};
 use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
@@ -52,12 +54,17 @@ async fn main() -> anyhow::Result<()> {
 
     let config_path = workplace.daemon_json_path();
     let snapshot_path = workplace.snapshot_path();
+    let event_log_path = workplace.path().join("events.jsonl");
 
     // Bootstrap session manager (owns runtime state).
     let session_mgr = Arc::new(
         SessionManager::bootstrap(workplace.cwd().to_path_buf(), workplace.workplace_id().clone())
             .await?,
     );
+
+    // Event infrastructure.
+    let broadcaster = EventBroadcaster::new();
+    let event_log = Arc::new(EventLog::open(&event_log_path).await?);
 
     let mut lifecycle = DaemonLifecycle::new(config_path.clone());
     let (server, _config) = lifecycle.start(&workplace, args.alias).await?;
@@ -74,16 +81,23 @@ async fn main() -> anyhow::Result<()> {
     let router_handle = router.handle();
 
     // Spawn the server run loop in a separate task so we can wait for signals.
-    let server_handle = tokio::spawn(async move {
-        let res = lifecycle
-            .run(server, |stream, peer_addr| {
-                let router = router_handle.clone();
-                async move {
-                    agent_daemon::connection::Connection::spawn(stream, peer_addr, router);
-                }
-            })
-            .await;
-        (lifecycle, res)
+    let server_handle = tokio::spawn({
+        let broadcaster = broadcaster.clone();
+        async move {
+            let res = lifecycle
+                .run(server, |stream, peer_addr| {
+                    let router = router_handle.clone();
+                    let broadcaster = broadcaster.clone();
+                    async move {
+                        let event_rx = broadcaster.register("conn".to_string()).await;
+                        agent_daemon::connection::Connection::spawn(
+                            stream, peer_addr, router, Some(event_rx),
+                        );
+                    }
+                })
+                .await;
+            (lifecycle, res)
+        }
     });
 
     // Wait for SIGTERM or SIGINT.

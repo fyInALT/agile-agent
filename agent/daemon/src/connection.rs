@@ -1,5 +1,6 @@
 //! Per-connection state machine
 
+use agent_protocol::events::Event;
 use agent_protocol::jsonrpc::*;
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -29,10 +30,14 @@ pub enum ConnectionState {
 
 impl Connection {
     /// Spawn a new task to handle this TCP connection.
+    ///
+    /// If `event_rx` is provided, events are forwarded to the client as
+    /// JSON-RPC notifications.
     pub fn spawn(
         stream: TcpStream,
         addr: std::net::SocketAddr,
         router: RouterHandle,
+        mut event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Event>>,
     ) -> ConnectionId {
         let id = format!("conn-{}", uuid::Uuid::new_v4());
         let id_clone = id.clone();
@@ -54,11 +59,81 @@ impl Connection {
             };
 
             loop {
-                // Wait for next message with heartbeat timeout.
-                let next_msg = tokio::time::timeout(HEARTBEAT_TIMEOUT, read.next()).await;
+                // Wait for next message with heartbeat timeout, or an event.
+                let next = tokio::select! {
+                    msg = tokio::time::timeout(HEARTBEAT_TIMEOUT, read.next()) => {
+                        match msg {
+                            Ok(Some(Ok(Message::Text(text)))) => {
+                                Some(ConnInput::WsText(text))
+                            }
+                            Ok(Some(Ok(Message::Ping(_)))) |
+                            Ok(Some(Ok(Message::Pong(_)))) |
+                            Ok(Some(Ok(Message::Frame(_)))) => {
+                                continue;
+                            }
+                            Ok(Some(Ok(Message::Close(_)))) => {
+                                tracing::debug!("Client {} sent close frame", conn.id);
+                                break;
+                            }
+                            Ok(Some(Ok(Message::Binary(_)))) => {
+                                let _ = write
+                                    .send(Message::Close(Some(
+                                        tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                                            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Unsupported,
+                                            reason: "Binary frames not supported".into(),
+                                        },
+                                    )))
+                                    .await;
+                                break;
+                            }
+                            Ok(Some(Err(e))) => {
+                                tracing::warn!("WebSocket error on {}: {}", conn.id, e);
+                                break;
+                            }
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Connection {} timed out after {:?} of inactivity",
+                                    conn.id,
+                                    HEARTBEAT_TIMEOUT
+                                );
+                                let _ = write
+                                    .send(Message::Close(Some(
+                                        tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                                            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away,
+                                            reason: "Heartbeat timeout".into(),
+                                        },
+                                    )))
+                                    .await;
+                                break;
+                            }
+                        }
+                    }
+                    event = async {
+                        match &mut event_rx {
+                            Some(rx) => rx.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        match event {
+                            Some(ev) => Some(ConnInput::Event(ev)),
+                            None => {
+                                tracing::debug!("Event channel closed for {}", conn.id);
+                                break;
+                            }
+                        }
+                    }
+                };
 
-                match next_msg {
-                    Ok(Some(Ok(Message::Text(text)))) => {
+                let input = match next {
+                    Some(i) => i,
+                    None => continue,
+                };
+
+                match input {
+                    ConnInput::WsText(text) => {
                         match conn.handle_message(&text, &router).await {
                             Ok(Some(response)) => {
                                 let json = match serde_json::to_string(&response) {
@@ -98,52 +173,18 @@ impl Connection {
                             }
                         }
                     }
-                    Ok(Some(Ok(Message::Ping(_)))) |
-                    Ok(Some(Ok(Message::Pong(_)))) |
-                    Ok(Some(Ok(Message::Frame(_)))) => {
-                        // Ignore control frames — they count as activity
-                        continue;
-                    }
-                    Ok(Some(Ok(Message::Close(_)))) => {
-                        tracing::debug!("Client {} sent close frame", conn.id);
-                        break;
-                    }
-                    Ok(Some(Ok(Message::Binary(_)))) => {
-                        // Reject binary frames per spec
-                        let _ = write
-                            .send(Message::Close(Some(
-                                tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Unsupported,
-                                    reason: "Binary frames not supported".into(),
-                                },
-                            )))
-                            .await;
-                        break;
-                    }
-                    Ok(Some(Err(e))) => {
-                        tracing::warn!("WebSocket error on {}: {}", conn.id, e);
-                        break;
-                    }
-                    Ok(None) => {
-                        // Stream closed
-                        break;
-                    }
-                    Err(_) => {
-                        // Heartbeat timeout
-                        tracing::warn!(
-                            "Connection {} timed out after {:?} of inactivity",
-                            conn.id,
-                            HEARTBEAT_TIMEOUT
-                        );
-                        let _ = write
-                            .send(Message::Close(Some(
-                                tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away,
-                                    reason: "Heartbeat timeout".into(),
-                                },
-                            )))
-                            .await;
-                        break;
+                    ConnInput::Event(event) => {
+                        let json = match serde_json::to_string(&event) {
+                            Ok(j) => j,
+                            Err(e) => {
+                                tracing::error!("Failed to serialize event: {}", e);
+                                continue;
+                            }
+                        };
+                        if let Err(e) = write.send(Message::Text(json)).await {
+                            tracing::warn!("Event send error on {}: {}", conn.id, e);
+                            break;
+                        }
                     }
                 }
             }
@@ -199,6 +240,11 @@ impl Connection {
             _ => Err(anyhow::anyhow!("Invalid message direction from client")),
         }
     }
+}
+
+enum ConnInput {
+    WsText(String),
+    Event(Event),
 }
 
 // ---------------------------------------------------------------------------
