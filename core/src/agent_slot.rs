@@ -437,6 +437,10 @@ impl AgentSlot {
         self.assigned_task_id.as_ref()
     }
 
+    // =========================================================================
+    // Transcript Access
+    // =========================================================================
+
     /// Get the transcript entries
     pub fn transcript(&self) -> &[TranscriptEntry] {
         &self.transcript
@@ -523,6 +527,10 @@ impl AgentSlot {
         self.event_rx = None;
         self.thread_handle = None;
     }
+
+    // =========================================================================
+    // Transcript Manipulation
+    // =========================================================================
 
     /// Append entry to transcript
     pub fn append_transcript(&mut self, entry: TranscriptEntry) {
