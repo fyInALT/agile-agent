@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent/protocol",
     "agent/types",
     "agent/toolkit",
     "agent/provider",
