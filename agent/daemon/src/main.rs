@@ -2,10 +2,11 @@
 
 use agent_daemon::broadcaster::EventBroadcaster;
 use agent_daemon::event_log::EventLog;
-use agent_daemon::handler::{AgentHandler, HeartbeatHandler, SessionHandler};
+use agent_daemon::handler::{AgentHandler, HealthHandler, HeartbeatHandler, SessionHandler};
 use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
 use agent_daemon::session_mgr::SessionManager;
+use agent_daemon::health::DaemonMetrics;
 use agent_daemon::workplace;
 use std::sync::Arc;
 
@@ -65,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // Event infrastructure.
     let broadcaster = EventBroadcaster::new();
     let _event_log = Arc::new(EventLog::open(&event_log_path).await?);
+    let metrics = Arc::new(DaemonMetrics::default());
 
     let mut lifecycle = DaemonLifecycle::new(config_path.clone());
     let (server, _config) = lifecycle.start(&workplace, args.alias).await?;
@@ -75,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = Router::new();
     router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
     router.register("session.heartbeat", Arc::new(HeartbeatHandler));
+    router.register("session.health", Arc::new(HealthHandler::new(metrics.clone())));
     router.register("agent.spawn", Arc::new(AgentHandler::new(session_mgr.clone())));
     router.register("agent.stop", Arc::new(AgentHandler::new(session_mgr.clone())));
     router.register("agent.list", Arc::new(AgentHandler::new(session_mgr.clone())));
