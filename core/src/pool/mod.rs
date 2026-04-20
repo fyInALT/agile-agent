@@ -9,6 +9,7 @@
 //! - blocked_handler: BlockedHandler for handling blocked agents
 //! - decision_coordinator: DecisionAgentCoordinator for decision layer state
 //! - worktree_coordinator: WorktreeCoordinator for worktree management
+//! - worktree_recovery: WorktreeRecovery for orphaned/idle worktree cleanup
 //!
 //! Types moved to pool/types.rs:
 //! - AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot
@@ -24,6 +25,7 @@ pub mod queries;
 pub mod task_assignment;
 pub mod types;
 pub mod worktree_coordinator;
+pub mod worktree_recovery;
 
 // Re-export main types for convenience
 pub use blocked_handler::{BlockedHandler, AgentBlockedNotifier, AgentBlockedEvent, NoOpAgentBlockedNotifier};
@@ -39,3 +41,4 @@ pub use types::{
     DecisionExecutionResult,
 };
 pub use worktree_coordinator::WorktreeCoordinator;
+pub use worktree_recovery::{WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError};

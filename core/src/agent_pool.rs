@@ -22,12 +22,12 @@ pub use crate::pool::{
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
     BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
     FocusManager, PoolQueries, DecisionExecutor,
+    WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
     WorktreeCreateOptions, WorktreeError, WorktreeState,
 };
-use chrono::Utc;
 
 // Decision layer imports
 use agent_decision::{
@@ -891,97 +891,11 @@ impl AgentPool {
         &mut self,
         recreate_missing: bool,
     ) -> Result<WorktreeRecoveryReport, AgentPoolWorktreeError> {
-        // Check worktree support is available
-        if !self.worktree_coordinator.is_enabled() {
-            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
-        }
-
-        let worktree_state_store = self.worktree_coordinator.state_store().unwrap();
-        let worktree_manager = self.worktree_coordinator.manager().unwrap();
-
-        let all_states = worktree_state_store
-            .list_all()
-            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-
-        let mut recovered = Vec::new();
-        let mut cleaned_up = Vec::new();
-
-        for (agent_id, state) in all_states {
-            // Check if this agent is already in the pool
-            if self.get_slot_by_id(&AgentId::new(&agent_id)).is_some() {
-                // Agent already exists, skip
-                continue;
-            }
-
-            // Check if worktree exists
-            if state.exists() {
-                // Worktree exists but agent doesn't - this is an orphan
-                // We could restore it as a paused agent, but for now we just log it
-                logging::debug_event(
-                    "worktree.orphan_found",
-                    "found orphaned worktree state",
-                    serde_json::json!({
-                        "agent_id": agent_id,
-                        "worktree_id": state.worktree_id,
-                        "path": state.path.to_string_lossy(),
-                    }),
-                );
-                // For orphan worktrees that still exist, we preserve them
-                // They can be manually recovered later
-            } else if recreate_missing {
-                // Worktree missing, recreate it
-                let options = WorktreeCreateOptions {
-                    path: worktree_manager.worktrees_dir().join(&state.worktree_id),
-                    branch: state.branch.clone(),
-                    create_branch: state.branch.is_some(),
-                    base: Some(state.base_commit.clone()),
-                    lock_reason: None,
-                };
-
-                match worktree_manager.create(&state.worktree_id, options) {
-                    Ok(_) => {
-                        recovered.push((agent_id.clone(), state.worktree_id.clone()));
-                        logging::debug_event(
-                            "worktree.recovered",
-                            "recovered missing worktree",
-                            serde_json::json!({
-                                "agent_id": agent_id,
-                                "worktree_id": state.worktree_id,
-                            }),
-                        );
-                    }
-                    Err(e) => {
-                        // Failed to recreate, clean up the state
-                        worktree_state_store
-                            .delete(&agent_id)
-                            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-                        cleaned_up.push((agent_id.clone(), e.to_string()));
-                        logging::debug_event(
-                            "worktree.cleanup_failed_recreate",
-                            "cleaned up worktree state after failed recreation",
-                            serde_json::json!({
-                                "agent_id": agent_id,
-                                "error": e.to_string(),
-                            }),
-                        );
-                    }
-                }
-            } else {
-                // Not recreating, clean up the stale state
-                worktree_state_store
-                    .delete(&agent_id)
-                    .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-                cleaned_up.push((
-                    agent_id.clone(),
-                    "worktree missing, state deleted".to_string(),
-                ));
-            }
-        }
-
-        Ok(WorktreeRecoveryReport {
-            recovered,
-            cleaned_up,
-        })
+        WorktreeRecovery::recover_orphaned(
+            &self.slots,
+            &self.worktree_coordinator,
+            recreate_missing,
+        )
     }
 
     /// Auto cleanup idle worktrees
@@ -995,82 +909,11 @@ impl AgentPool {
         &mut self,
         idle_duration: chrono::Duration,
     ) -> Result<Vec<String>, AgentPoolWorktreeError> {
-        // Check worktree support is available first
-        if !self.worktree_coordinator.is_enabled() {
-            return Err(AgentPoolWorktreeError::WorktreeNotEnabled);
-        }
-
-        // Get all states first (this borrows the store)
-        let all_states = self
-            .worktree_coordinator
-            .state_store()
-            .unwrap()
-            .list_all()
-            .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-
-        // First pass: collect worktrees to clean up and their info
-        let mut to_cleanup: Vec<(String, WorktreeState, bool)> = Vec::new();
-
-        for (agent_id, state) in &all_states {
-            // Check if agent is in pool and is idle
-            let slot = self.get_slot_by_id(&AgentId::new(agent_id));
-            let is_pool_idle =
-                slot.map_or(false, |s| s.status().is_idle() || s.status().is_paused());
-
-            // Skip if agent is active (not idle/paused)
-            if slot.is_some() && !is_pool_idle {
-                continue;
-            }
-
-            // Check if worktree is idle and empty
-            if state.is_idle_longer_than(idle_duration) && state.is_empty() {
-                to_cleanup.push((agent_id.clone(), state.clone(), slot.is_some()));
-            }
-        }
-
-        // Release the borrow by taking ownership of the cleanup list
-        let cleanup_list = to_cleanup;
-
-        let mut cleaned_up = Vec::new();
-
-        // Second pass: do the cleanup
-        for (agent_id, state, in_pool) in cleanup_list {
-            // Remove worktree if it exists
-            if state.exists() {
-                if let Some(wm) = self.worktree_coordinator.manager() {
-                    wm.remove(&state.worktree_id, true)
-                        .map_err(AgentPoolWorktreeError::WorktreeError)?;
-                }
-            }
-
-            // Delete state
-            if let Some(store) = self.worktree_coordinator.state_store() {
-                store
-                    .delete(&agent_id)
-                    .map_err(|e| AgentPoolWorktreeError::StateStoreError(e.to_string()))?;
-            }
-
-            // Clear worktree from slot if agent is in pool
-            if in_pool {
-                if let Some(slot) = self.get_slot_mut_by_id(&AgentId::new(&agent_id)) {
-                    slot.clear_worktree();
-                }
-            }
-
-            cleaned_up.push(state.worktree_id.clone());
-
-            logging::debug_event(
-                "worktree.auto_cleanup",
-                "cleaned up idle worktree",
-                serde_json::json!({
-                    "agent_id": &agent_id,
-                    "worktree_id": &state.worktree_id,
-                    "idle_seconds": (Utc::now() - state.last_active_at).num_seconds(),
-                }),
-            );
-        }
-
-        Ok(cleaned_up)
+        WorktreeRecovery::auto_cleanup_idle(
+            &mut self.slots,
+            &self.worktree_coordinator,
+            idle_duration,
+        )
     }
 
     /// Spawn the OVERVIEW agent (ProductOwner role) at the top of the pool
@@ -2711,49 +2554,6 @@ impl AgentPool {
 
 fn parse_agent_index(agent_id: &str) -> Option<usize> {
     agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
-}
-
-/// Report of worktree recovery operations
-#[derive(Debug, Clone)]
-pub struct WorktreeRecoveryReport {
-    /// Successfully recovered worktrees (agent_id, worktree_id)
-    pub recovered: Vec<(String, String)>,
-    /// Cleaned up stale worktree states (agent_id, reason)
-    pub cleaned_up: Vec<(String, String)>,
-}
-
-/// Errors for AgentPool worktree operations
-#[derive(Debug, thiserror::Error)]
-pub enum AgentPoolWorktreeError {
-    #[error("worktree support not enabled for this pool")]
-    WorktreeNotEnabled,
-
-    #[error("agent pool is full")]
-    PoolFull,
-
-    #[error("agent not found: {0}")]
-    AgentNotFound(String),
-
-    #[error("agent has no worktree: {0}")]
-    NoWorktree(String),
-
-    #[error("worktree directory not found on disk: {0}")]
-    WorktreeNotFound(PathBuf),
-
-    #[error("worktree state not found: {0}")]
-    StateNotFound(String),
-
-    #[error("agent is not paused: {0}")]
-    AgentNotPaused(String),
-
-    #[error("worktree error: {0}")]
-    WorktreeError(#[from] WorktreeError),
-
-    #[error("state store error: {0}")]
-    StateStoreError(String),
-
-    #[error("slot transition error: {0}")]
-    SlotTransitionError(String),
 }
 
 #[cfg(test)]

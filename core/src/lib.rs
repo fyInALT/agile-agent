@@ -101,6 +101,7 @@ pub use pool::{
     TaskAssignmentCoordinator, AssignmentError,
     FocusManager, FocusError,
     PoolQueries, DecisionExecutor,
+    WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
 };
 
 #[cfg(test)]
