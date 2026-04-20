@@ -20,13 +20,8 @@ use crate::logging;
 use crate::probe::CODEX_PATH_ENV;
 use crate::provider::ProviderEvent;
 use crate::provider::SessionHandle;
-use crate::tool_calls::ExecCommandStatus;
-use crate::tool_calls::McpInvocation;
-use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchApplyStatus;
-use crate::tool_calls::PatchChange;
-use crate::tool_calls::PatchChangeKind;
-use crate::tool_calls::WebSearchAction;
+// Tool call types re-exported from agent-toolkit
+use crate::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, PatchChangeKind, WebSearchAction};
 
 pub fn start(
     prompt: String,
@@ -1022,7 +1017,7 @@ mod tests {
             ProviderEvent::ExecCommandFinished {
                 call_id: Some("exec-1".to_string()),
                 output_preview: Some("done".to_string()),
-                status: crate::tool_calls::ExecCommandStatus::Completed,
+                status: crate::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(100),
                 source: None,
@@ -1085,7 +1080,7 @@ mod tests {
             ProviderEvent::ExecCommandFinished {
                 call_id: Some("exec-1".to_string()),
                 output_preview: Some("working".to_string()),
-                status: crate::tool_calls::ExecCommandStatus::InProgress,
+                status: crate::ExecCommandStatus::InProgress,
                 exit_code: None,
                 duration_ms: None,
                 source: None,
@@ -1113,15 +1108,15 @@ mod tests {
             events[0],
             ProviderEvent::PatchApplyFinished {
                 call_id: Some("patch-1".to_string()),
-                changes: vec![crate::tool_calls::PatchChange {
+                changes: vec![crate::PatchChange {
                     path: "/repo/lib.rs".to_string(),
                     move_path: None,
-                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    kind: crate::PatchChangeKind::Update,
                     diff: "+fn new() {}".to_string(),
                     added: 1,
                     removed: 0,
                 }],
-                status: crate::tool_calls::PatchApplyStatus::InProgress,
+                status: crate::PatchApplyStatus::InProgress,
             }
         );
     }
@@ -1147,15 +1142,15 @@ mod tests {
             events[0],
             ProviderEvent::PatchApplyFinished {
                 call_id: Some("patch-1".to_string()),
-                changes: vec![crate::tool_calls::PatchChange {
+                changes: vec![crate::PatchChange {
                     path: "/repo/lib.rs".to_string(),
                     move_path: None,
-                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    kind: crate::PatchChangeKind::Update,
                     diff: "+fn new() {}".to_string(),
                     added: 1,
                     removed: 0,
                 }],
-                status: crate::tool_calls::PatchApplyStatus::Completed,
+                status: crate::PatchApplyStatus::Completed,
             }
         );
     }
@@ -1186,7 +1181,7 @@ mod tests {
             vec![ProviderEvent::WebSearchFinished {
                 call_id: Some("search-1".to_string()),
                 query: "rust tutorials".to_string(),
-                action: Some(crate::tool_calls::WebSearchAction::Search {
+                action: Some(crate::WebSearchAction::Search {
                     query: Some("rust tutorials".to_string()),
                     queries: None,
                 }),
@@ -1221,7 +1216,7 @@ mod tests {
             parse_item_event("item.started", &started, &HashSet::new()),
             vec![ProviderEvent::McpToolCallStarted {
                 call_id: Some("mcp-1".to_string()),
-                invocation: crate::tool_calls::McpInvocation {
+                invocation: crate::McpInvocation {
                     server: "filesystem".to_string(),
                     tool: "read_file".to_string(),
                     arguments: Some(serde_json::json!({ "path": "/tmp/test.txt" })),
@@ -1232,7 +1227,7 @@ mod tests {
             parse_item_event("item.completed", &completed, &HashSet::new()),
             vec![ProviderEvent::McpToolCallFinished {
                 call_id: Some("mcp-1".to_string()),
-                invocation: crate::tool_calls::McpInvocation {
+                invocation: crate::McpInvocation {
                     server: "filesystem".to_string(),
                     tool: "read_file".to_string(),
                     arguments: Some(serde_json::json!({ "path": "/tmp/test.txt" })),
@@ -1242,7 +1237,7 @@ mod tests {
                     "text": "file contents"
                 })],
                 error: None,
-                status: crate::tool_calls::McpToolCallStatus::Completed,
+                status: crate::McpToolCallStatus::Completed,
                 is_error: false,
             }]
         );
@@ -1302,7 +1297,7 @@ mod tests {
             events[0],
             ProviderEvent::McpToolCallFinished {
                 call_id: Some("mcp-1".to_string()),
-                invocation: crate::tool_calls::McpInvocation {
+                invocation: crate::McpInvocation {
                     server: "search".to_string(),
                     tool: "find_docs".to_string(),
                     arguments: Some(serde_json::json!({ "query": "test" })),
@@ -1312,7 +1307,7 @@ mod tests {
                     "text": "error result"
                 })],
                 error: None,
-                status: crate::tool_calls::McpToolCallStatus::Completed,
+                status: crate::McpToolCallStatus::Completed,
                 is_error: true,
             }
         );

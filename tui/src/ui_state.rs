@@ -19,12 +19,12 @@ use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
 use agent_core::shutdown_snapshot::ProviderThreadSnapshot;
 use agent_core::shutdown_snapshot::ShutdownReason;
 use agent_core::shutdown_snapshot::ShutdownSnapshot;
-use agent_core::tool_calls::ExecCommandStatus;
-use agent_core::tool_calls::McpInvocation;
-use agent_core::tool_calls::McpToolCallStatus;
-use agent_core::tool_calls::PatchApplyStatus;
-use agent_core::tool_calls::PatchChange;
-use agent_core::tool_calls::WebSearchAction;
+use agent_core::ExecCommandStatus;
+use agent_core::McpInvocation;
+use agent_core::McpToolCallStatus;
+use agent_core::PatchApplyStatus;
+use agent_core::PatchChange;
+use agent_core::WebSearchAction;
 use agent_core::workplace_store::WorkplaceStore;
 use anyhow::Result;
 use std::collections::VecDeque;
@@ -3156,13 +3156,13 @@ mod tests {
     use agent_core::app::TranscriptEntry;
     use agent_core::provider::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
-    use agent_core::tool_calls::ExecCommandStatus;
-    use agent_core::tool_calls::McpInvocation;
-    use agent_core::tool_calls::McpToolCallStatus;
-    use agent_core::tool_calls::PatchApplyStatus;
-    use agent_core::tool_calls::PatchChange;
-    use agent_core::tool_calls::PatchChangeKind;
-    use agent_core::tool_calls::WebSearchAction;
+    use agent_core::ExecCommandStatus;
+    use agent_core::McpInvocation;
+    use agent_core::McpToolCallStatus;
+    use agent_core::PatchApplyStatus;
+    use agent_core::PatchChange;
+    use agent_core::PatchChangeKind;
+    use agent_core::WebSearchAction;
     use tempfile::TempDir;
 
     #[test]
@@ -3378,7 +3378,7 @@ mod tests {
         state.finish_active_exec(
             Some("call-1".to_string()),
             None,
-            agent_core::tool_calls::ExecCommandStatus::Completed,
+            agent_core::ExecCommandStatus::Completed,
             Some(0),
             Some(5),
             Some("agent".to_string()),

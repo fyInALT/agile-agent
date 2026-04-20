@@ -10,12 +10,8 @@ use crate::backlog::TodoStatus;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::skills::SkillRegistry;
-use crate::tool_calls::ExecCommandStatus;
-use crate::tool_calls::McpInvocation;
-use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchApplyStatus;
-use crate::tool_calls::PatchChange;
-use crate::tool_calls::WebSearchAction;
+// Tool call types re-exported from agent-toolkit at crate root
+use crate::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
 use crate::verification;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1092,7 +1088,7 @@ mod tests {
         state.push_exec_command_finished(
             Some("call-1".to_string()),
             Some("diff --git a/README.md b/README.md".to_string()),
-            crate::tool_calls::ExecCommandStatus::Completed,
+            crate::ExecCommandStatus::Completed,
             Some(0),
             Some(180),
             Some("agent".to_string()),
@@ -1116,7 +1112,7 @@ mod tests {
                 && *allow_exploring_group
                 && input_preview.as_deref() == Some("git diff README.md")
                 && output_preview.as_deref() == Some("diff --git a/README.md b/README.md")
-                && *status == crate::tool_calls::ExecCommandStatus::Completed
+                && *status == crate::ExecCommandStatus::Completed
                 && *exit_code == Some(0)
                 && *duration_ms == Some(180)
         ));
@@ -1129,7 +1125,7 @@ mod tests {
         state.push_exec_command_finished(
             Some("orphan-1".to_string()),
             Some("done".to_string()),
-            crate::tool_calls::ExecCommandStatus::Completed,
+            crate::ExecCommandStatus::Completed,
             Some(0),
             Some(5),
             Some("agent".to_string()),
@@ -1147,7 +1143,7 @@ mod tests {
             if call_id.as_deref() == Some("orphan-1")
                 && !*allow_exploring_group
                 && output_preview.as_deref() == Some("done")
-                && *status == crate::tool_calls::ExecCommandStatus::Completed
+                && *status == crate::ExecCommandStatus::Completed
         ));
     }
 
@@ -1175,7 +1171,7 @@ mod tests {
             if call_id.as_deref() == Some("call-1")
                 && input_preview.as_deref() == Some("printf hello")
                 && output_preview.as_deref() == Some("hello\nworld")
-                && *status == crate::tool_calls::ExecCommandStatus::InProgress
+                && *status == crate::ExecCommandStatus::InProgress
         ));
     }
 
@@ -1184,10 +1180,10 @@ mod tests {
         let mut state = AppState::new(ProviderKind::Mock);
         state.push_patch_apply_started(
             Some("patch-1".to_string()),
-            vec![crate::tool_calls::PatchChange {
+            vec![crate::PatchChange {
                 path: "README.md".to_string(),
                 move_path: None,
-                kind: crate::tool_calls::PatchChangeKind::Update,
+                kind: crate::PatchChangeKind::Update,
                 diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
                 added: 1,
                 removed: 1,
@@ -1195,15 +1191,15 @@ mod tests {
         );
         state.push_patch_apply_finished(
             Some("patch-1".to_string()),
-            vec![crate::tool_calls::PatchChange {
+            vec![crate::PatchChange {
                 path: "README.md".to_string(),
                 move_path: None,
-                kind: crate::tool_calls::PatchChangeKind::Update,
+                kind: crate::PatchChangeKind::Update,
                 diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
                 added: 1,
                 removed: 1,
             }],
-            crate::tool_calls::PatchApplyStatus::Completed,
+            crate::PatchApplyStatus::Completed,
         );
 
         assert_eq!(state.transcript.len(), 1);
@@ -1216,15 +1212,15 @@ mod tests {
                 output_preview,
             }
             if call_id.as_deref() == Some("patch-1")
-                && changes == &vec![crate::tool_calls::PatchChange {
+                && changes == &vec![crate::PatchChange {
                     path: "README.md".to_string(),
                     move_path: None,
-                    kind: crate::tool_calls::PatchChangeKind::Update,
+                    kind: crate::PatchChangeKind::Update,
                     diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
                     added: 1,
                     removed: 1,
                 }]
-                && *status == crate::tool_calls::PatchApplyStatus::Completed
+                && *status == crate::PatchApplyStatus::Completed
                 && output_preview.is_none()
         ));
     }
@@ -1234,10 +1230,10 @@ mod tests {
         let mut state = AppState::new(ProviderKind::Mock);
         state.push_patch_apply_started(
             Some("patch-1".to_string()),
-            vec![crate::tool_calls::PatchChange {
+            vec![crate::PatchChange {
                 path: "README.md".to_string(),
                 move_path: None,
-                kind: crate::tool_calls::PatchChangeKind::Update,
+                kind: crate::PatchChangeKind::Update,
                 diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
                 added: 1,
                 removed: 1,
@@ -1256,7 +1252,7 @@ mod tests {
             }
             if call_id.as_deref() == Some("patch-1")
                 && output_preview.as_deref() == Some("patch rejected")
-                && *status == crate::tool_calls::PatchApplyStatus::InProgress
+                && *status == crate::PatchApplyStatus::InProgress
         ));
     }
 
@@ -1267,7 +1263,7 @@ mod tests {
         state.push_web_search_finished(
             Some("search-1".to_string()),
             "ratatui stylize".to_string(),
-            Some(crate::tool_calls::WebSearchAction::Other),
+            Some(crate::WebSearchAction::Other),
         );
         state.push_view_image(Some("image-view-1".to_string()), "example.png".to_string());
         state.push_image_generation(
@@ -1287,7 +1283,7 @@ mod tests {
             }
             if call_id.as_deref() == Some("search-1")
                 && query == "ratatui stylize"
-                && action == &Some(crate::tool_calls::WebSearchAction::Other)
+                && action == &Some(crate::WebSearchAction::Other)
                 && !*started
         ));
         assert!(matches!(
@@ -1314,7 +1310,7 @@ mod tests {
     #[test]
     fn mcp_tool_call_uses_dedicated_transcript_entry() {
         let mut state = AppState::new(ProviderKind::Mock);
-        let invocation = crate::tool_calls::McpInvocation {
+        let invocation = crate::McpInvocation {
             server: "search".to_string(),
             tool: "find_docs".to_string(),
             arguments: Some(serde_json::json!({
@@ -1332,7 +1328,7 @@ mod tests {
                 "text": "Found styling guidance in styles.md"
             })],
             None,
-            crate::tool_calls::McpToolCallStatus::Completed,
+            crate::McpToolCallStatus::Completed,
             false,
         );
 
@@ -1354,7 +1350,7 @@ mod tests {
                     "text": "Found styling guidance in styles.md"
                 })]
                 && error.is_none()
-                && *status == crate::tool_calls::McpToolCallStatus::Completed
+                && *status == crate::McpToolCallStatus::Completed
                 && !*is_error
         ));
     }

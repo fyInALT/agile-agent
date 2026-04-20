@@ -13,12 +13,8 @@ use crate::logging;
 use crate::mock_provider;
 use crate::probe;
 use crate::provider_thread::ProviderThreadHandle;
-use crate::tool_calls::ExecCommandStatus;
-use crate::tool_calls::McpInvocation;
-use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchApplyStatus;
-use crate::tool_calls::PatchChange;
-use crate::tool_calls::WebSearchAction;
+// Tool call types are re-exported from agent-toolkit at crate root
+use crate::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderCapabilities {

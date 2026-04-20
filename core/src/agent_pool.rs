@@ -79,7 +79,7 @@ fn convert_provider_event_to_decision(
         } => DecisionProviderEvent::ClaudeToolCallFinished {
             name: "exec".to_string(),
             output: output_preview.clone(),
-            success: matches!(status, crate::tool_calls::ExecCommandStatus::Completed),
+            success: matches!(status, crate::ExecCommandStatus::Completed),
         },
         crate::provider::ProviderEvent::GenericToolCallStarted {
             name,
@@ -107,10 +107,10 @@ fn convert_provider_event_to_decision(
         crate::provider::ProviderEvent::PatchApplyFinished { status, .. } => {
             DecisionProviderEvent::StatusUpdate {
                 status: match status {
-                    crate::tool_calls::PatchApplyStatus::Completed => "patch completed".to_string(),
-                    crate::tool_calls::PatchApplyStatus::Failed => "patch failed".to_string(),
-                    crate::tool_calls::PatchApplyStatus::Declined => "patch declined".to_string(),
-                    crate::tool_calls::PatchApplyStatus::InProgress => {
+                    crate::PatchApplyStatus::Completed => "patch completed".to_string(),
+                    crate::PatchApplyStatus::Failed => "patch failed".to_string(),
+                    crate::PatchApplyStatus::Declined => "patch declined".to_string(),
+                    crate::PatchApplyStatus::InProgress => {
                         "patch in progress".to_string()
                     }
                 },

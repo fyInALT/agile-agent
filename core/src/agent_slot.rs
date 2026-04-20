@@ -16,7 +16,8 @@ use crate::app::TranscriptEntry;
 use crate::launch_config::AgentLaunchBundle;
 use crate::logging;
 use crate::provider::{ProviderEvent, SessionHandle};
-use crate::tool_calls::ExecCommandStatus;
+// Tool call types re-exported from agent-toolkit
+use crate::ExecCommandStatus;
 use agent_decision::{BlockedState, BlockingReason, DecisionAgentCreationPolicy};
 
 /// Status of an agent slot in the multi-agent runtime
@@ -927,7 +928,7 @@ impl AgentSlot {
         &mut self,
         call_id: Option<String>,
         output_preview: Option<String>,
-        status: crate::tool_calls::ExecCommandStatus,
+        status: crate::ExecCommandStatus,
         exit_code: Option<i32>,
         duration_ms: Option<u64>,
     ) {

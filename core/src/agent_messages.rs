@@ -5,11 +5,8 @@ use serde::Serialize;
 use crate::agent_runtime::AgentRuntime;
 use crate::app::AppState;
 use crate::app::TranscriptEntry;
-use crate::tool_calls::ExecCommandStatus;
-use crate::tool_calls::McpToolCallStatus;
-use crate::tool_calls::PatchApplyStatus;
-use crate::tool_calls::PatchChange;
-use crate::tool_calls::WebSearchAction;
+// Tool call types re-exported from agent-toolkit
+use crate::{ExecCommandStatus, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

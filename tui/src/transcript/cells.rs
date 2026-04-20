@@ -100,17 +100,17 @@ fn is_active_entry(entry: &TranscriptEntry) -> bool {
         TranscriptEntry::ExecCommand { status, .. } => {
             matches!(
                 status,
-                agent_core::tool_calls::ExecCommandStatus::InProgress
+                agent_core::ExecCommandStatus::InProgress
             )
         }
         TranscriptEntry::PatchApply { status, .. } => {
-            matches!(status, agent_core::tool_calls::PatchApplyStatus::InProgress)
+            matches!(status, agent_core::PatchApplyStatus::InProgress)
         }
         TranscriptEntry::WebSearch { started, .. } => *started,
         TranscriptEntry::McpToolCall { status, .. } => {
             matches!(
                 status,
-                agent_core::tool_calls::McpToolCallStatus::InProgress
+                agent_core::McpToolCallStatus::InProgress
             )
         }
         TranscriptEntry::GenericToolCall { started, .. } => *started,
@@ -156,7 +156,7 @@ fn exploring_exec_group_cell(
 
         contains_active |= matches!(
             status,
-            agent_core::tool_calls::ExecCommandStatus::InProgress
+            agent_core::ExecCommandStatus::InProgress
         );
         calls.push(ExploringExecCall {
             source: source.clone(),
@@ -237,7 +237,7 @@ mod tests {
             output_preview: Some(
                 "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new".to_string(),
             ),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(1234),
         }];
@@ -271,7 +271,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(1000),
         }];
@@ -296,7 +296,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("git log --oneline".to_string()),
             output_preview: Some(output),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(1000),
         }];
@@ -316,7 +316,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("git status".to_string()),
             output_preview: Some("On branch main".to_string()),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(50),
         }];
@@ -340,7 +340,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("set -o pipefail\ncargo test -p codex-tui --quiet".to_string()),
             output_preview: Some(String::new()),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(12),
         }];
@@ -421,25 +421,25 @@ mod tests {
         let entries = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-1".to_string()),
             changes: vec![
-                agent_core::tool_calls::PatchChange {
+                agent_core::PatchChange {
                     path: "README.md".to_string(),
                     move_path: None,
-                    kind: agent_core::tool_calls::PatchChangeKind::Update,
+                    kind: agent_core::PatchChangeKind::Update,
                     diff: "@@ -1,3 +1,3 @@\n line one\n-line two\n+line two changed\n line three"
                         .to_string(),
                     added: 1,
                     removed: 1,
                 },
-                agent_core::tool_calls::PatchChange {
+                agent_core::PatchChange {
                     path: "src/lib.rs".to_string(),
                     move_path: None,
-                    kind: agent_core::tool_calls::PatchChangeKind::Add,
+                    kind: agent_core::PatchChangeKind::Add,
                     diff: "+fn main() {}".to_string(),
                     added: 1,
                     removed: 0,
                 },
             ],
-            status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            status: agent_core::PatchApplyStatus::Completed,
             output_preview: None,
         }];
 
@@ -474,15 +474,15 @@ mod tests {
         let diff = "@@ -1,10 +1,10 @@\n line 1\n-line 2\n+line 2 changed\n line 3\n-line 4\n+line 4 changed\n line 5\n-line 6\n+line 6 changed\n line 7\n-line 8\n+line 8 changed\n line 9\n-line 10\n+line 10 changed";
         let entries = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-2".to_string()),
-            changes: vec![agent_core::tool_calls::PatchChange {
+            changes: vec![agent_core::PatchChange {
                 path: "README.md".to_string(),
                 move_path: None,
-                kind: agent_core::tool_calls::PatchChangeKind::Update,
+                kind: agent_core::PatchChangeKind::Update,
                 diff: diff.to_string(),
                 added: 5,
                 removed: 5,
             }],
-            status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            status: agent_core::PatchApplyStatus::Completed,
             output_preview: None,
         }];
 
@@ -509,15 +509,15 @@ mod tests {
     fn patch_apply_render_uses_rename_arrow() {
         let entries = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-3".to_string()),
-            changes: vec![agent_core::tool_calls::PatchChange {
+            changes: vec![agent_core::PatchChange {
                 path: "old_name.rs".to_string(),
                 move_path: Some("new_name.rs".to_string()),
-                kind: agent_core::tool_calls::PatchChangeKind::Update,
+                kind: agent_core::PatchChangeKind::Update,
                 diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
                 added: 1,
                 removed: 1,
             }],
-            status: agent_core::tool_calls::PatchApplyStatus::Completed,
+            status: agent_core::PatchApplyStatus::Completed,
             output_preview: None,
         }];
 
@@ -536,13 +536,13 @@ mod tests {
         let failed = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-failed".to_string()),
             changes: Vec::new(),
-            status: agent_core::tool_calls::PatchApplyStatus::Failed,
+            status: agent_core::PatchApplyStatus::Failed,
             output_preview: Some("patch rejected by user".to_string()),
         }];
         let declined = vec![TranscriptEntry::PatchApply {
             call_id: Some("patch-declined".to_string()),
             changes: Vec::new(),
-            status: agent_core::tool_calls::PatchApplyStatus::Declined,
+            status: agent_core::PatchApplyStatus::Declined,
             output_preview: Some("patch canceled".to_string()),
         }];
 
@@ -586,7 +586,7 @@ mod tests {
             call_id: Some("search-1".to_string()),
             query: "example search query with several generic words to exercise wrapping"
                 .to_string(),
-            action: Some(agent_core::tool_calls::WebSearchAction::Other),
+            action: Some(agent_core::WebSearchAction::Other),
             started: false,
         }];
 
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn mcp_tool_call_renders_dedicated_history_cell() {
-        let invocation = agent_core::tool_calls::McpInvocation {
+        let invocation = agent_core::McpInvocation {
             server: "search".to_string(),
             tool: "find_docs".to_string(),
             arguments: Some(serde_json::json!({
@@ -663,7 +663,7 @@ mod tests {
             invocation: invocation.clone(),
             result_blocks: Vec::new(),
             error: None,
-            status: agent_core::tool_calls::McpToolCallStatus::InProgress,
+            status: agent_core::McpToolCallStatus::InProgress,
             is_error: false,
         }];
         let completed = vec![TranscriptEntry::McpToolCall {
@@ -674,7 +674,7 @@ mod tests {
                 "text": "Found styling guidance in styles.md"
             })],
             error: None,
-            status: agent_core::tool_calls::McpToolCallStatus::Completed,
+            status: agent_core::McpToolCallStatus::Completed,
             is_error: false,
         }];
         let failed = vec![TranscriptEntry::McpToolCall {
@@ -682,7 +682,7 @@ mod tests {
             invocation,
             result_blocks: Vec::new(),
             error: Some("network timeout".to_string()),
-            status: agent_core::tool_calls::McpToolCallStatus::Failed,
+            status: agent_core::McpToolCallStatus::Failed,
             is_error: true,
         }];
 
@@ -729,7 +729,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -739,7 +739,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -749,7 +749,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("cat bar.txt".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -786,7 +786,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("rg shimmer_spans src".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -796,7 +796,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("cat src/shimmer.rs".to_string()),
                 output_preview: None,
-                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                status: agent_core::ExecCommandStatus::InProgress,
                 exit_code: None,
                 duration_ms: None,
             },
@@ -831,7 +831,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -841,7 +841,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -871,7 +871,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("cat foo.txt".to_string()),
             output_preview: Some(String::new()),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(10),
         }];
@@ -899,7 +899,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some(format!("rg {url_like}")),
             output_preview: Some(String::new()),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(10),
         }];
@@ -926,7 +926,7 @@ mod tests {
                 "bash -lc 'python3 -c '\\''print(\"Hello, world!\")'\\'''".to_string(),
             ),
             output_preview: Some("Hello, world!".to_string()),
-            status: agent_core::tool_calls::ExecCommandStatus::Completed,
+            status: agent_core::ExecCommandStatus::Completed,
             exit_code: Some(0),
             duration_ms: Some(10),
         }];
@@ -953,7 +953,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("printf hello".to_string()),
             output_preview: Some("hello\nworld".to_string()),
-            status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+            status: agent_core::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         }];
@@ -988,7 +988,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("printf hello".to_string()),
                 output_preview: Some("hello".to_string()),
-                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                status: agent_core::ExecCommandStatus::InProgress,
                 exit_code: None,
                 duration_ms: None,
             },
@@ -1035,7 +1035,7 @@ mod tests {
             TranscriptEntry::PatchApply {
                 call_id: Some("patch-live".to_string()),
                 changes: Vec::new(),
-                status: agent_core::tool_calls::PatchApplyStatus::InProgress,
+                status: agent_core::PatchApplyStatus::InProgress,
                 output_preview: Some("patch running".to_string()),
             },
             TranscriptEntry::WebSearch {
@@ -1046,7 +1046,7 @@ mod tests {
             },
             TranscriptEntry::McpToolCall {
                 call_id: Some("mcp-live".to_string()),
-                invocation: agent_core::tool_calls::McpInvocation {
+                invocation: agent_core::McpInvocation {
                     server: "search".to_string(),
                     tool: "find_docs".to_string(),
                     arguments: Some(serde_json::json!({
@@ -1056,7 +1056,7 @@ mod tests {
                 },
                 result_blocks: Vec::new(),
                 error: None,
-                status: agent_core::tool_calls::McpToolCallStatus::InProgress,
+                status: agent_core::McpToolCallStatus::InProgress,
                 is_error: false,
             },
         ];
@@ -1108,7 +1108,7 @@ mod tests {
             allow_exploring_group: false,
             input_preview: Some("false".to_string()),
             output_preview: Some(String::new()),
-            status: agent_core::tool_calls::ExecCommandStatus::Failed,
+            status: agent_core::ExecCommandStatus::Failed,
             exit_code: Some(1),
             duration_ms: Some(5),
         }];
@@ -1118,7 +1118,7 @@ mod tests {
             allow_exploring_group: false,
             input_preview: Some("rm -rf /tmp/demo".to_string()),
             output_preview: Some(String::new()),
-            status: agent_core::tool_calls::ExecCommandStatus::Declined,
+            status: agent_core::ExecCommandStatus::Declined,
             exit_code: None,
             duration_ms: None,
         }];
@@ -1147,7 +1147,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("bash -lc 'ls -la'".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -1157,7 +1157,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("/bin/bash -lc 'cat foo.txt'".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -1192,7 +1192,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("cat /dev/null".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                status: agent_core::ExecCommandStatus::InProgress,
                 exit_code: None,
                 duration_ms: None,
             },
@@ -1202,7 +1202,7 @@ mod tests {
                 allow_exploring_group: false,
                 input_preview: Some("echo repro-marker".to_string()),
                 output_preview: Some("repro-marker\n".to_string()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(5),
             },
@@ -1242,7 +1242,7 @@ mod tests {
                 allow_exploring_group: true,
                 input_preview: Some("ls -la".to_string()),
                 output_preview: Some(String::new()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(10),
             },
@@ -1252,7 +1252,7 @@ mod tests {
                 allow_exploring_group: false,
                 input_preview: Some("cat foo.txt".to_string()),
                 output_preview: Some("hello\n".to_string()),
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(5),
             },
@@ -1291,7 +1291,7 @@ mod tests {
             output_preview: Some(
                 "error: first line on stderr\nerror: second line on stderr".to_string(),
             ),
-            status: agent_core::tool_calls::ExecCommandStatus::Failed,
+            status: agent_core::ExecCommandStatus::Failed,
             exit_code: Some(1),
             duration_ms: Some(50),
         }];
@@ -1331,7 +1331,7 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join("\n"),
             ),
-            status: agent_core::tool_calls::ExecCommandStatus::Failed,
+            status: agent_core::ExecCommandStatus::Failed,
             exit_code: Some(1),
             duration_ms: Some(250),
         }];

@@ -1842,10 +1842,10 @@ fn generate_overview_log_message(
         }
         ProviderEvent::ExecCommandFinished { status, .. } => {
             let status_str = match status {
-                agent_core::tool_calls::ExecCommandStatus::Completed => "Success",
-                agent_core::tool_calls::ExecCommandStatus::Failed => "Failed",
-                agent_core::tool_calls::ExecCommandStatus::Declined => "Declined",
-                agent_core::tool_calls::ExecCommandStatus::InProgress => "In Progress",
+                agent_core::ExecCommandStatus::Completed => "Success",
+                agent_core::ExecCommandStatus::Failed => "Failed",
+                agent_core::ExecCommandStatus::Declined => "Declined",
+                agent_core::ExecCommandStatus::InProgress => "In Progress",
             };
             Some(OverviewLogMessage {
                 timestamp,
@@ -2076,7 +2076,7 @@ fn handle_agent_provider_event(
                     allow_exploring_group: true,
                     input_preview: input_preview.clone(),
                     output_preview: None,
-                    status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                    status: agent_core::ExecCommandStatus::InProgress,
                     exit_code: None,
                     duration_ms: None,
                 });
@@ -2611,7 +2611,7 @@ mod tests {
                 entry,
                 TranscriptEntry::ExecCommand {
                     call_id,
-                    status: agent_core::tool_calls::ExecCommandStatus::Failed,
+                    status: agent_core::ExecCommandStatus::Failed,
                     ..
                 } if call_id.as_deref() == Some("call-1")
             )
@@ -2976,7 +2976,7 @@ mod tests {
             state.active_entries_for_display().last(),
             Some(TranscriptEntry::ExecCommand {
                 call_id,
-                status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                status: agent_core::ExecCommandStatus::InProgress,
                 ..
             }) if call_id.as_deref() == Some("call-1")
         ));
@@ -3004,7 +3004,7 @@ mod tests {
             agent_core::provider::ProviderEvent::ExecCommandFinished {
                 call_id: Some("call-1".to_string()),
                 output_preview: None,
-                status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                status: agent_core::ExecCommandStatus::Completed,
                 exit_code: Some(0),
                 duration_ms: Some(42),
                 source: Some("agent".to_string()),
@@ -3018,7 +3018,7 @@ mod tests {
                 TranscriptEntry::ExecCommand {
                     call_id,
                     output_preview,
-                    status: agent_core::tool_calls::ExecCommandStatus::Completed,
+                    status: agent_core::ExecCommandStatus::Completed,
                     exit_code: Some(0),
                     duration_ms: Some(42),
                     ..

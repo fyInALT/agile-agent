@@ -2616,7 +2616,7 @@ fn background_terminal_summary(state: &TuiState) -> Option<String> {
             matches!(
                 entry,
                 agent_core::app::TranscriptEntry::ExecCommand {
-                    status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+                    status: agent_core::ExecCommandStatus::InProgress,
                     ..
                 }
             )
@@ -2746,7 +2746,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: None,
             output_preview: None,
-            status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+            status: agent_core::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         }]));
@@ -2773,7 +2773,7 @@ mod tests {
             allow_exploring_group: true,
             input_preview: Some("printf hello".to_string()),
             output_preview: Some("hello".to_string()),
-            status: agent_core::tool_calls::ExecCommandStatus::InProgress,
+            status: agent_core::ExecCommandStatus::InProgress,
             exit_code: None,
             duration_ms: None,
         }]));
@@ -2788,7 +2788,7 @@ mod tests {
         assert!(matches!(
             entries.last(),
             Some(TranscriptEntry::ExecCommand { status, .. })
-                if *status == agent_core::tool_calls::ExecCommandStatus::InProgress
+                if *status == agent_core::ExecCommandStatus::InProgress
         ));
     }
 
