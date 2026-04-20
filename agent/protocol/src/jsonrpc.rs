@@ -36,6 +36,7 @@ pub struct JsonRpcNotification {
 
 /// A successful response to a request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: RequestId,

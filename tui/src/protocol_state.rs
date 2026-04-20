@@ -241,4 +241,64 @@ mod tests {
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].codename, "alpha");
     }
+
+    #[test]
+    fn connection_state_transitions() {
+        let mut state = ProtocolState::default();
+        assert_eq!(state.connection_state, ConnectionState::Disconnected);
+
+        state.connection_state = ConnectionState::Connecting;
+        assert_eq!(state.connection_state, ConnectionState::Connecting);
+
+        state.connection_state = ConnectionState::Connected;
+        assert_eq!(state.connection_state, ConnectionState::Connected);
+
+        state.connection_state = ConnectionState::Reconnecting;
+        assert_eq!(state.connection_state, ConnectionState::Reconnecting);
+
+        state.connection_state = ConnectionState::Error;
+        assert_eq!(state.connection_state, ConnectionState::Error);
+    }
+
+    #[test]
+    fn approval_state_updates_via_events() {
+        let mut state = ProtocolState::default();
+        assert!(state.pending_approvals.is_empty());
+
+        // Simulate approval request arriving via event
+        let request = agent_protocol::events::ApprovalRequestData {
+            request_id: "req-1".to_string(),
+            agent_id: "a1".to_string(),
+            title: "Approve?".to_string(),
+            description: "Details".to_string(),
+            options: vec![agent_protocol::events::ApprovalOption {
+                id: "opt-A".to_string(),
+                label: "Yes".to_string(),
+            }],
+        };
+        crate::event_handler::apply_event(
+            &mut state,
+            &agent_protocol::events::Event {
+                seq: 1,
+                payload: agent_protocol::events::EventPayload::ApprovalRequest(request.clone()),
+            },
+        );
+        assert_eq!(state.pending_approvals.len(), 1);
+        assert_eq!(state.pending_approvals[0].request_id, "req-1");
+
+        // Simulate approval response removing the request
+        crate::event_handler::apply_event(
+            &mut state,
+            &agent_protocol::events::Event {
+                seq: 2,
+                payload: agent_protocol::events::EventPayload::ApprovalResponse(
+                    agent_protocol::events::ApprovalResponseData {
+                        request_id: "req-1".to_string(),
+                        selected_option_id: "opt-A".to_string(),
+                    },
+                ),
+            },
+        );
+        assert!(state.pending_approvals.is_empty());
+    }
 }

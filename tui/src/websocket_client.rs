@@ -162,7 +162,7 @@ impl WebSocketClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_protocol::jsonrpc::{JsonRpcErrorResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
+    use agent_protocol::jsonrpc::{JsonRpcErrorResponse, JsonRpcMessage, JsonRpcResponse};
     use tokio::net::TcpListener;
 
     /// Spawn a minimal mock daemon that echoes JSON-RPC requests as responses.
@@ -263,5 +263,43 @@ mod tests {
         client
             .notify("session.heartbeat", None)
             .expect("notify should succeed");
+    }
+
+    #[tokio::test]
+    async fn error_propagation_for_unmatched_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let url = format!("ws://{}", local_addr);
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let (mut write, _read) = ws.split();
+
+            // Send a JSON-RPC error with an unknown request ID (no pending request).
+            let err = JsonRpcErrorResponse {
+                jsonrpc: "2.0".to_string(),
+                id: RequestId::String("unknown-id".to_string()),
+                error: JsonRpcError {
+                    code: -32600,
+                    message: "Invalid request".to_string(),
+                    data: None,
+                },
+            };
+            let json = serde_json::to_string(&JsonRpcMessage::Error(err)).unwrap();
+            let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
+        });
+
+        let (_client, mut server_rx) = WebSocketClient::connect(&url).await.unwrap();
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), server_rx.recv()).await;
+        assert!(msg.is_ok(), "timed out waiting for error");
+        match msg.unwrap() {
+            Some(ServerMessage::Error(err)) => {
+                assert_eq!(err.error.code, -32600);
+                assert_eq!(err.error.message, "Invalid request");
+            }
+            other => panic!("expected Error, got {:?}", other),
+        }
     }
 }

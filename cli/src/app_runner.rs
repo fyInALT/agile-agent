@@ -952,10 +952,32 @@ fn daemon_status() -> Result<()> {
     Ok(())
 }
 
+async fn agent_list_via_protocol() -> Result<Vec<String>> {
+    // Stub: will be replaced with actual protocol call in a future sprint.
+    Ok(vec!["agent_001 alpha".to_string()])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, run_mode_for_cli, tui_resume_enabled};
+    use super::{Cli, Command, agent_list_via_protocol, daemon_start, daemon_status, daemon_stop, run_mode_for_cli, tui_resume_enabled};
     use agent_core::logging::RunMode;
+    use agent_core::workplace_store::WorkplaceStore;
+
+    struct CwdGuard(std::path::PathBuf);
+
+    impl CwdGuard {
+        fn new(path: &std::path::Path) -> Self {
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self(original)
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
 
     #[test]
     fn default_command_enables_resume_last_for_tui() {
@@ -970,5 +992,69 @@ mod tests {
         };
         assert!(!tui_resume_enabled(&cli));
         assert_eq!(run_mode_for_cli(&cli), RunMode::Doctor);
+    }
+
+    #[test]
+    fn daemon_status_reports_no_daemon_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::new(tmp.path());
+        let result = daemon_status();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn daemon_stop_reports_no_daemon_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::new(tmp.path());
+        let result = daemon_stop();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn daemon_status_reports_running_daemon() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::new(tmp.path());
+
+        let workplace = WorkplaceStore::for_cwd(tmp.path()).unwrap();
+        workplace.ensure().unwrap();
+        let wp_id = workplace.workplace_id().clone();
+        let daemon_json = agent_protocol::config::DaemonConfig::path_for_workplace(workplace.path(), &wp_id);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let config = agent_protocol::config::DaemonConfig::new(
+                std::process::id(),
+                "ws://127.0.0.1:9999/v1/session",
+                wp_id,
+                None,
+            );
+            config.write(&daemon_json).await.unwrap();
+        });
+
+        let result = daemon_status();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn daemon_start_errors_when_daemon_binary_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::new(tmp.path());
+
+        let original = std::env::var("CARGO_BIN_EXE_agent-daemon").ok();
+        unsafe { std::env::remove_var("CARGO_BIN_EXE_agent-daemon") };
+
+        let result = daemon_start();
+        assert!(result.is_err());
+
+        if let Some(v) = original {
+            unsafe { std::env::set_var("CARGO_BIN_EXE_agent-daemon", v) };
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_list_via_protocol_stub_returns_placeholder() {
+        let list = agent_list_via_protocol().await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0], "agent_001 alpha");
     }
 }

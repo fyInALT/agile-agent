@@ -121,4 +121,119 @@ mod tests {
         // auto_link times out because no daemon exists.
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn autolink_integration_links_to_existing_daemon() {
+        let tmp = TempDir::new().unwrap();
+        let wp_id = WorkplaceId::new("wp-test");
+        let daemon_json = tmp.path().join("daemon.json");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let url = format!("ws://{}", local_addr);
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            use futures::{SinkExt, StreamExt};
+            let (mut write, mut read) = ws.split();
+
+            while let Some(Ok(msg)) = read.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                    use agent_protocol::jsonrpc::{JsonRpcMessage, JsonRpcResponse};
+                    if let Ok(JsonRpcMessage::Request(req)) = serde_json::from_str::<JsonRpcMessage>(&text) {
+                        let resp = JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            id: req.id,
+                            result: Some(serde_json::json!({
+                                "session_id": "sess-1",
+                                "agents": [],
+                                "focused_agent_id": null,
+                                "app_state": {
+                                    "transcript": [],
+                                    "input": {"text": "", "multiline": false},
+                                    "status": "idle"
+                                }
+                            })),
+                        };
+                        let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
+                        let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
+                    }
+                }
+            }
+        });
+
+        let config = agent_protocol::config::DaemonConfig::new(
+            std::process::id(),
+            url,
+            wp_id.clone(),
+            None,
+        );
+        config.write(&daemon_json).await.unwrap();
+
+        let result = ProtocolClient::connect(&wp_id, &daemon_json).await;
+        assert!(result.is_ok(), "expected connect to succeed: {:?}", result.err());
+        let (client, _rx) = result.unwrap().unwrap();
+        assert_eq!(client.state().connection_state, crate::protocol_state::ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn send_input_forwards_to_daemon() {
+        let tmp = TempDir::new().unwrap();
+        let wp_id = WorkplaceId::new("wp-test");
+        let daemon_json = tmp.path().join("daemon.json");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let url = format!("ws://{}", local_addr);
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            use futures::{SinkExt, StreamExt};
+            let (mut write, mut read) = ws.split();
+
+            while let Some(Ok(msg)) = read.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                    use agent_protocol::jsonrpc::{JsonRpcMessage, JsonRpcResponse};
+                    if let Ok(JsonRpcMessage::Request(req)) = serde_json::from_str::<JsonRpcMessage>(&text) {
+                        let result = if req.method == "session.initialize" {
+                            Some(serde_json::json!({
+                                "session_id": "sess-1",
+                                "agents": [],
+                                "focused_agent_id": null,
+                                "app_state": {
+                                    "transcript": [],
+                                    "input": {"text": "", "multiline": false},
+                                    "status": "idle"
+                                }
+                            }))
+                        } else {
+                            Some(serde_json::json!({"echo": req.method}))
+                        };
+                        let resp = JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            id: req.id,
+                            result,
+                        };
+                        let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
+                        let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
+                    }
+                }
+            }
+        });
+
+        let config = agent_protocol::config::DaemonConfig::new(
+            std::process::id(),
+            url,
+            wp_id.clone(),
+            None,
+        );
+        config.write(&daemon_json).await.unwrap();
+
+        let (client, _rx) = ProtocolClient::connect(&wp_id, &daemon_json).await.unwrap().unwrap();
+        let resp = client.send_input("hello world", Some("a1")).await.unwrap();
+        assert!(resp.result.is_some());
+        assert_eq!(resp.result.unwrap()["echo"], "session.sendInput");
+    }
 }
