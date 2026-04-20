@@ -1,9 +1,6 @@
-use std::path::PathBuf;
+//! Storage module - re-exports from agent-storage crate
+//!
+//! This module provides backward compatibility by re-exporting the
+//! app_data_root function from the agent-storage crate.
 
-use anyhow::Context;
-use anyhow::Result;
-
-pub fn app_data_root() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir().context("local data directory is unavailable")?;
-    Ok(data_dir.join("agile-agent"))
-}
+pub use agent_storage::app_data_root;

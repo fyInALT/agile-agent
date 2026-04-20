@@ -81,3 +81,6 @@ pub use agent_worktree::{
 pub use agent_backlog::{
     BacklogState, ThreadSafeBacklog,
 };
+
+// Re-export storage utilities from agent-storage for backward compatibility
+pub use agent_storage::app_data_root;

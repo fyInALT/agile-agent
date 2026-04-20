@@ -23,6 +23,7 @@ uuid.workspace = true
 agent-kanban = { path = "../kanban" }
 agent-decision = { path = "../decision" }
 agent-backlog = { path = "../agent/backlog" }
+agent-storage = { path = "../agent/storage" }
 
 [dev-dependencies]
 serial_test.workspace = true
