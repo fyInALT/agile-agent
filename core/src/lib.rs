@@ -271,4 +271,72 @@ mod backward_compatibility_tests {
         let json = serde_json::to_string(&mode).unwrap();
         assert!(json.contains("env_only") || json.contains("EnvOnly"), "LaunchSourceMode should serialize");
     }
+
+    // Test pool types are accessible AND functional from core
+    #[test]
+    fn pool_types_accessible_and_functional() {
+        // BlockedHandler - can be created and used
+        let handler = BlockedHandler::new();
+        assert!(handler.history().is_empty(), "BlockedHandler::new should have empty history");
+
+        // BlockedTaskPolicy - has default and variants
+        let policy = BlockedTaskPolicy::default();
+        assert_eq!(policy, BlockedTaskPolicy::ReassignIfPossible, "BlockedTaskPolicy default should be ReassignIfPossible");
+
+        // DecisionAgentCoordinator - can be created
+        let coord = DecisionAgentCoordinator::new();
+        assert_eq!(coord.agent_count(), 0, "DecisionAgentCoordinator::new should have zero agents");
+
+        // DecisionAgentStats - can be created and fields accessed
+        let stats = DecisionAgentStats::default();
+        assert_eq!(stats.total_agents, 0, "DecisionAgentStats default should have zero total_agents");
+        assert_eq!(stats.total_decisions, 0, "DecisionAgentStats default should have zero total_decisions");
+
+        // WorktreeCoordinator - can be created
+        let worktree_coord = WorktreeCoordinator::new();
+        assert!(!worktree_coord.is_enabled(), "WorktreeCoordinator::new should not have worktree support");
+
+        // BlockedHandlingConfig - has sensible defaults
+        let config = BlockedHandlingConfig::default();
+        assert!(config.notify_others, "BlockedHandlingConfig default should notify others");
+        assert!(config.record_history, "BlockedHandlingConfig default should record history");
+        assert_eq!(config.max_history_entries, 1000, "BlockedHandlingConfig default max_history_entries should be 1000");
+
+        // DecisionExecutionResult - has all variants
+        let _executed = DecisionExecutionResult::Executed { option_id: "opt-1".to_string() };
+        let _skipped = DecisionExecutionResult::Skipped;
+        let _not_blocked = DecisionExecutionResult::NotBlocked;
+        let _task_prepared = DecisionExecutionResult::TaskPrepared { branch: "test".to_string(), worktree_path: std::path::PathBuf::from("/tmp") };
+        assert!(_executed != _skipped, "DecisionExecutionResult variants should be distinct");
+    }
+
+    // Test pool coordinator methods work in function signatures
+    fn _accept_blocked_handler(handler: BlockedHandler) -> usize {
+        handler.history().len()
+    }
+
+    fn _accept_decision_coordinator(coord: DecisionAgentCoordinator) -> usize {
+        coord.agent_count()
+    }
+
+    #[test]
+    fn pool_coordinators_work_in_function_signatures() {
+        // BlockedHandler - verify function can access history
+        let mut handler = BlockedHandler::new();
+        handler.record_blocked(crate::pool::BlockedHistoryEntry {
+            agent_id: crate::agent_runtime::AgentId::new("test"),
+            reason_type: "test".to_string(),
+            description: "test".to_string(),
+            duration_ms: 100,
+            resolved: false,
+            resolution: None,
+        });
+        let count = _accept_blocked_handler(handler);
+        assert_eq!(count, 1, "BlockedHandler should record one entry");
+
+        // DecisionAgentCoordinator - verify function returns count
+        let coord = DecisionAgentCoordinator::new();
+        let count = _accept_decision_coordinator(coord);
+        assert_eq!(count, 0, "DecisionAgentCoordinator should have zero agents");
+    }
 }
