@@ -201,10 +201,12 @@ dependencies = [
  "agent-core",
  "agent-decision",
  "agent-kanban",
+ "agent-protocol",
  "anyhow",
  "chrono",
  "crossterm",
  "diffy",
+ "futures",
  "pulldown-cmark",
  "ratatui",
  "serde",
@@ -212,8 +214,12 @@ dependencies = [
  "shlex",
  "tempfile",
  "textwrap",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
  "unicode-segmentation",
  "unicode-width 0.2.0",
+ "uuid",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ mod command_runtime;
 mod composer;
 mod confirmation_overlay;
 mod diff_render;
+mod event_handler;
 mod exec_command;
 mod exec_semantics;
 mod history_cell;
@@ -20,6 +21,7 @@ mod markdown_stream;
 mod metrics_panel;
 mod overview_row;
 mod overview_state;
+mod protocol_client;
 mod provider_overlay;
 mod profile_selection_overlay;
 mod render;
@@ -35,6 +37,7 @@ mod transcript;
 mod tui_snapshot;
 mod ui_state;
 mod view_mode;
+mod websocket_client;
 
 #[cfg(test)]
 mod shell_tests;

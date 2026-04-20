@@ -9,16 +9,22 @@ anyhow.workspace = true
 agent-core = { path = "../core" }
 agent-decision = { path = "../decision" }
 agent-kanban = { path = "../kanban" }
+agent-protocol = { path = "../agent/protocol" }
 chrono.workspace = true
 crossterm.workspace = true
 diffy.workspace = true
+futures = "0.3"
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
 textwrap.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+tracing.workspace = true
 unicode-segmentation.workspace = true
+uuid = { workspace = true }
 unicode-width.workspace = true
 
 [dev-dependencies]

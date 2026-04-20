@@ -29,6 +29,7 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = true, features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
+tokio-tungstenite = "0.24"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = { version = "0.28.1", features = ["bracketed-paste"] }
 dirs = "6"

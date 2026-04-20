@@ -13,5 +13,8 @@ pub mod jsonrpc;
 pub mod methods;
 pub mod state;
 
+/// Re-export core identity types so clients don't need a direct `agent-types` dep.
+pub use agent_types::WorkplaceId;
+
 /// Protocol version negotiated during `session.initialize`.
 pub const PROTOCOL_VERSION: &str = "1.0.0";
