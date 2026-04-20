@@ -8,7 +8,7 @@ use crate::app::LoopPhase;
 use crate::backlog::TaskItem;
 use crate::logging;
 // Provider types are re-exported at crate root
-use crate::{ProviderKind, ProviderEvent, SessionHandle};
+use crate::ProviderEvent;
 use crate::task_engine;
 use crate::task_engine::ExecutionGuardrails;
 use crate::task_engine::TurnResolution;

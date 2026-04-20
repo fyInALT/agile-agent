@@ -678,6 +678,7 @@ fn run_loop_headless_multi_agent(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn handle_multi_agent_event(_session: &mut MultiAgentSession, event: agent_core::event_aggregator::AgentEvent) {
     use agent_core::event_aggregator::AgentEvent;
 

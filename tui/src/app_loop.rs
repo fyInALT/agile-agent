@@ -10,7 +10,7 @@ use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_legacy_alias;
 use agent_core::logging;
 use agent_core::probe;
-use agent_core::{ProviderEvent, ProviderKind, SessionHandle};
+use agent_core::ProviderEvent;
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::task_engine;
 use agent_core::task_engine::ExecutionGuardrails;
