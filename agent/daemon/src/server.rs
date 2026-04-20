@@ -16,7 +16,12 @@ pub struct WebSocketServer {
 impl WebSocketServer {
     /// Bind to `127.0.0.1:0` and let the OS assign an ephemeral port.
     pub async fn bind() -> anyhow::Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        Self::bind_to("127.0.0.1:0").await
+    }
+
+    /// Bind to a specific address.
+    pub async fn bind_to(addr: &str) -> anyhow::Result<Self> {
+        let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
         Ok(Self {
             listener,

@@ -18,6 +18,7 @@ pub struct SessionState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focused_agent_id: Option<String>,
     pub protocol_version: String,
+    pub capabilities: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,7 @@ mod tests {
             },
             focused_agent_id: None,
             protocol_version: "1.0.0".to_string(),
+            capabilities: vec!["session.initialize".to_string()],
         };
         let json = serde_json::to_value(&state).unwrap();
         assert_eq!(json["session_id"], "sess-1");

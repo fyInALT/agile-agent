@@ -120,6 +120,7 @@ impl WebSocketClient {
             id: id.clone(),
             method: method.to_string(),
             params,
+    ext: None,
         };
         let payload = serde_json::to_string(&JsonRpcMessage::Request(req))?;
 
@@ -142,6 +143,7 @@ impl WebSocketClient {
             jsonrpc: "2.0".to_string(),
             method: method.to_string(),
             params,
+    ext: None,
         };
         let payload = serde_json::to_string(&JsonRpcMessage::Notification(notif))?;
         self.request_tx
@@ -183,6 +185,7 @@ mod tests {
                             jsonrpc: "2.0".to_string(),
                             id: req.id,
                             result: Some(serde_json::json!({"echo": req.method})),
+    ext: None,
                         };
                         let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
                         let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
@@ -284,7 +287,9 @@ mod tests {
                     code: -32600,
                     message: "Invalid request".to_string(),
                     data: None,
+                    ext: None,
                 },
+                ext: None,
             };
             let json = serde_json::to_string(&JsonRpcMessage::Error(err)).unwrap();
             let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;

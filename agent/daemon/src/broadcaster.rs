@@ -9,12 +9,14 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct EventBroadcaster {
     clients: Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Event>>>>,
+    client_seqs: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl EventBroadcaster {
     pub fn new() -> Self {
         Self {
             clients: Arc::new(Mutex::new(HashMap::new())),
+            client_seqs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -49,6 +51,25 @@ impl EventBroadcaster {
     /// Number of connected clients.
     pub async fn client_count(&self) -> usize {
         self.clients.lock().await.len()
+    }
+
+    /// Update the last acked sequence number for a client.
+    pub async fn update_client_seq(&self, conn_id: &str, seq: u64) {
+        self.client_seqs.lock().await.insert(conn_id.to_string(), seq);
+    }
+
+    /// Detect clients that are lagging behind by more than `threshold` events.
+    pub async fn detect_lagging_clients(&self, current_seq: u64, threshold: u64) -> Vec<String> {
+        let seqs = self.client_seqs.lock().await;
+        let clients = self.clients.lock().await;
+        let mut lagging = Vec::new();
+        for (conn_id, _tx) in clients.iter() {
+            let last_seq = seqs.get(conn_id).copied().unwrap_or(0);
+            if current_seq.saturating_sub(last_seq) > threshold {
+                lagging.push(conn_id.clone());
+            }
+        }
+        lagging
     }
 }
 
@@ -117,5 +138,73 @@ mod tests {
         };
         // Should not panic even though the receiver is closed.
         broadcaster.broadcast(event).await;
+    }
+
+    #[tokio::test]
+    async fn lag_fast_client() {
+        let broadcaster = EventBroadcaster::new();
+        let mut rx = broadcaster.register("conn-1".to_string()).await;
+
+        let event = Event {
+            seq: 1,
+            payload: EventPayload::Error(agent_protocol::events::ErrorData {
+                message: "test".to_string(),
+                source: None,
+            }),
+        };
+        broadcaster.broadcast(event.clone()).await;
+        broadcaster.update_client_seq("conn-1", 1).await;
+
+        assert_eq!(rx.recv().await.unwrap().seq, 1);
+        let lagging = broadcaster.detect_lagging_clients(1, 5).await;
+        assert!(lagging.is_empty(), "fast client should not be lagging");
+    }
+
+    #[tokio::test]
+    async fn lag_slow_client() {
+        let broadcaster = EventBroadcaster::new();
+        let _rx = broadcaster.register("conn-1".to_string()).await;
+
+        for seq in 1..=10 {
+            let event = Event {
+                seq,
+                payload: EventPayload::Error(agent_protocol::events::ErrorData {
+                    message: format!("evt-{}", seq),
+                    source: None,
+                }),
+            };
+            broadcaster.broadcast(event).await;
+        }
+
+        let lagging = broadcaster.detect_lagging_clients(10, 5).await;
+        assert_eq!(lagging, vec!["conn-1"], "slow client should be detected as lagging");
+    }
+
+    #[tokio::test]
+    async fn lag_recovery() {
+        let broadcaster = EventBroadcaster::new();
+        let _rx = broadcaster.register("conn-1".to_string()).await;
+
+        for seq in 1..=10 {
+            let event = Event {
+                seq,
+                payload: EventPayload::Error(agent_protocol::events::ErrorData {
+                    message: format!("evt-{}", seq),
+                    source: None,
+                }),
+            };
+            broadcaster.broadcast(event).await;
+        }
+
+        assert_eq!(
+            broadcaster.detect_lagging_clients(10, 5).await,
+            vec!["conn-1"]
+        );
+
+        broadcaster.update_client_seq("conn-1", 10).await;
+        assert!(
+            broadcaster.detect_lagging_clients(10, 5).await.is_empty(),
+            "client should recover after updating seq"
+        );
     }
 }

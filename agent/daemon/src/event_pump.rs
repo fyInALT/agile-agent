@@ -267,4 +267,21 @@ mod tests {
             _ => panic!("expected Error payload"),
         }
     }
+
+    #[test]
+    fn seq_monotonic() {
+        let mut pump = EventPump::new();
+        let mut last_seq = 0;
+        for i in 0..100 {
+            let events = pump.process(
+                "a1".to_string(),
+                ProviderEvent::AssistantChunk(format!("chunk-{}", i)),
+            );
+            for ev in events {
+                assert!(ev.seq > last_seq, "sequence should increase monotonically");
+                last_seq = ev.seq;
+            }
+        }
+        assert_eq!(last_seq, 100);
+    }
 }

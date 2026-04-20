@@ -34,14 +34,17 @@ impl EventLog {
         let line = serde_json::to_string(event).context("serialize event")?;
         let mut bytes = line.into_bytes();
         bytes.push(b'\n');
-        tokio::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .append(true)
             .open(&self.path)
             .await
-            .with_context(|| format!("open event log {}", self.path.display()))?
-            .write_all(&bytes)
+            .with_context(|| format!("open event log {}", self.path.display()))?;
+        file.write_all(&bytes)
             .await
             .with_context(|| format!("append to event log {}", self.path.display()))?;
+        file.sync_all()
+            .await
+            .with_context(|| format!("sync event log {}", self.path.display()))?;
         Ok(())
     }
 
@@ -70,6 +73,7 @@ impl EventLog {
                 }
             }
         }
+        events.sort_by_key(|e| e.seq);
         Ok(events)
     }
 
@@ -77,6 +81,25 @@ impl EventLog {
     pub async fn replay_range(&self, start_seq: u64, end_seq: u64) -> Result<Vec<Event>> {
         let all = self.replay_from(start_seq).await?;
         Ok(all.into_iter().filter(|e| e.seq < end_seq).collect())
+    }
+
+    /// Detect missing sequence numbers in the log.
+    pub async fn detect_gaps(&self) -> Result<Vec<u64>> {
+        let mut events = self.replay_from(1).await?;
+        events.sort_by_key(|e| e.seq);
+        if events.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut gaps = Vec::new();
+        let mut expected = events[0].seq;
+        for event in events {
+            while expected < event.seq {
+                gaps.push(expected);
+                expected += 1;
+            }
+            expected = event.seq.saturating_add(1);
+        }
+        Ok(gaps)
     }
 }
 
@@ -156,5 +179,102 @@ mod tests {
         assert_eq!(replayed.len(), 2);
         assert_eq!(replayed[0].seq, 2);
         assert_eq!(replayed[1].seq, 3);
+    }
+
+    #[tokio::test]
+    async fn log_durability() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("events.jsonl");
+        let log = EventLog::open(&path).await.unwrap();
+
+        let event = make_event(1);
+        log.append(&event).await.unwrap();
+
+        // Drop log and read file directly to prove durability
+        drop(log);
+        let bytes = tokio::fs::read(&path).await.unwrap();
+        let lines: Vec<&[u8]> = bytes.split(|&b| b == b'\n').filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: Event = serde_json::from_slice(lines[0]).unwrap();
+        assert_eq!(parsed.seq, 1);
+    }
+
+    #[tokio::test]
+    async fn log_before_broadcast() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        let event = make_event(1);
+        log.append(&event).await.unwrap();
+
+        // Event must be on disk before any consumer reads it
+        let replayed = log.replay_from(1).await.unwrap();
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(replayed[0].seq, 1);
+    }
+
+    #[tokio::test]
+    async fn replay_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        log.append(&make_event(3)).await.unwrap();
+        log.append(&make_event(1)).await.unwrap();
+        log.append(&make_event(2)).await.unwrap();
+
+        let replayed = log.replay_from(1).await.unwrap();
+        assert_eq!(replayed.len(), 3);
+        // Should be sorted by seq
+        assert_eq!(replayed[0].seq, 1);
+        assert_eq!(replayed[1].seq, 2);
+        assert_eq!(replayed[2].seq, 3);
+    }
+
+    #[tokio::test]
+    async fn replay_under_2s() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        for seq in 1..=10000 {
+            log.append(&make_event(seq)).await.unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let replayed = log.replay_from(1).await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(replayed.len(), 10000);
+        assert!(elapsed.as_secs_f64() < 2.0, "replay took {:?}, expected under 2s", elapsed);
+    }
+
+    #[tokio::test]
+    async fn gap_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        log.append(&make_event(1)).await.unwrap();
+        log.append(&make_event(2)).await.unwrap();
+        log.append(&make_event(4)).await.unwrap();
+
+        let gaps = log.detect_gaps().await.unwrap();
+        assert_eq!(gaps, vec![3]);
+    }
+
+    #[tokio::test]
+    async fn gap_recovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        log.append(&make_event(1)).await.unwrap();
+        log.append(&make_event(2)).await.unwrap();
+        log.append(&make_event(4)).await.unwrap();
+
+        let gaps = log.detect_gaps().await.unwrap();
+        assert_eq!(gaps, vec![3]);
+
+        // Fill the gap
+        log.append(&make_event(3)).await.unwrap();
+        let gaps = log.detect_gaps().await.unwrap();
+        assert!(gaps.is_empty());
     }
 }

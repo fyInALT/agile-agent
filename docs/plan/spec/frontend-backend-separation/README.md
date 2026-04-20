@@ -96,3 +96,50 @@ A story is done when:
 ### Risk Management
 
 Each sprint document contains a risk table with probability, impact, and mitigation. High-probability × high-impact risks are tracked on the project backlog.
+
+## Architecture Summary
+
+The frontend-backend separation is complete. The system now follows a strict daemon-centric architecture:
+
+- **`agent-daemon`** is the sole owner of runtime state. It exposes a WebSocket JSON-RPC 2.0 API on `127.0.0.1` (configurable via `daemon.toml`).
+- **`agent-protocol`** defines all wire types: JSON-RPC envelopes, event payloads, state snapshots, and method parameters. It is consumed by both the daemon and all clients.
+- **Clients (TUI, CLI, IDE plugins)** are thin protocol consumers. They connect over WebSocket, receive events via broadcast, and send commands via JSON-RPC requests.
+- **State isolation** is enforced through `SessionManager`, which owns `AppState`, `AgentPool`, and `EventAggregator`. No client has direct access to `agent-core` types.
+- **Persistence** is handled by the daemon: `events.jsonl` for append-only event replay and `snapshot.json` for graceful-shutdown state recovery (with CRC32 checksum validation).
+- **Observability** includes Prometheus-compatible metrics via `session.metrics`, structured logging via `tracing`, and a health endpoint via `session.health`.
+- **Security** includes localhost-only binding, WebSocket `Origin` header validation, input size limits (`MAX_INPUT_SIZE = 1MB`), and connection limits (default 10).
+- **Protocol extensibility** is supported via optional `ext` fields on all JSON-RPC message types and a `capabilities` list returned during `session.initialize`.
+
+### Component Diagram
+
+```
+┌─────────┐  ┌─────────┐  ┌─────────┐
+│   TUI   │  │   CLI   │  │  IDE    │
+│  (tui)  │  │  (cli)  │  │ (future)│
+└────┬────┘  └────┬────┘  └────┬────┘
+     │            │            │
+     └────────────┼────────────┘
+                  │ WebSocket / JSON-RPC 2.0
+                  ▼
+         ┌─────────────────┐
+         │  agent-daemon   │
+         │  - router       │
+         │  - broadcaster  │
+         │  - session_mgr  │
+         │  - event_log    │
+         └────────┬────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │   agent-core    │
+         │  - AgentPool    │
+         │  - AppState     │
+         │  - Mailbox      │
+         └─────────────────┘
+```
+
+### Migration Notes
+
+- The `--embedded-mode` flag and all embedded-mode code paths have been removed. The daemon is mandatory.
+- Clients auto-discover the daemon via `daemon.json` written to the workplace directory.
+- All breaking changes are documented in sprint specs; no undocumented breaking changes remain.

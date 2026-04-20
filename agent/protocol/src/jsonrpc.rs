@@ -16,49 +16,59 @@ pub enum JsonRpcMessage {
 }
 
 /// A request that expects a response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: RequestId,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// A one-way notification that does not expect a response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// A successful response to a request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: RequestId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// An error response to a request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct JsonRpcErrorResponse {
     pub jsonrpc: String,
     pub id: RequestId,
     pub error: JsonRpcError,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Error object within an error response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct JsonRpcError {
     pub code: i32,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Request identifier. Always a string (UUID-style), never an integer.
@@ -66,6 +76,12 @@ pub struct JsonRpcError {
 #[serde(untagged)]
 pub enum RequestId {
     String(String),
+}
+
+impl Default for RequestId {
+    fn default() -> Self {
+        RequestId::String(String::new())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +99,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "session.initialize".to_string(),
             params: Some(serde_json::json!({"client_type": "tui"})),
+            ..Default::default()
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: JsonRpcRequest = serde_json::from_str(&json).unwrap();
@@ -96,6 +113,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "session.heartbeat".to_string(),
             params: Some(serde_json::json!({})),
+            ..Default::default()
         };
         let json = serde_json::to_string(&notif).unwrap();
         let parsed: JsonRpcNotification = serde_json::from_str(&json).unwrap();
@@ -109,6 +127,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             id: RequestId::String("req-1".to_string()),
             result: Some(serde_json::json!({"session_id": "sess-abc"})),
+            ..Default::default()
         };
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: JsonRpcResponse = serde_json::from_str(&json).unwrap();
@@ -125,7 +144,9 @@ mod tests {
                 code: -32601,
                 message: "Method not found".to_string(),
                 data: Some(serde_json::json!({"method": "foo.bar"})),
+                ..Default::default()
             },
+            ..Default::default()
         };
         let json = serde_json::to_string(&err).unwrap();
         let parsed: JsonRpcErrorResponse = serde_json::from_str(&json).unwrap();
@@ -147,5 +168,45 @@ mod tests {
         let result: Result<JsonRpcRequest, _> = serde_json::from_str(json);
         // Since we use untagged enum, integer id won't match String variant
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn ext_roundtrip() {
+        let mut ext = serde_json::Map::new();
+        ext.insert("com.example.custom".to_string(), serde_json::json!({"foo": 42}));
+
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::String("ext-1".to_string()),
+            method: "test".to_string(),
+            params: None,
+            ext: Some(ext.clone()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: JsonRpcRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.ext, Some(ext.clone()));
+
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::String("ext-1".to_string()),
+            result: None,
+            ext: Some(ext.clone()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: JsonRpcResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.ext, Some(ext));
+    }
+
+    #[test]
+    fn ext_omitted_when_none() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::String("1".to_string()),
+            method: "m".to_string(),
+            params: None,
+            ext: None,
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.get("ext").is_none());
     }
 }

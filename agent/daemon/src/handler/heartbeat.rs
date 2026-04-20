@@ -18,6 +18,7 @@ impl Handler for HeartbeatHandler {
             jsonrpc: "2.0".to_string(),
             id: req.id,
             result: Some(serde_json::json!({})),
+    ext: None,
         }))
     }
 }
@@ -38,6 +39,7 @@ mod tests {
             id: RequestId::String("hb-1".to_string()),
             method: "session.heartbeat".to_string(),
             params: None,
+    ext: None,
         };
         let resp = handler.handle(req).await.unwrap();
         match resp {

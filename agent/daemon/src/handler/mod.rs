@@ -7,7 +7,7 @@ mod heartbeat;
 mod session;
 
 pub use agent::AgentHandler;
-pub use crate::health::HealthHandler;
+pub use crate::health::{HealthHandler, MetricsHandler};
 pub use heartbeat::HeartbeatHandler;
 pub use session::SessionHandler;
 

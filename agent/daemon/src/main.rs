@@ -1,8 +1,10 @@
 //! agent-daemon entry point
 
 use agent_daemon::broadcaster::EventBroadcaster;
+use agent_daemon::config_file::DaemonConfigFile;
+use agent_daemon::connection::ConnectionTracker;
 use agent_daemon::event_log::EventLog;
-use agent_daemon::handler::{AgentHandler, HealthHandler, HeartbeatHandler, SessionHandler};
+use agent_daemon::handler::{AgentHandler, HealthHandler, HeartbeatHandler, MetricsHandler, SessionHandler};
 use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
 use agent_daemon::session_mgr::SessionManager;
@@ -57,6 +59,11 @@ async fn main() -> anyhow::Result<()> {
     let snapshot_path = workplace.snapshot_path();
     let event_log_path = workplace.path().join("events.jsonl");
 
+    // Load daemon configuration file (optional, defaults apply if missing).
+    let daemon_toml = workplace.path().join("daemon.toml");
+    let config_file = DaemonConfigFile::load(&daemon_toml)?;
+    let bind_addr = config_file.bind.clone();
+
     // Bootstrap session manager (owns runtime state).
     let session_mgr = Arc::new(
         SessionManager::bootstrap(workplace.cwd().to_path_buf(), workplace.workplace_id().clone())
@@ -67,9 +74,10 @@ async fn main() -> anyhow::Result<()> {
     let broadcaster = EventBroadcaster::new();
     let _event_log = Arc::new(EventLog::open(&event_log_path).await?);
     let metrics = Arc::new(DaemonMetrics::default());
+    let tracker = ConnectionTracker::new(config_file.max_clients);
 
     let mut lifecycle = DaemonLifecycle::new(config_path.clone());
-    let (server, _config) = lifecycle.start(&workplace, args.alias).await?;
+    let (server, _config) = lifecycle.start(&workplace, args.alias, Some(&bind_addr)).await?;
 
     let addr = server.local_addr();
     tracing::info!("agent-daemon listening on ws://{}/v1/session", addr);
@@ -78,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
     router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
     router.register("session.heartbeat", Arc::new(HeartbeatHandler));
     router.register("session.health", Arc::new(HealthHandler::new(metrics.clone())));
+    router.register("session.metrics", Arc::new(MetricsHandler::new(metrics.clone())));
     router.register("agent.spawn", Arc::new(AgentHandler::new(session_mgr.clone())));
     router.register("agent.stop", Arc::new(AgentHandler::new(session_mgr.clone())));
     router.register("agent.list", Arc::new(AgentHandler::new(session_mgr.clone())));
@@ -86,15 +95,17 @@ async fn main() -> anyhow::Result<()> {
     // Spawn the server run loop in a separate task so we can wait for signals.
     let server_handle = tokio::spawn({
         let broadcaster = broadcaster.clone();
+        let tracker = tracker.clone();
         async move {
             let res = lifecycle
                 .run(server, |stream, peer_addr| {
                     let router = router_handle.clone();
                     let broadcaster = broadcaster.clone();
+                    let tracker = tracker.clone();
                     async move {
                         let event_rx = broadcaster.register("conn".to_string()).await;
                         agent_daemon::connection::Connection::spawn(
-                            stream, peer_addr, router, Some(event_rx),
+                            stream, peer_addr, router, Some(event_rx), Some(tracker),
                         );
                     }
                 })

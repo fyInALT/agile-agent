@@ -214,6 +214,7 @@ mod tests {
             },
             focused_agent_id: Some("a1".to_string()),
             protocol_version: "1.0.0".to_string(),
+            capabilities: vec!["session.initialize".to_string()],
         };
 
         let state = ProtocolState::from_snapshot(snapshot);

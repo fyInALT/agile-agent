@@ -42,10 +42,15 @@ impl DaemonLifecycle {
         &mut self,
         workplace: &ResolvedWorkplace,
         alias: Option<String>,
+        bind_addr: Option<&str>,
     ) -> Result<(WebSocketServer, DaemonConfig)> {
         workplace.ensure().await.context("ensure workplace directory")?;
 
-        let server = WebSocketServer::bind().await.context("bind WebSocket server")?;
+        let server = match bind_addr {
+            Some(addr) => WebSocketServer::bind_to(addr).await,
+            None => WebSocketServer::bind().await,
+        }
+        .context("bind WebSocket server")?;
         let addr = server.local_addr();
         let ws_url = format!("ws://{}/v1/session", addr);
         let pid = std::process::id();
@@ -200,7 +205,7 @@ mod tests {
         let config_path = wp.daemon_json_path();
 
         let mut lifecycle = DaemonLifecycle::new(config_path.clone());
-        let (server, config) = lifecycle.start(&wp, None).await.unwrap();
+        let (server, config) = lifecycle.start(&wp, None, None).await.unwrap();
 
         assert!(config_path.exists());
         assert_eq!(config.pid, std::process::id());
@@ -222,7 +227,7 @@ mod tests {
         let snapshot_path = wp.snapshot_path();
 
         let mut lifecycle = DaemonLifecycle::new(config_path.clone());
-        let (server, _) = lifecycle.start(&wp, Some("test".into())).await.unwrap();
+        let (server, _) = lifecycle.start(&wp, Some("test".into()), None).await.unwrap();
 
         assert!(server.local_addr().port() > 0);
 

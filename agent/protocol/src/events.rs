@@ -3,6 +3,9 @@
 use crate::state::{AgentSlotStatus, ItemKind, TranscriptItem};
 use serde::{Deserialize, Serialize};
 
+/// Maximum allowed input text size (1 MB).
+pub const MAX_INPUT_SIZE: usize = 1024 * 1024;
+
 /// An event broadcast by the daemon to all connected clients.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Event {

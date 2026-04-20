@@ -22,6 +22,7 @@ impl RouterHandle {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: None,
+    ext: None,
             }))
         }
     }
@@ -87,6 +88,7 @@ mod tests {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: req.params,
+    ext: None,
             }))
         }
     }
@@ -102,6 +104,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "echo".to_string(),
             params: Some(serde_json::json!(42)),
+    ext: None,
         };
 
         let resp = handle.dispatch(req).await.unwrap();
@@ -121,6 +124,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "unknown".to_string(),
             params: None,
+    ext: None,
         };
 
         let resp = handle.dispatch(req).await.unwrap();

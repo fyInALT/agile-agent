@@ -114,6 +114,14 @@ impl SessionManager {
             workplace,
             focused_agent_id: None,
             protocol_version: agent_protocol::PROTOCOL_VERSION.to_string(),
+            capabilities: vec![
+                "session.initialize".to_string(),
+                "session.heartbeat".to_string(),
+                "session.health".to_string(),
+                "agent.spawn".to_string(),
+                "agent.stop".to_string(),
+                "agent.list".to_string(),
+            ],
         };
 
         Ok(state)
@@ -164,18 +172,85 @@ impl SessionManager {
     /// Write a snapshot file to disk for session restore on next startup.
     pub async fn write_snapshot(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let snapshot = self.snapshot().await?;
-        let file = SnapshotFile {
+        let mut file = SnapshotFile {
             version: 1,
             session_id: snapshot.session_id.clone(),
             written_at: chrono::Utc::now().to_rfc3339(),
             last_event_seq: snapshot.last_event_seq,
             state: snapshot,
+            checksum: None,
         };
+        // Compute checksum of the JSON *without* the checksum field.
+        let json = serde_json::to_string_pretty(&file).context("serialize snapshot file")?;
+        let checksum = format!("{:08x}", crc32fast::hash(json.as_bytes()));
+        file.checksum = Some(checksum);
         let json = serde_json::to_string_pretty(&file).context("serialize snapshot file")?;
         tokio::fs::write(path.as_ref(), json)
             .await
             .with_context(|| format!("write snapshot {}", path.as_ref().display()))?;
         Ok(())
+    }
+
+    /// Read a snapshot file and verify its checksum. Returns an empty state on mismatch or parse error.
+    pub async fn read_snapshot(path: impl AsRef<std::path::Path>) -> Result<SnapshotFile> {
+        let bytes = tokio::fs::read(path.as_ref()).await?;
+        let file: SnapshotFile = match serde_json::from_slice(&bytes) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!("Snapshot parse error: {}. Falling back to empty state.", e);
+                return Ok(SnapshotFile {
+                    version: 1,
+                    session_id: String::new(),
+                    written_at: String::new(),
+                    last_event_seq: 0,
+                    state: SessionState::default(),
+                    checksum: None,
+                });
+            }
+        };
+
+        if let Some(ref expected) = file.checksum {
+            let mut file_without_checksum = file.clone();
+            file_without_checksum.checksum = None;
+            let json = serde_json::to_string_pretty(&file_without_checksum)
+                .context("re-serialize snapshot for checksum")?;
+            let actual = format!("{:08x}", crc32fast::hash(json.as_bytes()));
+            if actual != *expected {
+                tracing::warn!(
+                    "Snapshot checksum mismatch: expected {}, got {}. Falling back to empty state.",
+                    expected,
+                    actual
+                );
+                return Ok(SnapshotFile {
+                    version: 1,
+                    session_id: String::new(),
+                    written_at: String::new(),
+                    last_event_seq: 0,
+                    state: SessionState::default(),
+                    checksum: None,
+                });
+            }
+        }
+        Ok(file)
+    }
+
+    /// Return a debug dump of internal session state.
+    pub async fn debug_dump(&self) -> Result<serde_json::Value> {
+        let inner = self.inner.lock().await;
+        let agents: Vec<String> = inner
+            .agent_pool
+            .slots()
+            .iter()
+            .map(|s| s.agent_id().as_str().to_string())
+            .collect();
+        let event_queue_depth = inner.event_aggregator.receiver_count();
+        Ok(serde_json::json!({
+            "session_id": self.session_id,
+            "workplace_id": self.workplace_id.as_str(),
+            "agent_count": agents.len(),
+            "agents": agents,
+            "event_queue_depth": event_queue_depth,
+        }))
     }
 }
 
@@ -187,6 +262,8 @@ pub struct SnapshotFile {
     pub written_at: String,
     pub last_event_seq: u64,
     pub state: SessionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -499,5 +576,56 @@ mod tests {
         assert_eq!(snap.id, "a1");
         assert_eq!(snap.codename, "alpha");
         assert_eq!(snap.status, AgentSlotStatus::Idle);
+    }
+
+    #[tokio::test]
+    async fn snapshot_checksum_validates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-checksum");
+        let mgr = SessionManager::bootstrap(tmp.path().to_path_buf(), wp)
+            .await
+            .unwrap();
+
+        let path = tmp.path().join("snapshot.json");
+        mgr.write_snapshot(&path).await.unwrap();
+
+        let file = SessionManager::read_snapshot(&path).await.unwrap();
+        assert_eq!(file.version, 1);
+        assert!(file.checksum.is_some());
+    }
+
+    #[tokio::test]
+    async fn snapshot_checksum_mismatch_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-corrupt");
+        let mgr = SessionManager::bootstrap(tmp.path().to_path_buf(), wp)
+            .await
+            .unwrap();
+
+        let path = tmp.path().join("snapshot.json");
+        mgr.write_snapshot(&path).await.unwrap();
+
+        // Corrupt the file by appending garbage.
+        let mut bytes = tokio::fs::read(&path).await.unwrap();
+        bytes.extend_from_slice(b"\n{\"garbage\": true}");
+        tokio::fs::write(&path, &bytes).await.unwrap();
+
+        let file = SessionManager::read_snapshot(&path).await.unwrap();
+        assert!(file.checksum.is_none());
+        assert!(file.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn debug_dump_structure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-dump");
+        let mgr = SessionManager::bootstrap(tmp.path().to_path_buf(), wp.clone())
+            .await
+            .unwrap();
+
+        let dump = mgr.debug_dump().await.unwrap();
+        assert_eq!(dump["workplace_id"], wp.as_str());
+        assert!(dump.get("agent_count").is_some());
+        assert!(dump.get("event_queue_depth").is_some());
     }
 }

@@ -1,8 +1,10 @@
 //! Per-connection state machine
 
-use agent_protocol::events::Event;
+use agent_protocol::events::{Event, MAX_INPUT_SIZE};
 use agent_protocol::jsonrpc::*;
 use futures::{SinkExt, StreamExt};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -13,6 +15,53 @@ pub type ConnectionId = String;
 
 /// Heartbeat timeout: close connection after 120s of silence.
 const HEARTBEAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Tracks active connections and enforces a hard limit.
+#[derive(Debug, Clone)]
+pub struct ConnectionTracker {
+    active: Arc<AtomicUsize>,
+    max: usize,
+}
+
+impl ConnectionTracker {
+    pub fn new(max: usize) -> Self {
+        Self {
+            active: Arc::new(AtomicUsize::new(0)),
+            max,
+        }
+    }
+
+    /// Attempt to acquire a connection slot. Returns `false` if at limit.
+    pub fn try_connect(&self) -> bool {
+        let current = self.active.fetch_add(1, Ordering::SeqCst);
+        if current >= self.max {
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Release a connection slot.
+    pub fn disconnect(&self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Current number of tracked connections.
+    pub fn count(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
+    }
+}
+
+/// Validates that the origin header refers to localhost.
+fn is_localhost_origin(origin: &str) -> bool {
+    origin.is_empty()
+        || origin.starts_with("http://localhost")
+        || origin.starts_with("https://localhost")
+        || origin.starts_with("http://127.0.0.1")
+        || origin.starts_with("https://127.0.0.1")
+        || origin == "null"
+}
 
 /// State of a single client connection.
 pub struct Connection {
@@ -38,15 +87,48 @@ impl Connection {
         addr: std::net::SocketAddr,
         router: RouterHandle,
         mut event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Event>>,
+        tracker: Option<ConnectionTracker>,
     ) -> ConnectionId {
+        if let Some(ref t) = tracker {
+            if !t.try_connect() {
+                tracing::warn!("Connection from {} rejected: max connections reached", addr);
+                // Drop the TCP stream immediately.
+                return String::new();
+            }
+        }
+
         let id = format!("conn-{}", uuid::Uuid::new_v4());
         let id_clone = id.clone();
+        let tracker_clone = tracker.clone();
 
         tokio::spawn(async move {
-            let ws_stream = match tokio_tungstenite::accept_async(stream).await {
+            let ws_stream = match tokio_tungstenite::accept_hdr_async(
+                stream,
+                |req: &tokio_tungstenite::tungstenite::http::Request<()>,
+                 response: tokio_tungstenite::tungstenite::http::Response<()>| {
+                    if let Some(origin) = req.headers().get("origin") {
+                        let origin_str = origin.to_str().unwrap_or("");
+                        if !is_localhost_origin(origin_str) {
+                            tracing::warn!("Rejected non-localhost origin: {}", origin_str);
+                            return Err(
+                                tokio_tungstenite::tungstenite::http::Response::builder()
+                                    .status(403)
+                                    .body(Some("Non-localhost origin rejected".to_string()))
+                                    .unwrap(),
+                            );
+                        }
+                    }
+                    Ok(response)
+                },
+            )
+            .await
+            {
                 Ok(ws) => ws,
                 Err(e) => {
                     tracing::warn!("WebSocket upgrade failed for {}: {}", addr, e);
+                    if let Some(ref t) = tracker_clone {
+                        t.disconnect();
+                    }
                     return;
                 }
             };
@@ -134,6 +216,16 @@ impl Connection {
 
                 match input {
                     ConnInput::WsText(text) => {
+                        let text = if text.len() > MAX_INPUT_SIZE {
+                            tracing::warn!(
+                                "Input size {} exceeds MAX_INPUT_SIZE, truncating",
+                                text.len()
+                            );
+                            text.chars().take(MAX_INPUT_SIZE).collect()
+                        } else {
+                            text
+                        };
+
                         match conn.handle_message(&text, &router).await {
                             Ok(Some(response)) => {
                                 let json = match serde_json::to_string(&response) {
@@ -162,7 +254,9 @@ impl Connection {
                                             code: -32603,
                                             message: format!("Internal error: {}", e),
                                             data: None,
+                                            ext: None,
                                         },
+                                        ext: None,
                                     };
                                     let _ = write
                                         .send(Message::Text(
@@ -191,6 +285,9 @@ impl Connection {
 
             conn.state = ConnectionState::Closing;
             tracing::debug!("Connection {} closed", conn.id);
+            if let Some(ref t) = tracker_clone {
+                t.disconnect();
+            }
         });
 
         id
@@ -217,7 +314,9 @@ impl Connection {
                             code: -32100,
                             message: "Session not initialized".to_string(),
                             data: None,
+                            ext: None,
                         },
+                        ext: None,
                     })));
                 }
 
@@ -265,5 +364,45 @@ mod tests {
         assert_eq!(conn.state, ConnectionState::Connected);
         conn.state = ConnectionState::Initialized;
         assert_eq!(conn.state, ConnectionState::Initialized);
+    }
+
+    #[test]
+    fn tracker_allows_up_to_max() {
+        let tracker = ConnectionTracker::new(3);
+        assert!(tracker.try_connect());
+        assert!(tracker.try_connect());
+        assert!(tracker.try_connect());
+        assert!(!tracker.try_connect());
+        assert_eq!(tracker.count(), 3);
+    }
+
+    #[test]
+    fn tracker_release_allows_new_connection() {
+        let tracker = ConnectionTracker::new(1);
+        assert!(tracker.try_connect());
+        assert!(!tracker.try_connect());
+        tracker.disconnect();
+        assert!(tracker.try_connect());
+    }
+
+    #[test]
+    fn localhost_origin_accepted() {
+        assert!(is_localhost_origin("http://localhost:3000"));
+        assert!(is_localhost_origin("https://127.0.0.1:8080"));
+        assert!(is_localhost_origin(""));
+        assert!(is_localhost_origin("null"));
+    }
+
+    #[test]
+    fn non_localhost_origin_rejected() {
+        assert!(!is_localhost_origin("http://evil.com"));
+        assert!(!is_localhost_origin("https://example.com"));
+    }
+
+    #[test]
+    fn input_truncation_preserves_char_boundaries() {
+        let text: String = "a".repeat(MAX_INPUT_SIZE + 100);
+        let truncated: String = text.chars().take(MAX_INPUT_SIZE).collect();
+        assert_eq!(truncated.len(), MAX_INPUT_SIZE);
     }
 }

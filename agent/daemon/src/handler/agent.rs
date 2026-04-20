@@ -29,6 +29,7 @@ impl Handler for AgentHandler {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: None,
+    ext: None,
             })),
         }
     }
@@ -46,6 +47,7 @@ impl AgentHandler {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: Some(serde_json::to_value(snapshot)?),
+                ext: None,
             })),
             Err(e) => Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
                 jsonrpc: "2.0".to_string(),
@@ -54,7 +56,9 @@ impl AgentHandler {
                     code: -32000,
                     message: e.to_string(),
                     data: None,
+                    ext: None,
                 },
+                ext: None,
             })),
         }
     }
@@ -73,6 +77,7 @@ impl AgentHandler {
                     agent_id: params.agent_id,
                     stopped: true,
                 })?),
+                ext: None,
             })),
             Err(e) => Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
                 jsonrpc: "2.0".to_string(),
@@ -81,7 +86,9 @@ impl AgentHandler {
                     code: -32101,
                     message: e.to_string(),
                     data: None,
+                    ext: None,
                 },
+                ext: None,
             })),
         }
     }
@@ -97,6 +104,7 @@ impl AgentHandler {
             jsonrpc: "2.0".to_string(),
             id: req.id,
             result: Some(serde_json::to_value(AgentListResult { agents })?),
+    ext: None,
         }))
     }
 }
@@ -125,6 +133,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "agent.spawn".to_string(),
             params: Some(serde_json::json!({"provider": "mock", "role": "developer"})),
+    ext: None,
         };
 
         let resp = handler.handle(req).await.unwrap();
@@ -151,6 +160,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "agent.stop".to_string(),
             params: Some(serde_json::json!({"agentId": "nonexistent", "force": false})),
+    ext: None,
         };
 
         let resp = handler.handle(req).await.unwrap();
@@ -178,6 +188,7 @@ mod tests {
             id: RequestId::String("req-1".to_string()),
             method: "agent.list".to_string(),
             params: None,
+    ext: None,
         };
 
         let resp = handler.handle(req).await.unwrap();

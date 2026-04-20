@@ -49,6 +49,44 @@ impl Handler for HealthHandler {
             jsonrpc: "2.0".to_string(),
             id: req.id,
             result: Some(result),
+            ext: None,
+        }))
+    }
+}
+
+/// JSON-RPC handler for `session.metrics` returning Prometheus text format.
+pub struct MetricsHandler {
+    metrics: std::sync::Arc<DaemonMetrics>,
+}
+
+impl MetricsHandler {
+    pub fn new(metrics: std::sync::Arc<DaemonMetrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+#[async_trait::async_trait]
+impl Handler for MetricsHandler {
+    async fn handle(&self, req: JsonRpcRequest) -> Result<JsonRpcMessage> {
+        let text = format!(
+            "# HELP agent_events_total Total number of events broadcasted\n\
+             # TYPE agent_events_total counter\n\
+             agent_events_total {}\n\
+             # HELP websocket_connections_active Number of active WebSocket connections\n\
+             # TYPE websocket_connections_active gauge\n\
+             websocket_connections_active {}\n\
+             # HELP messages_handled_total Total number of messages handled\n\
+             # TYPE messages_handled_total counter\n\
+             messages_handled_total {}\n",
+            self.metrics.events_broadcasted.load(Ordering::Relaxed),
+            self.metrics.connections_accepted.load(Ordering::Relaxed),
+            self.metrics.messages_handled.load(Ordering::Relaxed),
+        );
+        Ok(JsonRpcMessage::Response(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: req.id,
+            result: Some(serde_json::Value::String(text)),
+            ext: None,
         }))
     }
 }
@@ -70,6 +108,7 @@ mod tests {
             id: agent_protocol::jsonrpc::RequestId::String("1".to_string()),
             method: "session.health".to_string(),
             params: None,
+            ext: None,
         };
 
         let resp = Handler::handle(&handler, req).await.unwrap();
@@ -79,6 +118,34 @@ mod tests {
                 assert_eq!(obj["status"], "healthy");
                 assert_eq!(obj["events_broadcasted"], 1);
                 assert_eq!(obj["connections_accepted"], 1);
+            }
+            other => panic!("expected Response, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn metrics_returns_prometheus_text() {
+        let metrics = Arc::new(DaemonMetrics::default());
+        metrics.inc_events();
+        metrics.inc_messages();
+
+        let handler = MetricsHandler::new(metrics);
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: agent_protocol::jsonrpc::RequestId::String("1".to_string()),
+            method: "session.metrics".to_string(),
+            params: None,
+            ext: None,
+        };
+
+        let resp = Handler::handle(&handler, req).await.unwrap();
+        match resp {
+            JsonRpcMessage::Response(r) => {
+                let text = r.result.unwrap().as_str().unwrap().to_string();
+                assert!(text.contains("agent_events_total"));
+                assert!(text.contains("websocket_connections_active"));
+                assert!(text.contains("messages_handled_total"));
+                assert!(text.contains("# TYPE agent_events_total counter"));
             }
             other => panic!("expected Response, got {:?}", other),
         }

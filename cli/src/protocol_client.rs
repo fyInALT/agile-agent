@@ -106,6 +106,7 @@ impl ProtocolClient {
             id: id.clone(),
             method: method.to_string(),
             params,
+    ext: None,
         };
         let payload = serde_json::to_string(&JsonRpcMessage::Request(req))?;
 
@@ -132,6 +133,7 @@ impl ProtocolClient {
             jsonrpc: "2.0".to_string(),
             method: method.to_string(),
             params,
+    ext: None,
         };
         let payload = serde_json::to_string(&JsonRpcMessage::Notification(notif))?;
         self.request_tx
@@ -175,6 +177,7 @@ mod tests {
                         jsonrpc: "2.0".to_string(),
                         id: req.id,
                         result: Some(serde_json::json!({"echo": req.method})),
+    ext: None,
                     };
                     let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
                     let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;

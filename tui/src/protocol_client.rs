@@ -155,6 +155,7 @@ mod tests {
                                     "status": "idle"
                                 }
                             })),
+                            ext: None,
                         };
                         let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
                         let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
@@ -215,6 +216,7 @@ mod tests {
                             jsonrpc: "2.0".to_string(),
                             id: req.id,
                             result,
+    ext: None,
                         };
                         let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
                         let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
