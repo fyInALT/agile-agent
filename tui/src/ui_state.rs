@@ -70,35 +70,6 @@ impl Default for AgentViewState {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ProtocolState — Sprint 7: holds daemon-driven state decoupled from core
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConnectionState {
-    Disconnected,
-    Connecting,
-    Connected,
-    Reconnecting,
-    Error,
-}
-
-impl Default for ConnectionState {
-    fn default() -> Self {
-        ConnectionState::Disconnected
-    }
-}
-
-/// Pure protocol-side state populated by WebSocket events.
-/// Kept separate from core-coupled fields so Sprint 8 can fully decouple.
-#[derive(Debug, Default)]
-pub struct ProtocolState {
-    pub connection_state: ConnectionState,
-    pub agents: Vec<agent_protocol::state::AgentSnapshot>,
-    pub transcript_items: Vec<agent_protocol::state::TranscriptItem>,
-    pub focused_agent_id: Option<String>,
-}
-
 #[derive(Debug)]
 pub struct TuiState {
     pub session: RuntimeSession,
@@ -139,7 +110,7 @@ pub struct TuiState {
     /// Current decision status summary (15 chars or less) for status bar
     pub decision_status: Option<String>,
     /// Sprint 7: protocol-driven state from daemon events (decoupled from core)
-    pub protocol_state: ProtocolState,
+    pub protocol_state: crate::protocol_state::ProtocolState,
 }
 
 impl TuiState {
@@ -172,7 +143,7 @@ impl TuiState {
             human_decision_overlay: None,
             launch_config_overlay: None,
             decision_status: None,
-            protocol_state: ProtocolState::default(),
+            protocol_state: crate::protocol_state::ProtocolState::default(),
         }
     }
 
@@ -1756,7 +1727,7 @@ impl TuiState {
     /// This is used for polling events from multiple agents.
     pub fn register_agent_channel(&mut self, agent_id: AgentId, rx: Receiver<ProviderEvent>) {
         self.event_aggregator.add_receiver(agent_id.clone(), rx);
-        crate::logging::debug_event(
+        agent_core::logging::debug_event(
             "tui.agent_channel.register",
             "registered agent event channel",
             serde_json::json!({

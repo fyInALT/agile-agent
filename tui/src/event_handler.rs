@@ -3,7 +3,7 @@
 use agent_protocol::events::*;
 use agent_protocol::state::{AgentSnapshot, TranscriptItem};
 
-use crate::ui_state::ProtocolState;
+use crate::protocol_state::ProtocolState;
 
 /// Apply a single daemon event to the TUI state.
 ///

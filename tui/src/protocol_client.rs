@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::event_handler::apply_event;
-use crate::ui_state::ProtocolState;
+use crate::protocol_state::ProtocolState;
 use crate::websocket_client::{ServerMessage, WebSocketClient};
 
 /// Handle to the daemon via the protocol.
@@ -53,7 +53,7 @@ impl ProtocolClient {
             .await?;
 
         let mut state = ProtocolState::default();
-        state.connection_state = crate::ui_state::ConnectionState::Connected;
+        state.connection_state = crate::protocol_state::ConnectionState::Connected;
 
         // Deserialize snapshot into state if present.
         if let Some(result_val) = init_resp.result {
@@ -97,7 +97,7 @@ impl ProtocolClient {
     }
 
     /// Update connection state.
-    pub fn set_connection_state(&mut self, cs: crate::ui_state::ConnectionState) {
+    pub fn set_connection_state(&mut self, cs: crate::protocol_state::ConnectionState) {
         self.state.connection_state = cs;
     }
 }

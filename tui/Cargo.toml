@@ -6,9 +6,9 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-agent-core = { path = "../core" }
-agent-decision = { path = "../decision" }
-agent-kanban = { path = "../kanban" }
+agent-core = { path = "../core", optional = true }
+agent-decision = { path = "../decision", optional = true }
+agent-kanban = { path = "../kanban", optional = true }
 agent-protocol = { path = "../agent/protocol" }
 chrono.workspace = true
 crossterm.workspace = true
@@ -26,6 +26,10 @@ tracing.workspace = true
 unicode-segmentation.workspace = true
 uuid = { workspace = true }
 unicode-width.workspace = true
+
+[features]
+default = ["core"]
+core = ["dep:agent-core", "dep:agent-decision", "dep:agent-kanban"]
 
 [dev-dependencies]
 tempfile.workspace = true
