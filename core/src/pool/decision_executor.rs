@@ -610,7 +610,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decision_executor_exists() {
-        let _executor = DecisionExecutor;
+    fn decision_executor_execute_agent_not_found() {
+        let mut slots: Vec<AgentSlot> = vec![];
+        let mut human_queue = HumanDecisionQueue::default();
+        let worktree_coordinator = WorktreeCoordinator::new();
+        let work_agent_id = AgentId::new("nonexistent-agent");
+        let output = agent_decision::output::DecisionOutput::new(vec![], "test reasoning");
+
+        let result = DecisionExecutor::execute(
+            &mut slots,
+            &mut human_queue,
+            &worktree_coordinator,
+            &work_agent_id,
+            &output,
+        );
+
+        assert!(matches!(result, DecisionExecutionResult::AgentNotFound));
+    }
+
+    #[test]
+    fn decision_executor_execute_empty_actions_cancelled() {
+        use crate::agent_runtime::{AgentCodename, ProviderType};
+        use crate::ProviderKind;
+
+        let work_agent_id = AgentId::new("work-agent");
+        let slot = AgentSlot::new(
+            work_agent_id.clone(),
+            AgentCodename::new("TEST"),
+            ProviderType::from_provider_kind(ProviderKind::Mock),
+        );
+        let mut slots = vec![slot];
+        let mut human_queue = HumanDecisionQueue::default();
+        let worktree_coordinator = WorktreeCoordinator::new();
+        let output = agent_decision::output::DecisionOutput::new(vec![], "test reasoning");
+
+        let result = DecisionExecutor::execute(
+            &mut slots,
+            &mut human_queue,
+            &worktree_coordinator,
+            &work_agent_id,
+            &output,
+        );
+
+        // Empty actions result in Cancelled
+        assert!(matches!(result, DecisionExecutionResult::Cancelled));
     }
 }

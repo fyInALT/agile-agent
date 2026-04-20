@@ -101,57 +101,51 @@ A daemon is **not** a global singleton. Instead:
 - Easier resource accounting and cleanup
 - Matches how developers work (each project is independent)
 
-### 5.2 Session Registry & Discovery
+### 5.2 Workplace-Based Configuration & Auto-Link
 
-Since multiple daemons may run on the same machine, we need a lightweight registry:
-
-**Registry file**: `~/.agile-agent/registry.json`
+Each workplace stores its daemon configuration locally under `~/.agile-agent/workplaces/<workplace_id>/daemon.json`:
 
 ```json
 {
-  "version": 1,
-  "sessions": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "alias": "api-server",
-      "workplace": "/home/user/projects/api-server",
-      "pid": 12345,
-      "websocket_url": "ws://localhost:50001",
-      "created_at": "2026-04-20T10:00:00Z"
-    },
-    {
-      "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-      "alias": "frontend",
-      "workplace": "/home/user/projects/frontend",
-      "pid": 12346,
-      "websocket_url": "ws://localhost:50002",
-      "created_at": "2026-04-20T11:30:00Z"
-    }
-  ]
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "alias": "api-server",
+  "pid": 12345,
+  "websocket_url": "ws://127.0.0.1:50001",
+  "created_at": "2026-04-20T10:00:00Z",
+  "last_heartbeat": "2026-04-20T10:05:00Z"
 }
 ```
 
-**Registry operations**:
+**Why per-workplace instead of global registry?**
 
-| Operation | Trigger |
-|-----------|---------|
-| Register | Daemon starts successfully |
-| Update heartbeat | Daemon writes heartbeat timestamp every 30s |
-| Prune stale | `agent-cli daemon list` prunes entries whose heartbeat is older than 2 min |
-| Unregister | Daemon shuts down gracefully |
+- The agent is strongly bound to the current working directory.
+- A workplace is the natural unit of session isolation.
+- No central registry file to maintain or corrupt.
+
+**Auto-link mechanism**:
+
+When `agent-cli` (or `agent-tui`) starts in a directory:
+
+1. Resolve the workplace for the current cwd via `WorkplaceStore::for_cwd()`.
+2. Check if `~/.agile-agent/workplaces/<workplace_id>/daemon.json` exists.
+3. **If yes**: read the WebSocket URL and connect directly. No need for `--session` or `--port`.
+4. **If no**: the workplace has never had a daemon. Start a new daemon, write the config file, then connect.
+5. **If stale** (heartbeat older than 2 min): remove the stale config, start a new daemon, overwrite the config.
 
 **Alias rules**:
 
 - Alias is optional; if not provided, defaults to the directory basename (e.g., `api-server`)
-- Alias must be unique across all running sessions on the machine
-- Alias can be renamed via `agent-cli daemon rename <old> <new>`
-- Connection can use either UUID or alias: `agent-cli --session api-server`
+- Alias is stored in the per-workplace `daemon.json`; no global uniqueness enforcement
+- Connection is always via the workplace config, never by scanning a global list
+- A workplace can be renamed by editing the `alias` field in its `daemon.json`
 
 ### 5.3 IPC Protocol — WebSocket
 
-**Transport**: WebSocket over TCP localhost (`ws://localhost:<port>`).
+**Transport**: WebSocket over TCP localhost only (`ws://127.0.0.1:<port>`).
 
-**Port allocation**: Ephemeral port (0) assigned by OS; daemon writes the actual port to the registry. No hardcoded ports.
+**Security scope**: The WebSocket server binds exclusively to `127.0.0.1`. Remote connections from other machines are **not supported** in v1 for security reasons. LAN or internet exposure is out of scope.
+
+**Port allocation**: Ephemeral port (0) assigned by OS; daemon writes the actual port to the workplace config. No hardcoded ports.
 
 **Message format**: JSON objects (one per WebSocket text frame). Not JSON-RPC 2.0 — a simpler custom protocol is sufficient and avoids framing overhead.
 
@@ -208,18 +202,15 @@ The CLI gains a `daemon` subcommand and a headless execution mode:
 ```bash
 # Daemon lifecycle
 agent-cli daemon start [--alias api-server]     # Start daemon for current workplace
-agent-cli daemon stop [--alias api-server]       # Stop daemon
-agent-cli daemon list                            # List all running sessions
-agent-cli daemon rename <old> <new>              # Rename session alias
+agent-cli daemon stop                            # Stop daemon for current workplace
+agent-cli daemon status                          # Show daemon status for current workplace
 
-# Connect to an existing session by alias
-agent-cli --session api-server
-
-# Headless execution (connects to daemon, no TUI)
-agent-cli run --prompt "refactor auth module"
-
-# Existing TUI mode still works (auto-starts daemon if not running)
+# TUI mode — auto-discovers and connects to the daemon for current cwd
+# If no daemon exists, auto-starts one
 agent-cli
+
+# Headless execution (connects to daemon for current cwd, no TUI)
+agent-cli run --prompt "refactor auth module"
 ```
 
 ### 5.6 Event Bus & Broadcasting
@@ -291,21 +282,27 @@ TUI #4 ──WebSocket──► Workspace C Daemon (ws://localhost:50003)
 4. User clicks "Allow" in TUI #2.
 5. Daemon receives `approve_tool` from TUI #2, cancels the pending request in TUI #1, and proceeds.
 
-### 6.5 Connect by Alias
+### 6.5 Auto-Link in Action
 
 ```bash
-# In terminal 1: start daemon with alias
+# In terminal 1: start in project directory
 $ cd ~/projects/api-server
-$ agent-cli daemon start --alias api-server
-Session "api-server" started at ws://localhost:50001
+$ agent-cli
+[Auto-detects no daemon for this workplace]
+[Starts daemon, writes ~/.agile-agent/workplaces/<id>/daemon.json]
+[TUI opens, connected to ws://127.0.0.1:50001]
 
-# In terminal 2: connect by alias
-$ agent-cli --session api-server
-[TUI connects to ws://localhost:50001]
+# In terminal 2: same directory — auto-links
+$ cd ~/projects/api-server
+$ agent-cli
+[Auto-detects existing daemon config]
+[TUI opens, connected to ws://127.0.0.1:50001, same state as terminal 1]
 
-# In terminal 3: also connect by alias
-$ agent-cli --session api-server
-[TUI also connects to ws://localhost:50001, both show same state]
+# In terminal 3: different directory — completely isolated
+$ cd ~/projects/frontend
+$ agent-cli
+[Starts a separate daemon on ws://127.0.0.1:50002]
+[Independent session, no shared state with api-server]
 ```
 
 ## 7. Crate Restructuring Plan
@@ -354,21 +351,21 @@ $ agent-cli --session api-server
 4. **How to handle TUI-specific state (scroll position, composer text)?**
    - TUI-specific state stays in the TUI process. Only shared agent state lives in the daemon.
 5. **Security: any process on the machine can connect to localhost WebSocket?**
-   - Yes, same as Codex App Server. localhost is inherently local-only. Token-based auth can be added in v2.
+   - Yes, same as Codex App Server. `127.0.0.1` is inherently local-only and unreachable from other machines. Token-based auth can be added in v2 if needed.
 6. **Port collision?**
    - Bind to port 0 (OS-assigned ephemeral port) and read back the actual port. No hardcoded ports.
-7. **Alias uniqueness across machine restarts?**
-   - Registry is pruned on read; stale entries (no heartbeat) are ignored. Alias uniqueness is checked only among running sessions.
+7. **What happens if I move the project directory?**
+   - The workplace ID is derived from the directory path. Moving the directory creates a new workplace ID and a new daemon config. The old daemon config becomes stale and is cleaned up on the next access.
 
 ## 10. Acceptance Criteria
 
-- [ ] `agent-cli daemon start --alias my-project` launches a background WebSocket server
-- [ ] `agent-cli daemon list` shows all running sessions with alias, port, and workplace
-- [ ] `agent-cli --session my-project` auto-connects to the correct daemon
-- [ ] Two `agent-cli` terminals with `--session my-project` show identical transcripts in real time
-- [ ] Closing one terminal does not stop the agent; reopening restores the full state
+- [ ] `agent-cli daemon start --alias my-project` launches a background WebSocket server and writes workplace config
+- [ ] `agent-cli daemon status` shows the daemon for the current workplace
+- [ ] `agent-cli` in a directory with an existing daemon auto-connects without extra flags
+- [ ] Two `agent-cli` terminals in the same directory show identical transcripts in real time
+- [ ] Closing one terminal does not stop the agent; reopening in the same directory restores full state
 - [ ] Tool approval prompts appear in all connected terminals; approving in one resolves all
-- [ ] `agent-cli run --prompt "..."` executes headlessly via the daemon
+- [ ] `agent-cli run --prompt "..."` executes headlessly via the daemon for current cwd
 - [ ] Two different workplace directories can each run their own daemon simultaneously without interference
 - [ ] `cargo test --workspace` passes after each phase
 
