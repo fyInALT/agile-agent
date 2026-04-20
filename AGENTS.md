@@ -10,7 +10,14 @@
 
 ## Architecture
 
-Layered architecture: `agent-cli` as the entry point, coordinating `agent-tui` (interactive interface) and `agent-core` (runtime core). `agent-decision` provides decision-layer capabilities, `agent-kanban` provides Kanban domain model, and `agent-llm-provider` provides LLM client abstraction.
+Layered architecture: `agent-daemon` owns all runtime state; `agent-cli` and `agent-tui` are thin protocol clients. `agent-protocol` defines the JSON-RPC 2.0 + WebSocket contract. `agent-core` provides the runtime engine (AgentPool, RuntimeSession, EventAggregator). `agent-decision` provides decision-layer capabilities, `agent-kanban` provides Kanban domain model, and `agent-llm-provider` provides LLM client abstraction.
+
+### Frontend-Backend Separation
+
+- **Daemon** (`agent-daemon`): Owns `RuntimeSession`, `AgentPool`, and all provider channels. Serves snapshots and broadcasts events over WebSocket.
+- **Protocol** (`agent-protocol`): JSON-RPC 2.0 envelopes, event payloads, state snapshots, `daemon.json` format, and shared client-side auto-link logic.
+- **TUI** (`agent-tui`): Protocol-only render state (`ProtocolState`). Embeddable mode still available via `core` feature.
+- **CLI** (`agent-cli`): Protocol-only headless client. Embeddable mode still available via `core` feature.
 
 ## Focus
 
@@ -64,6 +71,8 @@ The multi-agent foundation provides Scrum-style coordination:
 2. **Role-Based Coordination**: Each role has specific focus, skills, and prompt prefixes
 3. **Worktree Isolation**: Agents operate in isolated git worktrees for conflict-free parallel work
 4. **Decision Escalation**: Tiered engine escalates ambiguous cases to human intervention
+5. **Protocol-First**: TUI and CLI are thin clients; all runtime state lives in the daemon
+6. **Feature-Gated Decoupling**: `agent-tui` and `agent-cli` have `core` features for backward compatibility during transition
 
 ## Index
 
@@ -74,12 +83,14 @@ The multi-agent foundation provides Scrum-style coordination:
 
 ### Crates
 
-- `cli/`: `agent-cli` crate — binary entrypoints and CLI-facing integration tests
+- `cli/`: `agent-cli` crate — binary entrypoints and CLI-facing integration tests (protocol-first, `core` feature for legacy mode)
 - `core/`: `agent-core` crate — runtime, providers, persistence, backlog, verification
-- `tui/`: `agent-tui` crate — terminal UI, rendering, transcript, composer, overlays
+- `tui/`: `agent-tui` crate — terminal UI, rendering, transcript, composer, overlays (protocol-first, `core` feature for legacy mode)
 - `decision/`: `agent-decision` crate — classifiers, engines, actions, situations
 - `kanban/`: `agent-kanban` crate — trait-based Kanban domain model
 - `llm-provider/`: `agent-llm-provider` crate — OpenAI client/provider abstraction
+- `agent/daemon/`: `agent-daemon` crate — WebSocket server, session manager, event pump, broadcaster
+- `agent/protocol/`: `agent-protocol` crate — JSON-RPC types, events, snapshots, auto-link, config
 - `agent/commands/`: `agent-commands` crate — command bus and slash command system
 - `test-support/`: `agent-test-support` crate — shared test helpers
 

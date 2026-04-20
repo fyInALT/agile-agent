@@ -11,7 +11,7 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
 use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
-use crate::decision_mail::{DecisionMail, DecisionRequest, DecisionResponse};
+use crate::decision_mail::{DecisionRequest, DecisionResponse};
 use crate::logging;
 use crate::{ProviderEvent, ProviderKind};
 use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};

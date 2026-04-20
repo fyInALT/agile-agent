@@ -20,3 +20,8 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = { workspace = true }
 serde_json = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "event_serialize"
+harness = false

@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Event infrastructure.
     let broadcaster = EventBroadcaster::new();
-    let event_log = Arc::new(EventLog::open(&event_log_path).await?);
+    let _event_log = Arc::new(EventLog::open(&event_log_path).await?);
 
     let mut lifecycle = DaemonLifecycle::new(config_path.clone());
     let (server, _config) = lifecycle.start(&workplace, args.alias).await?;

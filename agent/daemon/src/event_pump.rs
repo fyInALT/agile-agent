@@ -52,7 +52,7 @@ impl EventPump {
                     delta: ItemDelta::Markdown(text),
                 })));
             }
-            ProviderEvent::ExecCommandStarted { call_id, input_preview, source } => {
+            ProviderEvent::ExecCommandStarted { call_id, input_preview: _, source: _ } => {
                 let item_id = self.create_item(agent_id.clone(), call_id.clone(), ItemKind::ToolCall);
                 events.push(self.mk_event(EventPayload::ItemStarted(ItemStartedData {
                     item_id: item_id.clone(),

@@ -36,7 +36,7 @@ impl EventBroadcaster {
     /// channel is full (lagging clients).
     pub async fn broadcast(&self, event: Event) {
         let clients = self.clients.lock().await;
-        let json = serde_json::to_string(&event).unwrap_or_default();
+        let _json = serde_json::to_string(&event).unwrap_or_default();
         for (conn_id, tx) in clients.iter() {
             if let Err(e) = tx.send(event.clone()) {
                 tracing::debug!("broadcast drop for {}: {}", conn_id, e);
