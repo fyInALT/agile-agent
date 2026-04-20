@@ -20,6 +20,7 @@ pub use crate::pool::{
     AgentBlockedEvent, AgentBlockedNotifier, AgentStatusSnapshot, AgentTaskAssignment,
     BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
+    BlockedHandler,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
@@ -159,14 +160,10 @@ pub struct AgentPool {
     focused_slot: usize,
     /// Workplace ID for this pool
     workplace_id: WorkplaceId,
-    /// Human decision queue
+    /// Human decision queue (slot-dependent, stays in pool)
     human_queue: HumanDecisionQueue,
-    /// Blocked handling configuration
-    blocked_config: BlockedHandlingConfig,
-    /// Blocking history records
-    blocked_history: Vec<BlockedHistoryEntry>,
-    /// Notifier for blocked events (used when notify_others is true)
-    blocked_notifier: Arc<dyn AgentBlockedNotifier>,
+    /// Blocked handling delegate (manages config, history, notifier)
+    blocked_handler: BlockedHandler,
     /// Decision agent slots (keyed by work agent ID)
     decision_agents: HashMap<AgentId, DecisionAgentSlot>,
     /// Decision mail senders (keyed by work agent ID)
@@ -195,8 +192,7 @@ impl std::fmt::Debug for AgentPool {
             .field("focused_slot", &self.focused_slot)
             .field("workplace_id", &self.workplace_id)
             .field("human_queue", &self.human_queue)
-            .field("blocked_config", &self.blocked_config)
-            .field("blocked_history", &self.blocked_history)
+            .field("blocked_handler", &self.blocked_handler)
             .finish()
     }
 }
@@ -211,9 +207,7 @@ impl AgentPool {
             focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
-            blocked_config: BlockedHandlingConfig::default(),
-            blocked_history: Vec::new(),
-            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            blocked_handler: BlockedHandler::new(),
             decision_agents: HashMap::new(),
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
@@ -238,9 +232,7 @@ impl AgentPool {
             focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
-            blocked_config: config,
-            blocked_history: Vec::new(),
-            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            blocked_handler: BlockedHandler::with_config(config),
             decision_agents: HashMap::new(),
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
@@ -261,9 +253,7 @@ impl AgentPool {
             focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
-            blocked_config: BlockedHandlingConfig::default(),
-            blocked_history: Vec::new(),
-            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            blocked_handler: BlockedHandler::new(),
             decision_agents: HashMap::new(),
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
@@ -319,9 +309,7 @@ impl AgentPool {
             focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
-            blocked_config: BlockedHandlingConfig::default(),
-            blocked_history: Vec::new(),
-            blocked_notifier: Arc::new(NoOpAgentBlockedNotifier),
+            blocked_handler: BlockedHandler::new(),
             decision_agents: HashMap::new(),
             decision_mail_senders: HashMap::new(),
             decision_components: initialize_decision_layer(),
@@ -335,7 +323,7 @@ impl AgentPool {
 
     /// Set a custom blocked notifier
     pub fn set_blocked_notifier(&mut self, notifier: Arc<dyn AgentBlockedNotifier>) {
-        self.blocked_notifier = notifier;
+        self.blocked_handler.set_notifier(notifier);
     }
 
     /// Get the maximum number of slots
@@ -2895,7 +2883,7 @@ impl AgentPool {
 
     /// Get blocked handling configuration
     pub fn blocked_config(&self) -> &BlockedHandlingConfig {
-        &self.blocked_config
+        self.blocked_handler.config()
     }
 
     /// Get human decision queue
@@ -2910,27 +2898,7 @@ impl AgentPool {
 
     /// Get blocked history
     pub fn blocked_history(&self) -> &[BlockedHistoryEntry] {
-        &self.blocked_history
-    }
-
-    /// Prune history to max size
-    ///
-    /// Removes oldest resolved entries first, then oldest unresolved if still over limit.
-    fn prune_history(&mut self) {
-        let max = self.blocked_config.max_history_entries;
-        if max == 0 {
-            return; // No limit
-        }
-
-        while self.blocked_history.len() > max {
-            // Find the oldest resolved entry
-            if let Some(pos) = self.blocked_history.iter().position(|e| e.resolved) {
-                self.blocked_history.remove(pos);
-            } else {
-                // No resolved entries, remove the oldest
-                self.blocked_history.remove(0);
-            }
-        }
+        self.blocked_handler.history()
     }
 
     /// Find blocked agents
@@ -2987,40 +2955,24 @@ impl AgentPool {
             self.human_queue.push(request);
         }
 
-        // Record in history
-        if self.blocked_config.record_history {
-            self.blocked_history.push(BlockedHistoryEntry {
-                agent_id: agent_id.clone(),
-                reason_type: reason_type.to_string(),
-                description: blocked_state.reason().description(),
-                duration_ms: 0, // Will be updated on resolution
-                resolved: false,
-                resolution: None,
-            });
-            self.prune_history();
-        }
+        // Record in history using BlockedHandler delegate
+        self.blocked_handler.record_blocked(BlockedHistoryEntry {
+            agent_id: agent_id.clone(),
+            reason_type: reason_type.to_string(),
+            description: blocked_state.reason().description(),
+            duration_ms: 0, // Will be updated on resolution
+            resolved: false,
+            resolution: None,
+        });
 
-        // Notify other agents if configured
-        if self.blocked_config.notify_others {
-            // Emit event for other agents to react
-            crate::logging::debug_event(
-                "agent.blocked.notify_others",
-                "agent blocked, notifying other agents",
-                serde_json::json!({
-                    "agent_id": agent_id.as_str(),
-                    "reason_type": reason_type,
-                    "description": blocked_state.reason().description(),
-                    "urgency": format!("{}", blocked_state.reason().urgency()),
-                }),
-            );
-            let event = AgentBlockedEvent {
-                agent_id: agent_id.clone(),
-                reason_type: reason_type.to_string(),
-                description: blocked_state.reason().description(),
-                urgency: format!("{}", blocked_state.reason().urgency()),
-            };
-            self.blocked_notifier.on_agent_blocked(event);
-        }
+        // Notify other agents using BlockedHandler delegate
+        let event = AgentBlockedEvent {
+            agent_id: agent_id.clone(),
+            reason_type: reason_type.to_string(),
+            description: blocked_state.reason().description(),
+            urgency: format!("{}", blocked_state.reason().urgency()),
+        };
+        self.blocked_handler.notify_blocked(event);
 
         // Handle blocked task
         if let Some(backlog) = backlog {
@@ -3039,7 +2991,8 @@ impl AgentPool {
         let reason = blocked_state.reason();
         let urgency = reason.urgency();
         let timeout_ms = self
-            .blocked_config
+            .blocked_handler
+            .config()
             .timeout_config
             .timeout_for_urgency(urgency);
 
@@ -3065,7 +3018,7 @@ impl AgentPool {
             .and_then(|s| s.assigned_task_id().cloned());
 
         if let Some(task_id) = task_id {
-            match self.blocked_config.task_policy {
+            match self.blocked_handler.config().task_policy {
                 BlockedTaskPolicy::KeepAssigned => {
                     // Task stays with blocked agent - no action needed
                 }
@@ -3133,15 +3086,8 @@ impl AgentPool {
                 .unwrap_or_else(|| "unknown".to_string()),
         );
 
-        // Find and update history
-        if let Some(entry) = self
-            .blocked_history
-            .iter_mut()
-            .find(|e| e.agent_id == agent_id && !e.resolved)
-        {
-            entry.resolved = true;
-            entry.resolution = Some(format!("{:?}", response.selection));
-        }
+        // Find and update history using BlockedHandler delegate
+        self.blocked_handler.record_resolution(&agent_id, format!("{:?}", response.selection));
 
         // Get slot and clear blocked status
         let slot = self.get_slot_mut_by_id(&agent_id);
@@ -3210,17 +3156,11 @@ impl AgentPool {
     pub fn clear_all_blocked(&mut self) {
         for slot in &mut self.slots {
             if slot.status().is_blocked() {
-                // Record in history
-                if self.blocked_config.record_history {
-                    if let Some(entry) = self
-                        .blocked_history
-                        .iter_mut()
-                        .find(|e| &e.agent_id == slot.agent_id() && !e.resolved)
-                    {
-                        entry.resolved = true;
-                        entry.resolution = Some("cleared_on_shutdown".to_string());
-                    }
-                }
+                // Record resolution in history using BlockedHandler delegate
+                self.blocked_handler.record_resolution(
+                    slot.agent_id(),
+                    "cleared_on_shutdown".to_string(),
+                );
                 slot.transition_to(AgentSlotStatus::Idle).ok();
             }
         }
@@ -3347,14 +3287,8 @@ impl AgentPool {
             let agent_id = AgentId::new(request.agent_id.clone());
 
             // Find and update history
-            if let Some(entry) = self
-                .blocked_history
-                .iter_mut()
-                .find(|e| e.agent_id == agent_id && !e.resolved)
-            {
-                entry.resolved = true;
-                entry.resolution = Some(format!("timeout: {:?}", selection));
-            }
+            // Record resolution using BlockedHandler delegate
+            self.blocked_handler.record_resolution(&agent_id, format!("timeout: {:?}", selection));
 
             // Clear blocked status and execute timeout action
             self.execute_timeout_action(&agent_id, selection);
@@ -3397,7 +3331,7 @@ impl AgentPool {
 
     /// Determine the timeout action for a request based on config
     fn timeout_action_for_request(&self, request: &HumanDecisionRequest) -> HumanSelection {
-        let timeout_action = self.blocked_config.timeout_config.timeout_default;
+        let timeout_action = self.blocked_handler.config().timeout_config.timeout_default;
 
         match timeout_action {
             AutoAction::FollowRecommendation => {
@@ -4414,56 +4348,10 @@ mod tests {
         assert!(matches!(prep_failed, DecisionExecutionResult::PreparationFailed { .. }));
     }
 
-    #[test]
-    fn blocked_history_pruning_removes_resolved_first() {
-        let mut pool = make_pool(2);
-        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
-
-        // Add 5 blocked entries
-        for i in 0..5 {
-            let blocking = HumanDecisionBlocking::new(
-                format!("req-{}", i),
-                Box::new(WaitingForChoiceSituation::default()),
-                vec![],
-            );
-            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
-                .unwrap();
-        }
-
-        // Set max to 3
-        pool.blocked_config.max_history_entries = 3;
-
-        // Manually resolve some entries (prune is called after push, so manually trigger)
-        pool.blocked_history[0].resolved = true;
-        pool.blocked_history[1].resolved = true;
-
-        pool.prune_history();
-
-        // Should have 3 entries remaining (resolved ones removed first)
-        assert_eq!(pool.blocked_history().len(), 3);
-    }
-
-    #[test]
-    fn blocked_history_pruning_unbounded_when_zero() {
-        let mut pool = make_pool(2);
-        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
-
-        // Add many blocked entries with max = 0 (unlimited)
-        pool.blocked_config.max_history_entries = 0;
-
-        for i in 0..10 {
-            let blocking = HumanDecisionBlocking::new(
-                format!("req-{}", i),
-                Box::new(WaitingForChoiceSituation::default()),
-                vec![],
-            );
-            pool.process_agent_blocked(&agent_id, BlockedState::new(Box::new(blocking)), None)
-                .unwrap();
-        }
-
-        // Should have all 10 entries
-        assert_eq!(pool.blocked_history().len(), 10);
-    }
+    // Note: blocked_history pruning tests are in pool/blocked_handler.rs
+    // The BlockedHandler tests cover:
+    // - pruning removes resolved entries first
+    // - max_entries=0 means unlimited history
 
     #[test]
     fn process_expired_requests_with_default_action() {

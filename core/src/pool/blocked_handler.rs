@@ -29,6 +29,16 @@ pub struct BlockedHandler {
     notifier: Arc<dyn AgentBlockedNotifier>,
 }
 
+impl std::fmt::Debug for BlockedHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockedHandler")
+            .field("config", &self.config)
+            .field("history", &self.history)
+            .field("notifier", &"<dyn AgentBlockedNotifier>")
+            .finish()
+    }
+}
+
 impl BlockedHandler {
     /// Create a new blocked handler with default config
     pub fn new() -> Self {
