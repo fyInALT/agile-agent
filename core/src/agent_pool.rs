@@ -21,6 +21,7 @@ pub use crate::pool::{
     BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
     BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
+    FocusManager, PoolQueries,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
@@ -154,8 +155,6 @@ pub struct AgentPool {
     max_slots: usize,
     /// Agent index counter for generating new IDs
     next_agent_index: usize,
-    /// Index of the currently focused agent (for TUI)
-    focused_slot: usize,
     /// Workplace ID for this pool
     workplace_id: WorkplaceId,
     /// Human decision queue (slot-dependent, stays in pool)
@@ -166,6 +165,8 @@ pub struct AgentPool {
     decision_coordinator: DecisionAgentCoordinator,
     /// Worktree coordinator (manages manager, state store, git flow executor)
     worktree_coordinator: WorktreeCoordinator,
+    /// Focus manager (manages focused slot index)
+    focus_manager: FocusManager,
     /// Working directory for decision agents
     cwd: PathBuf,
     /// Provider profile store (optional, for profile-based agent creation)
@@ -178,7 +179,7 @@ impl std::fmt::Debug for AgentPool {
             .field("slots", &self.slots)
             .field("max_slots", &self.max_slots)
             .field("next_agent_index", &self.next_agent_index)
-            .field("focused_slot", &self.focused_slot)
+            .field("focus_manager", &self.focus_manager)
             .field("workplace_id", &self.workplace_id)
             .field("human_queue", &self.human_queue)
             .field("blocked_handler", &self.blocked_handler)
@@ -195,12 +196,12 @@ impl AgentPool {
             slots: Vec::new(),
             max_slots,
             next_agent_index: 1,
-            focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
+            focus_manager: FocusManager::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             profile_store: None,
         }
@@ -216,12 +217,12 @@ impl AgentPool {
             slots: Vec::new(),
             max_slots,
             next_agent_index: 1,
-            focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
             blocked_handler: BlockedHandler::with_config(config),
             decision_coordinator: DecisionAgentCoordinator::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
+            focus_manager: FocusManager::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             profile_store: None,
         }
@@ -233,12 +234,12 @@ impl AgentPool {
             slots: Vec::new(),
             max_slots,
             next_agent_index: 1,
-            focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
+            focus_manager: FocusManager::new(),
             cwd,
             profile_store: None,
         }
@@ -262,12 +263,12 @@ impl AgentPool {
             slots: Vec::new(),
             max_slots,
             next_agent_index,
-            focused_slot: 0,
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
             decision_coordinator: DecisionAgentCoordinator::new(),
             worktree_coordinator,
+            focus_manager: FocusManager::new(),
             cwd: repo_root,
             profile_store: None,
         })
@@ -300,7 +301,7 @@ impl AgentPool {
 
     /// Get the focused slot index
     pub fn focused_slot_index(&self) -> usize {
-        self.focused_slot
+        self.focus_manager.focused_index()
     }
 
     /// Get workplace ID
@@ -375,17 +376,7 @@ impl AgentPool {
         );
 
         // Focus on the newly spawned agent if this is the first one
-        if self.slots.len() == 1 {
-            self.focused_slot = 0;
-            logging::debug_event(
-                "pool.focus.change",
-                "focus set to first agent after spawn",
-                serde_json::json!({
-                    "agent_id": agent_id.as_str(),
-                    "index": 0,
-                }),
-            );
-        }
+        self.focus_manager.focus_on_first_spawn(self.slots.len(), &agent_id);
 
         // Spawn decision agent for this work agent (if provider supports it)
         // All non-Mock agents should have decision layer support
@@ -485,9 +476,7 @@ impl AgentPool {
         );
 
         // Focus on the newly spawned agent if this is the first one
-        if self.slots.len() == 1 {
-            self.focused_slot = 0;
-        }
+        self.focus_manager.focus_on_first_spawn(self.slots.len(), &agent_id);
 
         // Spawn decision agent for this work agent (if provider supports it)
         if provider_kind != ProviderKind::Mock {
@@ -649,9 +638,7 @@ impl AgentPool {
         );
 
         // Focus on the newly spawned agent if this is the first one
-        if self.slots.len() == 1 {
-            self.focused_slot = 0;
-        }
+        self.focus_manager.focus_on_first_spawn(self.slots.len(), &agent_id);
 
         // Spawn decision agent for this work agent (if provider supports it)
         if provider_kind != ProviderKind::Mock {
@@ -1149,7 +1136,7 @@ impl AgentPool {
         // Worker agents should start from index 0 (alpha)
 
         // Focus on OVERVIEW agent by default
-        self.focused_slot = 0;
+        self.focus_manager.reset_to_first();
 
         logging::debug_event(
             "pool.focus.change",
@@ -2187,38 +2174,13 @@ impl AgentPool {
         );
 
         // Adjust focus if necessary
-        if self.focused_slot >= self.slots.len() && !self.slots.is_empty() {
-            self.focused_slot = self.slots.len() - 1;
-            if let Some(new_focused) = self.slots.get(self.focused_slot) {
-                logging::debug_event(
-                    "pool.focus.adjust",
-                    "adjusted focus after agent removal",
-                    serde_json::json!({
-                        "new_index": self.focused_slot,
-                        "new_agent_id": new_focused.agent_id().as_str(),
-                    }),
-                );
-            }
-        }
+        self.focus_manager.adjust_on_remove(index, self.slots.len());
         Ok(())
     }
 
     /// Get all agents with their current status
     pub fn agent_statuses(&self) -> Vec<AgentStatusSnapshot> {
-        self.slots
-            .iter()
-            .map(|slot| AgentStatusSnapshot {
-                agent_id: slot.agent_id().clone(),
-                codename: slot.codename().clone(),
-                provider_type: slot.provider_type(),
-                role: slot.role(),
-                status: slot.status().clone(),
-                assigned_task_id: slot.assigned_task_id().cloned(),
-                worktree_branch: slot.worktree_branch().cloned(),
-                has_worktree: slot.has_worktree(),
-                worktree_exists: slot.has_worktree() && slot.cwd().exists(),
-            })
-            .collect()
+        PoolQueries::agent_statuses(&self.slots)
     }
 
     /// Get all slots for snapshot/export use.
@@ -2341,71 +2303,14 @@ impl AgentPool {
 
     /// Switch focus to a different agent by index
     pub fn focus_agent_by_index(&mut self, index: usize) -> Result<(), String> {
-        if index >= self.slots.len() {
-            logging::debug_event(
-                "pool.focus.invalid_index",
-                "invalid focus index",
-                serde_json::json!({
-                    "attempted_index": index,
-                    "pool_size": self.slots.len(),
-                }),
-            );
-            return Err(format!(
-                "Invalid focus index {} (only {} agents)",
-                index,
-                self.slots.len()
-            ));
-        }
-        let old_index = self.focused_slot;
-        let old_agent_id = self
-            .slots
-            .get(old_index)
-            .map(|s| s.agent_id().as_str().to_string());
-        let new_agent_id = self
-            .slots
-            .get(index)
-            .map(|s| s.agent_id().as_str().to_string());
-        self.focused_slot = index;
-
-        logging::debug_event(
-            "pool.focus.change",
-            "focus changed by index",
-            serde_json::json!({
-                "old_index": old_index,
-                "new_index": index,
-                "old_agent_id": old_agent_id,
-                "new_agent_id": new_agent_id,
-            }),
-        );
-
-        Ok(())
+        self.focus_manager.focus_by_index(&self.slots, index)
+            .map_err(|e| e.to_string())
     }
 
     /// Switch focus to a different agent by ID
     pub fn focus_agent(&mut self, agent_id: &AgentId) -> Result<(), String> {
-        let index = self.find_slot_index(agent_id)?;
-        let old_index = self.focused_slot;
-        let old_agent_id = self
-            .slots
-            .get(old_index)
-            .map(|s| s.agent_id().as_str().to_string());
-        let new_codename = self
-            .slots
-            .get(index)
-            .map(|s| s.codename().as_str().to_string());
-
-        logging::debug_event(
-            "pool.focus.change.by_id",
-            "focus changed by agent ID",
-            serde_json::json!({
-                "old_index": old_index,
-                "old_agent_id": old_agent_id,
-                "new_agent_id": agent_id.as_str(),
-                "new_codename": new_codename,
-            }),
-        );
-
-        self.focus_agent_by_index(index)
+        self.focus_manager.focus_agent(&self.slots, agent_id)
+            .map_err(|e| e.to_string())
     }
 
     /// Get slot by index
@@ -2430,12 +2335,12 @@ impl AgentPool {
 
     /// Get the currently focused slot
     pub fn focused_slot(&self) -> Option<&AgentSlot> {
-        self.slots.get(self.focused_slot)
+        self.slots.get(self.focus_manager.focused_index())
     }
 
     /// Get the currently focused slot (mutable)
     pub fn focused_slot_mut(&mut self) -> Option<&mut AgentSlot> {
-        self.slots.get_mut(self.focused_slot)
+        self.slots.get_mut(self.focus_manager.focused_index())
     }
 
     /// Find the index of a slot by agent ID
@@ -2673,17 +2578,12 @@ impl AgentPool {
 
     /// Find an idle agent that can accept a task
     pub fn find_idle_agent(&self) -> Option<&AgentSlot> {
-        self.slots
-            .iter()
-            .find(|s| *s.status() == AgentSlotStatus::Idle)
+        PoolQueries::find_idle_slot(&self.slots)
     }
 
     /// Find an idle agent and return its ID for assignment
     pub fn find_idle_agent_id(&self) -> Option<AgentId> {
-        self.slots
-            .iter()
-            .find(|s| *s.status() == AgentSlotStatus::Idle)
-            .map(|s| s.agent_id().clone())
+        PoolQueries::find_idle_agent_id(&self.slots)
     }
 
     /// Auto-assign a ready task to an available idle agent
@@ -2742,72 +2642,19 @@ impl AgentPool {
 
     /// Count agents by status type
     pub fn count_by_status(&self) -> HashMap<String, usize> {
-        let mut counts = HashMap::new();
-        for slot in &self.slots {
-            let label = slot.status().label();
-            *counts.entry(label).or_insert(0) += 1;
-        }
-        counts
+        PoolQueries::count_by_status(&self.slots)
     }
 
     /// Generate a snapshot of the task queue state for TUI display
     ///
     /// Combines backlog state with agent pool state for comprehensive view.
     pub fn task_queue_snapshot(&self, backlog: &BacklogState) -> TaskQueueSnapshot {
-        let counts = backlog.count_tasks_by_status();
-
-        // Collect agent assignments
-        let agent_assignments: Vec<AgentTaskAssignment> = self
-            .slots
-            .iter()
-            .filter_map(|slot| {
-                let task_id = slot.assigned_task_id()?;
-                let task = backlog.find_task(task_id.as_str())?;
-                Some(AgentTaskAssignment {
-                    agent_id: slot.agent_id().clone(),
-                    codename: slot.codename().clone(),
-                    task_id: task_id.clone(),
-                    task_status: task.status,
-                })
-            })
-            .collect();
-
-        // Count available and active agents
-        let available_agents = self
-            .slots
-            .iter()
-            .filter(|s| *s.status() == AgentSlotStatus::Idle)
-            .count();
-        let active_agents = self.slots.iter().filter(|s| s.status().is_active()).count();
-
-        TaskQueueSnapshot {
-            total_tasks: backlog.tasks.len(),
-            ready_tasks: counts.get(&TaskStatus::Ready).copied().unwrap_or(0),
-            running_tasks: counts.get(&TaskStatus::Running).copied().unwrap_or(0),
-            completed_tasks: counts.get(&TaskStatus::Done).copied().unwrap_or(0),
-            failed_tasks: counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
-            blocked_tasks: counts.get(&TaskStatus::Blocked).copied().unwrap_or(0),
-            agent_assignments,
-            available_agents,
-            active_agents,
-        }
+        PoolQueries::task_queue_snapshot(&self.slots, backlog)
     }
 
     /// Get agents with their assigned task info
     pub fn agents_with_assignments(&self, backlog: &BacklogState) -> Vec<AgentTaskAssignment> {
-        self.slots
-            .iter()
-            .filter_map(|slot| {
-                let task_id = slot.assigned_task_id()?;
-                let task = backlog.find_task(task_id.as_str())?;
-                Some(AgentTaskAssignment {
-                    agent_id: slot.agent_id().clone(),
-                    codename: slot.codename().clone(),
-                    task_id: task_id.clone(),
-                    task_status: task.status,
-                })
-            })
-            .collect()
+        PoolQueries::agents_with_assignments(&self.slots, backlog)
     }
 
     // ==================== Blocked Handling Methods ====================

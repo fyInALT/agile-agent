@@ -34,6 +34,7 @@ impl std::error::Error for FocusError {}
 ///
 /// This struct tracks which agent slot is currently focused
 /// and provides methods to change focus.
+#[derive(Debug)]
 pub struct FocusManager {
     /// Currently focused slot index
     focused_slot: usize,
