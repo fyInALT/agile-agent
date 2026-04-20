@@ -1,0 +1,19 @@
+[package]
+name = "agent-worktree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-types = { path = "../types" }
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+pathdiff.workspace = true
+
+[dev-dependencies]
+serial_test.workspace = true

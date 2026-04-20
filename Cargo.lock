@@ -25,6 +25,7 @@ dependencies = [
  "agent-provider",
  "agent-toolkit",
  "agent-types",
+ "agent-worktree",
  "anyhow",
  "chrono",
  "dirs",
@@ -143,6 +144,22 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-worktree"
+version = "0.1.0"
+dependencies = [
+ "agent-types",
+ "anyhow",
+ "chrono",
+ "dirs",
+ "pathdiff",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

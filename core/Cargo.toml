@@ -8,6 +8,7 @@ license.workspace = true
 agent-types = { path = "../agent/types" }
 agent-toolkit = { path = "../agent/toolkit" }
 agent-provider = { path = "../agent/provider" }
+agent-worktree = { path = "../agent/worktree" }
 anyhow.workspace = true
 chrono.workspace = true
 dirs.workspace = true

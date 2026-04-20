@@ -880,7 +880,7 @@ impl TuiState {
                 AgentPool::new_with_worktrees(workplace_id.clone(), 10, cwd.clone(), wp_path)
             } else {
                 // Can't get workplace path, use regular pool
-                Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
+                Err(agent_core::WorktreeError::NotAGitRepository(cwd.clone()))
             };
 
             let mut pool = match pool {
@@ -1170,12 +1170,12 @@ impl TuiState {
         // Create WorktreeStateStore for loading authoritative worktree states
         let worktree_state_store = workplace_path
             .as_ref()
-            .map(|p| agent_core::worktree_state_store::WorktreeStateStore::new(p.clone()));
+            .map(|p| agent_core::WorktreeStateStore::new(p.clone()));
 
         let pool = if let Some(wp_path) = workplace_path {
             AgentPool::new_with_worktrees(workplace_id.clone(), 10, cwd.clone(), wp_path)
         } else {
-            Err(agent_core::worktree_manager::WorktreeError::NotAGitRepository(cwd.clone()))
+            Err(agent_core::WorktreeError::NotAGitRepository(cwd.clone()))
         };
 
         let mut pool = match pool {
@@ -1421,11 +1421,10 @@ impl TuiState {
         worktree_id: &str,
         branch: Option<&str>,
     ) -> Result<()> {
-        use agent_core::worktree_manager::{
+        use agent_core::{
             WorktreeConfig, WorktreeCreateOptions, WorktreeManager,
+            WorktreeState, WorktreeStateStore,
         };
-        use agent_core::worktree_state::WorktreeState;
-        use agent_core::worktree_state_store::WorktreeStateStore;
 
         let cwd = self.session.app.cwd.clone();
         let workplace_store = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd)?;

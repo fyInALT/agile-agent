@@ -15,12 +15,11 @@ use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, De
 use crate::logging;
 use crate::{ProviderEvent, ProviderKind};
 use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};
-use crate::worktree_manager::{
+// Worktree types are re-exported from agent-worktree
+use crate::{
     WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
+    WorktreeState, WorktreeStateStore, GitFlowExecutor,
 };
-use crate::worktree_state::WorktreeState;
-use crate::worktree_state_store::WorktreeStateStore;
-use crate::git_flow_executor::GitFlowExecutor;
 use chrono::Utc;
 
 // Decision layer imports
@@ -447,7 +446,7 @@ impl AgentPool {
         let worktree_state_store = WorktreeStateStore::new(state_dir);
 
         // Create GitFlowExecutor for task preparation workflow
-        let git_flow_config = crate::git_flow_config::GitFlowConfig::default();
+        let git_flow_config = crate::GitFlowConfig::default();
         let git_flow_executor = GitFlowExecutor::new(worktree_manager.clone(), git_flow_config);
 
         // Sync next_agent_index with existing worktree states AND git branches
@@ -3666,7 +3665,7 @@ mod tests {
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
     use crate::provider_profile::{ProfileStore, ProviderProfile, CliBaseType};
-    use crate::worktree_state_store::WorktreeStateStore;
+    use crate::WorktreeStateStore;
     use agent_decision::{
         BlockedState, HumanDecisionBlocking, HumanSelection, ResourceBlocking,
         WaitingForChoiceSituation,

@@ -22,8 +22,6 @@ pub mod decision_mail;
 pub mod escalation;
 pub mod event;
 pub mod event_aggregator;
-pub mod git_flow_config;
-pub mod git_flow_executor;
 pub mod global_config;
 pub mod logging;
 pub mod loop_runner;
@@ -43,9 +41,6 @@ pub mod task_artifacts;
 pub mod task_engine;
 pub mod verification;
 pub mod workplace_store;
-pub mod worktree_manager;
-pub mod worktree_state;
-pub mod worktree_state_store;
 
 // Re-export tool call types from agent-toolkit for backward compatibility
 pub use agent_toolkit::{
@@ -72,4 +67,12 @@ pub use agent_provider::launch_config::{
     RestoreError, check_restore_eligibility, validate_bundle_executable, validate_executable_exists,
     validate_launch_input_spec, validate_provider_consistency,
     validate_provider_supports_launch_config, validate_reserved_args,
+};
+
+// Re-export worktree types from agent-worktree for backward compatibility
+pub use agent_worktree::{
+    WorktreeManager, WorktreeError, WorktreeConfig, WorktreeInfo,
+    WorktreeCreateOptions, WorktreeState, WorktreeStateStore, WorktreeStateStoreError,
+    GitFlowExecutor, GitFlowError, GitFlowConfig, GitFlowConfigError,
+    TaskType, TaskPriority, PreparationResult, WorkspaceHealthReport,
 };

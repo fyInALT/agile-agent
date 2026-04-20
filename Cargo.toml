@@ -3,6 +3,7 @@ members = [
     "agent/types",
     "agent/toolkit",
     "agent/provider",
+    "agent/worktree",
     "cli",
     "core",
     "decision",
