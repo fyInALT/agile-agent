@@ -393,7 +393,94 @@ TUI currently calls `parse_slash_command()` directly and then mutates core state
 
 ---
 
-## 9. Appendix: Raw Call Sites
+## 9. Full Crate Dependency Graph
+
+### 9.1 Workspace Crate Dependency Tree
+
+```
+agent-cli
+├── agent-core
+│   ├── agent-types
+│   ├── agent-toolkit
+│   │   └── agent-types
+│   ├── agent-provider
+│   │   ├── agent-types
+│   │   ├── agent-toolkit
+│   │   ├── agent-decision
+│   │   ├── anyhow, chrono, dirs, serde, serde_json, shlex, tempfile, thiserror, uuid, which
+│   │   └── [dev] serial_test
+│   ├── agent-worktree
+│   │   ├── agent-types
+│   │   ├── anyhow, chrono, dirs, pathdiff, serde, serde_json, tempfile, thiserror
+│   │   └── [dev] serial_test
+│   ├── agent-backlog
+│   │   ├── agent-types
+│   │   ├── anyhow, serde, serde_json
+│   │   └── [dev] serial_test
+│   ├── agent-storage
+│   │   ├── agent-types
+│   │   ├── anyhow, chrono, dirs, serde, serde_json, tempfile
+│   ├── agent-kanban
+│   │   ├── agent-backlog
+│   │   ├── serde, serde_json, chrono
+│   │   └── [dev] tempfile
+│   ├── agent-decision
+│   │   ├── serde, serde_json, serde_yaml, chrono, thiserror, uuid
+│   │   └── [dev] tempfile
+│   ├── agent-commands
+│   │   ├── serde, shlex
+│   │   └── [dev] serde_json
+│   ├── anyhow, chrono, dirs, pathdiff, serde, serde_json, shlex, tempfile, thiserror, uuid, which
+│   └── [dev] serial_test
+├── agent-decision (direct)
+├── agent-tui
+│   ├── agent-core (see above)
+│   ├── agent-decision (direct)
+│   ├── agent-kanban (direct)
+│   ├── anyhow, chrono, crossterm, diffy, pulldown-cmark, ratatui, serde, serde_json, shlex, textwrap, unicode-segmentation, unicode-width
+│   └── [dev] tempfile
+├── anyhow, clap, serde_json
+└── [dev] agent-test-support, tempfile
+
+agent-llm-provider (standalone, not linked to core)
+├── reqwest, tokio, tokio-stream, bytes, serde, serde_json, toml, anyhow, thiserror, futures-util
+└── [dev] tokio-test
+```
+
+### 9.2 External Dependencies by Crate
+
+| Crate | External Crates (non-workspace) |
+|-------|--------------------------------|
+| `agent-cli` | `anyhow`, `clap`, `serde_json` |
+| `agent-tui` | `anyhow`, `chrono`, `crossterm`, `diffy`, `pulldown-cmark`, `ratatui`, `serde`, `serde_json`, `shlex`, `textwrap`, `unicode-segmentation`, `unicode-width` |
+| `agent-core` | `anyhow`, `chrono`, `dirs`, `pathdiff`, `serde`, `serde_json`, `shlex`, `tempfile`, `thiserror`, `uuid`, `which` |
+| `agent-decision` | `serde`, `serde_json`, `serde_yaml`, `chrono`, `thiserror`, `uuid` |
+| `agent-kanban` | `serde`, `serde_json`, `chrono` |
+| `agent-llm-provider` | `reqwest`, `tokio`, `tokio-stream`, `bytes`, `serde`, `serde_json`, `toml`, `anyhow`, `thiserror`, `futures-util` |
+| `agent-test-support` | `tempfile` |
+| `agent-types` | `serde` |
+| `agent-toolkit` | `serde`, `serde_json` |
+| `agent-provider` | `anyhow`, `chrono`, `dirs`, `serde`, `serde_json`, `shlex`, `tempfile`, `thiserror`, `uuid`, `which` |
+| `agent-worktree` | `anyhow`, `chrono`, `dirs`, `pathdiff`, `serde`, `serde_json`, `tempfile`, `thiserror` |
+| `agent-backlog` | `anyhow`, `serde`, `serde_json` |
+| `agent-storage` | `anyhow`, `chrono`, `dirs`, `serde`, `serde_json`, `tempfile` |
+| `agent-commands` | `serde`, `shlex` |
+
+### 9.3 Key Observations for Separation
+
+1. **TUI has 13 external crates** independent of core — mostly terminal UI (ratatui, crossterm) and text processing (pulldown-cmark, diffy, textwrap). These are TUI-only and never cross to the daemon.
+
+2. **CLI depends on TUI directly** (`agent-tui` is a dependency of `agent-cli`). When TUI becomes a thin WebSocket client, CLI may no longer need to depend on `agent-tui` as a library — it can use `agent-protocol` instead.
+
+3. **`agent-llm-provider` is fully standalone** — it has no workspace dependencies and uses `tokio`/`reqwest`. It will likely remain untouched during the TUI-core separation.
+
+4. **`agent-decision` is widely depended upon** — by `core`, `provider`, `cli`, and `tui`. Any protocol changes that touch decision types (e.g., `DecisionRequest`) need careful coordination.
+
+5. **`chrono` appears in 7 crates** — it is the de facto time library. `serde` + `serde_json` appear in nearly every crate.
+
+---
+
+## 10. Appendix: Raw Call Sites
 
 ### 9.1 TUI Files with Core Imports
 
