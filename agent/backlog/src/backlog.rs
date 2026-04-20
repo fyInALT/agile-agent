@@ -710,6 +710,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]  // Prevent race condition with parallel test runner
     fn thread_safe_backlog_concurrent_access() {
         use std::sync::Arc;
         use std::thread;
@@ -741,6 +742,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]  // Lock timing sensitive
     fn thread_safe_backlog_timeout_when_locked() {
         use std::sync::Arc;
 
@@ -764,6 +766,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]  // Thread panic handling sensitive
     fn thread_safe_backlog_poisoned_recovery() {
         use std::sync::Arc;
         use std::thread;

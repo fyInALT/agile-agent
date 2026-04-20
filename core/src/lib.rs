@@ -91,67 +91,142 @@ mod backward_compatibility_tests {
     //! Tests to verify backward compatibility of re-exports
     //!
     //! These tests ensure that external code using `agent_core::TypeName`
-    //! continues to work after the crate split.
+    //! continues to work after the crate split, AND that the types
+    //! actually function correctly (not just compile).
 
     use super::*;
 
-    // Test that toolkit types are accessible from core
+    // Test that toolkit types are accessible AND functional from core
     #[test]
-    fn toolkit_types_accessible_from_core() {
-        let _kind: PatchChangeKind = PatchChangeKind::Add;
-        let _status: PatchApplyStatus = PatchApplyStatus::Completed;
-        let _exec: ExecCommandStatus = ExecCommandStatus::InProgress;
-        let _mcp: McpToolCallStatus = McpToolCallStatus::Completed;
+    fn toolkit_types_accessible_and_functional() {
+        // PatchChangeKind - verify serialization works
+        let kind = PatchChangeKind::Add;
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, "\"add\"", "PatchChangeKind should serialize correctly");
+
+        // PatchApplyStatus - verify all variants exist
+        let statuses = [PatchApplyStatus::Completed, PatchApplyStatus::Failed];
+        assert_eq!(statuses.len(), 2, "PatchApplyStatus variants should exist");
+
+        // ExecCommandStatus - verify roundtrip
+        let status = ExecCommandStatus::InProgress;
+        let json = serde_json::to_string(&status).unwrap();
+        let parsed: ExecCommandStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, status, "ExecCommandStatus roundtrip should work");
+
+        // McpToolCallStatus - verify Display/Debug trait
+        let mcp = McpToolCallStatus::Completed;
+        let debug_str = format!("{:?}", mcp);
+        assert!(debug_str.contains("Completed"), "McpToolCallStatus should implement Debug");
     }
 
-    // Test that provider types are accessible from core
+    // Test that provider types are accessible AND functional from core
     #[test]
-    fn provider_types_accessible_from_core() {
-        let _kind: ProviderKind = ProviderKind::Claude;
-        // ProviderEvent can be instantiated
-        let _event = ProviderEvent::Finished;
+    fn provider_types_accessible_and_functional() {
+        // ProviderKind - verify label() method works
+        let kind = ProviderKind::Claude;
+        assert_eq!(kind.label(), "claude", "ProviderKind::label() should return correct label");
+
+        // ProviderKind - verify next() cycle works
+        let mock = ProviderKind::Mock;
+        let next = mock.next();
+        assert_eq!(next, ProviderKind::Claude, "ProviderKind::next() should cycle correctly");
+
+        // ProviderEvent - verify Debug trait works (used in logging)
+        let event = ProviderEvent::Finished;
+        let debug_str = format!("{:?}", event);
+        assert!(debug_str.contains("Finished"), "ProviderEvent should implement Debug");
     }
 
-    // Test that worktree types are accessible from core
+    // Test that worktree types are accessible AND functional from core
     #[test]
-    fn worktree_types_accessible_from_core() {
-        let _config: WorktreeConfig = WorktreeConfig::default();
-        let _task_type: TaskType = TaskType::Feature;
-        let _priority: TaskPriority = TaskPriority::High;
+    fn worktree_types_accessible_and_functional() {
+        // WorktreeConfig - verify default values are sensible
+        let config = WorktreeConfig::default();
+        assert!(config.max_worktrees > 0, "WorktreeConfig::max_worktrees should be positive");
+        assert!(!config.prefix.is_empty(), "WorktreeConfig::prefix should not be empty");
+
+        // TaskType - verify serialization roundtrip
+        let task_type = TaskType::Feature;
+        let json = serde_json::to_string(&task_type).unwrap();
+        let parsed: TaskType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, task_type, "TaskType roundtrip should work");
+
+        // TaskPriority - verify variants exist and are distinct
+        let high = TaskPriority::High;
+        let low = TaskPriority::Low;
+        assert_ne!(high, low, "TaskPriority variants should be distinct");
     }
 
-    // Test that backlog types are accessible from core
+    // Test that backlog types are accessible AND functional from core
     #[test]
-    fn backlog_types_accessible_from_core() {
-        let _state: BacklogState = BacklogState::default();
-        let _task_status: TaskStatus = TaskStatus::Ready;
-        let _todo_status: TodoStatus = TodoStatus::Ready;
+    fn backlog_types_accessible_and_functional() {
+        // BacklogState - verify push_task actually adds task
+        let mut state = BacklogState::default();
+        state.push_task(TaskItem {
+            id: "test-task".to_string(),
+            todo_id: "todo-1".to_string(),
+            objective: "test objective".to_string(),
+            scope: "test scope".to_string(),
+            constraints: vec!["c1".to_string()],
+            verification_plan: vec!["v1".to_string()],
+            status: TaskStatus::Ready,
+            result_summary: None,
+        });
+        assert_eq!(state.tasks.len(), 1, "BacklogState::push_task should add task");
+        assert!(state.find_task("test-task").is_some(), "BacklogState::find_task should find added task");
+
+        // TaskStatus - verify status transitions
+        let status = TaskStatus::Ready;
+        assert!(status != TaskStatus::Done, "TaskStatus variants should be distinct");
+
+        // TodoStatus - verify serialization roundtrip
+        let todo_status = TodoStatus::InProgress;
+        let json = serde_json::to_string(&todo_status).unwrap();
+        let parsed: TodoStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, todo_status, "TodoStatus roundtrip should work");
     }
 
-    // Test that storage function is accessible from core
+    // Test that storage function is accessible AND functional from core
     #[test]
-    fn storage_function_accessible_from_core() {
+    fn storage_function_accessible_and_functional() {
         let result = app_data_root();
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "app_data_root() should return Ok");
+
+        let path = result.unwrap();
+        assert!(path.is_absolute(), "app_data_root() should return absolute path");
+        assert!(path.ends_with("agile-agent"), "app_data_root() should end with 'agile-agent'");
     }
 
-    // Test that types can be used in function signatures
+    // Test that types can be used in function signatures with actual behavior
     fn _accept_provider_kind(kind: ProviderKind) -> ProviderKind {
-        kind
+        kind.next()
     }
 
-    fn _accept_backlog_state(state: BacklogState) -> BacklogState {
-        state
+    fn _accept_backlog_state(state: BacklogState) -> usize {
+        state.tasks.len()
     }
 
     #[test]
     fn types_work_in_function_signatures() {
+        // ProviderKind - verify function returns transformed value
         let kind = ProviderKind::Mock;
         let result = _accept_provider_kind(kind);
-        assert_eq!(result, ProviderKind::Mock);
+        assert_eq!(result, ProviderKind::Claude, "Function should transform ProviderKind");
 
-        let state = BacklogState::default();
-        let result = _accept_backlog_state(state);
-        assert!(result.todos.is_empty());
+        // BacklogState - verify function can access internal state
+        let mut state = BacklogState::default();
+        state.push_task(TaskItem {
+            id: "sig-test".to_string(),
+            todo_id: "todo-1".to_string(),
+            objective: "test".to_string(),
+            scope: "test".to_string(),
+            constraints: vec!["c1".to_string()],
+            verification_plan: vec!["v1".to_string()],
+            status: TaskStatus::Ready,
+            result_summary: None,
+        });
+        let count = _accept_backlog_state(state);
+        assert_eq!(count, 1, "Function should return correct task count");
     }
 }
