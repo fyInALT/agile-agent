@@ -23,6 +23,9 @@ pub use crate::pool::{
     BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
     FocusManager, PoolQueries, DecisionExecutor,
     WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
+    convert_provider_event_to_decision,
+    AgentLifecycleManager,
+    spawn_decision_agent_for, spawn_decision_agent_with_profile_for, stop_decision_agent_for,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
@@ -36,116 +39,7 @@ use agent_decision::{
     builtin_situations::TaskStartingSituation,
     classifier::ClassifyResult,
     context::DecisionContext,
-    provider_event::ProviderEvent as DecisionProviderEvent,
 };
-
-/// Convert core ProviderEvent to decision layer ProviderEvent
-fn convert_provider_event_to_decision(
-    event: &crate::ProviderEvent,
-) -> DecisionProviderEvent {
-    match event {
-        crate::ProviderEvent::Finished => {
-            DecisionProviderEvent::Finished { summary: None }
-        }
-        crate::ProviderEvent::Error(msg) => DecisionProviderEvent::Error {
-            message: msg.clone(),
-            error_type: None,
-        },
-        crate::ProviderEvent::Status(text) => DecisionProviderEvent::StatusUpdate {
-            status: text.clone(),
-        },
-        crate::ProviderEvent::AssistantChunk(text) => {
-            DecisionProviderEvent::ClaudeAssistantChunk { text: text.clone() }
-        }
-        crate::ProviderEvent::ThinkingChunk(text) => {
-            DecisionProviderEvent::ClaudeThinkingChunk { text: text.clone() }
-        }
-        crate::ProviderEvent::SessionHandle(handle) => {
-            DecisionProviderEvent::SessionHandle {
-                session_id: match handle {
-                    crate::SessionHandle::ClaudeSession { session_id } => {
-                        session_id.clone()
-                    }
-                    crate::SessionHandle::CodexThread { thread_id } => thread_id.clone(),
-                },
-                info: None,
-            }
-        }
-        crate::ProviderEvent::ExecCommandStarted { input_preview, .. } => {
-            DecisionProviderEvent::ClaudeToolCallStarted {
-                name: "exec".to_string(),
-                input: input_preview.clone(),
-            }
-        }
-        crate::ProviderEvent::ExecCommandFinished {
-            output_preview,
-            status,
-            ..
-        } => DecisionProviderEvent::ClaudeToolCallFinished {
-            name: "exec".to_string(),
-            output: output_preview.clone(),
-            success: matches!(status, crate::ExecCommandStatus::Completed),
-        },
-        crate::ProviderEvent::GenericToolCallStarted {
-            name,
-            input_preview,
-            ..
-        } => DecisionProviderEvent::ClaudeToolCallStarted {
-            name: name.clone(),
-            input: input_preview.clone(),
-        },
-        crate::ProviderEvent::GenericToolCallFinished {
-            name,
-            output_preview,
-            success,
-            ..
-        } => DecisionProviderEvent::ClaudeToolCallFinished {
-            name: name.clone(),
-            output: output_preview.clone(),
-            success: *success,
-        },
-        crate::ProviderEvent::PatchApplyStarted { .. } => {
-            DecisionProviderEvent::CodexPatchApplyStarted {
-                path: "".to_string(),
-            }
-        }
-        crate::ProviderEvent::PatchApplyFinished { status, .. } => {
-            DecisionProviderEvent::StatusUpdate {
-                status: match status {
-                    crate::PatchApplyStatus::Completed => "patch completed".to_string(),
-                    crate::PatchApplyStatus::Failed => "patch failed".to_string(),
-                    crate::PatchApplyStatus::Declined => "patch declined".to_string(),
-                    crate::PatchApplyStatus::InProgress => {
-                        "patch in progress".to_string()
-                    }
-                },
-            }
-        }
-        crate::ProviderEvent::McpToolCallStarted { .. } => {
-            DecisionProviderEvent::ClaudeToolCallStarted {
-                name: "mcp".to_string(),
-                input: None,
-            }
-        }
-        crate::ProviderEvent::McpToolCallFinished { error, .. } => {
-            DecisionProviderEvent::ClaudeToolCallFinished {
-                name: "mcp".to_string(),
-                output: error.clone(),
-                success: error.is_none(),
-            }
-        }
-        crate::ProviderEvent::WebSearchStarted { .. }
-        | crate::ProviderEvent::WebSearchFinished { .. }
-        | crate::ProviderEvent::ViewImage { .. }
-        | crate::ProviderEvent::ImageGenerationFinished { .. }
-        | crate::ProviderEvent::ExecCommandOutputDelta { .. }
-        | crate::ProviderEvent::PatchApplyOutputDelta { .. } => {
-            DecisionProviderEvent::StatusUpdate {
-                status: "running".to_string(),
-            }
-        }
-    }
-}
 
 /// Pool managing multiple agent slots
 pub struct AgentPool {
@@ -1022,52 +916,12 @@ impl AgentPool {
     /// Creates a decision agent that handles decision requests for the specified work agent.
     /// The decision agent uses the same provider as the work agent.
     pub fn spawn_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
-        // Find the work agent slot
-        let slot_index = self.find_slot_index(work_agent_id)?;
-        let work_slot = &self.slots[slot_index];
-        let provider_kind_opt = work_slot.provider_type().to_provider_kind();
-
-        // Handle Opencode provider which doesn't have ProviderKind mapping
-        let provider_kind = provider_kind_opt.ok_or_else(|| {
-            format!(
-                "Provider type {} doesn't have a ProviderKind mapping",
-                work_slot.provider_type().label()
-            )
-        })?;
-
-        // Create decision mail channel
-        let mail = DecisionMail::new();
-        let (sender, receiver) = mail.split();
-
-        // Create decision agent slot
-        let mut decision_agent = DecisionAgentSlot::new(
-            work_agent_id.as_str().to_string(),
-            provider_kind,
-            receiver,
-            self.cwd.clone(),
-            self.decision_coordinator.components(),
-        );
-
-        // Inject ProviderLLMCaller for real LLM calls
-        use crate::llm_caller::ProviderLLMCaller;
-        use std::sync::Arc;
-        let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
-        decision_agent.set_llm_caller(llm_caller);
-
-        // Store the decision agent and mail sender using coordinator
-        self.decision_coordinator.insert_agent(work_agent_id.clone(), decision_agent);
-        self.decision_coordinator.insert_mail_sender(work_agent_id.clone(), sender);
-
-        logging::debug_event(
-            "pool.decision_agent.spawn",
-            "spawned decision agent for work agent",
-            serde_json::json!({
-                "work_agent_id": work_agent_id.as_str(),
-                "provider_kind": provider_kind.label(),
-            }),
-        );
-
-        Ok(())
+        spawn_decision_agent_for(
+            &self.slots,
+            &mut self.decision_coordinator,
+            &self.cwd,
+            work_agent_id,
+        )
     }
 
     /// Spawn decision agent for a work agent with optional profile
@@ -1079,74 +933,18 @@ impl AgentPool {
         work_agent_id: &AgentId,
         profile_id: Option<&ProfileId>,
     ) -> Result<(), String> {
-        // Find the work agent slot
-        let slot_index = self.find_slot_index(work_agent_id)?;
-        let work_slot = &self.slots[slot_index];
-        let provider_kind_opt = work_slot.provider_type().to_provider_kind();
-
-        // Handle Opencode provider which doesn't have ProviderKind mapping
-        let provider_kind = provider_kind_opt.ok_or_else(|| {
-            format!(
-                "Provider type {} doesn't have a ProviderKind mapping",
-                work_slot.provider_type().label()
-            )
-        })?;
-
-        // Create decision mail channel
-        let mail = DecisionMail::new();
-        let (sender, receiver) = mail.split();
-
-        // Create decision agent slot
-        let mut decision_agent = DecisionAgentSlot::new(
-            work_agent_id.as_str().to_string(),
-            provider_kind,
-            receiver,
-            self.cwd.clone(),
-            self.decision_coordinator.components(),
-        );
-
-        // Set profile_id if provided
-        if let Some(pid) = profile_id {
-            decision_agent.set_profile_id(pid.clone());
-        }
-
-        // Inject ProviderLLMCaller for real LLM calls
-        use crate::llm_caller::ProviderLLMCaller;
-        use std::sync::Arc;
-        let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
-        decision_agent.set_llm_caller(llm_caller);
-
-        // Store the decision agent and mail sender using coordinator
-        self.decision_coordinator.insert_agent(work_agent_id.clone(), decision_agent);
-        self.decision_coordinator.insert_mail_sender(work_agent_id.clone(), sender);
-
-        logging::debug_event(
-            "pool.decision_agent.spawn_with_profile",
-            "spawned decision agent for work agent with profile",
-            serde_json::json!({
-                "work_agent_id": work_agent_id.as_str(),
-                "provider_kind": provider_kind.label(),
-                "profile_id": profile_id,
-            }),
-        );
-
-        Ok(())
+        spawn_decision_agent_with_profile_for(
+            &self.slots,
+            &mut self.decision_coordinator,
+            &self.cwd,
+            work_agent_id,
+            profile_id,
+        )
     }
 
     /// Stop the decision agent for a work agent
     pub fn stop_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
-        if let Some(mut decision_agent) = self.decision_coordinator.remove_agent(work_agent_id) {
-            decision_agent.stop("work agent stopping");
-
-            logging::debug_event(
-                "pool.decision_agent.stop",
-                "stopped decision agent for work agent",
-                serde_json::json!({
-                    "work_agent_id": work_agent_id.as_str(),
-                }),
-            );
-        }
-        Ok(())
+        stop_decision_agent_for(&mut self.decision_coordinator, work_agent_id)
     }
 
     /// Get decision agent for a work agent
@@ -1451,97 +1249,30 @@ impl AgentPool {
         agent_id: &AgentId,
         cleanup_worktree: bool,
     ) -> Result<usize, AgentPoolWorktreeError> {
-        // First, transition the slot to stopped
-        let index = self
-            .find_slot_index(agent_id)
-            .map_err(|e| AgentPoolWorktreeError::AgentNotFound(e))?;
+        use crate::pool::LifecycleError;
 
-        let slot = &mut self.slots[index];
-        let codename = slot.codename().clone();
-        let has_worktree = slot.has_worktree();
-        let worktree_id = slot.worktree_id().map(|s| s.clone());
-
-        slot.transition_to(AgentSlotStatus::stopped("user requested"))
-            .map_err(|e: String| AgentPoolWorktreeError::SlotTransitionError(e))?;
-
-        // Also stop the decision agent for this work agent
-        self.stop_decision_agent_for(agent_id)
-            .map_err(|e| AgentPoolWorktreeError::SlotTransitionError(e))?;
-
-        // Handle worktree cleanup
-        if has_worktree && cleanup_worktree && worktree_id.is_some() {
-            // Get worktree manager and state store via coordinator
-            if let (Some(worktree_manager), Some(worktree_state_store)) =
-                (self.worktree_coordinator.manager(), self.worktree_coordinator.state_store())
-            {
-                let wt_id = worktree_id.unwrap();
-
-                // Remove the worktree - log error if it fails but continue
-                let worktree_removed = match worktree_manager.remove(&wt_id, true) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        logging::debug_event(
-                            "pool.agent.stop.worktree_remove_failed",
-                            "worktree removal failed",
-                            serde_json::json!({
-                                "agent_id": agent_id.as_str(),
-                                "worktree_id": wt_id,
-                                "error": e.to_string(),
-                            }),
-                        );
-                        false
-                    }
-                };
-
-                // Delete the worktree state - only if worktree was removed successfully
-                // Otherwise, keep the state so it can be recovered manually
-                if worktree_removed {
-                    if let Err(e) = worktree_state_store.delete(agent_id.as_str()) {
-                        logging::debug_event(
-                            "pool.agent.stop.state_delete_failed",
-                            "worktree state deletion failed",
-                            serde_json::json!({
-                                "agent_id": agent_id.as_str(),
-                                "error": e.to_string(),
-                            }),
-                        );
-                    }
-
-                    logging::debug_event(
-                        "pool.agent.stop.cleanup_worktree",
-                        "worktree cleaned up",
-                        serde_json::json!({
-                            "agent_id": agent_id.as_str(),
-                            "worktree_id": wt_id,
-                        }),
-                    );
-                } else {
-                    logging::debug_event(
-                        "pool.agent.stop.worktree_preserved",
-                        "worktree preserved due to removal failure",
-                        serde_json::json!({
-                            "agent_id": agent_id.as_str(),
-                            "worktree_id": wt_id,
-                            "note": "state kept for manual recovery",
-                        }),
-                    );
-                }
-            }
-        }
-
-        logging::debug_event(
-            "pool.agent.stop_with_worktree",
-            "stopped agent with worktree handling",
-            serde_json::json!({
-                "agent_id": agent_id.as_str(),
-                "codename": codename.as_str(),
-                "slot_index": index,
-                "has_worktree": has_worktree,
-                "cleanup_worktree": cleanup_worktree,
-            }),
-        );
-
-        Ok(index)
+        AgentLifecycleManager::stop_with_worktree(
+            &mut self.slots,
+            &mut self.decision_coordinator,
+            &self.worktree_coordinator,
+            agent_id,
+            cleanup_worktree,
+        )
+        .map_err(|e| match e {
+            LifecycleError::AgentNotFound(id) => AgentPoolWorktreeError::AgentNotFound(id),
+            LifecycleError::SlotTransitionError(msg) => AgentPoolWorktreeError::SlotTransitionError(msg),
+            LifecycleError::WorktreeError(msg) => AgentPoolWorktreeError::WorktreeError(
+                crate::WorktreeError::GitCommandFailed(msg)
+            ),
+            LifecycleError::StateStoreError(msg) => AgentPoolWorktreeError::StateStoreError(msg),
+            LifecycleError::WorktreeNotEnabled => AgentPoolWorktreeError::WorktreeNotEnabled,
+            LifecycleError::WorktreeNotFound(path) => AgentPoolWorktreeError::WorktreeNotFound(path),
+            LifecycleError::StateNotFound(id) => AgentPoolWorktreeError::StateNotFound(id),
+            LifecycleError::AgentNotPaused(id) => AgentPoolWorktreeError::AgentNotPaused(id),
+            LifecycleError::NoWorktree(id) => AgentPoolWorktreeError::NoWorktree(id),
+            LifecycleError::PoolFull => AgentPoolWorktreeError::PoolFull,
+            other => AgentPoolWorktreeError::StateStoreError(other.to_string()),
+        })
     }
 
     /// Remove a stopped agent from the pool

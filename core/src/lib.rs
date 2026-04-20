@@ -102,6 +102,7 @@ pub use pool::{
     FocusManager, FocusError,
     PoolQueries, DecisionExecutor,
     WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
+    convert_provider_event_to_decision,
 };
 
 #[cfg(test)]
