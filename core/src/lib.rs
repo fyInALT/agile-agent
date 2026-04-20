@@ -34,6 +34,7 @@ pub mod session_store;
 pub mod shared_state;
 pub mod shutdown_snapshot;
 pub mod skills;
+pub mod slot;
 pub mod sprint_planning;
 pub mod standup_report;
 pub mod storage;
@@ -85,6 +86,9 @@ pub use agent_backlog::{
 
 // Re-export storage utilities from agent-storage for backward compatibility
 pub use agent_storage::app_data_root;
+
+// Re-export slot types for backward compatibility
+pub use slot::{AgentSlotStatus, TaskCompletionResult, ThreadOutcome};
 
 #[cfg(test)]
 mod backward_compatibility_tests {
