@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-types = { path = "../agent-types" }
 anyhow.workspace = true
 chrono.workspace = true
 dirs.workspace = true

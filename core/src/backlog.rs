@@ -5,53 +5,10 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde::Serialize;
 
+// Import and re-export types from agent-types for backward compatibility
+pub use agent_types::{TaskStatus, TodoStatus, TodoItem, TaskItem};
+
 use crate::logging;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TodoStatus {
-    Candidate,
-    Ready,
-    InProgress,
-    Blocked,
-    Done,
-    Dropped,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum TaskStatus {
-    Draft,
-    Ready,
-    Running,
-    Verifying,
-    #[serde(alias = "Completed")]
-    Done,
-    Blocked,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TodoItem {
-    pub id: String,
-    pub title: String,
-    pub description: String,
-    pub priority: u8,
-    pub status: TodoStatus,
-    pub acceptance_criteria: Vec<String>,
-    pub dependencies: Vec<String>,
-    pub source: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskItem {
-    pub id: String,
-    pub todo_id: String,
-    pub objective: String,
-    pub scope: String,
-    pub constraints: Vec<String>,
-    pub verification_plan: Vec<String>,
-    pub status: TaskStatus,
-    pub result_summary: Option<String>,
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BacklogState {

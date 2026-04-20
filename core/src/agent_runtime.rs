@@ -5,6 +5,9 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+// Import and re-export foundation types from agent-types for backward compatibility
+pub use agent_types::{AgentId, WorkplaceId, AgentCodename, AgentStatus};
+
 use crate::agent_memory::AgentMemory;
 use crate::agent_messages::AgentMessages;
 use crate::agent_state::AgentState;
@@ -18,67 +21,6 @@ use crate::logging;
 use crate::provider::ProviderKind;
 use crate::provider::SessionHandle;
 use crate::workplace_store::WorkplaceStore;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AgentId(String);
-
-impl AgentId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct WorkplaceId(String);
-
-impl WorkplaceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AgentCodename(String);
-
-impl AgentCodename {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentStatus {
-    Idle,
-    Running,
-    Stopped,
-}
-
-impl AgentStatus {
-    /// Get display label for this status
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Idle => "idle",
-            Self::Running => "running",
-            Self::Stopped => "stopped",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

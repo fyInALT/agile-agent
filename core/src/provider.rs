@@ -4,8 +4,9 @@ use std::thread::{self, Builder, JoinHandle};
 use std::time::Duration;
 
 use anyhow::Result;
-use serde::Deserialize;
-use serde::Serialize;
+
+// Import and re-export ProviderKind from agent-types for backward compatibility
+pub use agent_types::ProviderKind;
 
 use crate::launch_config::context::ProviderLaunchContext;
 use crate::logging;
@@ -19,52 +20,20 @@ use crate::tool_calls::PatchApplyStatus;
 use crate::tool_calls::PatchChange;
 use crate::tool_calls::WebSearchAction;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProviderKind {
-    Mock,
-    Claude,
-    Codex,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderCapabilities {
     pub supports_slash_passthrough: bool,
 }
 
-impl ProviderKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Mock => "mock",
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Mock => Self::Claude,
-            Self::Claude => Self::Codex,
-            Self::Codex => Self::Mock,
-        }
-    }
-
-    pub fn all() -> [ProviderKind; 3] {
-        [
-            ProviderKind::Mock,
-            ProviderKind::Claude,
-            ProviderKind::Codex,
-        ]
-    }
-
-    pub fn capabilities(self) -> ProviderCapabilities {
-        match self {
-            Self::Mock => ProviderCapabilities {
-                supports_slash_passthrough: false,
-            },
-            Self::Claude | Self::Codex => ProviderCapabilities {
-                supports_slash_passthrough: true,
-            },
-        }
+/// Get capabilities for a provider kind
+pub fn provider_capabilities(kind: ProviderKind) -> ProviderCapabilities {
+    match kind {
+        ProviderKind::Mock => ProviderCapabilities {
+            supports_slash_passthrough: false,
+        },
+        ProviderKind::Claude | ProviderKind::Codex => ProviderCapabilities {
+            supports_slash_passthrough: true,
+        },
     }
 }
 

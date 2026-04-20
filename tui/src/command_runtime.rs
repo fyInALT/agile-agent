@@ -1,7 +1,7 @@
 use std::fs;
 
 use agent_core::command_bus::registry::render_local_help_lines;
-use agent_core::provider::ProviderKind;
+use agent_core::provider::{ProviderKind, provider_capabilities};
 use agent_core::workplace_store::WorkplaceStore;
 use anyhow::{Result, anyhow};
 
@@ -173,7 +173,7 @@ pub fn execute_provider_command(
     raw_tail: &str,
 ) -> Result<ProviderCommandRequest> {
     let target = resolve_agent_target(state, explicit_target)?;
-    if !target.provider.capabilities().supports_slash_passthrough {
+    if !provider_capabilities(target.provider).supports_slash_passthrough {
         return Err(anyhow!(
             "provider `{}` does not support raw slash passthrough",
             target.provider.label()
