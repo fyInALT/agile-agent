@@ -11,7 +11,7 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
 use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::backlog::{BacklogState, TaskStatus};
 use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
-use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
+use crate::decision_mail::{DecisionMail, DecisionRequest, DecisionResponse};
 use crate::logging;
 use crate::{ProviderEvent, ProviderKind};
 use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};
@@ -20,7 +20,7 @@ pub use crate::pool::{
     AgentBlockedEvent, AgentBlockedNotifier, AgentStatusSnapshot, AgentTaskAssignment,
     BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
-    BlockedHandler,
+    BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats,
 };
 // Worktree types are re-exported from agent-worktree
 use crate::{
@@ -36,7 +36,6 @@ use agent_decision::{
     builtin_situations::TaskStartingSituation,
     classifier::ClassifyResult,
     context::DecisionContext,
-    initializer::{DecisionLayerComponents, initialize_decision_layer},
     provider_event::ProviderEvent as DecisionProviderEvent,
 };
 
@@ -164,13 +163,8 @@ pub struct AgentPool {
     human_queue: HumanDecisionQueue,
     /// Blocked handling delegate (manages config, history, notifier)
     blocked_handler: BlockedHandler,
-    /// Decision agent slots (keyed by work agent ID)
-    decision_agents: HashMap<AgentId, DecisionAgentSlot>,
-    /// Decision mail senders (keyed by work agent ID)
-    /// Used by work agents to send decision requests
-    decision_mail_senders: HashMap<AgentId, DecisionMailSender>,
-    /// Decision layer components (classifiers, etc.)
-    decision_components: DecisionLayerComponents,
+    /// Decision agent coordinator (manages agents, mail senders, components)
+    decision_coordinator: DecisionAgentCoordinator,
     /// Working directory for decision agents
     cwd: PathBuf,
     /// Worktree manager (optional, for isolated worktrees)
@@ -193,6 +187,7 @@ impl std::fmt::Debug for AgentPool {
             .field("workplace_id", &self.workplace_id)
             .field("human_queue", &self.human_queue)
             .field("blocked_handler", &self.blocked_handler)
+            .field("decision_coordinator", &self.decision_coordinator)
             .finish()
     }
 }
@@ -208,9 +203,7 @@ impl AgentPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_agents: HashMap::new(),
-            decision_mail_senders: HashMap::new(),
-            decision_components: initialize_decision_layer(),
+            decision_coordinator: DecisionAgentCoordinator::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
@@ -233,9 +226,7 @@ impl AgentPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
             blocked_handler: BlockedHandler::with_config(config),
-            decision_agents: HashMap::new(),
-            decision_mail_senders: HashMap::new(),
-            decision_components: initialize_decision_layer(),
+            decision_coordinator: DecisionAgentCoordinator::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             worktree_manager: None,
             worktree_state_store: None,
@@ -254,9 +245,7 @@ impl AgentPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_agents: HashMap::new(),
-            decision_mail_senders: HashMap::new(),
-            decision_components: initialize_decision_layer(),
+            decision_coordinator: DecisionAgentCoordinator::new(),
             cwd,
             worktree_manager: None,
             worktree_state_store: None,
@@ -310,9 +299,7 @@ impl AgentPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_agents: HashMap::new(),
-            decision_mail_senders: HashMap::new(),
-            decision_components: initialize_decision_layer(),
+            decision_coordinator: DecisionAgentCoordinator::new(),
             cwd: repo_root,
             worktree_manager: Some(worktree_manager),
             worktree_state_store: Some(worktree_state_store),
@@ -1263,7 +1250,7 @@ impl AgentPool {
             provider_kind,
             receiver,
             self.cwd.clone(),
-            &self.decision_components,
+            self.decision_coordinator.components(),
         );
 
         // Inject ProviderLLMCaller for real LLM calls
@@ -1272,11 +1259,9 @@ impl AgentPool {
         let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
         decision_agent.set_llm_caller(llm_caller);
 
-        // Store the decision agent and mail sender
-        self.decision_agents
-            .insert(work_agent_id.clone(), decision_agent);
-        self.decision_mail_senders
-            .insert(work_agent_id.clone(), sender);
+        // Store the decision agent and mail sender using coordinator
+        self.decision_coordinator.insert_agent(work_agent_id.clone(), decision_agent);
+        self.decision_coordinator.insert_mail_sender(work_agent_id.clone(), sender);
 
         logging::debug_event(
             "pool.decision_agent.spawn",
@@ -1322,7 +1307,7 @@ impl AgentPool {
             provider_kind,
             receiver,
             self.cwd.clone(),
-            &self.decision_components,
+            self.decision_coordinator.components(),
         );
 
         // Set profile_id if provided
@@ -1336,11 +1321,9 @@ impl AgentPool {
         let llm_caller = Arc::new(ProviderLLMCaller::new(provider_kind, self.cwd.clone()));
         decision_agent.set_llm_caller(llm_caller);
 
-        // Store the decision agent and mail sender
-        self.decision_agents
-            .insert(work_agent_id.clone(), decision_agent);
-        self.decision_mail_senders
-            .insert(work_agent_id.clone(), sender);
+        // Store the decision agent and mail sender using coordinator
+        self.decision_coordinator.insert_agent(work_agent_id.clone(), decision_agent);
+        self.decision_coordinator.insert_mail_sender(work_agent_id.clone(), sender);
 
         logging::debug_event(
             "pool.decision_agent.spawn_with_profile",
@@ -1357,10 +1340,8 @@ impl AgentPool {
 
     /// Stop the decision agent for a work agent
     pub fn stop_decision_agent_for(&mut self, work_agent_id: &AgentId) -> Result<(), String> {
-        if let Some(decision_agent) = self.decision_agents.get_mut(work_agent_id) {
+        if let Some(mut decision_agent) = self.decision_coordinator.remove_agent(work_agent_id) {
             decision_agent.stop("work agent stopping");
-            self.decision_agents.remove(work_agent_id);
-            self.decision_mail_senders.remove(work_agent_id);
 
             logging::debug_event(
                 "pool.decision_agent.stop",
@@ -1375,12 +1356,12 @@ impl AgentPool {
 
     /// Get decision agent for a work agent
     pub fn decision_agent_for(&self, work_agent_id: &AgentId) -> Option<&DecisionAgentSlot> {
-        self.decision_agents.get(work_agent_id)
+        self.decision_coordinator.agent_for(work_agent_id)
     }
 
     /// Check if work agent has a decision agent
     pub fn has_decision_agent(&self, work_agent_id: &AgentId) -> bool {
-        self.decision_agents.contains_key(work_agent_id)
+        self.decision_coordinator.has_agent(work_agent_id)
     }
 
     /// Get list of agents that have decision agents in Thinking status
@@ -1393,8 +1374,8 @@ impl AgentPool {
 
         // First, get agents in Thinking status
         let thinking_agents: Vec<_> = self
-            .decision_agents
-            .iter()
+            .decision_coordinator
+            .agents_iter()
             .filter_map(|(work_agent_id, decision_agent)| match decision_agent.status() {
                 DecisionAgentStatus::Thinking { started_at } => {
                     Some((work_agent_id.clone(), *started_at))
@@ -1406,8 +1387,8 @@ impl AgentPool {
         // If no thinking agents, check if any decision agent had a decision recently
         if thinking_agents.is_empty() {
             let recent_agents: Vec<_> = self
-                .decision_agents
-                .iter()
+                .decision_coordinator
+                .agents_iter()
                 .filter_map(|(work_agent_id, decision_agent)| {
                     if let Some(started_at) = decision_agent.last_decision_started_at() {
                         let elapsed = now.duration_since(started_at);
@@ -1448,7 +1429,8 @@ impl AgentPool {
                 let decision_event = convert_provider_event_to_decision(event);
 
                 // Use classifier registry to classify the event
-                self.decision_components
+                self.decision_coordinator
+                    .components()
                     .classifier_registry
                     .classify(&decision_event, decision_provider)
             } else {
@@ -1473,7 +1455,7 @@ impl AgentPool {
         let situation_type_name = request.situation_type.name.clone();
         let situation_prompt = request.context.trigger_situation.to_prompt_text();
 
-        if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
+        if let Some(sender) = self.decision_coordinator.mail_sender_for(work_agent_id) {
             sender.send_request(request).map_err(|e| {
                 logging::warn_event(
                     "decision_layer.request_send_failed",
@@ -1559,15 +1541,16 @@ impl AgentPool {
     pub fn poll_decision_agents(&mut self) -> Vec<(AgentId, DecisionResponse)> {
         let mut responses = Vec::new();
 
-        for (work_agent_id, decision_agent) in &mut self.decision_agents {
+        // Process each agent with its mail sender using coordinator's helper
+        self.decision_coordinator.for_each_agent_with_mail_sender(|work_agent_id, decision_agent, sender| {
             // Poll and process any pending requests (spawns async threads)
             decision_agent.poll_and_process();
 
             // Try to receive any responses that were generated via channel
             let mut received_this_poll = false;
             let mut had_error = false;
-            if let Some(sender) = self.decision_mail_senders.get(work_agent_id) {
-                while let Some(response) = sender.try_receive_response() {
+            if let Some(mail_sender) = sender {
+                while let Some(response) = mail_sender.try_receive_response() {
                     if response.is_error() {
                         had_error = true;
                     }
@@ -1593,42 +1576,26 @@ impl AgentPool {
             if received_this_poll {
                 decision_agent.clear_thinking_status(had_error);
             }
-        }
+        });
 
         // Cleanup: Clear old timestamps that are past the display window (1.5s)
         // This prevents memory accumulation of stale timestamps
         const MIN_DECISION_DISPLAY_MS: u64 = 1500;
-        for decision_agent in self.decision_agents.values_mut() {
+        self.decision_coordinator.for_each_agent_mut(|_, decision_agent| {
             if let Some(started_at) = decision_agent.last_decision_started_at() {
                 let elapsed = std::time::Instant::now().duration_since(started_at);
                 if elapsed.as_millis() >= MIN_DECISION_DISPLAY_MS as u128 {
                     decision_agent.clear_recent_decision();
                 }
             }
-        }
+        });
 
         responses
     }
 
     /// Get decision agent statistics
     pub fn decision_agent_stats(&self) -> DecisionAgentStats {
-        let mut stats = DecisionAgentStats::default();
-
-        for (_, decision_agent) in &self.decision_agents {
-            stats.total_agents += 1;
-            stats.total_decisions += decision_agent.decision_count();
-            stats.total_errors += decision_agent.error_count();
-
-            match decision_agent.status() {
-                DecisionAgentStatus::Idle => stats.idle_agents += 1,
-                DecisionAgentStatus::Thinking { .. } => stats.thinking_agents += 1,
-                DecisionAgentStatus::Responding => stats.responding_agents += 1,
-                DecisionAgentStatus::Error { .. } => stats.error_agents += 1,
-                DecisionAgentStatus::Stopped { .. } => stats.stopped_agents += 1,
-            }
-        }
-
-        stats
+        self.decision_coordinator.stats()
     }
 
     /// Execute a decision action on a work agent
@@ -2241,9 +2208,8 @@ impl AgentPool {
         let codename = slot.codename().clone();
         self.slots.remove(index);
 
-        // Also remove the decision agent for this work agent
-        self.decision_agents.remove(agent_id);
-        self.decision_mail_senders.remove(agent_id);
+        // Also remove the decision agent for this work agent using coordinator
+        self.decision_coordinator.remove_agent(agent_id);
 
         logging::debug_event(
             "pool.agent.remove",
@@ -3202,7 +3168,7 @@ impl AgentPool {
         }
 
         // Clear decision agent context if exists
-        if let Some(decision_agent) = self.decision_agents.get_mut(agent_id) {
+        if let Some(decision_agent) = self.decision_coordinator.agent_mut_for(agent_id) {
             // Reset decision agent to idle state
             if decision_agent.status().has_error() {
                 decision_agent.reset_error();
@@ -3235,8 +3201,8 @@ impl AgentPool {
             }
         }
 
-        // Clear all decision agents
-        for (work_agent_id, decision_agent) in &mut self.decision_agents {
+        // Clear all decision agents using coordinator
+        self.decision_coordinator.for_each_agent_mut(|work_agent_id, decision_agent| {
             if decision_agent.status().has_error() {
                 decision_agent.reset_error();
             }
@@ -3249,7 +3215,7 @@ impl AgentPool {
                     "decision_agent_id": decision_agent.agent_id(),
                 }),
             );
-        }
+        });
 
         // Clear human decision queue
         self.human_queue.clear();
@@ -3259,7 +3225,7 @@ impl AgentPool {
             "cleared all agent contexts",
             serde_json::json!({
                 "agent_count": self.slots.len(),
-                "decision_agent_count": self.decision_agents.len(),
+                "decision_agent_count": self.decision_coordinator.agent_count(),
             }),
         );
     }
@@ -3369,27 +3335,6 @@ impl AgentPool {
 
 fn parse_agent_index(agent_id: &str) -> Option<usize> {
     agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
-}
-
-/// Statistics for decision agents
-#[derive(Debug, Clone, Default)]
-pub struct DecisionAgentStats {
-    /// Total number of decision agents
-    pub total_agents: usize,
-    /// Number of idle decision agents
-    pub idle_agents: usize,
-    /// Number of thinking decision agents
-    pub thinking_agents: usize,
-    /// Number of responding decision agents
-    pub responding_agents: usize,
-    /// Number of decision agents with errors
-    pub error_agents: usize,
-    /// Number of stopped decision agents
-    pub stopped_agents: usize,
-    /// Total decisions made
-    pub total_decisions: u64,
-    /// Total errors encountered
-    pub total_errors: u64,
 }
 
 /// Report of worktree recovery operations
@@ -5534,7 +5479,7 @@ mod tests {
         let agent_id = pool.spawn_agent(ProviderKind::Claude).expect("spawn work agent");
 
         // Get the decision mail sender for this agent
-        let mail_sender = pool.decision_mail_senders.get(&agent_id).expect("mail sender exists");
+        let mail_sender = pool.decision_coordinator.mail_sender_for_test(&agent_id).expect("mail sender exists");
 
         // Create a decision request
         let registry = SituationRegistry::new();
@@ -5593,7 +5538,7 @@ mod tests {
         assert!(pending.is_empty());
 
         // Get the decision mail sender for this agent
-        let mail_sender = pool.decision_mail_senders.get(&agent_id).expect("mail sender exists");
+        let mail_sender = pool.decision_coordinator.mail_sender_for_test(&agent_id).expect("mail sender exists");
 
         // Create a decision request
         let registry = SituationRegistry::new();
@@ -5671,7 +5616,7 @@ mod tests {
 
         // Manually set last_decision_started_at to a past time (>1.5s ago)
         // This simulates a decision that started long ago and already completed
-        if let Some(decision_agent) = pool.decision_agents.get_mut(&agent_id) {
+        if let Some(decision_agent) = pool.decision_coordinator.agent_mut_for_test(&agent_id) {
             // Set to 2 seconds ago
             decision_agent.set_last_decision_started_at_for_test(Some(
                 std::time::Instant::now() - std::time::Duration::from_millis(2000)
@@ -5686,7 +5631,7 @@ mod tests {
         let _responses = pool.poll_decision_agents();
 
         // After poll, the old timestamp should be cleared
-        if let Some(decision_agent) = pool.decision_agents.get(&agent_id) {
+        if let Some(decision_agent) = pool.decision_coordinator.agent_for_test(&agent_id) {
             assert!(
                 decision_agent.last_decision_started_at().is_none(),
                 "Old timestamp should be cleared after poll_decision_agents cleanup"

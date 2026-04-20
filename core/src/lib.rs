@@ -96,7 +96,7 @@ pub use pool::{
     AgentBlockedEvent, AgentBlockedNotifier, NoOpAgentBlockedNotifier,
     BlockedHandler, BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot,
-    DecisionExecutionResult,
+    DecisionExecutionResult, DecisionAgentCoordinator, DecisionAgentStats,
 };
 
 #[cfg(test)]
