@@ -23,6 +23,16 @@ These documents have dependencies. Read in this order:
 | 7 | [07-cli-refactor.md](./07-cli-refactor.md) | 06-tui-refactor | CLI as independent `agent-protocol` client, daemon lifecycle commands |
 | 8 | [08-testing-strategy.md](./08-testing-strategy.md) | 03–07 | In-memory WebSocket harness, daemon test fixtures, contract tests |
 | 9 | [09-migration-plan.md](./09-migration-plan.md) | all above | Backward-compatible rollout, embedded-mode deprecation, cutover criteria |
+| 10 | [10-separation-gaps-and-supplements.md](./10-separation-gaps-and-supplements.md) | all above | Systematic gap analysis: observability, limits, security, config, recovery, platform |
+
+## Supplementary Sprint Specs
+
+The following sprint specs were added during gap analysis to cover operational, security, and cross-platform concerns:
+
+| Sprint | Document | What It Covers |
+|--------|----------|---------------|
+| Sprint 12 | [sprint-12-observability-operational-readiness.md](../../plan/spec/frontend-backend-separation/sprint-12-observability-operational-readiness.md) | Structured logging, Prometheus metrics, health checks, resource limits, config management |
+| Sprint 13 | [sprint-13-security-platform.md](../../plan/spec/frontend-backend-separation/sprint-13-security-platform.md) | Origin validation, token auth, audit logs, disaster recovery, Windows/macOS/Linux support |
 
 ---
 

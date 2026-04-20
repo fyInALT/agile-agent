@@ -21,8 +21,28 @@ This directory contains the sprint-by-sprint execution plan for the frontend-bac
 | [Sprint 9](./sprint-09-cli-refactor.md) | CLI Refactor | CLI becomes independent protocol client | 10 pts |
 | [Sprint 10](./sprint-10-hardening.md) | Hardening | Reconnect, approval flow, error handling | 9 pts |
 | [Sprint 11](./sprint-11-cleanup-performance.md) | Cleanup + Performance | Remove legacy code, benchmark, release | 8 pts |
+| [Sprint 12](./sprint-12-observability-operational-readiness.md) | Observability & Operational Readiness | Structured logging, metrics, resource limits, configuration | 10 pts |
+| [Sprint 13](./sprint-13-security-platform.md) | Security Hardening & Platform Support | Origin validation, audit log, disaster recovery, cross-platform | 9 pts |
 
-**Total**: 22 weeks (≈ 5.5 months), 111 story points
+**Total**: 26 weeks (≈ 6.5 months), 130 story points
+
+## Gap Analysis
+
+A systematic gap analysis identified critical omissions in the original plan. See the full analysis in:
+
+- [`docs/refactor/frontend-backend-separation/10-separation-gaps-and-supplements.md`](../../../refactor/frontend-backend-separation/10-separation-gaps-and-supplements.md)
+
+Key gaps that required new sprints:
+
+| Gap | Severity | Sprint |
+|-----|----------|--------|
+| Observability & Diagnostics | P0 | Sprint 12 |
+| Resource Limits & Backpressure | P0 | Sprint 12 |
+| Configuration Management | P1 | Sprint 12 |
+| Security Hardening (v1) | P1 | Sprint 13 |
+| Disaster Recovery | P1 | Sprint 13 |
+| Multi-Platform Support | P2 | Sprint 13 |
+| Protocol Extension Points | P2 | Sprint 13 |
 
 ## Design Documents
 
