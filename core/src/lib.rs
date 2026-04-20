@@ -100,7 +100,7 @@ pub use pool::{
     WorktreeCoordinator, AgentLifecycleManager, LifecycleError,
     TaskAssignmentCoordinator, AssignmentError,
     FocusManager, FocusError,
-    PoolQueries,
+    PoolQueries, DecisionExecutor,
 };
 
 #[cfg(test)]
