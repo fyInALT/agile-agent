@@ -10,9 +10,31 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 8: TUI Decoupling](./sprint-08-tui-decoupling.md)
 
+## Background
+
+The TUI is now a pure protocol client, but the CLI is not. `agent-cli` still depends on `agent-tui` as a library crate and on `agent-core` for headless commands. The CLI's `main()` calls into the TUI library for interactive mode and into core directly for `run-loop`, `agent list`, and other commands. This means the CLI cannot be built without ratatui, crossterm, and all TUI dependencies — even for simple headless operations.
+
+This sprint makes the CLI a peer to the TUI: both are thin clients speaking the same protocol. The CLI gets its own `ProtocolClient`, new `daemon start/stop/status` commands, and a rewritten `run --prompt` that streams output via events. The `agent-tui` dependency is removed entirely, significantly reducing the CLI binary size.
+
 ## Sprint Goal
 
 The CLI is a standalone protocol client with no dependency on `agent-tui` or `agent-core`. All commands (except `doctor`/`probe`) communicate with the daemon via JSON-RPC. New `daemon start/stop/status` commands manage the daemon lifecycle. The CLI binary is significantly smaller.
+
+## TDD Approach
+
+CLI commands are request/response oriented — tests should verify exact output format and exit codes.
+
+1. **Red**: For each command, write a test that invokes the command against a mock daemon and asserts exact stdout/stderr and exit code.
+2. **Green**: Implement the command using `ProtocolClient` until the test passes.
+3. **Refactor**: Extract common output formatting; add `--json` mode for scripting.
+
+Test requirements per story:
+- Unit tests for `ProtocolClient`: request/response, timeout, error handling
+- Command tests: each CLI subcommand tested with expected stdout, stderr, and exit code
+- Table output tests: verify human-readable formatting (padding, alignment)
+- JSON output tests: `--json` flag produces valid, parseable JSON
+- Integration tests: CLI + real daemon for full command matrix
+- Binary size test: `agent-cli` binary is smaller than before (no TUI deps linked)
 
 ## Stories
 
@@ -43,6 +65,8 @@ Implement a blocking-friendly protocol client for the CLI.
 - `request()` blocks until response arrives (with timeout)
 - `subscribe_events()` returns a channel that receives `Event` values
 - Auto-link works identically to TUI
+- **Tests**: `cli_request_response` — `ProtocolClient::request` returns correct response; `cli_event_subscription` — receives `Event` notifications
+
 
 #### Technical Notes
 
@@ -76,6 +100,8 @@ Add daemon lifecycle commands to the CLI.
 - `daemon stop` gracefully shuts down the daemon
 - `daemon status` shows human-readable daemon info
 - `daemon logs` follows the daemon's log output
+- **Tests**: `daemon_start_idempotent` — succeeds whether daemon exists or not; `daemon_stop_graceful` — daemon.json removed; `daemon_status_shows_info` — pid and port visible
+
 
 #### Technical Notes
 
@@ -108,6 +134,8 @@ Rewrite all agent subcommands to use the protocol instead of direct core access.
 - Table output is human-readable
 - `--json` flag produces valid JSON for scripting
 - Errors are shown clearly (e.g., "Agent not found: agent-dead")
+- **Tests**: `agent_list_table` — human-readable output; `agent_list_json` — `--json` produces valid JSON; `agent_spawn_cli` — spawn via CLI updates daemon
+
 
 #### Technical Notes
 
@@ -143,6 +171,8 @@ Implement the headless execution mode that sends input and streams output.
 - Approval requests prompt the user interactively
 - `--auto-approve` silently approves all tool calls
 - Exit code is 0 on success, 1 on error
+- **Tests**: `run_prompt_output` — stdout matches expected; `run_auto_approve` — `--auto-approve` silently approves; `run_exit_code` — 0 on success, 1 on error
+
 
 #### Technical Notes
 
@@ -177,6 +207,8 @@ Clean up `cli/Cargo.toml` and remove all direct core access.
 - `cargo test -p agent-cli` passes
 - `agent-tui` and `agent-core` are not in dependency tree
 - Binary size is smaller (no ratatui/crossterm linked)
+- **Tests**: `cli_build_succeeds` — `cargo build -p agent-cli` passes; `cli_test_passes` — `cargo test -p agent-cli` passes; `binary_size_reduced` — binary smaller than before
+
 
 #### Technical Notes
 

@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 7: TUI WebSocket Client + Event Handler](./sprint-07-tui-client-event-handler.md)
 
+## Background
+
+The TUI now connects to the daemon and receives events, but it still carries the baggage of direct `agent_core` dependencies. `TuiState` retains fields for `RuntimeSession`, `AgentPool`, `EventAggregator`, and `Mailbox` — all dead weight that is no longer used since the TUI relies on the protocol. The `Cargo.toml` still lists `agent-core`, `agent-decision`, and `agent-kanban` as dependencies. Compilation succeeds only because these types are still imported, not because they are needed.
+
+This sprint is surgical removal. Every `use agent_core::*` statement is deleted. Every direct method call on core objects is replaced with a protocol call. `TuiState` shrinks to a pure render state machine. The `agent-tui` crate becomes a thin presentation layer that depends only on `agent-protocol` and rendering libraries. This is the decoupling endgame.
+
 ## Sprint Goal
 
 The TUI contains zero `agent_core` imports. All runtime state ownership is in the daemon. `TuiState` is a pure render state machine. `cargo build -p agent-tui` succeeds with no `agent-core` dependency in `Cargo.toml`.
+
+## TDD Approach
+
+Decoupling is deletion work — the primary risk is accidentally removing something still in use. Tests are the safety net.
+
+1. **Red**: Before deleting any import, write a test that exercises the code path through the new protocol-based route. Ensure the test passes.
+2. **Green**: Delete the core import and its usage; verify the test still passes (now via protocol).
+3. **Refactor**: Clean up dead code, re-exports, and conditional compilation.
+
+Test requirements per story:
+- Compilation gate: `cargo build -p agent-tui` must succeed after each import removal
+- Dependency audit: `cargo tree -p agent-tui` shows no `agent-core`/`agent-decision`/`agent-kanban`
+- Functional parity tests: every TUI feature works via protocol (spawn, stop, input, focus switch)
+- Mock daemon tests: TUI operates correctly against a mock daemon (no real core needed)
+- Integration tests: full TUI + daemon end-to-end for all user workflows
 
 ## Stories
 
@@ -41,6 +62,8 @@ Delete the `session: RuntimeSession` field and all code that directly accesses i
 - `TuiState` has no `session` field
 - All previous `session` usages are replaced with protocol-driven equivalents
 - TUI compiles and renders correctly
+- **Tests**: `no_runtime_session_import` — grep confirms no `RuntimeSession` in TUI; `tui_compiles` — `cargo build -p agent-tui` succeeds
+
 
 #### Technical Notes
 
@@ -72,6 +95,8 @@ Delete the `agent_pool: Option<AgentPool>` field and replace agent operations wi
 - `AgentPool` is not imported in any TUI source file
 - Agent spawn/stop go through WebSocket protocol calls
 - Agent status is derived from `Event` stream, not direct pool queries
+- **Tests**: `spawn_via_protocol` — Ctrl+S sends `agent.spawn`; `stop_via_protocol` — Ctrl+Q sends `agent.stop`; `no_agent_pool_import` — grep confirms no `AgentPool` in TUI
+
 
 #### Technical Notes
 
@@ -102,6 +127,8 @@ Delete the `event_aggregator` field. The TUI no longer polls provider channels d
 - `EventAggregator` is not imported in any TUI source file
 - No polling of provider channels in the TUI event loop
 - All events arrive via WebSocket `Event` notifications
+- **Tests**: `no_event_aggregator_import` — grep confirms no `EventAggregator` in TUI; `events_only_via_websocket` — no `mpsc::Receiver<ProviderEvent>` usage
+
 
 #### Technical Notes
 
@@ -130,6 +157,8 @@ Delete the `mailbox` field. Cross-agent mail is handled by the daemon.
 
 - `AgentMailbox` is not imported in any TUI source file
 - Mail notifications come via `Event::MailReceived`
+- **Tests**: `no_mailbox_import` — grep confirms no `Mailbox` in TUI; `mail_via_event` — `MailReceived` updates UI
+
 
 ---
 
@@ -159,6 +188,8 @@ Clean up `Cargo.toml` and fix any remaining indirect imports.
 - `cargo test -p agent-tui` passes all tests
 - `Cargo.toml` has no `agent-core`, `agent-decision`, or `agent-kanban` dependencies
 - `agent-protocol` is the only internal agent crate dependency
+- **Tests**: `cargo_build_succeeds` — `cargo build -p agent-tui` passes; `cargo_test_passes` — `cargo test -p agent-tui` passes; `dependency_audit` — `cargo tree` shows no core deps
+
 
 #### Technical Notes
 

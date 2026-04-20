@@ -10,9 +10,31 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 5: Agent Lifecycle + Event Pump](./sprint-05-agent-lifecycle-event-pump.md)
 
+## Background
+
+Events are being produced by the `EventPump`, but they only exist in memory. If a client disconnects and reconnects, it misses all events that occurred during the disconnection. There is no mechanism to catch up. Additionally, events are not distributed to multiple clients — the broadcaster does not exist, so only the first connected client would receive them.
+
+This sprint completes the event infrastructure. The `EventBroadcaster` fans out each event to all connected WebSocket clients. The `EventLog` persists every event to an append-only `events.jsonl` file. The gap-detection and replay protocol enables clients to recover missed events after reconnect. Without these capabilities, the TUI would be unreliable — any network hiccup would leave it with stale or missing state.
+
 ## Sprint Goal
 
 Events produced by the `EventPump` are broadcast to all connected clients and persisted to an append-only `events.jsonl` log. Clients can detect gaps and request replay. This completes the event streaming infrastructure.
+
+## TDD Approach
+
+Broadcast, persistence, and recovery are inherently concurrent — tests must verify correctness under race conditions.
+
+1. **Red**: Write tests with multiple mock clients connected to a single broadcaster; assert all receive identical events in order.
+2. **Green**: Implement broadcaster, event log, and recovery until tests pass.
+3. **Refactor**: Optimize serialization (pre-serialize once per broadcast); ensure no blocking under load.
+
+Test requirements per story:
+- Broadcast tests: N clients (N=2,5,10) all receive same events in same order
+- Lag tests: slow client is detected; events are dropped without crashing broadcaster
+- Persistence tests: write → crash → read back produces identical events
+- Replay tests: `replay_from(seq)` returns correct subset in correct order
+- Gap recovery integration tests: disconnect → generate events → reconnect → state is consistent
+- Corruption tests: corrupted line in `events.jsonl` is skipped, remaining events readable
 
 ## Stories
 
@@ -43,6 +65,8 @@ Implement the broadcaster that distributes events to all connected WebSocket cli
 - Disconnected clients are removed from the broadcast list
 - Broadcast is non-blocking (uses `try_send` or unbounded channel)
 - Event order is identical for all clients
+- **Tests**: `broadcast_all_clients` — N clients receive same event; `broadcast_order` — all clients receive events in identical order; `broadcast_survives_disconnect` — broadcaster survives client channel closure
+
 
 #### Technical Notes
 
@@ -76,6 +100,8 @@ Implement persistent storage for events to enable replay after reconnect.
 - File is append-only (no in-place modifications)
 - Write happens before broadcast (durability guarantee)
 - File can be read line-by-line and deserialized
+- **Tests**: `log_append` — produces valid JSONL; `log_durability` — events survive crash; `log_before_broadcast` — write happens before broadcast
+
 
 #### Technical Notes
 
@@ -109,6 +135,8 @@ Implement reading events back from the log for client reconnect scenarios.
 - Events are returned in `seq` order
 - Corrupted lines are skipped without crashing
 - Replay completes in under 1s for 10,000 events
+- **Tests**: `replay_from_seq` — returns correct subset; `replay_order` — events in seq order; `replay_corruption` — corrupted line skipped
+
 
 #### Technical Notes
 
@@ -143,6 +171,8 @@ Implement the client-side gap detection and the daemon-side recovery response.
 - Recovery completes without duplicate or missing events
 - Client state is consistent after recovery
 - Normal operation (no gap) has zero recovery overhead
+- **Tests**: `gap_detected` — client detects missing seq; `gap_recovery` — reconnect restores consistent state; `gap_no_false_positive` — no recovery when no gap
+
 
 #### Technical Notes
 
@@ -176,6 +206,8 @@ Complete the heartbeat mechanism with lag detection for slow clients.
 - Slow clients are detected within 30s (one heartbeat cycle)
 - Lagging clients receive `lagging: true` in heartbeat ack
 - Client re-syncs automatically when lag is detected
+- **Tests**: `lag_fast_client` — fast client receives all events; `lag_slow_client` — slow client marked lagging; `lag_recovery` — lagging client re-syncs
+
 
 #### Technical Notes
 

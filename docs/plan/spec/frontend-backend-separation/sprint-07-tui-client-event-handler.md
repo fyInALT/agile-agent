@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 6: Event Broadcast + Persistence](./sprint-06-event-broadcast-persistence.md)
 
+## Background
+
+The daemon is fully operational: it owns state, serves snapshots, spawns agents, and broadcasts events. But the TUI is still running in embedded mode — it bootstraps its own `RuntimeSession` and polls provider channels directly. The TUI has no WebSocket client, no auto-link integration, and no event handler. Even though the daemon exists, the TUI does not use it.
+
+This sprint is the first end-to-end integration. The TUI connects to the daemon via WebSocket, receives the initial snapshot, and rebuilds its render state from the event stream. User input is sent over the protocol rather than directly to core. This is the moment when the separation becomes real — the TUI stops being a runtime controller and starts being a view layer.
+
 ## Sprint Goal
 
 The TUI connects to the daemon via WebSocket, receives the initial snapshot, and applies incoming events to rebuild its render state. The TUI can send user input and receive real-time transcript updates. This is the first live end-to-end integration.
+
+## TDD Approach
+
+TUI integration tests must verify both protocol correctness and rendering correctness without requiring a human operator.
+
+1. **Red**: Write tests that instantiate `TuiState`, feed it a sequence of `Event`s, and assert the resulting render state matches expectations.
+2. **Green**: Implement WebSocket client and event handler until tests pass.
+3. **Refactor**: Separate event handling from rendering; ensure `apply_event()` is pure and testable.
+
+Test requirements per story:
+- Event handler unit tests: every `EventPayload` variant produces correct `TuiState` mutation
+- State reconstruction tests: feed N events → `TuiState` matches expected final state
+- WebSocket client unit tests: mock `tokio::io::duplex()` transport, verify request/response correlation
+- Integration tests: TUI connects to real daemon, sends input, receives transcript updates
+- Snapshot rendering tests: `TuiState` populated from `SessionState` snapshot renders correctly
 
 ## Stories
 
@@ -44,6 +65,8 @@ Implement the WebSocket client inside the TUI that connects to the daemon and ha
 - `notify()` sends without waiting
 - Server messages are parsed into typed `ServerMessage` variants
 - Connection errors are surfaced as `ServerMessage::Error`
+- **Tests**: `client_connect` — connects to daemon; `client_call` — request/response correlation; `client_notify` — no response waited
+
 
 #### Technical Notes
 
@@ -76,6 +99,8 @@ Wire the shared auto-link logic into the TUI startup flow.
 - User sees clear progress messages during connection
 - Snapshot is received and stored within 2s of connect
 - Failure to connect shows actionable error (not panic)
+- **Tests**: `autolink_integration` — TUI starts and connects; `snapshot_received` — `SessionState` stored in `TuiState`
+
 
 #### Technical Notes
 
@@ -111,6 +136,8 @@ Implement the event handler that applies daemon events to the TUI's render state
 - Transcript is byte-for-byte identical to the daemon's transcript after applying all events
 - `focused_agent_id` is cleared when the focused agent stops
 - State updates are deterministic (same event sequence → same state)
+- **Tests**: `apply_agent_spawned` — adds agent; `apply_agent_stopped` — removes agent and clears focus; `apply_item_delta` — appends text; `apply_item_completed` — finalizes item
+
 
 #### Technical Notes
 
@@ -142,6 +169,8 @@ Add visual indicators for connection state (connecting, connected, reconnecting,
 - Reconnecting: yellow indicator with retry count
 - Disconnected: red indicator, input disabled
 - State transitions are visible within one frame (16ms)
+- **Tests**: `connection_state_transitions` — Connected → Reconnecting → Connected; `status_bar_shows_state` — correct color per state
+
 
 ---
 
@@ -168,6 +197,8 @@ Replace direct `AppState` input submission with `session.sendInput` protocol cal
 - User input is sent over WebSocket, not directly to core
 - Input appears in transcript via event stream (not immediate local append)
 - Errors (e.g., no target agent) are shown in status bar
+- **Tests**: `input_via_protocol` — `session.sendInput` sent on Enter; `input_rejected` — error shown when no target agent
+
 
 #### Technical Notes
 

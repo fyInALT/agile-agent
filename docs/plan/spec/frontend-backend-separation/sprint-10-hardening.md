@@ -10,9 +10,31 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 9: CLI Refactor](./sprint-09-cli-refactor.md)
 
+## Background
+
+The core separation is complete: daemon owns state, TUI and CLI are thin clients, and events flow over WebSocket. But the system lacks resilience. A brief network interruption breaks the TUI permanently — there is no reconnect. Approval requests from the decision layer have no UI path — they are lost. Error messages from the daemon are swallowed or displayed as raw JSON-RPC, confusing users.
+
+This sprint is about production readiness. It implements exponential-backoff reconnection with state recovery, modal overlays for approval and decision requests, and human-friendly error feedback. Without these capabilities, the system works in ideal conditions but fails under real-world usage.
+
 ## Sprint Goal
 
 The system is resilient to network interruptions, daemon restarts, and slow clients. The TUI reconnects automatically with state recovery. Approval and decision requests flow correctly from daemon → TUI overlay → user response → daemon. Error handling gives clear feedback to users.
+
+## TDD Approach
+
+Hardening features are difficult to test because they involve failure scenarios and timeouts. Tests must simulate these conditions deterministically.
+
+1. **Red**: Use mock transports and time manipulation (`tokio::time::pause`) to simulate disconnects, delays, and timeouts in tests.
+2. **Green**: Implement reconnect, overlay, and error handling until tests pass.
+3. **Refactor**: Ensure no real sleeps in tests; all timeouts must be injectable.
+
+Test requirements per story:
+- Reconnect tests: mock transport drop → assert backoff sequence → mock transport restore → assert recovery
+- State recovery tests: disconnect → generate events → reconnect → `TuiState` matches expected
+- Overlay tests: inject `approval.request` notification → assert overlay appears → simulate user input → assert correct protocol response sent
+- Timeout tests: inject approval request → advance time past timeout → assert auto-reject
+- Error handling tests: inject `JsonRpcError` → assert user-friendly message displayed
+- Stress tests: rapid connect/disconnect cycles do not leak memory or deadlock
 
 ## Stories
 
@@ -44,6 +66,8 @@ Implement automatic reconnection when the WebSocket connection drops.
 - User sees clear reconnect status in UI
 - Reconnection succeeds when daemon becomes available
 - No data loss: events resume from correct sequence number
+- **Tests**: `reconnect_backoff` — 100ms → 200ms → 400ms sequence; `reconnect_success` — connection restored; `reconnect_indefinite` — retries until success
+
 
 #### Technical Notes
 
@@ -77,6 +101,8 @@ Ensure the TUI's render state is consistent after reconnect by applying the snap
 - No duplicate events (snapshot + replay overlap is handled)
 - No missing events (all events between disconnect and reconnect are applied)
 - UI does not flicker during recovery
+- **Tests**: `state_after_reconnect` — transcript identical to pre-disconnect; `no_duplicate_events` — snapshot + replay overlap handled; `no_missing_events` — all events applied
+
 
 #### Technical Notes
 
@@ -113,6 +139,8 @@ Implement the full approval flow: daemon sends notification, TUI shows overlay, 
 - `Y`/`N` keys send correct approval response
 - Overlay disappears on resolution
 - Timeout auto-rejects after configured duration
+- **Tests**: `approval_overlay_appears` — within 100ms of notification; `approval_approve` — Y key sends `allowed: true`; `approval_timeout` — auto-reject after duration
+
 
 #### Technical Notes
 
@@ -145,6 +173,8 @@ Implement the decision layer escalation flow in the TUI.
 - User selects option via number keys
 - Response is sent to daemon within 100ms
 - Timeout auto-escalates after configured duration
+- **Tests**: `decision_overlay_appears` — shows situation and options; `decision_select` — number key sends correct choice; `decision_timeout` — auto-escalate after duration
+
 
 ---
 
@@ -173,6 +203,8 @@ Improve error visibility in the TUI and CLI.
 - Error messages are human-readable (no raw JSON-RPC dumped to screen)
 - CLI returns appropriate exit codes
 - Error context helps users understand what went wrong
+- **Tests**: `error_visible` — error shown within 100ms; `error_human_readable` — no raw JSON-RPC dumped; `cli_exit_code` — non-zero on daemon errors
+
 
 ---
 

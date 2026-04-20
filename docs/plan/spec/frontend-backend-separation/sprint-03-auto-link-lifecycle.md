@@ -10,9 +10,31 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 2: Daemon Skeleton](./sprint-02-daemon-skeleton.md)
 
+## Background
+
+The daemon can now accept WebSocket connections, but clients have no way to find it. A user running `agent-cli` or `agent-tui` in a workplace directory must manually know the WebSocket URL — which changes on every restart because the port is ephemeral. There is no persistence of daemon location, no discovery mechanism, and no graceful shutdown protocol.
+
+This sprint solves the "where is my daemon?" problem. It introduces `daemon.json` as the discovery contract, implements auto-link (discover existing → spawn new if missing), and makes the daemon a well-behaved service that cleans up after itself. Without auto-link, every subsequent sprint would require manual daemon management, blocking all user-facing work.
+
 ## Sprint Goal
 
 The daemon can write its configuration to disk on startup and remove it on shutdown. A client can discover an existing daemon or spawn a new one automatically. Graceful shutdown persists a snapshot and cleans up resources. This is the "daemon as a service" milestone.
+
+## TDD Approach
+
+Daemon lifecycle and auto-link involve filesystem I/O and process management — tests must be hermetic and parallel-safe.
+
+1. **Red**: Write tests using `tempfile::TempDir` for isolated filesystem state.
+2. **Green**: Implement config I/O, spawn logic, and signal handling until tests pass.
+3. **Refactor**: Extract process-spawn utilities; use `CARGO_BIN_EXE_agent-daemon` for binary resolution in tests.
+
+Test requirements per story:
+- Filesystem tests in temp dirs (no pollution of real `~/.agile-agent/`)
+- Unit tests for `DaemonConfig` serialization and validation
+- Integration tests: daemon starts, writes config, stops, cleans up
+- Auto-link tests: existing daemon → connect; missing daemon → spawn; stale config → respawn
+- Signal tests: send SIGTERM, assert graceful shutdown sequence
+- All process-spawn tests have timeouts to prevent hanging CI
 
 ## Stories
 
@@ -42,6 +64,8 @@ Define and implement the `daemon.json` configuration file that advertises a runn
 - Write is atomic (no half-written files observable)
 - Read validates schema version and rejects unknown versions
 - `last_heartbeat` is updated every 30s by a background task
+- **Tests**: `config_roundtrip` — write → read produces identical config; `config_corrupted` — corrupted file rejected gracefully; `config_atomic_write` — no half-written files
+
 
 #### Technical Notes
 
@@ -76,6 +100,8 @@ Implement the daemon startup: parse args, bootstrap workplace, bind WebSocket, w
 - `websocket_url` contains the actual assigned port
 - `pid` matches the daemon's OS process ID
 - Two daemons for different workplaces bind to different ports
+- **Tests**: `startup_writes_config` — daemon.json appears within 1s; `startup_unique_port` — two daemons get different ports
+
 
 #### Technical Notes
 
@@ -111,6 +137,8 @@ Implement signal handling, connection drain, agent shutdown, snapshot write, and
 - `daemon.json` is deleted after shutdown
 - `snapshot.json` is written with schema version `1`
 - No dangling processes or file descriptors
+- **Tests**: `shutdown_sigterm` — SIGTERM triggers full sequence; `shutdown_cleanup` — daemon.json deleted after exit; `shutdown_snapshot` — snapshot.json written
+
 
 #### Technical Notes
 
@@ -147,6 +175,8 @@ Implement the client-side logic that discovers or spawns the daemon for the curr
 - Stale config (dead PID) is detected and removed before respawn
 - Exponential backoff: 100ms → 200ms → 400ms → ... → 5s max
 - Works from both CLI and TUI contexts
+- **Tests**: `autolink_existing` — connects to running daemon; `autolink_spawn` — spawns daemon when missing; `autolink_stale` — stale PID triggers respawn
+
 
 #### Technical Notes
 
@@ -179,6 +209,8 @@ Implement client heartbeat and daemon heartbeat acknowledgment to detect stale c
 - Daemon responds with `heartbeatAck` within 100ms
 - Connection closed with `1001` after 120s of silence
 - No false disconnects during normal operation
+- **Tests**: `heartbeat_keeps_alive` — heartbeat every 30s prevents disconnect; `heartbeat_timeout` — 120s silence triggers close with `1001`
+
 
 #### Technical Notes
 

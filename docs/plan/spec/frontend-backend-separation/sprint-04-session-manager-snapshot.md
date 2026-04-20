@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 3: Auto-Link + Lifecycle](./sprint-03-auto-link-lifecycle.md)
 
+## Background
+
+The daemon runs and clients can connect, but it owns no runtime state. `TuiState` in the TUI still embeds `RuntimeSession`, `AgentPool`, `EventAggregator`, and `AgentMailbox`. The daemon's `session.initialize` handler returns a hardcoded snapshot because there is no live data to serve. The runtime is still trapped inside the TUI process.
+
+This sprint is the pivotal state-ownership migration. We extract `SessionManager` from `TuiState` and place it in the daemon. The daemon becomes the single source of truth for all runtime state. The `session.initialize` response now reflects actual agent slots, transcript entries, and workplace configuration. This is the most technically complex phase because it touches the deepest coupling point between TUI and core.
+
 ## Sprint Goal
 
 The daemon owns the runtime state. `SessionManager` encapsulates `AppState`, `AgentPool`, `EventAggregator`, and `Mailbox` — all previously owned by `TuiState`. The `session.initialize` handler returns a real `SessionState` snapshot built from live data. This is the "state migration begins" milestone.
+
+## TDD Approach
+
+State migration is high-risk — tests must verify correctness before and after the move.
+
+1. **Red**: Write tests against `TuiState::bootstrap()` behavior (current baseline). Then write identical tests against `SessionManager::bootstrap()` and assert same outputs.
+2. **Green**: Implement `SessionManager` in daemon until it produces the same state as the TUI baseline.
+3. **Refactor**: Deduplicate bootstrap logic; ensure `SessionManager` is the only owner.
+
+Test requirements per story:
+- Baseline tests: capture current `TuiState` behavior before any changes
+- Snapshot tests: `SessionManager::snapshot()` output matches expected `SessionState` structure
+- Mapping tests: every `agent_core` → `agent_protocol` mapping has a unit test
+- Concurrency tests: multiple concurrent snapshot reads do not deadlock
+- Integration test: client receives snapshot that reflects daemon-side agent spawn/stop
 
 ## Stories
 
@@ -43,6 +64,8 @@ Create the `SessionManager` struct and its bootstrap logic, mirroring the curren
 - All core objects (`AppState`, `AgentPool`, etc.) are initialized
 - State is behind `Arc<RwLock<>>` for shared access
 - Multiple concurrent reads complete without deadlock
+- **Tests**: `session_manager_bootstrap` — produces valid state; `session_manager_concurrent_reads` — multiple read locks do not deadlock
+
 
 #### Technical Notes
 
@@ -77,6 +100,8 @@ Implement the adapter functions that translate `agent_core` domain types into `a
 - Mappings are deterministic (same input → same output)
 - Timestamps are ISO 8601 strings
 - `AgentRole` and `ProviderKind` use string representations matching protocol spec
+- **Tests**: `map_agent_snapshot` — `AgentSlot` → `AgentSnapshot` is deterministic; `map_transcript_item` — timestamps are ISO 8601 strings
+
 
 #### Technical Notes
 
@@ -111,6 +136,8 @@ Implement `SessionManager::snapshot()` that assembles the full `SessionState` fr
 - `last_event_seq` reflects the current sequence counter
 - Snapshot generation completes in under 50ms for typical sessions
 - Empty sessions produce valid snapshots with zero-length arrays
+- **Tests**: `snapshot_completeness` — contains all required fields; `snapshot_performance` — generation under 50ms for 1000 transcript items
+
 
 #### Technical Notes
 
@@ -143,6 +170,8 @@ Wire `SessionManager` into the `session.initialize` handler so clients receive l
 - Snapshot reflects agents spawned via `AgentPool`
 - Snapshot reflects transcript changes via `AppState`
 - Connection is not marked `Initialized` until the snapshot is successfully serialized
+- **Tests**: `initialize_live_snapshot` — snapshot reflects daemon-side agent spawn; `initialize_after_spawn` — spawned agent appears in snapshot
+
 
 #### Technical Notes
 
@@ -173,6 +202,8 @@ Implement `snapshot.json` write during graceful shutdown.
 - File contains schema version `1` and a valid `SessionState`
 - `written_at` is ISO 8601 timestamp
 - File is readable and deserializable after write
+- **Tests**: `snapshot_file_roundtrip` — write → read produces identical `SessionState`; `snapshot_file_atomic` — write is atomic
+
 
 #### Technical Notes
 

@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 4: SessionManager + Snapshot](./sprint-04-session-manager-snapshot.md)
 
+## Background
+
+The daemon now owns runtime state, but clients cannot manipulate it. There are no handlers for `agent.spawn`, `agent.stop`, or `agent.list`. Agents must still be spawned through direct `AgentPool` calls inside the daemon — there is no protocol path. More critically, `ProviderEvent`s from running agents flow into `EventAggregator` but go nowhere; the daemon does not consume them, so no events reach connected clients.
+
+This sprint opens the daemon's control surface and starts the event stream. Agent lifecycle operations become protocol methods. The `EventPump` background task begins consuming `ProviderEvent`s, converting them to protocol `Event`s, and assigning sequence numbers. For the first time, the daemon is not just a passive state server — it actively produces a stream of incremental updates.
+
 ## Sprint Goal
 
 Agents can be spawned and stopped through the JSON-RPC protocol. The `EventPump` background task consumes `ProviderEvent`s from `EventAggregator` and converts them to protocol `Event`s with sequence numbers. This is the first time the daemon actively produces events.
+
+## TDD Approach
+
+Agent lifecycle and event conversion require both unit-level precision and integration-level flow verification.
+
+1. **Red**: Write tests for `EventPumpState::process()` with mock `ProviderEvent` inputs — assert exact `Event` output and sequence numbers.
+2. **Green**: Implement handlers and EventPump until tests pass.
+3. **Refactor**: Centralize all `ProviderEvent` knowledge in the pump; no other module references `ProviderEvent`.
+
+Test requirements per story:
+- Handler unit tests: mock `SessionManager`, verify correct method delegation
+- Event conversion unit tests: exhaustive match — every `ProviderEvent` variant produces expected `Event`
+- Sequence number tests: monotonic, no gaps, no duplicates
+- Integration tests: spawn agent via protocol → receive `AgentSpawned` event
+- In-flight item tracking tests: `Started` → `Delta` × N → `Completed` produces correct item lifecycle
 
 ## Stories
 
@@ -43,6 +64,8 @@ Implement the `agent.spawn` method handler that creates a new agent in the pool.
 - Response contains a complete `AgentSnapshot`
 - Invalid provider/role produces `-32602`
 - Pool capacity limits are enforced
+- **Tests**: `spawn_returns_snapshot` — response contains valid `AgentSnapshot`; `spawn_invalid_provider` — invalid provider returns `-32602`
+
 
 #### Technical Notes
 
@@ -75,6 +98,8 @@ Implement the `agent.stop` method handler for graceful agent shutdown.
 - `force: true` sends SIGKILL instead of graceful shutdown
 - Unknown `agent_id` produces `-32101`
 - Stopped agent is removed from the active pool
+- **Tests**: `stop_graceful` — running agent stops cleanly; `stop_force` — force flag sends SIGKILL; `stop_unknown` — unknown agent returns `-32101`
+
 
 #### Technical Notes
 
@@ -106,6 +131,8 @@ Implement the `agent.list` method handler for querying all agents.
 - Default list shows only non-stopped agents
 - `include_stopped: true` shows all agents including stopped
 - Response is sorted by agent creation time
+- **Tests**: `list_default` — shows only running agents; `list_include_stopped` — shows all agents when flag set
+
 
 ---
 
@@ -134,6 +161,8 @@ Wire the existing `EventAggregator` from `agent_core` into the daemon's `Session
 - Agent spawn registers a new event receiver
 - Agent stop removes the event receiver (no leak)
 - Events flow from provider thread → aggregator → `event_rx`
+- **Tests**: `aggregator_register` — spawn adds receiver; `aggregator_unregister` — stop removes receiver; `aggregator_no_leak` — no receiver leak after 100 spawn/stop cycles
+
 
 #### Technical Notes
 
@@ -168,6 +197,8 @@ Implement the background task that polls `ProviderEvent`s, converts them to `Eve
 - Every `ProviderEvent` produces at least one `Event`
 - `seq` numbers start at `1` and increment by `1` per event
 - `current_items` tracks in-flight items correctly across `Started` → `Delta` × N → `Completed`
+- **Tests**: `convert_exec_started` — produces `ItemStarted`; `convert_output_delta` — produces `ItemDelta` with correct `item_id`; `convert_finished` — produces `ItemCompleted`; `seq_monotonic` — sequence numbers increment by 1
+
 
 #### Technical Notes
 

@@ -10,9 +10,29 @@
 - Created: 2026-04-20
 - Depends On: Architecture Blueprint approval, IMP-01/02 finalized
 
+## Background
+
+Currently, `agent-tui` directly imports 140+ symbols from `agent-core` across 18 files. There is no shared message format between the TUI and the runtime — the TUI calls core methods directly and polls `mpsc::Receiver<ProviderEvent>` for updates. This tight coupling makes it impossible to have multiple TUI instances, prevents the CLI from existing independently, and means closing the terminal kills the agent.
+
+This sprint establishes the foundational contract that decouples frontend from backend. The `agent-protocol` crate becomes the single source of truth: all messages, events, and state snapshots that ever flow between daemon and clients are defined here first. Without this crate, no subsequent sprint can proceed — daemon and client teams would have no common language.
+
 ## Sprint Goal
 
 Establish the `agent-protocol` crate as the single source of truth for all daemon-client communication. All JSON-RPC 2.0 envelope types, method enums, event types, and state snapshot types are defined, serializable, and covered by unit tests. No runtime logic — pure data contracts only.
+
+## TDD Approach
+
+This sprint is pure data-contract work — ideal for TDD because behavior is fully specified by the JSON shape.
+
+1. **Red**: For each type, write a test that asserts the serialized JSON matches the expected wire format from IMP-01.
+2. **Green**: Add the struct/enum and `derive(Serialize, Deserialize)` until the test passes.
+3. **Refactor**: Extract common patterns, verify no custom `Serialize` impls are needed.
+
+Test requirements per story:
+- Round-trip serialization tests (`serialize → deserialize → assert_eq`)
+- Wire-format contract tests (compare actual JSON string against expected)
+- Edge-case tests: null optional fields, unknown enum variants, malformed input
+- All tests must pass before the story is marked done
 
 ## Stories
 
@@ -43,6 +63,8 @@ Implement the generic JSON-RPC 2.0 message types that wrap all protocol communic
 - `RequestId` is always a string, never an integer
 - Invalid JSON produces a parseable error structure
 - Round-trip serialization is lossless for all variants
+- **Tests**: `jsonrpc_serde_roundtrip` — every variant serializes and deserializes without loss; `jsonrpc_parse_error` — invalid JSON produces `-32700` error response
+
 
 #### Technical Notes
 
@@ -77,6 +99,8 @@ Define all method parameters and result types for client-to-daemon requests.
 - Param structs use `#[serde(default)]` and `#[serde(skip_serializing_if)]` where appropriate
 - `ClientMethod` enum is exhaustive — no stringly-typed dispatch
 - All parameter types have corresponding deserialization tests
+- **Tests**: `method_contract_roundtrip` — every `ClientMethod` variant produces correct JSON shape; `method_invalid_params` — unknown `client_type` produces `-32602`
+
 
 #### Technical Notes
 
@@ -111,6 +135,8 @@ Define the event payload types that the daemon broadcasts to all connected clien
 - `type` field uses camelCase (`agentSpawned`, `itemDelta`, etc.)
 - `data` field contains the payload object
 - Server-initiated notifications (`approval.request`) are distinct from `event` notifications
+- **Tests**: `event_wire_format` — each `EventPayload` variant matches IMP-01 §4.1 JSON shape exactly; `event_seq_monotonic` — sequence numbers increment by 1
+
 
 #### Technical Notes
 
@@ -145,6 +171,8 @@ Define the `SessionState` and all nested snapshot types sent on `session.initial
 - Timestamps are ISO 8601 strings, not `chrono` types
 - Optional fields (`focused_agent_id`, `completed_at`) are omitted when null
 - `protocol_version` field is present and matches `PROTOCOL_VERSION` constant
+- **Tests**: `session_state_roundtrip` — full `SessionState` serializes and deserializes; `session_state_optional_fields` — null fields are omitted in JSON
+
 
 #### Technical Notes
 
@@ -177,6 +205,8 @@ Implement application-specific error types and the protocol version constant.
 - Error `data` includes contextual fields (`agent_id`, `request_id`, etc.)
 - `JsonRpcError` serialization matches IMP-01 §7.3
 - `PROTOCOL_VERSION` is accessible from both daemon and client crates
+- **Tests**: `protocol_error_codes` — every `ProtocolError` variant maps to correct code; `protocol_error_data` — error `data` contains contextual fields
+
 
 #### Technical Notes
 

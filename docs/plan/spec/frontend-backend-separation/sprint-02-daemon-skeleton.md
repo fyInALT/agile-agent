@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 1: Protocol Foundation](./sprint-01-protocol-foundation.md)
 
+## Background
+
+With the `agent-protocol` crate complete, we have the shared language — but no process speaks it yet. The daemon process does not exist; there is no WebSocket server, no connection handler, and no request routing. A client attempting to connect would find nothing listening on any port.
+
+This sprint builds the service-layer skeleton: the `agent-daemon` binary that binds to a local WebSocket, accepts connections, parses JSON-RPC, and routes requests. At the end of this sprint, a test client can connect, send `session.initialize`, and receive a response. The daemon has no real state yet — it returns hardcoded stubs — but the full request/response pipeline is operational.
+
 ## Sprint Goal
 
 Create the `agent-daemon` binary with a functional WebSocket server that accepts connections, parses JSON-RPC messages, and routes requests to the correct handler. The daemon can start, bind to an ephemeral port, and echo a `session.initialize` response. No real runtime state yet — just the service layer skeleton.
+
+## TDD Approach
+
+This sprint introduces async I/O and concurrency — tests must be deterministic and fast.
+
+1. **Red**: Write tests using in-memory `tokio::io::duplex()` streams to simulate WebSocket connections without real TCP.
+2. **Green**: Implement the server, connection handler, and router until tests pass.
+3. **Refactor**: Extract shared test harness code; ensure no real ports are needed for unit tests.
+
+Test requirements per story:
+- In-memory WebSocket tests (no real TCP, no port conflicts)
+- Unit tests for router dispatch (mock handlers)
+- Integration tests for full request→response pipeline
+- Connection lifecycle tests: connect, initialize, disconnect, cleanup
+- All async tests use `tokio::test` with deterministic ordering
 
 ## Stories
 
@@ -43,6 +64,8 @@ Implement the WebSocket server that binds to localhost on an ephemeral port.
 - `local_addr()` returns `127.0.0.1:<port>`
 - Binary WebSocket frames are rejected with `1003`
 - Server runs until explicitly shut down
+- **Tests**: `server_bind_ephemeral` — binds to `127.0.0.1:0` and returns valid port; `server_reject_binary` — binary frame rejected with `1003`
+
 
 #### Technical Notes
 
@@ -77,6 +100,8 @@ Implement per-connection state management: read JSON-RPC messages, enforce initi
 - Any method call before `session.initialize` returns error `-32100`
 - Malformed JSON returns JSON-RPC parse error (`-32700`)
 - Connection cleans up on disconnect (no resource leaks)
+- **Tests**: `connection_initialize_gate` — methods before `session.initialize` return `-32100`; `connection_malformed_json` — invalid JSON returns `-32700`
+
 
 #### Technical Notes
 
@@ -111,6 +136,8 @@ Implement the two-way JSON-RPC message serialization and deserialization within 
 - Request `id` is echoed verbatim in the response
 - Unknown methods produce `-32601` with the method name in the message
 - Invalid JSON produces `-32700`; invalid params produces `-32602`
+- **Tests**: `framing_request_response` — request `id` echoed verbatim; `framing_unknown_method` — unknown method returns `-32601`
+
 
 #### Technical Notes
 
@@ -145,6 +172,8 @@ Implement the router that maps method names to handler functions.
 - Router dispatches in O(1) via HashMap lookup
 - Handler errors are converted to `JsonRpcErrorResponse`, not panics
 - Notifications do not expect or wait for responses
+- **Tests**: `router_dispatch` — registered method routes to correct handler; `router_not_found` — unregistered method returns `-32601`
+
 
 #### Technical Notes
 
@@ -179,6 +208,8 @@ Implement the first real handler: `session.initialize` returning a hardcoded sna
 - Connection state transitions to `Initialized` after successful response
 - Second `session.initialize` on same connection returns error `-32105`
 - Unknown `client_type` values produce `-32602`
+- **Tests**: `initialize_returns_snapshot` — response contains valid `SessionState`; `initialize_twice_fails` — second initialize returns `-32105`
+
 
 #### Technical Notes
 

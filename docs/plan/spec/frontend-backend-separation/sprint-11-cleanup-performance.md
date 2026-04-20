@@ -10,9 +10,30 @@
 - Created: 2026-04-20
 - Depends On: [Sprint 10: Hardening](./sprint-10-hardening.md)
 
+## Background
+
+All functional work is done. The daemon is the sole state owner. The TUI and CLI are pure protocol clients. Reconnect, approval, and error handling all work. But the codebase still contains legacy embedded-mode code paths, feature flags, and re-export stubs that were needed during the transition. The `agent-core` crate may have dead code. Documentation still describes the old architecture. No performance benchmarks exist to validate the claim that WebSocket overhead is negligible.
+
+This sprint is the final cleanup and validation. It removes all legacy code, runs performance benchmarks, updates documentation, and prepares the release. This is not optional polish — leaving dead code creates permanent technical debt that future developers will trip over.
+
 ## Sprint Goal
 
 All legacy embedded-mode code is removed. The system passes performance benchmarks with multiple concurrent clients. Documentation is updated. The release is ready for deployment. This is the final sprint of the frontend-backend separation.
+
+## TDD Approach
+
+Cleanup removes code, which removes tests. The TDD discipline here is: delete code only after confirming it has no callers.
+
+1. **Red**: Before deleting any module, run the full test suite. All tests must pass — this establishes the baseline.
+2. **Green**: Delete the legacy code. Run tests again. If any test fails, the deleted code was still needed — restore and investigate.
+3. **Refactor**: After deletion, verify workspace compiles and all tests pass.
+
+Test requirements per story:
+- Deletion safety: `cargo test --workspace` passes before and after each removal
+- Coverage audit: overall workspace coverage does not drop below 80%
+- Performance benchmarks: event latency, snapshot size, memory usage — all measured and documented
+- Regression tests: full E2E test suite (daemon + TUI + CLI) passes
+- Documentation tests: all code examples in docs compile and run correctly
 
 ## Stories
 
@@ -43,6 +64,8 @@ Delete all code paths that supported running without a daemon.
 - No `--embedded-mode` flag in CLI
 - `cargo build --workspace` compiles without the feature
 - All tests pass
+- **Tests**: `no_embedded_feature` — `Cargo.toml` has no `embedded-mode`; `workspace_builds` — `cargo build --workspace` passes; `workspace_tests_pass` — `cargo test --workspace` passes
+
 
 #### Technical Notes
 
@@ -73,6 +96,8 @@ Clean up `agent-core` re-exports that were created solely for TUI consumption.
 - `core/src/lib.rs` contains only re-exports needed by daemon and other core consumers
 - No `pub` items are unused
 - Workspace compiles cleanly
+- **Tests**: `no_dead_reexports` — `cargo build` succeeds after re-export removal; `core_compiles` — `agent-core` compiles without TUI-only re-exports
+
 
 ---
 
@@ -103,6 +128,8 @@ Validate performance with multiple concurrent TUI and CLI clients.
 - Daemon memory usage is under 100MB with 3 clients and active agents
 - Snapshot generation is under 50ms for typical sessions
 - Event replay (10,000 events) completes in under 2s
+- **Tests**: `latency_under_5ms` — event latency < 5ms; `memory_under_100mb` — daemon RSS < 100MB; `snapshot_under_50ms` — snapshot generation < 50ms; `replay_under_2s` — 10k event replay < 2s
+
 
 #### Technical Notes
 
@@ -134,6 +161,8 @@ Update all user-facing and developer documentation.
 - New users can set up and run with daemon mode from README alone
 - Architecture diagrams show daemon + protocol + clients
 - Migration guide covers all breaking changes
+- **Tests**: `readme_works` — new user can follow README from scratch; `architecture_diagram_updated` — diagram shows daemon + protocol + clients
+
 
 ---
 
@@ -161,6 +190,8 @@ Prepare release notes and communicate changes to users.
 - Release notes are complete and accurate
 - Users understand what changed and why
 - No undocumented breaking changes
+- **Tests**: `release_notes_complete` — all changes documented; `no_undocumented_breaking` — every breaking change listed; `docs_compile` — all code examples in docs run correctly
+
 
 ---
 
