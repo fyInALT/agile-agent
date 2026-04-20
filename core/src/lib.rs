@@ -76,3 +76,8 @@ pub use agent_worktree::{
     GitFlowExecutor, GitFlowError, GitFlowConfig, GitFlowConfigError,
     TaskType, TaskPriority, PreparationResult, WorkspaceHealthReport,
 };
+
+// Re-export backlog types from agent-backlog for backward compatibility
+pub use agent_backlog::{
+    BacklogState, ThreadSafeBacklog,
+};

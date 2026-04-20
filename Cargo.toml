@@ -4,6 +4,7 @@ members = [
     "agent/toolkit",
     "agent/provider",
     "agent/worktree",
+    "agent/backlog",
     "cli",
     "core",
     "decision",
