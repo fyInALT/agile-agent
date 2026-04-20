@@ -1755,4 +1755,86 @@ mod tests {
         assert!(config.auto_cleanup);
         assert_eq!(config.idle_timeout_secs, 3600);
     }
+
+    #[test]
+    fn parse_porcelain_empty_output() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        let worktrees = manager.parse_porcelain_output("").unwrap();
+        assert_eq!(worktrees.len(), 0);
+    }
+
+    #[test]
+    fn parse_porcelain_malformed_missing_worktree_line() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        // Malformed: missing "worktree" line
+        let output = "HEAD abc123\nbranch refs/heads/main\n";
+        let worktrees = manager.parse_porcelain_output(output).unwrap();
+        // Should skip malformed entry
+        assert_eq!(worktrees.len(), 0);
+    }
+
+    #[test]
+    fn create_duplicate_worktree_fails() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        // Create first worktree
+        let options = WorktreeCreateOptions {
+            path: PathBuf::new(),
+            branch: Some("test-branch".to_string()),
+            create_branch: true,
+            base: None,
+            lock_reason: None,
+        };
+        manager.create("duplicate-name", options.clone()).unwrap();
+
+        // Try to create with same name - should fail
+        let result = manager.create("duplicate-name", options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remove_nonexistent_worktree_fails() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        let result = manager.remove("nonexistent-worktree", false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_info_for_nonexistent_worktree_returns_error() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        let result = manager.get_worktree_by_name("nonexistent-worktree");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn worktree_info_path_exists_after_create() {
+        let (_temp, repo_path) = create_test_repo();
+        let config = WorktreeConfig::default();
+        let manager = WorktreeManager::new(repo_path, config).unwrap();
+
+        let info = manager
+            .create_for_agent("test_agent", Some("task-123"))
+            .unwrap();
+
+        // The path should actually exist on disk
+        assert!(info.path.exists());
+        assert!(info.path.is_dir());
+
+        // Cleanup
+        manager.remove("test_agent", false).unwrap();
+    }
 }

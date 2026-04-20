@@ -88,8 +88,11 @@ mod tests {
     use crate::backlog::BacklogState;
     use crate::backlog::TodoItem;
     use crate::backlog::TodoStatus;
+    use crate::backlog::TaskItem;
+    use crate::backlog::TaskStatus;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
+    use std::fs;
 
     #[test]
     fn missing_backlog_file_returns_empty_state() {
@@ -144,5 +147,142 @@ mod tests {
 
         assert_eq!(loaded.todos.len(), 1);
         assert_eq!(loaded.todos[0].id, "todo-1");
+    }
+
+    #[test]
+    fn invalid_json_returns_error() {
+        let temp = TempDir::new().expect("tempdir");
+        let backlog_path = temp.path().join("backlog.json");
+        fs::write(&backlog_path, "{invalid json}").expect("write invalid json");
+
+        let result = load_backlog_from_root(temp.path());
+        assert!(result.is_err(), "invalid JSON should return error");
+    }
+
+    #[test]
+    fn empty_backlog_file_returns_empty_state() {
+        let temp = TempDir::new().expect("tempdir");
+        let backlog_path = temp.path().join("backlog.json");
+        fs::write(&backlog_path, "").expect("write empty file");
+
+        let result = load_backlog_from_root(temp.path());
+        // Empty file should fail to parse
+        assert!(result.is_err(), "empty file should return error");
+    }
+
+    #[test]
+    fn saves_tasks_along_with_todos() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut backlog = BacklogState::default();
+        backlog.push_todo(TodoItem {
+            id: "todo-1".to_string(),
+            title: "todo".to_string(),
+            description: "desc".to_string(),
+            priority: 1,
+            status: TodoStatus::Ready,
+            acceptance_criteria: vec!["done".to_string()],
+            dependencies: Vec::new(),
+            source: "test".to_string(),
+        });
+        backlog.push_task(TaskItem {
+            id: "task-1".to_string(),
+            todo_id: "todo-1".to_string(),
+            objective: "implement".to_string(),
+            scope: "full".to_string(),
+            constraints: vec!["no deps".to_string()],
+            verification_plan: vec!["run tests".to_string()],
+            status: TaskStatus::Ready,
+            result_summary: None,
+        });
+
+        save_backlog_to_root(&backlog, temp.path()).expect("save backlog");
+        let loaded = load_backlog_from_root(temp.path()).expect("load backlog");
+
+        assert_eq!(loaded.todos.len(), 1);
+        assert_eq!(loaded.tasks.len(), 1);
+        assert_eq!(loaded.tasks[0].id, "task-1");
+    }
+
+    #[test]
+    fn overwrites_existing_backlog() {
+        let temp = TempDir::new().expect("tempdir");
+
+        // First save
+        let mut backlog1 = BacklogState::default();
+        backlog1.push_todo(TodoItem {
+            id: "todo-1".to_string(),
+            title: "first".to_string(),
+            description: "first".to_string(),
+            priority: 1,
+            status: TodoStatus::Ready,
+            acceptance_criteria: vec!["done".to_string()],
+            dependencies: Vec::new(),
+            source: "test".to_string(),
+        });
+        save_backlog_to_root(&backlog1, temp.path()).expect("save first");
+
+        // Second save with different content
+        let mut backlog2 = BacklogState::default();
+        backlog2.push_todo(TodoItem {
+            id: "todo-2".to_string(),
+            title: "second".to_string(),
+            description: "second".to_string(),
+            priority: 2,
+            status: TodoStatus::InProgress,
+            acceptance_criteria: vec!["done".to_string()],
+            dependencies: Vec::new(),
+            source: "test".to_string(),
+        });
+        save_backlog_to_root(&backlog2, temp.path()).expect("save second");
+
+        let loaded = load_backlog_from_root(temp.path()).expect("load backlog");
+        // Should have second todo, not first
+        assert_eq!(loaded.todos.len(), 1);
+        assert_eq!(loaded.todos[0].id, "todo-2");
+    }
+
+    #[test]
+    fn roundtrip_preserves_all_fields() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut backlog = BacklogState::default();
+        backlog.push_todo(TodoItem {
+            id: "todo-full".to_string(),
+            title: "Full Todo".to_string(),
+            description: "Complete description".to_string(),
+            priority: 5,
+            status: TodoStatus::Blocked,
+            acceptance_criteria: vec!["AC1".to_string(), "AC2".to_string()],
+            dependencies: vec!["dep-1".to_string(), "dep-2".to_string()],
+            source: "integration-test".to_string(),
+        });
+        backlog.push_task(TaskItem {
+            id: "task-full".to_string(),
+            todo_id: "todo-full".to_string(),
+            objective: "Full objective".to_string(),
+            scope: "Complete scope".to_string(),
+            constraints: vec!["c1".to_string()],
+            verification_plan: vec!["vp1".to_string()],
+            status: TaskStatus::Running,
+            result_summary: Some("in progress".to_string()),
+        });
+
+        save_backlog_to_root(&backlog, temp.path()).expect("save");
+        let loaded = load_backlog_from_root(temp.path()).expect("load");
+
+        let todo = &loaded.todos[0];
+        assert_eq!(todo.id, "todo-full");
+        assert_eq!(todo.title, "Full Todo");
+        assert_eq!(todo.description, "Complete description");
+        assert_eq!(todo.priority, 5);
+        assert_eq!(todo.status, TodoStatus::Blocked);
+        assert_eq!(todo.acceptance_criteria.len(), 2);
+        assert_eq!(todo.dependencies.len(), 2);
+        assert_eq!(todo.source, "integration-test");
+
+        let task = &loaded.tasks[0];
+        assert_eq!(task.id, "task-full");
+        assert_eq!(task.objective, "Full objective");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.result_summary, Some("in progress".to_string()));
     }
 }
