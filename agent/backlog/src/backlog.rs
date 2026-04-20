@@ -719,12 +719,19 @@ mod tests {
         let mut handles = vec![];
 
         // Spawn 10 threads that each add a task
+        // Each thread retries until update succeeds (since try_lock may fail initially)
         for i in 0..10 {
             let backlog_clone = Arc::clone(&backlog);
             let handle = thread::spawn(move || {
-                backlog_clone.update(|state| {
+                // Retry until update succeeds
+                let mut retries = 0;
+                while !backlog_clone.update(|state| {
                     state.push_task(task(&format!("task-{}", i), TaskStatus::Ready));
-                });
+                }) && retries < 100 {
+                    retries += 1;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                assert!(retries < 100, "Thread {} failed to update after 100 retries", i);
             });
             handles.push(handle);
         }
