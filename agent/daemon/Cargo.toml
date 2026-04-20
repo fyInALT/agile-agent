@@ -25,6 +25,7 @@ uuid = { workspace = true }
 
 agent-protocol = { path = "../protocol" }
 agent-types = { path = "../types" }
+agent-core = { path = "../../core" }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

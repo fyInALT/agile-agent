@@ -7,4 +7,5 @@ pub mod handler;
 pub mod lifecycle;
 pub mod router;
 pub mod server;
+pub mod session_mgr;
 pub mod workplace;

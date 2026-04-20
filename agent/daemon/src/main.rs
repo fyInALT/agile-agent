@@ -3,6 +3,7 @@
 use agent_daemon::handler::{HeartbeatHandler, SessionHandler};
 use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
+use agent_daemon::session_mgr::SessionManager;
 use agent_daemon::workplace;
 use std::sync::Arc;
 
@@ -52,6 +53,12 @@ async fn main() -> anyhow::Result<()> {
     let config_path = workplace.daemon_json_path();
     let snapshot_path = workplace.snapshot_path();
 
+    // Bootstrap session manager (owns runtime state).
+    let session_mgr = Arc::new(
+        SessionManager::bootstrap(workplace.cwd().to_path_buf(), workplace.workplace_id().clone())
+            .await?,
+    );
+
     let mut lifecycle = DaemonLifecycle::new(config_path.clone());
     let (server, _config) = lifecycle.start(&workplace, args.alias).await?;
 
@@ -59,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("agent-daemon listening on ws://{}/v1/session", addr);
 
     let mut router = Router::new();
-    router.register("session.initialize", Arc::new(SessionHandler));
+    router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
     router.register("session.heartbeat", Arc::new(HeartbeatHandler));
     let router_handle = router.handle();
 
@@ -92,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
     // Trigger graceful shutdown.
     let (mut lifecycle, server_res) = server_handle.await?;
     server_res?;
-    lifecycle.shutdown(Some(snapshot_path)).await?;
+    lifecycle.shutdown(Some(snapshot_path), Some(session_mgr)).await?;
 
     tracing::info!("daemon exited cleanly");
     Ok(())

@@ -45,14 +45,14 @@ pub enum KanbanEvent {
 }
 
 /// Trait for event subscribers
-pub trait KanbanEventSubscriber: Send {
+pub trait KanbanEventSubscriber: Send + Sync {
     fn on_event(&self, event: &KanbanEvent);
 }
 
 /// Event bus for publishing and subscribing to kanban events
 #[derive(Default)]
 pub struct KanbanEventBus {
-    subscribers: RwLock<Vec<Box<dyn KanbanEventSubscriber + Send>>>,
+    subscribers: RwLock<Vec<Box<dyn KanbanEventSubscriber + Send + Sync>>>,
 }
 
 impl std::fmt::Debug for KanbanEventBus {
@@ -71,7 +71,7 @@ impl KanbanEventBus {
     }
 
     /// Subscribe to events
-    pub fn subscribe(&self, subscriber: Box<dyn KanbanEventSubscriber + Send>) {
+    pub fn subscribe(&self, subscriber: Box<dyn KanbanEventSubscriber + Send + Sync>) {
         let mut subscribers = self.subscribers.write().unwrap();
         subscribers.push(subscriber);
     }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 // SessionState
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SessionState {
     pub session_id: String,
     pub alias: String,
@@ -24,22 +24,23 @@ pub struct SessionState {
 // App state
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AppStateSnapshot {
     pub transcript: Vec<TranscriptItem>,
     pub input: InputState,
     pub status: SessionStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct InputState {
     pub text: String,
     pub multiline: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
+    #[default]
     Idle,
     Running,
     WaitingForApproval,
@@ -49,7 +50,7 @@ pub enum SessionStatus {
 // Transcript
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TranscriptItem {
     pub id: String,
     pub kind: ItemKind,
@@ -62,9 +63,10 @@ pub struct TranscriptItem {
     pub completed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
+    #[default]
     UserInput,
     AssistantOutput,
     ToolCall,
@@ -76,7 +78,7 @@ pub enum ItemKind {
 // Agent
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentSnapshot {
     pub id: String,
     pub codename: String,
@@ -88,9 +90,10 @@ pub struct AgentSnapshot {
     pub uptime_seconds: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSlotStatus {
+    #[default]
     Idle,
     Running,
     Stopped,
@@ -101,7 +104,7 @@ pub enum AgentSlotStatus {
 // Workplace
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorkplaceSnapshot {
     pub id: String,
     pub path: String,
@@ -109,12 +112,12 @@ pub struct WorkplaceSnapshot {
     pub skills: Vec<SkillSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct BacklogSnapshot {
     pub items: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SkillSnapshot {
     pub name: String,
     pub enabled: bool,

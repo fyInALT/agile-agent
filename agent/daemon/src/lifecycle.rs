@@ -1,11 +1,14 @@
 //! Daemon startup, heartbeat, and graceful shutdown sequence.
 
 use agent_protocol::config::DaemonConfig;
+use agent_protocol::state::SessionState;
 use crate::server::{ShutdownHandle, WebSocketServer};
+use crate::session_mgr::SessionManager;
 use crate::workplace::ResolvedWorkplace;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -71,7 +74,6 @@ impl DaemonLifecycle {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        // Read, update heartbeat, write atomically.
                         match DaemonConfig::read(&heartbeat_path).await {
                             Ok(mut cfg) => {
                                 cfg.last_heartbeat = Utc::now();
@@ -124,7 +126,11 @@ impl DaemonLifecycle {
     }
 
     /// Trigger graceful shutdown.
-    pub async fn shutdown(&mut self, snapshot_path: Option<PathBuf>) -> Result<()> {
+    pub async fn shutdown(
+        &mut self,
+        snapshot_path: Option<PathBuf>,
+        session_mgr: Option<Arc<SessionManager>>,
+    ) -> Result<()> {
         tracing::info!("graceful shutdown initiated");
 
         // 1. Stop accepting new connections.
@@ -138,18 +144,29 @@ impl DaemonLifecycle {
         // 3. Wait briefly for existing connections to drain.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // 4. Write snapshot (hardcoded schema version 1 for now).
-        if let Some(path) = snapshot_path {
-            let snapshot = serde_json::json!({
-                "version": 1,
-                "sessionState": serde_json::Value::Null,
-                "shutdownAt": Utc::now().to_rfc3339(),
-            });
-            let json = serde_json::to_string_pretty(&snapshot).context("serialize snapshot")?;
-            tokio::fs::write(&path, json)
-                .await
-                .with_context(|| format!("write snapshot {}", path.display()))?;
-            tracing::info!(path = %path.display(), "snapshot written");
+        // 4. Write snapshot from SessionManager if available.
+        if let Some(mgr) = session_mgr {
+            if let Some(path) = snapshot_path {
+                if let Err(e) = mgr.write_snapshot(&path).await {
+                    tracing::warn!("failed to write session snapshot: {}", e);
+                } else {
+                    tracing::info!(path = %path.display(), "session snapshot written");
+                }
+            }
+        } else {
+            // Fallback: write hardcoded snapshot.
+            if let Some(path) = snapshot_path {
+                let snapshot = serde_json::json!({
+                    "version": 1,
+                    "sessionState": SessionState::default(),
+                    "shutdownAt": Utc::now().to_rfc3339(),
+                });
+                let json = serde_json::to_string_pretty(&snapshot).context("serialize snapshot")?;
+                tokio::fs::write(&path, json)
+                    .await
+                    .with_context(|| format!("write snapshot {}", path.display()))?;
+                tracing::info!(path = %path.display(), "snapshot written");
+            }
         }
 
         // 5. Delete daemon.json.
@@ -189,8 +206,7 @@ mod tests {
         assert_eq!(config.pid, std::process::id());
         assert!(config.websocket_url.contains(&server.local_addr().port().to_string()));
 
-        // Clean up
-        lifecycle.shutdown(None).await.unwrap();
+        lifecycle.shutdown(None, None).await.unwrap();
     }
 
     #[tokio::test]
@@ -208,10 +224,9 @@ mod tests {
         let mut lifecycle = DaemonLifecycle::new(config_path.clone());
         let (server, _) = lifecycle.start(&wp, Some("test".into())).await.unwrap();
 
-        // Sanity: server is bound
         assert!(server.local_addr().port() > 0);
 
-        lifecycle.shutdown(Some(snapshot_path.clone())).await.unwrap();
+        lifecycle.shutdown(Some(snapshot_path.clone()), None).await.unwrap();
 
         assert!(!config_path.exists(), "daemon.json should be removed");
         assert!(snapshot_path.exists(), "snapshot.json should be written");
