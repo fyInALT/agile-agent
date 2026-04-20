@@ -180,13 +180,17 @@ impl Connection {
                     })));
                 }
 
-                let response = router.dispatch(req).await?;
+                let result = router.dispatch(req).await?;
 
-                if self.state == ConnectionState::Connected && response.result.is_some() {
-                    self.state = ConnectionState::Initialized;
+                if self.state == ConnectionState::Connected {
+                    if let JsonRpcMessage::Response(ref resp) = result {
+                        if resp.result.is_some() {
+                            self.state = ConnectionState::Initialized;
+                        }
+                    }
                 }
 
-                Ok(Some(JsonRpcMessage::Response(response)))
+                Ok(Some(result))
             }
             JsonRpcMessage::Notification(notif) => {
                 router.dispatch_notification(notif).await?;

@@ -71,7 +71,7 @@ pub struct SetFocusParams {
     pub agent_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentSpawnParams {
     pub provider: ProviderKind,
     pub role: AgentRole,
@@ -79,14 +79,14 @@ pub struct AgentSpawnParams {
     pub codename: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentStopParams {
     pub agent_id: String,
     #[serde(default)]
     pub force: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentListParams {
     #[serde(default)]
     pub include_stopped: bool,

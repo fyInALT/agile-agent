@@ -1,6 +1,6 @@
 //! agent-daemon entry point
 
-use agent_daemon::handler::{HeartbeatHandler, SessionHandler};
+use agent_daemon::handler::{AgentHandler, HeartbeatHandler, SessionHandler};
 use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
 use agent_daemon::session_mgr::SessionManager;
@@ -68,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
     let mut router = Router::new();
     router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
     router.register("session.heartbeat", Arc::new(HeartbeatHandler));
+    router.register("agent.spawn", Arc::new(AgentHandler::new(session_mgr.clone())));
+    router.register("agent.stop", Arc::new(AgentHandler::new(session_mgr.clone())));
+    router.register("agent.list", Arc::new(AgentHandler::new(session_mgr.clone())));
     let router_handle = router.handle();
 
     // Spawn the server run loop in a separate task so we can wait for signals.

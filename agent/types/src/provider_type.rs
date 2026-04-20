@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Kind of LLM provider
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
+    #[default]
     Mock,
     Claude,
     Codex,

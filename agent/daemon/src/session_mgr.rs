@@ -119,6 +119,48 @@ impl SessionManager {
         Ok(state)
     }
 
+    /// Spawn a new agent in the pool.
+    pub async fn spawn_agent(&self, provider: agent_types::ProviderKind) -> Result<AgentSnapshot> {
+        let mut inner = self.inner.lock().await;
+        let agent_id = inner
+            .agent_pool
+            .spawn_agent(provider)
+            .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+
+        // Find the newly created slot.
+        let slot = inner
+            .agent_pool
+            .slots()
+            .iter()
+            .find(|s| s.agent_id().as_str() == agent_id.as_str())
+            .context("spawned agent not found in pool")?;
+
+        Ok(map_agent_slot(slot))
+    }
+
+    /// Stop an agent by ID.
+    pub async fn stop_agent(&self, agent_id: &str) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        inner
+            .agent_pool
+            .stop_agent(&id)
+            .map_err(|e| anyhow::anyhow!("stop failed: {e}"))?;
+        Ok(())
+    }
+
+    /// List agents in the pool.
+    pub async fn list_agents(&self, include_stopped: bool) -> Vec<AgentSnapshot> {
+        let inner = self.inner.lock().await;
+        inner
+            .agent_pool
+            .slots()
+            .iter()
+            .filter(|s| include_stopped || !matches!(s.status(), CoreAgentStatus::Stopped { .. }))
+            .map(map_agent_slot)
+            .collect()
+    }
+
     /// Write a snapshot file to disk for session restore on next startup.
     pub async fn write_snapshot(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let snapshot = self.snapshot().await?;

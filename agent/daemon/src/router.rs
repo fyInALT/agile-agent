@@ -14,15 +14,15 @@ pub struct RouterHandle {
 
 impl RouterHandle {
     /// Dispatch a request to the appropriate handler.
-    pub async fn dispatch(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcResponse> {
+    pub async fn dispatch(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcMessage> {
         if let Some(handler) = self.inner.handlers.get(&req.method) {
             handler.handle(req).await
         } else {
-            Ok(JsonRpcResponse {
+            Ok(JsonRpcMessage::Response(JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: None,
-            })
+            }))
         }
     }
 
@@ -82,12 +82,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Handler for EchoHandler {
-        async fn handle(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcResponse> {
-            Ok(JsonRpcResponse {
+        async fn handle(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcMessage> {
+            Ok(JsonRpcMessage::Response(JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
                 result: req.params,
-            })
+            }))
         }
     }
 
@@ -105,7 +105,10 @@ mod tests {
         };
 
         let resp = handle.dispatch(req).await.unwrap();
-        assert_eq!(resp.result, Some(serde_json::json!(42)));
+        match resp {
+            JsonRpcMessage::Response(r) => assert_eq!(r.result, Some(serde_json::json!(42))),
+            _ => panic!("expected response"),
+        }
     }
 
     #[tokio::test]
@@ -121,6 +124,9 @@ mod tests {
         };
 
         let resp = handle.dispatch(req).await.unwrap();
-        assert!(resp.result.is_none());
+        match resp {
+            JsonRpcMessage::Response(r) => assert!(r.result.is_none()),
+            _ => panic!("expected response"),
+        }
     }
 }

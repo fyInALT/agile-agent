@@ -12,13 +12,13 @@ pub struct HeartbeatHandler;
 
 #[async_trait]
 impl Handler for HeartbeatHandler {
-    async fn handle(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcResponse> {
+    async fn handle(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcMessage> {
         // Heartbeat is a no-op for routing; respond with empty success.
-        Ok(JsonRpcResponse {
+        Ok(JsonRpcMessage::Response(JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id: req.id,
             result: Some(serde_json::json!({})),
-        })
+        }))
     }
 }
 
@@ -40,7 +40,12 @@ mod tests {
             params: None,
         };
         let resp = handler.handle(req).await.unwrap();
-        assert!(resp.result.is_some());
-        assert_eq!(resp.result.unwrap(), serde_json::json!({}));
+        match resp {
+            JsonRpcMessage::Response(r) => {
+                assert!(r.result.is_some());
+                assert_eq!(r.result.unwrap(), serde_json::json!({}));
+            }
+            _ => panic!("expected response"),
+        }
     }
 }
