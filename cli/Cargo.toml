@@ -9,12 +9,23 @@ name = "agile-agent"
 path = "src/main.rs"
 
 [dependencies]
-agent-core = { path = "../core" }
-agent-decision = { path = "../decision" }
+agent-core = { path = "../core", optional = true }
+agent-decision = { path = "../decision", optional = true }
+agent-protocol = { path = "../agent/protocol" }
+agent-tui = { path = "../tui", optional = true }
 anyhow.workspace = true
 clap.workspace = true
+futures = "0.3"
+libc = "0.2"
 serde_json.workspace = true
-agent-tui = { path = "../tui" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-tungstenite = { workspace = true }
+tracing.workspace = true
+uuid = { workspace = true }
+
+[features]
+default = ["core"]
+core = ["dep:agent-core", "dep:agent-decision", "dep:agent-tui"]
 
 [dev-dependencies]
 agent-test-support = { path = "../test-support" }

@@ -66,6 +66,11 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Manage the agent daemon lifecycle.
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -137,6 +142,16 @@ pub enum DecisionCommand {
         #[arg(long, default_value_t = 10)]
         count: usize,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonCommand {
+    /// Start the daemon for the current workplace.
+    Start,
+    /// Stop the daemon for the current workplace.
+    Stop,
+    /// Show daemon status (pid, url, uptime).
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -224,6 +239,11 @@ pub fn execute(cli: Cli) -> Result<()> {
             println!("probe requires --json");
             Ok(())
         }
+        Some(Command::Daemon { command }) => match command {
+            DaemonCommand::Start => daemon_start(),
+            DaemonCommand::Stop => daemon_stop(),
+            DaemonCommand::Status => daemon_status(),
+        },
     }
 }
 
@@ -269,6 +289,7 @@ fn run_mode_for_cli(cli: &Cli) -> RunMode {
             command: DecisionCommand::History { .. },
         }) => RunMode::DecisionHistory,
         Some(Command::Profile { .. }) => RunMode::ProfileList,
+        Some(Command::Daemon { .. }) => RunMode::Daemon,
     }
 }
 
@@ -838,6 +859,96 @@ fn print_profile_list(verbose: bool) -> Result<()> {
     println!("Default work profile: {}", store.default_work_profile_id());
     println!("Default decision profile: {}", store.default_decision_profile_id());
 
+    Ok(())
+}
+
+fn daemon_start() -> Result<()> {
+    let launch_cwd = std::env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let wp_id = workplace.workplace_id().clone();
+    let daemon_json = agent_protocol::config::DaemonConfig::path_for_workplace(
+        workplace.path(),
+        &wp_id,
+    );
+
+    let rt = tokio::runtime::Runtime::new()?;
+    let result = rt.block_on(agent_protocol::client::auto_link::auto_link(
+        &wp_id,
+        &daemon_json,
+        None,
+        std::time::Duration::from_secs(10),
+    ))?;
+
+    println!("Daemon started");
+    println!("  PID:     {}", result.pid);
+    println!("  URL:     {}", result.websocket_url);
+    println!("  Spawned: {}", if result.spawned { "yes" } else { "already running" });
+    Ok(())
+}
+
+fn daemon_stop() -> Result<()> {
+    let launch_cwd = std::env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let wp_id = workplace.workplace_id().clone();
+    let daemon_json = agent_protocol::config::DaemonConfig::path_for_workplace(
+        workplace.path(),
+        &wp_id,
+    );
+
+    let rt = tokio::runtime::Runtime::new()?;
+    match rt.block_on(agent_protocol::config::DaemonConfig::read(&daemon_json)) {
+        Ok(config) => {
+            // Send SIGTERM
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(config.pid as i32, libc::SIGTERM);
+            }
+            #[cfg(not(unix))]
+            {
+                println!("Daemon stop not supported on this platform");
+                return Ok(());
+            }
+            println!("Sent SIGTERM to daemon (pid {})", config.pid);
+            // Wait for daemon.json to disappear
+            for _ in 0..50 {
+                if !daemon_json.exists() {
+                    println!("Daemon stopped.");
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            anyhow::bail!("daemon did not stop within 5s");
+        }
+        Err(_) => {
+            println!("No daemon running for this workplace.");
+            Ok(())
+        }
+    }
+}
+
+fn daemon_status() -> Result<()> {
+    let launch_cwd = std::env::current_dir()?;
+    let workplace = WorkplaceStore::for_cwd(&launch_cwd)?;
+    let wp_id = workplace.workplace_id().clone();
+    let daemon_json = agent_protocol::config::DaemonConfig::path_for_workplace(
+        workplace.path(),
+        &wp_id,
+    );
+
+    let rt = tokio::runtime::Runtime::new()?;
+    match rt.block_on(agent_protocol::config::DaemonConfig::read(&daemon_json)) {
+        Ok(config) => {
+            let alive = unsafe { libc::kill(config.pid as i32, 0) == 0 };
+            println!("Daemon status");
+            println!("  PID:     {}", config.pid);
+            println!("  URL:     {}", config.websocket_url);
+            println!("  Alive:   {}", if alive { "yes" } else { "no (stale config)" });
+            println!("  Started: {}", config.started_at);
+        }
+        Err(_) => {
+            println!("No daemon running for this workplace.");
+        }
+    }
     Ok(())
 }
 

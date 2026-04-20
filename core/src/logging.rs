@@ -36,6 +36,7 @@ pub enum RunMode {
     DecisionRespond,
     DecisionHistory,
     ProfileList,
+    Daemon,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +78,7 @@ impl RunMode {
             Self::DecisionRespond => "decision-respond",
             Self::DecisionHistory => "decision-history",
             Self::ProfileList => "profile-list",
+            Self::Daemon => "daemon",
         }
     }
 }
