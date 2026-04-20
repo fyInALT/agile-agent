@@ -24,7 +24,14 @@ Layered architecture: `agent-cli` as the entry point, coordinating `agent-tui` (
 - Do not take on technical debt in technical decisions. Prefer clear architecture, explicit boundaries, and durable implementations over shortcuts.
 - During every planning step, explicitly re-evaluate whether the current architecture and module boundaries are still the right fit.
 - After every completed task, explicitly check whether all requirements were fully delivered and whether there is any worthwhile improvement to make before closing the work.
-- Git commit messages must be clear, concise, when u finished a task, commit changes then keep workspace clean.
+- All commit messages, PR messages, documentation, comments, and file names must be in **English**.
+- Git commit messages must be clear and concise; commit changes and keep the workspace clean when a task is finished.
+- Development follows **git-flow** conventions:
+  - `main` is the production branch; only merge stable releases into it.
+  - Create `feature/<name>` branches from `main` (or `develop` if one exists) for every new feature or refactor.
+  - Create `fix/<name>` branches for bug fixes.
+  - Keep branches focused and short-lived; rebase onto the latest base branch before opening a PR.
+  - Ensure the branch is up to date and all tests pass before merging.
 
 ## Multi-Agent Architecture
 
@@ -73,6 +80,7 @@ The multi-agent foundation provides Scrum-style coordination:
 - `decision/`: `agent-decision` crate — classifiers, engines, actions, situations
 - `kanban/`: `agent-kanban` crate — trait-based Kanban domain model
 - `llm-provider/`: `agent-llm-provider` crate — OpenAI client/provider abstraction
+- `agent/commands/`: `agent-commands` crate — command bus and slash command system
 - `test-support/`: `agent-test-support` crate — shared test helpers
 
 ### Documentation
@@ -85,6 +93,7 @@ The multi-agent foundation provides Scrum-style coordination:
 - `docs/plan/spec/kanban/`: Kanban system sprint specs
 - `docs/superpowers/specs/`: Design specs written through superpowers workflow
 - `docs/superpowers/plans/`: Implementation plans written through superpowers workflow
+- `docs/refactor/`: Refactoring analysis and architectural decision records
 
 ### Scripts
 
