@@ -7,7 +7,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::agent_mail::{AgentMail, MailBody, MailId, MailSubject, MailTarget};
-use crate::agent_pool::AgentStatusSnapshot;
+use crate::pool::AgentStatusSnapshot;
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::AgentId;
 use crate::agent_slot::TaskId;

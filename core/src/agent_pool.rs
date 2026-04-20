@@ -15,6 +15,12 @@ use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, De
 use crate::logging;
 use crate::{ProviderEvent, ProviderKind};
 use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};
+// Pool types (extracted to pool module, re-exported for backward compatibility)
+pub use crate::pool::{
+    AgentBlockedEvent, AgentBlockedNotifier, AgentStatusSnapshot, AgentTaskAssignment,
+    BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
+    DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
+};
 // Worktree types are re-exported from agent-worktree
 use crate::{
     WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
@@ -139,171 +145,6 @@ fn convert_provider_event_to_decision(
             }
         }
     }
-}
-
-/// Event emitted when an agent becomes blocked
-#[derive(Debug, Clone)]
-pub struct AgentBlockedEvent {
-    /// The blocked agent ID
-    pub agent_id: AgentId,
-    /// The reason type
-    pub reason_type: String,
-    /// Human readable description
-    pub description: String,
-    /// Urgency level
-    pub urgency: String,
-}
-
-/// Notifier trait for agent blocked events
-///
-/// Implement this trait to receive notifications when agents become blocked.
-/// This enables other agents or systems to react to blocking events.
-pub trait AgentBlockedNotifier: Send + Sync {
-    /// Called when an agent becomes blocked
-    fn on_agent_blocked(&self, event: AgentBlockedEvent);
-}
-
-/// No-op notifier that does nothing
-#[derive(Debug, Clone, Default)]
-pub struct NoOpAgentBlockedNotifier;
-
-impl AgentBlockedNotifier for NoOpAgentBlockedNotifier {
-    fn on_agent_blocked(&self, _event: AgentBlockedEvent) {
-        // Do nothing
-    }
-}
-
-/// Snapshot of an agent's status for display
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentStatusSnapshot {
-    pub agent_id: AgentId,
-    pub codename: AgentCodename,
-    pub provider_type: ProviderType,
-    pub role: AgentRole,
-    pub status: AgentSlotStatus,
-    pub assigned_task_id: Option<TaskId>,
-    /// Worktree branch name (if agent has worktree)
-    pub worktree_branch: Option<String>,
-    /// Whether agent has a worktree
-    pub has_worktree: bool,
-    /// Whether worktree directory exists on disk
-    pub worktree_exists: bool,
-}
-
-/// Per-agent task assignment info for visualization
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentTaskAssignment {
-    pub agent_id: AgentId,
-    pub codename: AgentCodename,
-    pub task_id: TaskId,
-    pub task_status: TaskStatus,
-}
-
-/// Snapshot of task queue state for TUI display
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskQueueSnapshot {
-    /// Total number of tasks in backlog
-    pub total_tasks: usize,
-    /// Number of tasks ready to be assigned
-    pub ready_tasks: usize,
-    /// Number of tasks currently running
-    pub running_tasks: usize,
-    /// Number of tasks completed successfully
-    pub completed_tasks: usize,
-    /// Number of tasks that failed
-    pub failed_tasks: usize,
-    /// Number of tasks that are blocked
-    pub blocked_tasks: usize,
-    /// Tasks assigned to specific agents
-    pub agent_assignments: Vec<AgentTaskAssignment>,
-    /// Number of idle agents available for assignment
-    pub available_agents: usize,
-    /// Number of active agents (responding/executing)
-    pub active_agents: usize,
-}
-
-/// Policy for handling tasks when agent becomes blocked
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockedTaskPolicy {
-    /// Task stays assigned to blocked agent
-    KeepAssigned,
-    /// Reassign task to another idle agent if available
-    ReassignIfPossible,
-    /// Mark task as waiting in backlog
-    MarkWaiting,
-}
-
-impl Default for BlockedTaskPolicy {
-    fn default() -> Self {
-        BlockedTaskPolicy::ReassignIfPossible
-    }
-}
-
-/// Blocked handling configuration
-#[derive(Debug, Clone)]
-pub struct BlockedHandlingConfig {
-    /// Task policy when agent blocked
-    pub task_policy: BlockedTaskPolicy,
-    /// Human decision timeout config
-    pub timeout_config: HumanDecisionTimeoutConfig,
-    /// Notify other agents when blocked
-    pub notify_others: bool,
-    /// Record blocked history
-    pub record_history: bool,
-    /// Maximum history entries (0 = unlimited)
-    pub max_history_entries: usize,
-}
-
-impl Default for BlockedHandlingConfig {
-    fn default() -> Self {
-        Self {
-            task_policy: BlockedTaskPolicy::default(),
-            timeout_config: HumanDecisionTimeoutConfig::default(),
-            notify_others: true,
-            record_history: true,
-            max_history_entries: 1000,
-        }
-    }
-}
-
-/// Record of agent blocking history
-#[derive(Debug, Clone)]
-pub struct BlockedHistoryEntry {
-    /// Agent ID
-    pub agent_id: AgentId,
-    /// Blocking reason type
-    pub reason_type: String,
-    /// Blocking description
-    pub description: String,
-    /// Duration in milliseconds
-    pub duration_ms: u64,
-    /// Whether it was resolved
-    pub resolved: bool,
-    /// Resolution method
-    pub resolution: Option<String>,
-}
-
-/// Decision execution result
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecisionExecutionResult {
-    /// Selection executed successfully
-    Executed { option_id: String },
-    /// Recommendation accepted
-    AcceptedRecommendation,
-    /// Custom instruction sent
-    CustomInstruction { instruction: String },
-    /// Task skipped
-    Skipped,
-    /// Operation cancelled
-    Cancelled,
-    /// Agent not found
-    AgentNotFound,
-    /// Agent not blocked
-    NotBlocked,
-    /// Task preparation succeeded
-    TaskPrepared { branch: String, worktree_path: PathBuf },
-    /// Task preparation failed
-    PreparationFailed { reason: String },
 }
 
 /// Pool managing multiple agent slots

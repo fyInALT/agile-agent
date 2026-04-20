@@ -27,6 +27,7 @@ pub mod logging;
 pub mod loop_runner;
 pub mod multi_agent_session;
 pub mod persistence_coordinator;
+pub mod pool;
 pub mod provider_profile;
 pub mod runtime_mode;
 pub mod runtime_session;
@@ -89,6 +90,14 @@ pub use agent_storage::app_data_root;
 
 // Re-export slot types for backward compatibility
 pub use slot::{AgentSlotStatus, TaskCompletionResult, ThreadOutcome};
+
+// Re-export pool types for backward compatibility
+pub use pool::{
+    AgentBlockedEvent, AgentBlockedNotifier, NoOpAgentBlockedNotifier,
+    BlockedHandler, BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
+    AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot,
+    DecisionExecutionResult,
+};
 
 #[cfg(test)]
 mod backward_compatibility_tests {
