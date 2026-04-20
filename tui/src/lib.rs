@@ -6,6 +6,7 @@ use anyhow::Result;
 mod event_handler;
 mod protocol_client;
 mod protocol_state;
+mod reconnecting_client;
 mod websocket_client;
 
 // Core-dependent modules (embedded mode).

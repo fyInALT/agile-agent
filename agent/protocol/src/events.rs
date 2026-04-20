@@ -22,6 +22,8 @@ pub enum EventPayload {
     ItemDelta(ItemDeltaData),
     ItemCompleted(ItemCompletedData),
     MailReceived(MailReceivedData),
+    ApprovalRequest(ApprovalRequestData),
+    ApprovalResponse(ApprovalResponseData),
     Error(ErrorData),
 }
 
@@ -84,6 +86,30 @@ pub struct ErrorData {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRequestData {
+    pub request_id: String,
+    pub agent_id: String,
+    pub title: String,
+    pub description: String,
+    pub options: Vec<ApprovalOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalOption {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalResponseData {
+    pub request_id: String,
+    pub selected_option_id: String,
 }
 
 // ---------------------------------------------------------------------------

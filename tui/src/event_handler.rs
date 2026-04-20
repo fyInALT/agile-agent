@@ -62,6 +62,12 @@ pub fn apply_event(state: &mut ProtocolState, event: &Event) {
         EventPayload::MailReceived(_) => {
             // Mail display not yet implemented in TUI.
         }
+        EventPayload::ApprovalRequest(data) => {
+            state.pending_approvals.push(data.clone());
+        }
+        EventPayload::ApprovalResponse(data) => {
+            state.pending_approvals.retain(|a| a.request_id != data.request_id);
+        }
         EventPayload::Error(data) => {
             tracing::warn!("daemon error event: {}", data.message);
         }

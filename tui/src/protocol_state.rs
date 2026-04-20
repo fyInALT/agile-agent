@@ -65,6 +65,7 @@ pub struct ProtocolState {
     pub transcript_rendered_lines: Vec<String>,
     pub busy_started_at: Option<std::time::Instant>,
     pub agent_view_states: HashMap<String, AgentViewState>,
+    pub pending_approvals: Vec<agent_protocol::events::ApprovalRequestData>,
     pub decision_status: Option<String>,
 }
 
@@ -91,6 +92,7 @@ impl Default for ProtocolState {
             transcript_rendered_lines: Vec::new(),
             busy_started_at: None,
             agent_view_states: HashMap::new(),
+            pending_approvals: Vec::new(),
             decision_status: None,
         }
     }
