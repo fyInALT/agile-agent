@@ -5,9 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-types = { path = "../agent-types" }
-agent-toolkit = { path = "../agent-toolkit" }
-agent-decision = { path = "../decision" }
+agent-types = { path = "../types" }
+agent-toolkit = { path = "../toolkit" }
+agent-decision = { path = "../../decision" }
 anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
