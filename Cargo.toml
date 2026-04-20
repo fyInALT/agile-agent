@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agent-types",
+    "agent-toolkit",
     "cli",
     "core",
     "decision",

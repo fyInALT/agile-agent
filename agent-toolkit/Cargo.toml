@@ -1,0 +1,13 @@
+[package]
+name = "agent-toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-types = { path = "../agent-types" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
