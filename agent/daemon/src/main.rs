@@ -103,17 +103,24 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Wait for SIGTERM or SIGINT.
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-
-    tokio::select! {
-        _ = sigterm.recv() => {
-            tracing::info!("received SIGTERM");
+    // Wait for termination signal (Unix: SIGTERM/SIGINT, Windows: Ctrl+C).
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+        tokio::select! {
+            _ = sigterm.recv() => {
+                tracing::info!("received SIGTERM");
+            }
+            _ = sigint.recv() => {
+                tracing::info!("received SIGINT");
+            }
         }
-        _ = sigint.recv() => {
-            tracing::info!("received SIGINT");
-        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+        tracing::info!("received Ctrl+C");
     }
 
     // Trigger graceful shutdown.

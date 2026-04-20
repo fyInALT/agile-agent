@@ -72,6 +72,14 @@ impl DaemonConfig {
             .await
             .with_context(|| format!("rename {} to {}", temp_path.display(), path.display()))?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms)
+                .with_context(|| format!("set permissions on {}", path.display()))?;
+        }
+
         Ok(())
     }
 
