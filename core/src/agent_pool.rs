@@ -13,7 +13,7 @@ use crate::backlog::{BacklogState, TaskStatus};
 use crate::decision_agent_slot::{DecisionAgentSlot, DecisionAgentStatus};
 use crate::decision_mail::{DecisionMail, DecisionMailSender, DecisionRequest, DecisionResponse};
 use crate::logging;
-use crate::provider::{ProviderEvent, ProviderKind};
+use crate::{ProviderEvent, ProviderKind};
 use crate::provider_profile::{ProfileId, ProfilePersistence, ProfileStore, ProviderProfile, get_effective_profile, AgentType as ProfileAgentType};
 use crate::worktree_manager::{
     WorktreeConfig, WorktreeCreateOptions, WorktreeError, WorktreeManager,
@@ -36,43 +36,43 @@ use agent_decision::{
 
 /// Convert core ProviderEvent to decision layer ProviderEvent
 fn convert_provider_event_to_decision(
-    event: &crate::provider::ProviderEvent,
+    event: &crate::ProviderEvent,
 ) -> DecisionProviderEvent {
     match event {
-        crate::provider::ProviderEvent::Finished => {
+        crate::ProviderEvent::Finished => {
             DecisionProviderEvent::Finished { summary: None }
         }
-        crate::provider::ProviderEvent::Error(msg) => DecisionProviderEvent::Error {
+        crate::ProviderEvent::Error(msg) => DecisionProviderEvent::Error {
             message: msg.clone(),
             error_type: None,
         },
-        crate::provider::ProviderEvent::Status(text) => DecisionProviderEvent::StatusUpdate {
+        crate::ProviderEvent::Status(text) => DecisionProviderEvent::StatusUpdate {
             status: text.clone(),
         },
-        crate::provider::ProviderEvent::AssistantChunk(text) => {
+        crate::ProviderEvent::AssistantChunk(text) => {
             DecisionProviderEvent::ClaudeAssistantChunk { text: text.clone() }
         }
-        crate::provider::ProviderEvent::ThinkingChunk(text) => {
+        crate::ProviderEvent::ThinkingChunk(text) => {
             DecisionProviderEvent::ClaudeThinkingChunk { text: text.clone() }
         }
-        crate::provider::ProviderEvent::SessionHandle(handle) => {
+        crate::ProviderEvent::SessionHandle(handle) => {
             DecisionProviderEvent::SessionHandle {
                 session_id: match handle {
-                    crate::provider::SessionHandle::ClaudeSession { session_id } => {
+                    crate::SessionHandle::ClaudeSession { session_id } => {
                         session_id.clone()
                     }
-                    crate::provider::SessionHandle::CodexThread { thread_id } => thread_id.clone(),
+                    crate::SessionHandle::CodexThread { thread_id } => thread_id.clone(),
                 },
                 info: None,
             }
         }
-        crate::provider::ProviderEvent::ExecCommandStarted { input_preview, .. } => {
+        crate::ProviderEvent::ExecCommandStarted { input_preview, .. } => {
             DecisionProviderEvent::ClaudeToolCallStarted {
                 name: "exec".to_string(),
                 input: input_preview.clone(),
             }
         }
-        crate::provider::ProviderEvent::ExecCommandFinished {
+        crate::ProviderEvent::ExecCommandFinished {
             output_preview,
             status,
             ..
@@ -81,7 +81,7 @@ fn convert_provider_event_to_decision(
             output: output_preview.clone(),
             success: matches!(status, crate::ExecCommandStatus::Completed),
         },
-        crate::provider::ProviderEvent::GenericToolCallStarted {
+        crate::ProviderEvent::GenericToolCallStarted {
             name,
             input_preview,
             ..
@@ -89,7 +89,7 @@ fn convert_provider_event_to_decision(
             name: name.clone(),
             input: input_preview.clone(),
         },
-        crate::provider::ProviderEvent::GenericToolCallFinished {
+        crate::ProviderEvent::GenericToolCallFinished {
             name,
             output_preview,
             success,
@@ -99,12 +99,12 @@ fn convert_provider_event_to_decision(
             output: output_preview.clone(),
             success: *success,
         },
-        crate::provider::ProviderEvent::PatchApplyStarted { .. } => {
+        crate::ProviderEvent::PatchApplyStarted { .. } => {
             DecisionProviderEvent::CodexPatchApplyStarted {
                 path: "".to_string(),
             }
         }
-        crate::provider::ProviderEvent::PatchApplyFinished { status, .. } => {
+        crate::ProviderEvent::PatchApplyFinished { status, .. } => {
             DecisionProviderEvent::StatusUpdate {
                 status: match status {
                     crate::PatchApplyStatus::Completed => "patch completed".to_string(),
@@ -116,25 +116,25 @@ fn convert_provider_event_to_decision(
                 },
             }
         }
-        crate::provider::ProviderEvent::McpToolCallStarted { .. } => {
+        crate::ProviderEvent::McpToolCallStarted { .. } => {
             DecisionProviderEvent::ClaudeToolCallStarted {
                 name: "mcp".to_string(),
                 input: None,
             }
         }
-        crate::provider::ProviderEvent::McpToolCallFinished { error, .. } => {
+        crate::ProviderEvent::McpToolCallFinished { error, .. } => {
             DecisionProviderEvent::ClaudeToolCallFinished {
                 name: "mcp".to_string(),
                 output: error.clone(),
                 success: error.is_none(),
             }
         }
-        crate::provider::ProviderEvent::WebSearchStarted { .. }
-        | crate::provider::ProviderEvent::WebSearchFinished { .. }
-        | crate::provider::ProviderEvent::ViewImage { .. }
-        | crate::provider::ProviderEvent::ImageGenerationFinished { .. }
-        | crate::provider::ProviderEvent::ExecCommandOutputDelta { .. }
-        | crate::provider::ProviderEvent::PatchApplyOutputDelta { .. } => {
+        crate::ProviderEvent::WebSearchStarted { .. }
+        | crate::ProviderEvent::WebSearchFinished { .. }
+        | crate::ProviderEvent::ViewImage { .. }
+        | crate::ProviderEvent::ImageGenerationFinished { .. }
+        | crate::ProviderEvent::ExecCommandOutputDelta { .. }
+        | crate::ProviderEvent::PatchApplyOutputDelta { .. } => {
             DecisionProviderEvent::StatusUpdate {
                 status: "running".to_string(),
             }

@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use crate::agent_runtime::AgentId;
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId, ThreadOutcome};
 use crate::logging;
-use crate::provider::ProviderEvent;
+use crate::ProviderEvent;
 
 /// Agent event wrapping provider events with agent context
 #[derive(Debug, Clone, PartialEq, Eq)]

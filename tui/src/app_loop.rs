@@ -10,8 +10,7 @@ use agent_core::commands::LocalCommand;
 use agent_core::commands::parse_legacy_alias;
 use agent_core::logging;
 use agent_core::probe;
-use agent_core::provider;
-use agent_core::provider::ProviderEvent;
+use agent_core::{ProviderEvent, ProviderKind, SessionHandle};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::task_engine;
 use agent_core::task_engine::ExecutionGuardrails;
@@ -92,7 +91,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
     let session = RuntimeSession::bootstrap(
         launch_cwd.clone(),
-        provider::default_provider(),
+        agent_core::default_provider(),
         effective_resume_last && tui_resume_snapshot.is_none(),
     )?;
     let mut state = TuiState::from_session(session);
@@ -468,7 +467,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 ProviderSelectionCommand::Select(provider) => {
                                     state.close_provider_overlay();
                                     // Mock provider skips config overlay (Story 3.9)
-                                    if provider == agent_core::provider::ProviderKind::Mock {
+                                    if provider == agent_core::ProviderKind::Mock {
                                         if let Some(agent_id) = state.spawn_agent(provider) {
                                             state.app_mut().push_status_message(format!(
                                                 "spawned {} with {}",
@@ -1351,7 +1350,7 @@ fn start_provider_request(
         }),
     );
     state.app_mut().mark_active_task_running();
-    if let Err(err) = provider::start_provider(
+    if let Err(err) = agent_core::start_provider(
         provider_kind,
         prompt,
         state.app().cwd.clone(),
@@ -2581,8 +2580,8 @@ mod tests {
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
     use agent_core::command_bus::model::{CommandInvocation, CommandNamespace, CommandTargetSpec};
-    use agent_core::provider::ProviderKind;
-    use agent_core::provider::SessionHandle;
+    use agent_core::ProviderKind;
+    use agent_core::SessionHandle;
     use agent_core::runtime_session::RuntimeSession;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -2699,7 +2698,7 @@ mod tests {
         assert!(state.is_multi_agent_mode());
 
         // Start provider request - should use multi-agent flow
-        let mut provider_rx: Option<mpsc::Receiver<agent_core::provider::ProviderEvent>> = None;
+        let mut provider_rx: Option<mpsc::Receiver<agent_core::ProviderEvent>> = None;
         start_provider_request(&mut state, "hello".to_string(), &mut provider_rx);
 
         // In multi-agent mode, provider_rx should NOT be set (events go through EventAggregator)
@@ -2817,7 +2816,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             agent_id.clone(),
-            agent_core::provider::ProviderEvent::Status("working".to_string()),
+            agent_core::ProviderEvent::Status("working".to_string()),
         );
 
         assert_eq!(state.view_state.overview.log_buffer.len(), 1);
@@ -2840,7 +2839,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             agent_id.clone(),
-            agent_core::provider::ProviderEvent::Error("need human input".to_string()),
+            agent_core::ProviderEvent::Error("need human input".to_string()),
         );
 
         let slot = state
@@ -2875,14 +2874,14 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             overview_id.clone(),
-            agent_core::provider::ProviderEvent::AssistantChunk(
+            agent_core::ProviderEvent::AssistantChunk(
                 "Overview reply content".to_string(),
             ),
         );
         handle_agent_provider_event(
             &mut state,
             overview_id,
-            agent_core::provider::ProviderEvent::Finished,
+            agent_core::ProviderEvent::Finished,
         );
 
         assert!(
@@ -2916,17 +2915,17 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             overview_id.clone(),
-            agent_core::provider::ProviderEvent::AssistantChunk("I".to_string()),
+            agent_core::ProviderEvent::AssistantChunk("I".to_string()),
         );
         handle_agent_provider_event(
             &mut state,
             overview_id.clone(),
-            agent_core::provider::ProviderEvent::AssistantChunk("’m".to_string()),
+            agent_core::ProviderEvent::AssistantChunk("’m".to_string()),
         );
         handle_agent_provider_event(
             &mut state,
             overview_id.clone(),
-            agent_core::provider::ProviderEvent::AssistantChunk(" loading".to_string()),
+            agent_core::ProviderEvent::AssistantChunk(" loading".to_string()),
         );
 
         assert_eq!(
@@ -2938,7 +2937,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             overview_id,
-            agent_core::provider::ProviderEvent::Finished,
+            agent_core::ProviderEvent::Finished,
         );
 
         let assistant_logs: Vec<_> = state
@@ -2965,7 +2964,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             agent_id.clone(),
-            agent_core::provider::ProviderEvent::ExecCommandStarted {
+            agent_core::ProviderEvent::ExecCommandStarted {
                 call_id: Some("call-1".to_string()),
                 input_preview: Some("git status".to_string()),
                 source: Some("agent".to_string()),
@@ -2984,7 +2983,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             agent_id.clone(),
-            agent_core::provider::ProviderEvent::ExecCommandOutputDelta {
+            agent_core::ProviderEvent::ExecCommandOutputDelta {
                 call_id: Some("call-1".to_string()),
                 delta: "On branch main".to_string(),
             },
@@ -3001,7 +3000,7 @@ mod tests {
         handle_agent_provider_event(
             &mut state,
             agent_id,
-            agent_core::provider::ProviderEvent::ExecCommandFinished {
+            agent_core::ProviderEvent::ExecCommandFinished {
                 call_id: Some("call-1".to_string()),
                 output_preview: None,
                 status: agent_core::ExecCommandStatus::Completed,
@@ -3132,7 +3131,7 @@ mod tests {
         if let Some(pool) = state.agent_pool.as_mut()
             && let Some(slot) = pool.get_slot_mut_by_id(&overview_id)
         {
-            slot.set_session_handle(agent_core::provider::SessionHandle::CodexThread {
+            slot.set_session_handle(agent_core::SessionHandle::CodexThread {
                 thread_id: "thr-provider".to_string(),
             });
         }

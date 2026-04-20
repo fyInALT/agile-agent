@@ -1,7 +1,7 @@
 use std::fs;
 
 use agent_core::command_bus::registry::render_local_help_lines;
-use agent_core::provider::{ProviderKind, provider_capabilities};
+use agent_core::{ProviderKind, provider_capabilities};
 use agent_core::workplace_store::WorkplaceStore;
 use anyhow::{Result, anyhow};
 
@@ -357,7 +357,7 @@ mod tests {
         resolve_agent_target,
     };
     use crate::test_support::ShellHarness;
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
 
     #[test]
     fn resolves_agent_target_from_focused_worker() {

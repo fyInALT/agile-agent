@@ -25,18 +25,11 @@ pub mod event_aggregator;
 pub mod git_flow_config;
 pub mod git_flow_executor;
 pub mod global_config;
-pub mod launch_config;
-pub mod llm_caller;
 pub mod logging;
 pub mod loop_runner;
-pub mod mock_provider;
 pub mod multi_agent_session;
 pub mod persistence_coordinator;
-pub mod probe;
-pub mod provider;
 pub mod provider_profile;
-pub mod provider_thread;
-pub mod providers;
 pub mod runtime_mode;
 pub mod runtime_session;
 pub mod session_store;
@@ -58,4 +51,25 @@ pub mod worktree_state_store;
 pub use agent_toolkit::{
     PatchChangeKind, PatchApplyStatus, ExecCommandStatus,
     McpToolCallStatus, McpInvocation, WebSearchAction, PatchChange,
+};
+
+// Re-export provider types from agent-provider for backward compatibility
+pub use agent_provider::{
+    ProviderKind, ProviderEvent, SessionHandle, ProviderCapabilities,
+    provider_capabilities, ProviderThreadHandle,
+    start_provider, start_provider_with_handle, default_provider,
+    mock_provider, probe, llm_caller,
+    providers,
+    launch_config,
+};
+pub use agent_provider::launch_config::{
+    AgentLaunchBundle, LaunchInputSpec, LaunchSourceMode, LaunchSourceOrigin, ResolvedLaunchSpec,
+    ProviderLaunchContext, ParseError, ValidationError,
+    detect_source_mode, parse, parse_command_fragment, parse_env_only,
+    format_launch_summary, is_sensitive_key, redact_env_map, redact_env_value,
+    generate_host_default_input, resolve_bundle, resolve_decision_launch_spec,
+    resolve_executable_path, resolve_host_env, resolve_launch_spec,
+    RestoreError, check_restore_eligibility, validate_bundle_executable, validate_executable_exists,
+    validate_launch_input_spec, validate_provider_consistency,
+    validate_provider_supports_launch_config, validate_reserved_args,
 };

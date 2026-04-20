@@ -14,7 +14,7 @@ use crate::agent_runtime::{AgentId, WorkplaceId};
 use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::event_aggregator::{AgentEvent, EventAggregator, PollResult};
 use crate::logging;
-use crate::provider::{ProviderEvent, ProviderKind};
+use crate::{ProviderEvent, ProviderKind};
 use crate::shared_state::SharedWorkplaceState;
 use crate::shutdown_snapshot::ShutdownSnapshot;
 use crate::skills::SkillRegistry;
@@ -142,18 +142,18 @@ impl MultiAgentSession {
                         if let Some(session_id) = &agent_snapshot.meta.provider_session_id {
                             let handle = match agent_snapshot.meta.provider_type {
                                 crate::agent_runtime::ProviderType::Claude => {
-                                    crate::provider::SessionHandle::ClaudeSession {
+                                    crate::SessionHandle::ClaudeSession {
                                         session_id: session_id.as_str().to_string(),
                                     }
                                 }
                                 crate::agent_runtime::ProviderType::Codex => {
-                                    crate::provider::SessionHandle::CodexThread {
+                                    crate::SessionHandle::CodexThread {
                                         thread_id: session_id.as_str().to_string(),
                                     }
                                 }
                                 _ => {
                                     // Mock or Opencode - no session handle needed
-                                    crate::provider::SessionHandle::ClaudeSession {
+                                    crate::SessionHandle::ClaudeSession {
                                         session_id: session_id.as_str().to_string(),
                                     }
                                 }

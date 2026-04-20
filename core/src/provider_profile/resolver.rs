@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::launch_config::resolver::resolve_launch_spec;
 use crate::launch_config::spec::{LaunchInputSpec, LaunchSourceMode, LaunchSourceOrigin, ResolvedLaunchSpec};
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 use crate::provider_profile::error::ProfileError;
 use crate::provider_profile::interpolate::interpolate_profile_env;
 use crate::provider_profile::profile::{ProfileId, ProviderProfile};
@@ -120,7 +120,7 @@ pub fn create_launch_context_from_profile(
     cwd: std::path::PathBuf,
 ) -> Result<crate::launch_config::context::ProviderLaunchContext, ProfileError> {
     use crate::launch_config::context::ProviderLaunchContext;
-    use crate::provider::SessionHandle;
+    use crate::SessionHandle;
 
     let resolved = resolve_profile(profile)?;
     Ok(ProviderLaunchContext::new(resolved, cwd)
@@ -131,7 +131,7 @@ pub fn create_launch_context_from_profile(
 pub fn create_launch_context_from_profile_with_session(
     profile: &ProviderProfile,
     cwd: std::path::PathBuf,
-    session_handle: Option<crate::provider::SessionHandle>,
+    session_handle: Option<crate::SessionHandle>,
 ) -> Result<crate::launch_config::context::ProviderLaunchContext, ProfileError> {
     use crate::launch_config::context::ProviderLaunchContext;
 
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_create_launch_context_with_session() {
-        use crate::provider::SessionHandle;
+        use crate::SessionHandle;
 
         let profile = test_profile();
         let cwd = std::path::PathBuf::from("/tmp/test");

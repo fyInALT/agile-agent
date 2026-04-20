@@ -2,7 +2,7 @@ use agent_core::agent_runtime::AgentRuntime;
 use agent_core::agent_runtime::WorkplaceId;
 use agent_core::app::AppState;
 use agent_core::app::AppStatus;
-use agent_core::provider::ProviderKind;
+use agent_core::ProviderKind;
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::skills::SkillRegistry;
@@ -102,7 +102,7 @@ impl ShellHarness {
                     }
                     ProviderSelectionCommand::Select(provider) => {
                         self.state.close_provider_overlay();
-                        if provider == agent_core::provider::ProviderKind::Mock {
+                        if provider == agent_core::ProviderKind::Mock {
                             if let Some(agent_id) = self.state.spawn_agent(provider) {
                                 self.state.app_mut().push_status_message(format!(
                                     "spawned {} with {}",

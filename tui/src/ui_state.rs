@@ -12,7 +12,7 @@ use agent_core::app::LoopPhase;
 use agent_core::app::TranscriptEntry;
 use agent_core::event_aggregator::EventAggregator;
 use agent_core::logging;
-use agent_core::provider::{ProviderEvent, ProviderKind};
+use agent_core::{ProviderEvent, ProviderKind};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
@@ -1078,10 +1078,10 @@ impl TuiState {
                         workplace_id: self.session.workplace().workplace_id.clone(),
                         provider_type: slot.provider_type(),
                         provider_session_id: slot.session_handle().map(|handle| match handle {
-                            agent_core::provider::SessionHandle::ClaudeSession { session_id } => {
+                            agent_core::SessionHandle::ClaudeSession { session_id } => {
                                 ProviderSessionId::new(session_id)
                             }
-                            agent_core::provider::SessionHandle::CodexThread { thread_id } => {
+                            agent_core::SessionHandle::CodexThread { thread_id } => {
                                 ProviderSessionId::new(thread_id)
                             }
                         }),
@@ -1584,7 +1584,7 @@ impl TuiState {
         &mut self,
         prompt: String,
         provider: ProviderKind,
-    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::ProviderEvent>> {
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
             self.agent_pool = Some(AgentPool::new(workplace_id, 10));
@@ -1600,7 +1600,7 @@ impl TuiState {
         &mut self,
         agent_id: &AgentId,
         prompt: String,
-    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::ProviderEvent>> {
         self.start_provider_for_agent_with_mode(agent_id, prompt, true, true)
     }
 
@@ -1608,7 +1608,7 @@ impl TuiState {
         &mut self,
         agent_id: &AgentId,
         prompt: String,
-    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::ProviderEvent>> {
         self.start_provider_for_agent_with_mode(agent_id, prompt, false, false)
     }
 
@@ -1618,7 +1618,7 @@ impl TuiState {
         prompt: String,
         inject_mail: bool,
         record_user_prompt: bool,
-    ) -> Option<std::sync::mpsc::Receiver<agent_core::provider::ProviderEvent>> {
+    ) -> Option<std::sync::mpsc::Receiver<agent_core::ProviderEvent>> {
         let augmented_prompt =
             self.build_provider_prompt_for_agent(agent_id, prompt.clone(), inject_mail)?;
         if inject_mail {
@@ -1670,7 +1670,7 @@ impl TuiState {
         }
 
         let thread_name = format!("agent-{}-provider", agent_id.as_str());
-        let thread_handle = agent_core::provider::start_provider_with_handle(
+        let thread_handle = agent_core::start_provider_with_handle(
             provider_kind,
             augmented_prompt,
             cwd,
@@ -2669,7 +2669,7 @@ impl TuiState {
 
     pub fn switch_to_new_agent(
         &mut self,
-        provider_kind: agent_core::provider::ProviderKind,
+        provider_kind: agent_core::ProviderKind,
     ) -> Result<String> {
         self.sync_app_input_from_composer();
         let summary = self.session.switch_agent(provider_kind)?;
@@ -3154,7 +3154,7 @@ mod tests {
     use agent_core::agent_runtime::AgentId;
     use agent_core::agent_slot::TaskId;
     use agent_core::app::TranscriptEntry;
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
     use agent_core::ExecCommandStatus;
     use agent_core::McpInvocation;
@@ -4213,7 +4213,7 @@ mod tests {
     #[test]
     fn multi_agent_provider_request_registers_channel_with_aggregator() {
         #[allow(unused_imports)]
-        use agent_core::provider::ProviderEvent;
+        use agent_core::ProviderEvent;
         #[allow(unused_imports)]
         use std::sync::mpsc;
 
@@ -4244,7 +4244,7 @@ mod tests {
 
     #[test]
     fn multi_agent_event_routing_updates_agent_slot_transcript() {
-        use agent_core::provider::ProviderEvent;
+        use agent_core::ProviderEvent;
         use std::sync::mpsc;
 
         let temp = TempDir::new().expect("tempdir");

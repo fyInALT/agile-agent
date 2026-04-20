@@ -7,8 +7,8 @@ use crate::app::AppState;
 use crate::app::LoopPhase;
 use crate::backlog::TaskItem;
 use crate::logging;
-use crate::provider;
-use crate::provider::ProviderEvent;
+// Provider types are re-exported at crate root
+use crate::{ProviderKind, ProviderEvent, SessionHandle};
 use crate::task_engine;
 use crate::task_engine::ExecutionGuardrails;
 use crate::task_engine::TurnResolution;
@@ -229,7 +229,7 @@ fn execute_task_until_resolution(
         let (event_tx, event_rx) = mpsc::channel();
         let provider_kind = state.selected_provider;
         let session_handle = state.current_session_handle();
-        if let Err(err) = provider::start_provider(
+        if let Err(err) = crate::start_provider(
             provider_kind,
             prompt.clone(),
             state.cwd.clone(),
@@ -422,7 +422,7 @@ mod tests {
     use crate::backlog::TodoStatus;
     use crate::logging;
     use crate::logging::RunMode;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
     use crate::skills::SkillRegistry;
     use crate::workplace_store::WorkplaceStore;
 

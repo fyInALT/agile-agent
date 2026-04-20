@@ -2718,7 +2718,7 @@ mod tests {
     use crate::ui_state::TuiState;
     use agent_core::app::AppStatus;
     use agent_core::app::TranscriptEntry;
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
     use ratatui::text::Line;
     use std::time::Duration;

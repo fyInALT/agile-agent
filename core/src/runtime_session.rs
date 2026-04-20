@@ -9,7 +9,7 @@ use crate::app::AppState;
 use crate::app::LoopPhase;
 use crate::backlog_store;
 use crate::logging;
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 use crate::session_store;
 use crate::shared_state::SharedWorkplaceState;
 use crate::shutdown_snapshot::AgentShutdownSnapshot;
@@ -471,8 +471,8 @@ mod tests {
     use crate::app::TranscriptEntry;
     use crate::logging;
     use crate::logging::RunMode;
-    use crate::provider::ProviderKind;
-    use crate::provider::SessionHandle;
+    use crate::ProviderKind;
+    use crate::SessionHandle;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 

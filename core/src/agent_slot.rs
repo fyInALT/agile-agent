@@ -15,7 +15,7 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::launch_config::AgentLaunchBundle;
 use crate::logging;
-use crate::provider::{ProviderEvent, SessionHandle};
+use crate::{ProviderEvent, SessionHandle};
 // Tool call types re-exported from agent-toolkit
 use crate::ExecCommandStatus;
 use agent_decision::{BlockedState, BlockingReason, DecisionAgentCreationPolicy};

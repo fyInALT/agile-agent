@@ -347,7 +347,7 @@ fn print_agent_list(all: bool) -> Result<()> {
 }
 
 fn spawn_agent(provider: String) -> Result<()> {
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
 
     let provider_kind = match provider.to_lowercase().as_str() {
         "claude" => ProviderKind::Claude,
@@ -454,9 +454,9 @@ fn run_loop_headless_single_agent(
     launch_cwd: std::path::PathBuf,
 ) -> Result<()> {
     let bootstrap =
-        AgentRuntime::bootstrap_for_cwd(&launch_cwd, agent_core::provider::default_provider())?;
+        AgentRuntime::bootstrap_for_cwd(&launch_cwd, agent_core::default_provider())?;
     let mut state = AppState::with_skills(
-        agent_core::provider::default_provider(),
+        agent_core::default_provider(),
         launch_cwd.clone(),
         SkillRegistry::discover(&launch_cwd),
     );
@@ -551,7 +551,7 @@ fn run_loop_headless_multi_agent(
     let max_agents = RuntimeMode::MultiAgent.max_agents();
     let mut session = MultiAgentSession::bootstrap(
         launch_cwd.clone(),
-        agent_core::provider::default_provider(),
+        agent_core::default_provider(),
         resume_last,
         max_agents,
     )?;

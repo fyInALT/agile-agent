@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use agent_core::agent_pool::AgentPool;
 use agent_core::agent_runtime::WorkplaceId;
-use agent_core::provider::ProviderKind;
+use agent_core::ProviderKind;
 use agent_core::worktree_state_store::WorktreeStateStore;
 
 /// Helper to create a test git repository with initial commit

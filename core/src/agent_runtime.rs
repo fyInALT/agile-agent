@@ -18,8 +18,8 @@ use crate::app::AppState;
 use crate::app::AppStatus;
 use crate::app::LoopPhase;
 use crate::logging;
-use crate::provider::ProviderKind;
-use crate::provider::SessionHandle;
+use crate::ProviderKind;
+use crate::SessionHandle;
 use crate::workplace_store::WorkplaceStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,7 +411,7 @@ mod tests {
     use crate::app::AppState;
     use crate::app::AppStatus;
     use crate::app::LoopPhase;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 

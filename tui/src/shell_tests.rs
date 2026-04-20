@@ -11,7 +11,7 @@ use crate::view_mode::ViewMode;
 use agent_core::app::TranscriptEntry;
 use agent_core::logging;
 use agent_core::logging::RunMode;
-use agent_core::provider::ProviderKind;
+use agent_core::ProviderKind;
 use agent_core::workplace_store::WorkplaceStore;
 
 #[test]

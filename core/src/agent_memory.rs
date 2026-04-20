@@ -53,7 +53,7 @@ mod tests {
     use crate::agent_runtime::AgentRuntime;
     use crate::app::AppState;
     use crate::app::TranscriptEntry;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
     use crate::workplace_store::WorkplaceStore;
     use tempfile::TempDir;
 

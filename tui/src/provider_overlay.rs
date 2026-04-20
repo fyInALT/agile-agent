@@ -6,7 +6,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 
-use agent_core::provider::ProviderKind;
+use agent_core::ProviderKind;
 
 /// Provider selection overlay state
 #[derive(Debug, Clone, Default)]
@@ -103,7 +103,7 @@ impl ProviderSelectionOverlay {
 mod tests {
     use super::ProviderSelectionCommand;
     use super::ProviderSelectionOverlay;
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
 

@@ -7,7 +7,7 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 
 use agent_core::launch_config::LaunchSourceMode;
-use agent_core::provider::ProviderKind;
+use agent_core::ProviderKind;
 
 /// Preview of parsed launch configuration
 #[derive(Debug, Clone)]

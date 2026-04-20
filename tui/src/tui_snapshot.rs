@@ -14,7 +14,7 @@ use agent_core::agent_slot::{AgentSlotStatus, TaskId};
 use agent_core::app::TranscriptEntry;
 use agent_core::backlog::BacklogState;
 use agent_core::launch_config::AgentLaunchBundle;
-use agent_core::provider::{ProviderKind, SessionHandle};
+use agent_core::{ProviderKind, SessionHandle};
 use agent_core::shutdown_snapshot::ShutdownReason;
 use agent_core::workplace_store::WorkplaceStore;
 
@@ -452,7 +452,7 @@ mod split_ratio_serde {
 mod tests {
     use super::*;
     use crate::ui_state::TuiState;
-    use agent_core::provider::ProviderKind;
+    use agent_core::ProviderKind;
     use agent_core::runtime_session::RuntimeSession;
     use agent_core::shutdown_snapshot::ShutdownReason;
     use tempfile::TempDir;

@@ -99,7 +99,7 @@ mod tests {
     use super::AgentState;
     use crate::app::AppState;
     use crate::app::LoopPhase;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
 
     #[test]
     fn round_trips_basic_runtime_state() {

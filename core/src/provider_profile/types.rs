@@ -2,7 +2,7 @@
 //!
 //! Defines the base CLI executable types for provider profiles.
 
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 use serde::{Deserialize, Serialize};
 
 /// CLI base type (the executable to run)

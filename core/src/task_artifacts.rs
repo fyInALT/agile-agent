@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 use crate::storage;
 use crate::verification::VerificationResult;
 
@@ -64,7 +64,7 @@ mod tests {
     use super::TaskArtifact;
     use super::TaskArtifactOutcome;
     use super::save_task_artifact_to_root;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
     use crate::verification::VerificationOutcome;
     use crate::verification::VerificationResult;
 

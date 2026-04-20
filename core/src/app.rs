@@ -7,8 +7,8 @@ use crate::backlog::TaskItem;
 use crate::backlog::TaskStatus;
 use crate::backlog::TodoItem;
 use crate::backlog::TodoStatus;
-use crate::provider::ProviderKind;
-use crate::provider::SessionHandle;
+use crate::ProviderKind;
+use crate::SessionHandle;
 use crate::skills::SkillRegistry;
 // Tool call types re-exported from agent-toolkit at crate root
 use crate::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
@@ -923,8 +923,8 @@ mod tests {
     use super::TranscriptEntry;
     use crate::backlog::TaskStatus;
     use crate::backlog::TodoStatus;
-    use crate::provider::ProviderKind;
-    use crate::provider::SessionHandle;
+    use crate::ProviderKind;
+    use crate::SessionHandle;
     use crate::skills::SkillRegistry;
 
     #[test]

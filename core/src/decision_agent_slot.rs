@@ -43,7 +43,7 @@ use std::time::Instant;
 
 use crate::decision_mail::{DecisionMailReceiver, DecisionRequest, DecisionResponse};
 use crate::logging;
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 
 use agent_decision::action_registry::ActionRegistry;
 use agent_decision::builtin_actions::register_action_builtins;

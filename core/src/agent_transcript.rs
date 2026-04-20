@@ -26,7 +26,7 @@ mod tests {
     use super::AgentTranscript;
     use crate::app::AppState;
     use crate::app::TranscriptEntry;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
 
     #[test]
     fn round_trips_transcript_entries() {

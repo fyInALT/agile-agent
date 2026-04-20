@@ -14,7 +14,7 @@ use crate::app::LoopPhase;
 use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
 use crate::logging;
-use crate::provider::ProviderKind;
+use crate::ProviderKind;
 use crate::skills::SkillRegistry;
 use crate::storage;
 use crate::workplace_store::WorkplaceStore;
@@ -223,7 +223,7 @@ mod tests {
     use crate::app::LoopPhase;
     use crate::app::TranscriptEntry;
     use crate::backlog::BacklogState;
-    use crate::provider::ProviderKind;
+    use crate::ProviderKind;
     use crate::skills::SkillMetadata;
     use crate::skills::SkillRegistry;
     use crate::workplace_store::WorkplaceStore;
