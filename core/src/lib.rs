@@ -229,4 +229,32 @@ mod backward_compatibility_tests {
         let count = _accept_backlog_state(state);
         assert_eq!(count, 1, "Function should return correct task count");
     }
+
+    // Test launch_config types are accessible AND functional from core
+    #[test]
+    fn launch_config_types_accessible_and_functional() {
+        // Test that launch_config module is accessible
+        use launch_config::{LaunchInputSpec, LaunchSourceMode};
+
+        // LaunchInputSpec - can be constructed using new()
+        let spec = LaunchInputSpec::new(ProviderKind::Mock);
+        assert_eq!(spec.provider, ProviderKind::Mock, "LaunchInputSpec::new should set provider");
+        assert_eq!(spec.source_mode, LaunchSourceMode::HostDefault, "LaunchInputSpec::new should set HostDefault mode");
+
+        // Test that validation functions are accessible
+        let args = vec!["--test".to_string()];
+        let result = launch_config::validate_reserved_args(&args, ProviderKind::Mock);
+        assert!(result.is_ok(), "validate_reserved_args should be callable");
+
+        // Test parse function exists and works with provider kind
+        let input = "--prompt test";
+        let result = launch_config::parse(ProviderKind::Mock, input);
+        // parse returns Result, just check it's callable
+        let _ = result;
+
+        // Test LaunchSourceMode serialization
+        let mode = LaunchSourceMode::EnvOnly;
+        let json = serde_json::to_string(&mode).unwrap();
+        assert!(json.contains("env_only") || json.contains("EnvOnly"), "LaunchSourceMode should serialize");
+    }
 }
