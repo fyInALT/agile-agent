@@ -109,6 +109,12 @@ fn restore_from_snapshot_recreates_agents() {
     let _ = session.spawn_agent(agent_core::ProviderKind::Mock).unwrap();
     let _ = session.spawn_agent(agent_core::ProviderKind::Mock).unwrap();
 
+    // Remember original IDs for later verification
+    let original_ids: Vec<String> = (0..session.agents.active_count())
+        .filter_map(|idx| session.agents.get_slot(idx))
+        .map(|s| s.agent_id().as_str().to_string())
+        .collect();
+
     // Build snapshot
     let agents_snapshots: Vec<_> = (0..session.agents.active_count())
         .filter_map(|idx| session.agents.get_slot(idx))
@@ -152,4 +158,12 @@ fn restore_from_snapshot_recreates_agents() {
     assert!(restored.is_ok(), "restore failed: {:?}", restored.err());
     let restored_session = restored.unwrap();
     assert_eq!(restored_session.agents.active_count(), 2);
+
+    // Verify original IDs are preserved
+    let restored_ids: Vec<String> = (0..restored_session.agents.active_count())
+        .filter_map(|idx| restored_session.agents.get_slot(idx))
+        .map(|s| s.agent_id().as_str().to_string())
+        .collect();
+    assert!(restored_ids.contains(&original_ids[0]), "first agent ID should be preserved");
+    assert!(restored_ids.contains(&original_ids[1]), "second agent ID should be preserved");
 }

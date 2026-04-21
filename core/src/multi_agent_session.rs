@@ -11,7 +11,7 @@ use anyhow::Result;
 
 use crate::agent_pool::AgentPool;
 use crate::agent_runtime::{AgentId, WorkplaceId};
-use crate::agent_slot::{AgentSlotStatus, TaskCompletionResult, TaskId};
+use crate::agent_slot::{AgentSlot, AgentSlotStatus, TaskCompletionResult, TaskId};
 use crate::event_aggregator::{AgentEvent, EventAggregator, PollResult};
 use crate::logging;
 use crate::{ProviderEvent, ProviderKind};
@@ -124,66 +124,55 @@ impl MultiAgentSession {
 
         let mut agents = AgentPool::new(workplace_id.clone(), max_agents);
 
-        // Restore all agents from snapshot
+        // Restore all agents from snapshot, preserving original IDs.
         for agent_snapshot in &snapshot.agents {
-            // Get provider from agent meta, fall back to default if not convertible
-            let provider = agent_snapshot
-                .meta
-                .provider_type
-                .to_provider_kind()
-                .unwrap_or(default_provider);
-
-            match agents.spawn_agent(provider) {
-                Ok(_) => {
-                    // Get the spawned slot and restore its state
-                    let last_index = agents.active_count() - 1;
-                    if let Some(slot) = agents.get_slot_mut(last_index) {
-                        // Set session handle from provider_session_id if available
-                        if let Some(session_id) = &agent_snapshot.meta.provider_session_id {
-                            let handle = match agent_snapshot.meta.provider_type {
-                                crate::agent_runtime::ProviderType::Claude => {
-                                    crate::SessionHandle::ClaudeSession {
-                                        session_id: session_id.as_str().to_string(),
-                                    }
-                                }
-                                crate::agent_runtime::ProviderType::Codex => {
-                                    crate::SessionHandle::CodexThread {
-                                        thread_id: session_id.as_str().to_string(),
-                                    }
-                                }
-                                _ => {
-                                    // Mock or Opencode - no session handle needed
-                                    crate::SessionHandle::ClaudeSession {
-                                        session_id: session_id.as_str().to_string(),
-                                    }
-                                }
-                            };
-                            slot.set_session_handle(handle);
-                        }
-
-                        // Set assigned task if agent had one
-                        if let Some(task_id) = &agent_snapshot.assigned_task_id {
-                            let _ = slot.assign_task(TaskId::new(task_id));
-                        }
-
-                        // Set status based on was_active
-                        if agent_snapshot.was_active {
-                            // Agent was interrupted, mark as stopped
-                            let _ = slot.transition_to(AgentSlotStatus::stopped(
-                                "interrupted during execution",
-                            ));
+            let meta = &agent_snapshot.meta;
+            let session_handle = meta.provider_session_id.as_ref().map(|sid| {
+                match meta.provider_type {
+                    crate::agent_runtime::ProviderType::Claude => {
+                        crate::SessionHandle::ClaudeSession {
+                            session_id: sid.as_str().to_string(),
                         }
                     }
+                    crate::agent_runtime::ProviderType::Codex => {
+                        crate::SessionHandle::CodexThread {
+                            thread_id: sid.as_str().to_string(),
+                        }
+                    }
+                    _ => crate::SessionHandle::ClaudeSession {
+                        session_id: sid.as_str().to_string(),
+                    },
                 }
-                Err(e) => {
-                    crate::logging::debug_event(
-                        "multi_agent.restore.spawn_failed",
-                        "failed to spawn agent from snapshot",
-                        serde_json::json!({
-                            "error": e,
-                        }),
-                    );
-                }
+            });
+            let status = if agent_snapshot.was_active {
+                AgentSlotStatus::stopped("interrupted during execution")
+            } else {
+                AgentSlotStatus::idle()
+            };
+            let assigned_task_id = agent_snapshot
+                .assigned_task_id
+                .as_ref()
+                .map(|t| TaskId::new(t));
+
+            let slot = AgentSlot::restored(
+                meta.agent_id.clone(),
+                meta.codename.clone(),
+                meta.provider_type,
+                agent_snapshot.role,
+                status,
+                session_handle,
+                agent_snapshot.transcript.clone(),
+                assigned_task_id,
+            );
+            if let Err(e) = agents.restore_slot(slot) {
+                crate::logging::debug_event(
+                    "multi_agent.restore.slot_failed",
+                    "failed to restore agent slot from snapshot",
+                    serde_json::json!({
+                        "agent_id": meta.agent_id.as_str(),
+                        "error": e,
+                    }),
+                );
             }
         }
 
