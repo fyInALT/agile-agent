@@ -199,7 +199,7 @@ impl DaemonLifecycle {
         let backup_dir = dir.join(".backups");
         tokio::fs::create_dir_all(&backup_dir).await?;
 
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f");
         let snapshot_src = dir.join("snapshot.json");
         let events_src = dir.join("events.jsonl");
 

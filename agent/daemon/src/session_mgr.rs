@@ -260,7 +260,8 @@ impl SessionManager {
                     agent_id: None,
                     content,
                     metadata: serde_json::Value::Null,
-                    created_at: chrono::Utc::now().to_rfc3339(),
+                    // TranscriptEntry does not store original timestamps; use a stable placeholder.
+                    created_at: "1970-01-01T00:00:00+00:00".to_string(),
                     completed_at: None,
                 }
             })

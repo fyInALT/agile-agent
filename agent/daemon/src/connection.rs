@@ -308,9 +308,13 @@ impl Connection {
                         if let Some(ref mut limiter) = rate_limiter {
                             if !limiter.try_acquire() {
                                 tracing::warn!("Rate limit exceeded on {}", conn.id);
+                                // Attempt to echo the client's request ID; fallback to Null.
+                                let req_id = serde_json::from_str::<JsonRpcRequest>(&text)
+                                    .map(|r| r.id)
+                                    .unwrap_or(RequestId::String(String::new()));
                                 let err = JsonRpcErrorResponse {
                                     jsonrpc: "2.0".to_string(),
-                                    id: RequestId::String("rate-limit".to_string()),
+                                    id: req_id,
                                     error: JsonRpcError {
                                         code: -32000,
                                         message: "Rate limit exceeded".to_string(),
@@ -319,7 +323,9 @@ impl Connection {
                                     },
                                     ext: None,
                                 };
-                                let _ = write.send(Message::Text(serde_json::to_string(&err).unwrap())).await;
+                                if let Ok(json) = serde_json::to_string(&err) {
+                                    let _ = write.send(Message::Text(json)).await;
+                                }
                                 continue;
                             }
                         }
@@ -366,11 +372,9 @@ impl Connection {
                                         },
                                         ext: None,
                                     };
-                                    let _ = write
-                                        .send(Message::Text(
-                                            serde_json::to_string(&err).unwrap(),
-                                        ))
-                                        .await;
+                                    if let Ok(json) = serde_json::to_string(&err) {
+                                        let _ = write.send(Message::Text(json)).await;
+                                    }
                                 }
                             }
                         }
@@ -466,7 +470,9 @@ impl Connection {
                             &self.addr.to_string(),
                             serde_json::json!({"connection_id": self.id}),
                         );
-                        let _ = log.append(&entry).await;
+                        if let Err(e) = log.append(&entry).await {
+                            tracing::warn!("Audit log append failed: {}", e);
+                        }
                     }
                 }
 

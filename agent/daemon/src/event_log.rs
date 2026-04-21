@@ -75,6 +75,8 @@ impl EventLog {
     }
 
     /// Check available disk space on the event log's filesystem.
+    /// On non-Unix platforms this is a no-op (always returns Ok).
+    #[cfg(target_family = "unix")]
     async fn check_disk_space(&self) -> Result<()> {
         let parent = self.path.parent().unwrap_or_else(|| std::path::Path::new("."));
         let stat = nix::sys::statfs::statfs(parent)
@@ -87,6 +89,11 @@ impl EventLog {
                 MIN_FREE_SPACE_BYTES
             );
         }
+        Ok(())
+    }
+
+    #[cfg(not(target_family = "unix"))]
+    async fn check_disk_space(&self) -> Result<()> {
         Ok(())
     }
 
