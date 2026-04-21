@@ -92,9 +92,19 @@ impl DaemonConfigFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial(env_vars)]
     fn load_missing_returns_defaults() {
+        // Clear any env vars that might override defaults (parallel test safety)
+        unsafe {
+            std::env::remove_var("AGILE_AGENT_BIND");
+            std::env::remove_var("AGILE_AGENT_HEARTBEAT_TIMEOUT");
+            std::env::remove_var("AGILE_AGENT_MAX_CLIENTS");
+            std::env::remove_var("AGILE_AGENT_MAX_EVENT_LOG_MB");
+            std::env::remove_var("AGILE_AGENT_BEARER_TOKEN");
+        }
         let cfg = DaemonConfigFile::load(Path::new("/nonexistent/daemon.toml")).unwrap();
         assert_eq!(cfg.bind, "127.0.0.1:0");
         assert_eq!(cfg.heartbeat_timeout, 120);
@@ -103,6 +113,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(env_vars)]
     fn env_var_overrides_defaults() {
         unsafe { std::env::set_var("AGILE_AGENT_BIND", "127.0.0.1:9999") };
         unsafe { std::env::set_var("AGILE_AGENT_MAX_CLIENTS", "42") };

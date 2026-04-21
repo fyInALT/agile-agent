@@ -36,6 +36,7 @@ agent-core = { path = "../../core" }
 tokio-test = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+serial_test = "3"
 
 [[bench]]
 name = "multi_client_latency"
