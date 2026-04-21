@@ -8,6 +8,7 @@ use crate::protocol_state::ProtocolState;
 /// Apply a single daemon event to the TUI state.
 ///
 /// This is pure logic — no async, no I/O — making it trivially testable.
+#[allow(dead_code)] // Used in protocol-only mode
 pub fn apply_event(state: &mut ProtocolState, event: &Event) {
     match &event.payload {
         EventPayload::AgentSpawned(data) => {
