@@ -12,7 +12,7 @@ path = "src/main.rs"
 agent-core = { path = "../core", optional = true }
 agent-decision = { path = "../decision", optional = true }
 agent-protocol = { path = "../agent/protocol" }
-agent-tui = { path = "../tui", optional = true }
+agent-tui = { path = "../tui" }
 anyhow.workspace = true
 clap.workspace = true
 futures = "0.3"
@@ -24,7 +24,7 @@ tracing.workspace = true
 uuid = { workspace = true }
 
 [features]
-core = ["dep:agent-core", "dep:agent-decision", "dep:agent-tui"]
+core = ["dep:agent-core", "dep:agent-decision"]
 
 [dev-dependencies]
 agent-test-support = { path = "../test-support" }

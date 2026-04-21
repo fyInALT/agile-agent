@@ -1,7 +1,7 @@
 //! Protocol-only TUI event loop (zero agent_core dependency).
 
 use crate::protocol_state::{ConnectionState, ProtocolState};
-use crate::websocket_client::ServerMessage;
+use crate::websocket_client::{ServerMessage, WebSocketClient};
 use anyhow::Result;
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -26,12 +26,33 @@ async fn async_run() -> Result<()> {
     let mut state = ProtocolState::default();
     state.connection_state = ConnectionState::Connecting;
 
-    // Stub: in a full implementation we would auto-link and spawn a
-    // ReconnectingClient here. For now we stay in "disconnected" demo mode.
-    state.connection_state = ConnectionState::Disconnected;
+    // Auto-link: discover existing daemon or spawn a new one.
+    let workplace = agent_protocol::workplace::resolve_workplace()?;
+    workplace.ensure().await?;
 
-    let mut event_rx: tokio::sync::mpsc::UnboundedReceiver<ServerMessage> =
-        tokio::sync::mpsc::unbounded_channel().1;
+    let result = agent_protocol::client::auto_link::auto_link(
+        workplace.workplace_id(),
+        &workplace.daemon_json_path(),
+        find_daemon_binary().as_deref(),
+        Duration::from_secs(10),
+    )
+    .await?;
+
+    // Connect WebSocket.
+    let (client, mut event_rx) = WebSocketClient::connect(&result.websocket_url).await?;
+
+    // Initialize session.
+    let init_params = agent_protocol::methods::InitializeParams {
+        client_type: agent_protocol::methods::ClientType::Tui,
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        resume_snapshot_id: None,
+        protocol_version: Some(agent_protocol::PROTOCOL_VERSION.to_string()),
+    };
+    let _resp = client
+        .call("session.initialize", Some(serde_json::to_value(&init_params)?))
+        .await?;
+
+    state.connection_state = ConnectionState::Connected;
 
     let mut last_tick = std::time::Instant::now();
     let tick_rate = Duration::from_millis(250);
@@ -45,8 +66,10 @@ async fn async_run() -> Result<()> {
                     KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::Enter => {
                         if let Some(text) = state.composer.take_submission() {
-                            // TODO: send via protocol client when connected
-                            let _ = text;
+                            let _ = client.notify(
+                                "session.sendInput",
+                                Some(serde_json::json!({ "text": text })),
+                            );
                         }
                     }
                     KeyCode::Char(ch) => {
@@ -79,6 +102,18 @@ async fn async_run() -> Result<()> {
 
     terminal.restore()?;
     Ok(())
+}
+
+fn find_daemon_binary() -> Option<std::path::PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("agent-daemon");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 fn draw_ui(frame: &mut Frame, state: &ProtocolState) {
