@@ -456,6 +456,9 @@ fn shutdown_restore_cycle() {
         provider_thread_state: None,
         captured_at: "2026-04-15T00:00:00Z".to_string(),
         transcript: Vec::new(),
+        worktree_path: None,
+        worktree_branch: None,
+        worktree_id: None,
     };
 
     // Create snapshot for shutdown

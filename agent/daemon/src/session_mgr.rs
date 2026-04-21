@@ -369,6 +369,9 @@ impl SessionManager {
                     provider_thread_state: None,
                     captured_at: chrono::Utc::now().to_rfc3339(),
                     transcript: slot.transcript().to_vec(),
+                    worktree_path: slot.worktree_path().cloned(),
+                    worktree_branch: slot.worktree_branch().cloned(),
+                    worktree_id: slot.worktree_id().cloned(),
                 }
             })
             .collect();
@@ -460,7 +463,7 @@ impl SessionManager {
                 agent_shutdown.transcript.clone()
             };
 
-            let slot = agent_core::agent_slot::AgentSlot::restored(
+            let slot = agent_core::agent_slot::AgentSlot::restored_with_worktree(
                 meta.agent_id.clone(),
                 meta.codename.clone(),
                 meta.provider_type,
@@ -469,6 +472,9 @@ impl SessionManager {
                 session_handle,
                 transcript,
                 assigned_task_id,
+                agent_shutdown.worktree_path.clone(),
+                agent_shutdown.worktree_branch.clone(),
+                agent_shutdown.worktree_id.clone(),
             );
             if let Err(e) = agent_pool.restore_slot(slot) {
                 tracing::warn!(

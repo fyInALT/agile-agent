@@ -1124,6 +1124,9 @@ impl TuiState {
                         provider_thread_state,
                         captured_at: chrono::Utc::now().to_rfc3339(),
                         transcript: slot.transcript().to_vec(),
+                        worktree_path: slot.worktree_path().cloned(),
+                        worktree_branch: slot.worktree_branch().cloned(),
+                        worktree_id: slot.worktree_id().cloned(),
                     }
                 })
                 .collect()

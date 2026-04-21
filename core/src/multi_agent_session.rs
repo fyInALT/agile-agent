@@ -154,7 +154,7 @@ impl MultiAgentSession {
                 .as_ref()
                 .map(|t| TaskId::new(t));
 
-            let slot = AgentSlot::restored(
+            let slot = AgentSlot::restored_with_worktree(
                 meta.agent_id.clone(),
                 meta.codename.clone(),
                 meta.provider_type,
@@ -163,6 +163,9 @@ impl MultiAgentSession {
                 session_handle,
                 agent_snapshot.transcript.clone(),
                 assigned_task_id,
+                agent_snapshot.worktree_path.clone(),
+                agent_snapshot.worktree_branch.clone(),
+                agent_snapshot.worktree_id.clone(),
             );
             if let Err(e) = agents.restore_slot(slot) {
                 crate::logging::debug_event(
@@ -891,6 +894,9 @@ mod tests {
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         };
 
         let agent2 = AgentShutdownSnapshot {
@@ -911,6 +917,9 @@ mod tests {
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         };
 
         let snapshot = ShutdownSnapshot {

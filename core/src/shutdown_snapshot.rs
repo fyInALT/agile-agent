@@ -6,6 +6,8 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 
+use std::path::PathBuf;
+
 use crate::agent_mail::AgentMail;
 use crate::agent_runtime::AgentMeta;
 use crate::app::TranscriptEntry;
@@ -47,6 +49,15 @@ pub struct AgentShutdownSnapshot {
     /// Agent transcript entries preserved at shutdown
     #[serde(default)]
     pub transcript: Vec<TranscriptEntry>,
+    /// Worktree path (if agent was using a git worktree)
+    #[serde(default)]
+    pub worktree_path: Option<PathBuf>,
+    /// Worktree branch name
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
+    /// Worktree unique identifier
+    #[serde(default)]
+    pub worktree_id: Option<String>,
 }
 
 /// Snapshot of provider thread state
@@ -152,6 +163,9 @@ impl AgentShutdownSnapshot {
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -169,6 +183,9 @@ impl AgentShutdownSnapshot {
             provider_thread_state: Some(thread_state),
             captured_at: Utc::now().to_rfc3339(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -182,6 +199,9 @@ impl AgentShutdownSnapshot {
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         }
     }
 
@@ -290,6 +310,9 @@ mod tests {
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
             transcript: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            worktree_id: None,
         };
 
         assert!(with_task.needs_resume());
