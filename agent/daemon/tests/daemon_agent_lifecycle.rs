@@ -249,35 +249,47 @@ func main() {
     .await
     .expect("restore from shutdown snapshot");
 
-    // 8. Assert only agent B remains active
+    // 8. Assert only agent B remains active AND IDs are preserved
+    assert_eq!(
+        restored_mgr.agent_count().await,
+        2,
+        "both agents should exist in pool after resume"
+    );
+
     let active_after = restored_mgr.list_agents(false).await;
     assert_eq!(
         active_after.len(),
         1,
         "only one agent should remain active after resume"
     );
-
-    // The restored agent will have a new ID, but its status should be active
+    assert_eq!(
+        active_after[0].id, agent_b_id,
+        "agent B's original ID should be preserved after resume"
+    );
     assert_ne!(
         active_after[0].status,
         agent_protocol::state::AgentSlotStatus::Stopped,
         "remaining agent should not be stopped"
     );
 
-    // Verify stopped agent is also present in the full list
+    // Verify stopped agent A is also present with its original ID
     let all_after = restored_mgr.list_agents(true).await;
     assert_eq!(
         all_after.len(),
         2,
         "both agents should exist in pool (one active, one stopped)"
     );
-    let stopped_count = all_after
+    let stopped = all_after
         .iter()
-        .filter(|a| a.status == agent_protocol::state::AgentSlotStatus::Stopped)
-        .count();
+        .find(|a| a.status == agent_protocol::state::AgentSlotStatus::Stopped);
+    assert!(
+        stopped.is_some(),
+        "stopped agent should be present in full list"
+    );
     assert_eq!(
-        stopped_count, 1,
-        "exactly one agent should be stopped after resume"
+        stopped.unwrap().id,
+        agent_a_id,
+        "agent A's original ID should be preserved after resume"
     );
 
     // 9. Verify Go file still exists and content is intact
