@@ -125,6 +125,23 @@ fn run_tui_with_options(resume_last: bool) -> Result<()> {
         }
     }
 
+    // Redirect tracing logs to the same JSONL file so they don't pollute the TUI terminal.
+    if let Some(log_path) = logging::current_log_path() {
+        let _ = tracing_subscriber::fmt()
+            .with_writer(move || -> Box<dyn std::io::Write + Send + Sync> {
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                {
+                    Ok(f) => Box::new(f),
+                    Err(_) => Box::new(std::io::sink()),
+                }
+            })
+            .with_ansi(false)
+            .try_init();
+    }
+
     if !probe::has_any_real_provider() {
         anyhow::bail!(
             "no real provider detected: install codex or claude, or run `agile-agent doctor`"

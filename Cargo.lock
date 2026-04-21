@@ -176,6 +176,7 @@ dependencies = [
  "shlex",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
  "uuid",
  "which",
 ]
@@ -233,6 +234,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "tracing-subscriber",
  "unicode-segmentation",
  "unicode-width 0.2.0",
  "uuid",
@@ -260,6 +262,7 @@ dependencies = [
  "serial_test",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

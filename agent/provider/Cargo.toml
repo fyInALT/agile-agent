@@ -18,6 +18,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 which.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 serial_test.workspace = true

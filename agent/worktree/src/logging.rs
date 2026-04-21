@@ -1,33 +1,19 @@
 //! Minimal logging facade for agent-worktree
 //!
-//! Provides debug/warn event logging.
+//! Provides debug/warn event logging via tracing so output can be
+//! captured by a subscriber instead of going straight to stderr.
 
-/// Log a debug event (stub implementation)
+/// Log a debug event.
 pub fn debug_event(event: &str, message: &str, fields: serde_json::Value) {
-    eprintln!(
-        "[DEBUG] {} - {} | {}",
-        event,
-        message,
-        serde_json::to_string(&fields).unwrap_or_default()
-    );
+    tracing::debug!(target: "agile-agent", event = %event, fields = %fields, "{}", message);
 }
 
-/// Log a warning event (stub implementation)
+/// Log a warning event.
 pub fn warn_event(event: &str, message: &str, fields: serde_json::Value) {
-    eprintln!(
-        "[WARN] {} - {} | {}",
-        event,
-        message,
-        serde_json::to_string(&fields).unwrap_or_default()
-    );
+    tracing::warn!(target: "agile-agent", event = %event, fields = %fields, "{}", message);
 }
 
-/// Log an error event (stub implementation)
+/// Log an error event.
 pub fn error_event(event: &str, message: &str, fields: serde_json::Value) {
-    eprintln!(
-        "[ERROR] {} - {} | {}",
-        event,
-        message,
-        serde_json::to_string(&fields).unwrap_or_default()
-    );
+    tracing::error!(target: "agile-agent", event = %event, fields = %fields, "{}", message);
 }
