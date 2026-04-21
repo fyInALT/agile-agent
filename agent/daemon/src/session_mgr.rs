@@ -295,6 +295,64 @@ impl SessionManager {
             "event_queue_depth": event_queue_depth,
         }))
     }
+
+    // ---------------------------------------------------------------------------
+    // Test-only helpers
+    // ---------------------------------------------------------------------------
+
+    /// Test helper: return the number of agents in the pool.
+    #[doc(hidden)]
+    pub async fn agent_count(&self) -> usize {
+        let inner = self.inner.lock().await;
+        inner.agent_pool.active_count()
+    }
+
+    /// Test helper: check if an agent exists in the pool.
+    #[doc(hidden)]
+    pub async fn agent_exists(&self, agent_id: &str) -> bool {
+        let inner = self.inner.lock().await;
+        inner
+            .agent_pool
+            .slots()
+            .iter()
+            .any(|s| s.agent_id().as_str() == agent_id)
+    }
+
+    /// Test helper: return the status label of an agent.
+    #[doc(hidden)]
+    pub async fn agent_status(&self, agent_id: &str) -> Option<String> {
+        let inner = self.inner.lock().await;
+        inner
+            .agent_pool
+            .slots()
+            .iter()
+            .find(|s| s.agent_id().as_str() == agent_id)
+            .map(|s| s.status().label())
+    }
+
+    /// Test helper: inject a transcript entry directly into an agent's slot.
+    #[doc(hidden)]
+    pub async fn inject_transcript_entry(
+        &self,
+        agent_id: &str,
+        entry: agent_core::app::TranscriptEntry,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        let slot = inner
+            .agent_pool
+            .get_slot_mut_by_id(&id)
+            .context("agent not found")?;
+        slot.append_transcript(entry);
+        Ok(())
+    }
+
+    /// Test helper: return the current working directory.
+    #[doc(hidden)]
+    pub async fn work_dir(&self) -> PathBuf {
+        let inner = self.inner.lock().await;
+        inner.session.app.cwd.clone()
+    }
 }
 
 /// On-disk snapshot format for graceful shutdown persistence.
