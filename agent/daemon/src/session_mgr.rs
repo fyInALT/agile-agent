@@ -12,6 +12,7 @@ use agent_core::runtime_session::RuntimeSession;
 use agent_protocol::state::*;
 use agent_types::WorkplaceId;
 use anyhow::{Context, Result};
+use sha2::Digest;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -182,7 +183,7 @@ impl SessionManager {
         };
         // Compute checksum of the JSON *without* the checksum field.
         let json = serde_json::to_string_pretty(&file).context("serialize snapshot file")?;
-        let checksum = format!("{:08x}", crc32fast::hash(json.as_bytes()));
+        let checksum = format!("{:x}", sha2::Sha256::digest(json.as_bytes()));
         file.checksum = Some(checksum);
         let json = serde_json::to_string_pretty(&file).context("serialize snapshot file")?;
         tokio::fs::write(path.as_ref(), json)
@@ -214,7 +215,7 @@ impl SessionManager {
             file_without_checksum.checksum = None;
             let json = serde_json::to_string_pretty(&file_without_checksum)
                 .context("re-serialize snapshot for checksum")?;
-            let actual = format!("{:08x}", crc32fast::hash(json.as_bytes()));
+            let actual = format!("{:x}", sha2::Sha256::digest(json.as_bytes()));
             if actual != *expected {
                 tracing::warn!(
                     "Snapshot checksum mismatch: expected {}, got {}. Falling back to empty state.",
@@ -235,6 +236,54 @@ impl SessionManager {
     }
 
     /// Return a debug dump of internal session state.
+    /// Load a paginated slice of transcript history.
+    pub async fn load_history(&self, offset: usize, limit: usize) -> Vec<TranscriptItem> {
+        let inner = self.inner.lock().await;
+        let app = &inner.session.app;
+        app.transcript
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .enumerate()
+            .map(|(idx, entry)| {
+                let (kind, content) = match entry {
+                    agent_core::app::TranscriptEntry::User(t) => (ItemKind::UserInput, t.clone()),
+                    agent_core::app::TranscriptEntry::Assistant(t) => (ItemKind::AssistantOutput, t.clone()),
+                    agent_core::app::TranscriptEntry::Thinking(t) => (ItemKind::SystemMessage, t.clone()),
+                    agent_core::app::TranscriptEntry::Decision { reasoning, .. } => (ItemKind::SystemMessage, reasoning.clone()),
+                    agent_core::app::TranscriptEntry::ExecCommand { input_preview, .. } => (ItemKind::ToolCall, input_preview.clone().unwrap_or_default()),
+                    agent_core::app::TranscriptEntry::PatchApply { output_preview, .. } => (ItemKind::ToolResult, output_preview.clone().unwrap_or_default()),
+                    agent_core::app::TranscriptEntry::WebSearch { query, .. } => (ItemKind::ToolCall, query.clone()),
+                    agent_core::app::TranscriptEntry::ViewImage { path, .. } => (ItemKind::ToolResult, path.clone()),
+                    agent_core::app::TranscriptEntry::ImageGeneration { revised_prompt, .. } => (ItemKind::ToolResult, revised_prompt.clone().unwrap_or_default()),
+                    agent_core::app::TranscriptEntry::McpToolCall { invocation, .. } => (ItemKind::ToolCall, format!("{:?}", invocation)),
+                    agent_core::app::TranscriptEntry::GenericToolCall { name, .. } => (ItemKind::ToolCall, name.clone()),
+                    agent_core::app::TranscriptEntry::Status(t) => (ItemKind::SystemMessage, t.clone()),
+                    agent_core::app::TranscriptEntry::Error(t) => (ItemKind::SystemMessage, t.clone()),
+                };
+                TranscriptItem {
+                    id: format!("item-{}", offset + idx),
+                    kind,
+                    agent_id: None,
+                    content,
+                    metadata: serde_json::Value::Null,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    completed_at: None,
+                }
+            })
+            .collect()
+    }
+
+    /// Trigger an immediate snapshot write to disk.
+    pub async fn force_snapshot(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        self.write_snapshot(path).await
+    }
+
+    /// List active connections (placeholder — actual connections tracked externally).
+    pub async fn list_connections(&self) -> Vec<serde_json::Value> {
+        vec![]
+    }
+
     pub async fn debug_dump(&self) -> Result<serde_json::Value> {
         let inner = self.inner.lock().await;
         let agents: Vec<String> = inner

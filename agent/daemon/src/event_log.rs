@@ -5,10 +5,14 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
+/// Minimum free disk space before entering read-only mode (100MB).
+const MIN_FREE_SPACE_BYTES: u64 = 100 * 1024 * 1024;
+
 /// Append-only JSONL event log.
 pub struct EventLog {
     path: PathBuf,
     max_size_bytes: u64,
+    read_only: std::sync::atomic::AtomicBool,
 }
 
 impl EventLog {
@@ -35,11 +39,22 @@ impl EventLog {
         Ok(Self {
             path,
             max_size_bytes: max_event_log_mb * 1024 * 1024,
+            read_only: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
     /// Append a single event atomically (newline-delimited JSON).
+    /// Returns Ok(()) even in read-only mode (event is silently dropped).
     pub async fn append(&self, event: &Event) -> Result<()> {
+        if self.read_only.load(std::sync::atomic::Ordering::Relaxed) {
+            tracing::warn!("Event log is in read-only mode (disk full). Dropping event seq={}", event.seq);
+            return Ok(());
+        }
+        if let Err(e) = self.check_disk_space().await {
+            tracing::warn!("Disk space check failed: {}. Entering read-only mode.", e);
+            self.read_only.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(());
+        }
         self.maybe_rotate().await?;
         let line = serde_json::to_string(event).context("serialize event")?;
         let mut bytes = line.into_bytes();
@@ -57,6 +72,27 @@ impl EventLog {
             .await
             .with_context(|| format!("sync event log {}", self.path.display()))?;
         Ok(())
+    }
+
+    /// Check available disk space on the event log's filesystem.
+    async fn check_disk_space(&self) -> Result<()> {
+        let parent = self.path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let stat = nix::sys::statfs::statfs(parent)
+            .with_context(|| format!("statfs for disk space check on {}", parent.display()))?;
+        let available = stat.blocks_available() * stat.block_size() as u64;
+        if available < MIN_FREE_SPACE_BYTES {
+            anyhow::bail!(
+                "insufficient disk space: {} bytes available (min {})",
+                available,
+                MIN_FREE_SPACE_BYTES
+            );
+        }
+        Ok(())
+    }
+
+    /// Return whether the event log is in read-only mode.
+    pub fn is_read_only(&self) -> bool {
+        self.read_only.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Replay all events with `seq >= from_seq` in order.
@@ -334,5 +370,18 @@ mod tests {
             assert!(path.with_extension(format!("jsonl.{}", i)).exists());
         }
         assert!(!path.with_extension("jsonl.6").exists());
+    }
+
+    #[tokio::test]
+    async fn read_only_mode_drops_events_silently() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(tmp.path().join("events.jsonl")).await.unwrap();
+
+        log.read_only.store(true, std::sync::atomic::Ordering::Relaxed);
+        log.append(&make_event(1)).await.unwrap();
+
+        let replayed = log.replay_from(1).await.unwrap();
+        assert!(replayed.is_empty());
+        assert!(log.is_read_only());
     }
 }

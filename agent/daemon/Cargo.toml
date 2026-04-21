@@ -21,8 +21,11 @@ tracing = "0.1"
 tracing-subscriber = { workspace = true, features = ["json"] }
 toml = "0.8"
 crc32fast = "1.3"
+sha2 = "0.10"
+rand = "0.8"
 chrono = { workspace = true }
 dirs = { workspace = true }
+nix = { version = "0.29", features = ["fs"] }
 uuid = { workspace = true }
 
 agent-protocol = { path = "../protocol" }

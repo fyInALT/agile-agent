@@ -68,10 +68,21 @@ async fn main() -> anyhow::Result<()> {
     let config_path = workplace.daemon_json_path();
     let snapshot_path = workplace.snapshot_path();
     let event_log_path = workplace.path().join("events.jsonl");
+    let audit_log_path = workplace.path().join("audit.jsonl");
+    let audit_log = std::sync::Arc::new(Some(agent_daemon::audit::AuditLog::new(&audit_log_path)));
 
     // Load daemon configuration file (optional, defaults apply if missing).
     let daemon_toml = workplace.path().join("daemon.toml");
-    let config_file = DaemonConfigFile::load(&daemon_toml)?;
+    let mut config_file = DaemonConfigFile::load(&daemon_toml)?;
+    // Auto-generate bearer token if auth is enabled but no token is configured.
+    if config_file.bearer_token.is_none() && std::env::var("AGILE_AGENT_AUTO_TOKEN").is_ok() {
+        let token: String = (0..32)
+            .map(|_| rand::Rng::gen_range(&mut rand::thread_rng(), 0..16))
+            .map(|i| format!("{:x}", i))
+            .collect();
+        config_file.bearer_token = Some(token);
+        tracing::info!("auto-generated bearer token for daemon");
+    }
     let bind_addr = config_file.bind.clone();
 
     // Bootstrap session manager (owns runtime state).
@@ -109,17 +120,21 @@ async fn main() -> anyhow::Result<()> {
     let server_handle = tokio::spawn({
         let broadcaster = broadcaster.clone();
         let tracker = tracker.clone();
+        let audit_log_clone = (*audit_log).clone();
         async move {
             let res = lifecycle
-                .run(server, |stream, peer_addr| {
+                .run(server, move |stream, peer_addr| {
                     let router = router_handle.clone();
                     let broadcaster = broadcaster.clone();
                     let tracker = tracker.clone();
                     let bearer_token = bearer_token.clone();
+                    let audit_log = audit_log_clone.clone();
                     async move {
                         let event_rx = broadcaster.register("conn".to_string()).await;
                         agent_daemon::connection::Connection::spawn(
                             stream, peer_addr, router, Some(event_rx), Some(tracker), bearer_token,
+                            Some(agent_daemon::connection::RateLimiter::new(100)),
+                            audit_log,
                         );
                     }
                 })

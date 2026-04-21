@@ -76,8 +76,8 @@ pub fn resolve_workplaces_root() -> Result<PathBuf> {
         return Ok(PathBuf::from(custom));
     }
 
-    let home = dirs::home_dir().context("home directory is unavailable")?;
-    Ok(home.join(".agile-agent").join("workplaces"))
+    let data_dir = dirs::data_dir().context("data directory is unavailable")?;
+    Ok(data_dir.join("agile-agent").join("workplaces"))
 }
 
 fn derive_workplace_id(cwd: &Path) -> WorkplaceId {

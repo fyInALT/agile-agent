@@ -28,6 +28,7 @@ impl AuditEntry {
 }
 
 /// Append-only audit log.
+#[derive(Debug, Clone)]
 pub struct AuditLog {
     path: std::path::PathBuf,
 }

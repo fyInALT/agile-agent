@@ -151,7 +151,7 @@ impl DaemonLifecycle {
 
         // 4. Write snapshot from SessionManager if available.
         if let Some(mgr) = session_mgr {
-            if let Some(path) = snapshot_path {
+            if let Some(ref path) = snapshot_path {
                 if let Err(e) = mgr.write_snapshot(&path).await {
                     tracing::warn!("failed to write session snapshot: {}", e);
                 } else {
@@ -160,7 +160,7 @@ impl DaemonLifecycle {
             }
         } else {
             // Fallback: write hardcoded snapshot.
-            if let Some(path) = snapshot_path {
+            if let Some(ref path) = snapshot_path {
                 let snapshot = serde_json::json!({
                     "version": 1,
                     "sessionState": SessionState::default(),
@@ -174,11 +174,69 @@ impl DaemonLifecycle {
             }
         }
 
-        // 5. Delete daemon.json.
+        // 5. Create backup of snapshot + event log (retain last 3).
+        if let Some(ref path) = snapshot_path {
+            if let Err(e) = Self::rotate_backups(path.parent().unwrap_or_else(|| std::path::Path::new("."))).await {
+                tracing::warn!("failed to rotate backups: {}", e);
+            }
+        }
+
+        // 6. Delete daemon.json.
         DaemonConfig::remove(&self.config_path)
             .await
             .context("remove daemon.json")?;
         tracing::info!("daemon.json removed");
+
+        Ok(())
+    }
+
+    /// Rotate backups in `dir/.backups/`: keep last 3, delete older ones.
+    async fn rotate_backups(dir: &std::path::Path) -> Result<()> {
+        let backup_dir = dir.join(".backups");
+        tokio::fs::create_dir_all(&backup_dir).await?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let snapshot_src = dir.join("snapshot.json");
+        let events_src = dir.join("events.jsonl");
+
+        if snapshot_src.exists() {
+            let dst = backup_dir.join(format!("snapshot_{}.json", timestamp));
+            tokio::fs::copy(&snapshot_src, &dst).await?;
+            tracing::info!("backup created: {}", dst.display());
+        }
+        if events_src.exists() {
+            let dst = backup_dir.join(format!("events_{}.jsonl", timestamp));
+            tokio::fs::copy(&events_src, &dst).await?;
+            tracing::info!("backup created: {}", dst.display());
+        }
+
+        // Clean up old backups (keep last 3 of each type).
+        let mut entries = Vec::new();
+        let mut read_dir = tokio::fs::read_dir(&backup_dir).await?;
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            entries.push(entry);
+        }
+        entries.sort_by_key(|e| e.file_name());
+        entries.reverse();
+
+        let mut snapshot_count = 0;
+        let mut events_count = 0;
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("snapshot_") {
+                snapshot_count += 1;
+                if snapshot_count > 3 {
+                    tokio::fs::remove_file(entry.path()).await?;
+                    tracing::info!("old backup removed: {}", entry.path().display());
+                }
+            } else if name.starts_with("events_") {
+                events_count += 1;
+                if events_count > 3 {
+                    tokio::fs::remove_file(entry.path()).await?;
+                    tracing::info!("old backup removed: {}", entry.path().display());
+                }
+            }
+        }
 
         Ok(())
     }
@@ -235,5 +293,35 @@ mod tests {
 
         assert!(!config_path.exists(), "daemon.json should be removed");
         assert!(snapshot_path.exists(), "snapshot.json should be written");
+    }
+
+    #[tokio::test]
+    async fn shutdown_creates_backup_and_retains_three() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("wp");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+
+        // Pre-create snapshot and event log.
+        tokio::fs::write(dir.join("snapshot.json"), b"{}")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("events.jsonl"), b"\n")
+            .await
+            .unwrap();
+
+        // Run shutdown 4 times to trigger rotation.
+        for _ in 0..4 {
+            let mut lifecycle = DaemonLifecycle::new(dir.join("daemon.json"));
+            lifecycle.shutdown(Some(dir.join("snapshot.json")), None).await.unwrap();
+            // Recreate daemon.json for next iteration (shutdown removes it).
+            tokio::fs::write(dir.join("daemon.json"), b"{}").await.unwrap();
+        }
+
+        let backup_dir = dir.join(".backups");
+        assert!(backup_dir.exists());
+
+        let entries: Vec<_> = std::fs::read_dir(&backup_dir).unwrap().filter_map(|e| e.ok()).collect();
+        let snapshots: Vec<_> = entries.iter().filter(|e| e.file_name().to_string_lossy().starts_with("snapshot_")).collect();
+        assert_eq!(snapshots.len(), 3, "should retain only 3 snapshot backups");
     }
 }

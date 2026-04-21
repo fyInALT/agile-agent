@@ -10,6 +10,43 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::router::RouterHandle;
 
+/// Simple token-bucket rate limiter per connection.
+#[derive(Debug)]
+pub struct RateLimiter {
+    tokens: usize,
+    max: usize,
+    last_refill: std::time::Instant,
+    refill_interval: std::time::Duration,
+}
+
+impl RateLimiter {
+    /// Create a new rate limiter with `max` requests per minute.
+    pub fn new(max_per_minute: usize) -> Self {
+        Self {
+            tokens: max_per_minute,
+            max: max_per_minute,
+            last_refill: std::time::Instant::now(),
+            refill_interval: std::time::Duration::from_secs(60),
+        }
+    }
+
+    /// Attempt to consume one token. Returns `true` if allowed.
+    pub fn try_acquire(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_refill);
+        if elapsed >= self.refill_interval {
+            self.tokens = self.max;
+            self.last_refill = now;
+        }
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Unique identifier for a connection.
 pub type ConnectionId = String;
 
@@ -107,6 +144,7 @@ pub struct Connection {
     pub id: ConnectionId,
     pub addr: std::net::SocketAddr,
     pub state: ConnectionState,
+    pub client_type: Option<agent_protocol::methods::ClientType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +166,8 @@ impl Connection {
         mut event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Event>>,
         tracker: Option<ConnectionTracker>,
         bearer_token: Option<String>,
+        rate_limiter: Option<RateLimiter>,
+        audit_log: Option<crate::audit::AuditLog>,
     ) -> ConnectionId {
         if let Some(ref t) = tracker {
             if !t.try_connect() {
@@ -181,7 +221,9 @@ impl Connection {
                 id: id_clone.clone(),
                 addr,
                 state: ConnectionState::Connected,
+                client_type: None,
             };
+            let mut rate_limiter = rate_limiter;
 
             loop {
                 // Wait for next message with heartbeat timeout, or an event.
@@ -259,6 +301,29 @@ impl Connection {
 
                 match input {
                     ConnInput::WsText(text) => {
+                        let _req_span = tracing::info_span!("jsonrpc_request", connection_id = %conn.id);
+                        let _enter = _req_span.enter();
+
+                        // Rate limiting check
+                        if let Some(ref mut limiter) = rate_limiter {
+                            if !limiter.try_acquire() {
+                                tracing::warn!("Rate limit exceeded on {}", conn.id);
+                                let err = JsonRpcErrorResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id: RequestId::String("rate-limit".to_string()),
+                                    error: JsonRpcError {
+                                        code: -32000,
+                                        message: "Rate limit exceeded".to_string(),
+                                        data: Some(serde_json::json!({"retry_after": 60})),
+                                        ext: None,
+                                    },
+                                    ext: None,
+                                };
+                                let _ = write.send(Message::Text(serde_json::to_string(&err).unwrap())).await;
+                                continue;
+                            }
+                        }
+
                         let text = if text.len() > MAX_INPUT_SIZE {
                             tracing::warn!(
                                 "Input size {} exceeds MAX_INPUT_SIZE, truncating",
@@ -269,7 +334,7 @@ impl Connection {
                             text
                         };
 
-                        match conn.handle_message(&text, &router).await {
+                        match conn.handle_message(&text, &router, audit_log.as_ref()).await {
                             Ok(Some(response)) => {
                                 let json = match serde_json::to_string(&response) {
                                     Ok(j) => j,
@@ -341,11 +406,21 @@ impl Connection {
         &mut self,
         text: &str,
         router: &RouterHandle,
+        audit_log: Option<&crate::audit::AuditLog>,
     ) -> anyhow::Result<Option<JsonRpcMessage>> {
         let msg: JsonRpcMessage = serde_json::from_str(text)?;
 
         match msg {
             JsonRpcMessage::Request(req) => {
+                // Parse client_type from initialize params
+                if req.method == "session.initialize" {
+                    if let Some(ref params) = req.params {
+                        if let Ok(init) = serde_json::from_value::<agent_protocol::methods::InitializeParams>(params.clone()) {
+                            self.client_type = Some(init.client_type);
+                        }
+                    }
+                }
+
                 // Initialization gate
                 if self.state == ConnectionState::Connected
                     && req.method != "session.initialize"
@@ -363,7 +438,37 @@ impl Connection {
                     })));
                 }
 
+                // Debug commands restricted to CLI client type
+                if matches!(req.method.as_str(), "session.debugDump" | "session.forceSnapshot" | "session.listConnections") {
+                    if self.client_type != Some(agent_protocol::methods::ClientType::Cli) {
+                        return Ok(Some(JsonRpcMessage::Error(JsonRpcErrorResponse {
+                            jsonrpc: "2.0".to_string(),
+                            id: req.id,
+                            error: JsonRpcError {
+                                code: -32106,
+                                message: "Not supported: debug commands restricted to CLI clients".to_string(),
+                                data: None,
+                                ext: None,
+                            },
+                            ext: None,
+                        })));
+                    }
+                }
+
+                let method = req.method.clone();
                 let result = router.dispatch(req).await?;
+
+                // Audit log for sensitive operations
+                if let Some(log) = audit_log {
+                    if matches!(method.as_str(), "agent.spawn" | "agent.stop" | "tool.approve") {
+                        let entry = crate::audit::AuditEntry::new(
+                            &method,
+                            &self.addr.to_string(),
+                            serde_json::json!({"connection_id": self.id}),
+                        );
+                        let _ = log.append(&entry).await;
+                    }
+                }
 
                 if self.state == ConnectionState::Connected {
                     if let JsonRpcMessage::Response(ref resp) = result {
@@ -403,6 +508,7 @@ mod tests {
             id: "test".to_string(),
             addr: "127.0.0.1:12345".parse().unwrap(),
             state: ConnectionState::Connected,
+            client_type: None,
         };
         assert_eq!(conn.state, ConnectionState::Connected);
         conn.state = ConnectionState::Initialized;
@@ -487,5 +593,24 @@ mod tests {
             .body(())
             .unwrap();
         assert!(check_bearer_token(&req, &None).is_ok());
+    }
+
+    #[test]
+    fn rate_limiter_allows_up_to_max() {
+        let mut limiter = RateLimiter::new(3);
+        assert!(limiter.try_acquire());
+        assert!(limiter.try_acquire());
+        assert!(limiter.try_acquire());
+        assert!(!limiter.try_acquire());
+    }
+
+    #[test]
+    fn rate_limiter_refills_after_interval() {
+        let mut limiter = RateLimiter::new(1);
+        assert!(limiter.try_acquire());
+        assert!(!limiter.try_acquire());
+        // Manually reset last_refill to simulate time passing
+        limiter.last_refill = std::time::Instant::now() - std::time::Duration::from_secs(61);
+        assert!(limiter.try_acquire());
     }
 }

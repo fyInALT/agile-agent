@@ -53,12 +53,38 @@ impl Default for DaemonConfigFile {
 
 impl DaemonConfigFile {
     /// Load from a TOML file, returning defaults if the file is missing.
+    /// Environment variables with prefix `AGILE_AGENT_` override file values.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
+        let mut config = if !path.exists() {
+            Self::default()
+        } else {
+            let text = std::fs::read_to_string(path)?;
+            toml::from_str(&text)?
+        };
+
+        // Apply env var overrides: AGILE_AGENT_BIND, AGILE_AGENT_HEARTBEAT_TIMEOUT, etc.
+        if let Ok(val) = std::env::var("AGILE_AGENT_BIND") {
+            config.bind = val;
         }
-        let text = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&text)?;
+        if let Ok(val) = std::env::var("AGILE_AGENT_HEARTBEAT_TIMEOUT") {
+            if let Ok(v) = val.parse() {
+                config.heartbeat_timeout = v;
+            }
+        }
+        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_CLIENTS") {
+            if let Ok(v) = val.parse() {
+                config.max_clients = v;
+            }
+        }
+        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_EVENT_LOG_MB") {
+            if let Ok(v) = val.parse() {
+                config.max_event_log_mb = v;
+            }
+        }
+        if let Ok(val) = std::env::var("AGILE_AGENT_BEARER_TOKEN") {
+            config.bearer_token = Some(val);
+        }
+
         Ok(config)
     }
 }
@@ -74,5 +100,16 @@ mod tests {
         assert_eq!(cfg.heartbeat_timeout, 120);
         assert_eq!(cfg.max_clients, 10);
         assert_eq!(cfg.bearer_token, None);
+    }
+
+    #[test]
+    fn env_var_overrides_defaults() {
+        unsafe { std::env::set_var("AGILE_AGENT_BIND", "127.0.0.1:9999") };
+        unsafe { std::env::set_var("AGILE_AGENT_MAX_CLIENTS", "42") };
+        let cfg = DaemonConfigFile::load(Path::new("/nonexistent/daemon.toml")).unwrap();
+        assert_eq!(cfg.bind, "127.0.0.1:9999");
+        assert_eq!(cfg.max_clients, 42);
+        unsafe { std::env::remove_var("AGILE_AGENT_BIND") };
+        unsafe { std::env::remove_var("AGILE_AGENT_MAX_CLIENTS") };
     }
 }
