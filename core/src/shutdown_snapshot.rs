@@ -8,7 +8,6 @@ use serde::Serialize;
 
 use crate::agent_mail::AgentMail;
 use crate::agent_runtime::AgentMeta;
-use crate::agent_role::AgentRole;
 use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
 
@@ -45,9 +44,6 @@ pub struct AgentShutdownSnapshot {
     pub provider_thread_state: Option<ProviderThreadSnapshot>,
     /// Timestamp when snapshot was captured
     pub captured_at: String,
-    /// Agent role for Scrum-style coordination
-    #[serde(default)]
-    pub role: AgentRole,
     /// Agent transcript entries preserved at shutdown
     #[serde(default)]
     pub transcript: Vec<TranscriptEntry>,
@@ -155,7 +151,6 @@ impl AgentShutdownSnapshot {
             had_error: false,
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
-            role: AgentRole::Developer,
             transcript: Vec::new(),
         }
     }
@@ -173,7 +168,6 @@ impl AgentShutdownSnapshot {
             had_error: false,
             provider_thread_state: Some(thread_state),
             captured_at: Utc::now().to_rfc3339(),
-            role: AgentRole::Developer,
             transcript: Vec::new(),
         }
     }
@@ -187,7 +181,6 @@ impl AgentShutdownSnapshot {
             had_error: true,
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
-            role: AgentRole::Developer,
             transcript: Vec::new(),
         }
     }
@@ -244,6 +237,7 @@ mod tests {
             created_at: "2026-04-14T00:00:00Z".to_string(),
             updated_at: "2026-04-14T00:00:00Z".to_string(),
             status: AgentStatus::Idle,
+            role: AgentRole::Developer,
         }
     }
 
@@ -295,7 +289,6 @@ mod tests {
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
-            role: AgentRole::Developer,
             transcript: Vec::new(),
         };
 

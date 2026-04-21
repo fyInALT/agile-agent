@@ -448,13 +448,13 @@ fn shutdown_restore_cycle() {
             status: agent_core::agent_runtime::AgentStatus::Idle,
             created_at: "2026-04-15T00:00:00Z".to_string(),
             updated_at: "2026-04-15T00:00:00Z".to_string(),
+            role: agent_core::agent_role::AgentRole::Developer,
         },
         assigned_task_id: Some("task-001".to_string()),
         was_active: false,
         had_error: false,
         provider_thread_state: None,
         captured_at: "2026-04-15T00:00:00Z".to_string(),
-        role: agent_core::agent_role::AgentRole::Developer,
         transcript: Vec::new(),
     };
 

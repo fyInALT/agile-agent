@@ -299,6 +299,7 @@ mod tests {
             created_at: updated_at.to_string(),
             updated_at: updated_at.to_string(),
             status: AgentStatus::Idle,
+            role: crate::agent_role::AgentRole::Developer,
         }
     }
 

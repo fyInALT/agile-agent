@@ -9,6 +9,7 @@ use serde::Serialize;
 pub use agent_types::{AgentId, WorkplaceId, AgentCodename, AgentStatus};
 
 use crate::agent_memory::AgentMemory;
+use crate::agent_role::AgentRole;
 use crate::agent_messages::AgentMessages;
 use crate::agent_state::AgentState;
 use crate::agent_state::RestoreAgentStateResult;
@@ -83,6 +84,9 @@ pub struct AgentMeta {
     pub created_at: String,
     pub updated_at: String,
     pub status: AgentStatus,
+    /// Agent role for Scrum-style coordination.
+    #[serde(default)]
+    pub role: AgentRole,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +130,7 @@ impl AgentRuntime {
                 created_at: now.clone(),
                 updated_at: now,
                 status: AgentStatus::Idle,
+                role: AgentRole::Developer,
             },
             workplace: workplace.clone(),
         }

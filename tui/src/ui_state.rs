@@ -1099,6 +1099,7 @@ impl TuiState {
                         } else {
                             AgentStatus::Idle
                         },
+                        role: slot.role(),
                     };
 
                     let provider_thread_state = if slot.status().is_active() {
@@ -1122,7 +1123,6 @@ impl TuiState {
                         ),
                         provider_thread_state,
                         captured_at: chrono::Utc::now().to_rfc3339(),
-                        role: slot.role(),
                         transcript: slot.transcript().to_vec(),
                     }
                 })

@@ -180,6 +180,7 @@ impl SessionManager {
                     _ if slot.status().is_active() => AgentStatus::Running,
                     _ => AgentStatus::Idle,
                 },
+                role: slot.role(),
             };
             let store = agent_core::agent_store::AgentStore::new(
                 inner.session.agent_runtime.workplace().clone(),
@@ -350,6 +351,7 @@ impl SessionManager {
                         _ if slot.status().is_active() => AgentStatus::Running,
                         _ => AgentStatus::Idle,
                     },
+                    role: slot.role(),
                 };
                 AgentShutdownSnapshot {
                     meta,
@@ -358,7 +360,6 @@ impl SessionManager {
                     had_error: slot.status().is_blocked(),
                     provider_thread_state: None,
                     captured_at: chrono::Utc::now().to_rfc3339(),
-                    role: slot.role(),
                     transcript: slot.transcript().to_vec(),
                 }
             })
@@ -440,7 +441,7 @@ impl SessionManager {
                 meta.agent_id.clone(),
                 meta.codename.clone(),
                 meta.provider_type,
-                agent_shutdown.role,
+                meta.role,
                 status,
                 session_handle,
                 agent_shutdown.transcript.clone(),

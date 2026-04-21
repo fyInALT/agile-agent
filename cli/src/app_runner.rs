@@ -669,13 +669,13 @@ fn run_loop_headless_multi_agent(
                     created_at: String::new(),
                     updated_at: String::new(),
                     status: AgentStatus::Idle,
+                    role: slot.role(),
                 },
                 assigned_task_id: slot.assigned_task_id().map(|id| id.as_str().to_string()),
                 was_active: !slot.status().is_terminal(),
                 had_error: slot.status().is_blocked(),
                 provider_thread_state: None,
                 captured_at: String::new(),
-                role: slot.role(),
                 transcript: slot.transcript().to_vec(),
             }
         })

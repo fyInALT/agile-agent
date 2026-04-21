@@ -169,6 +169,7 @@ mod tests {
             created_at: "2026-04-14T09:00:00Z".to_string(),
             updated_at: "2026-04-14T10:00:00Z".to_string(),
             status: AgentStatus::Running,
+            role: agent_core::agent_role::AgentRole::Developer,
         }
     }
 
@@ -182,7 +183,6 @@ mod tests {
                 had_error: false,
                 provider_thread_state: None,
                 captured_at: "2026-04-14T10:00:00Z".to_string(),
-                role: agent_core::agent_role::AgentRole::Developer,
                 transcript: Vec::new(),
             }],
             BacklogState::default(),

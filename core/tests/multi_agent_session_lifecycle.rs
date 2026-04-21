@@ -73,13 +73,13 @@ fn shutdown_snapshot_captures_state() {
                 created_at: String::new(),
                 updated_at: String::new(),
                 status: AgentStatus::Idle,
+                role: slot.role(),
             },
             assigned_task_id: slot.assigned_task_id().map(|id| id.as_str().to_string()),
             was_active: !slot.status().is_terminal(),
             had_error: slot.status().is_blocked(),
             provider_thread_state: None,
             captured_at: String::new(),
-            role: slot.role(),
             transcript: slot.transcript().to_vec(),
         })
         .collect();
@@ -128,13 +128,13 @@ fn restore_from_snapshot_recreates_agents() {
                 created_at: String::new(),
                 updated_at: String::new(),
                 status: AgentStatus::Idle,
+                role: slot.role(),
             },
             assigned_task_id: None,
             was_active: false,
             had_error: false,
             provider_thread_state: None,
             captured_at: String::new(),
-            role: slot.role(),
             transcript: slot.transcript().to_vec(),
         })
         .collect();

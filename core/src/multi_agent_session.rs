@@ -158,7 +158,7 @@ impl MultiAgentSession {
                 meta.agent_id.clone(),
                 meta.codename.clone(),
                 meta.provider_type,
-                agent_snapshot.role,
+                meta.role,
                 status,
                 session_handle,
                 agent_snapshot.transcript.clone(),
@@ -883,13 +883,13 @@ mod tests {
                 created_at: "2026-04-14T00:00:00Z".to_string(),
                 updated_at: "2026-04-14T00:00:00Z".to_string(),
                 status: AgentStatus::Idle,
+                role: crate::agent_role::AgentRole::Developer,
             },
             assigned_task_id: Some("task-001".to_string()),
             was_active: false,
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
-            role: crate::agent_role::AgentRole::Developer,
             transcript: Vec::new(),
         };
 
@@ -903,13 +903,13 @@ mod tests {
                 created_at: "2026-04-14T00:00:00Z".to_string(),
                 updated_at: "2026-04-14T00:00:00Z".to_string(),
                 status: AgentStatus::Running,
+                role: crate::agent_role::AgentRole::Developer,
             },
             assigned_task_id: None,
             was_active: true,
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
-            role: crate::agent_role::AgentRole::Developer,
             transcript: Vec::new(),
         };
 

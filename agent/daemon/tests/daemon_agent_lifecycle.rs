@@ -255,7 +255,7 @@ func main() {
         "agent A's transcript should be preserved in snapshot"
     );
     assert_eq!(
-        agent_a_snapshot.role,
+        agent_a_snapshot.meta.role,
         agent_types::AgentRole::Developer,
         "agent A's role should be Developer in snapshot"
     );
