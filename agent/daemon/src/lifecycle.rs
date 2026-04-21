@@ -149,8 +149,18 @@ impl DaemonLifecycle {
         // 3. Wait briefly for existing connections to drain.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // 4. Write snapshot from SessionManager if available.
+        // 4. Write snapshots from SessionManager if available.
+        //    - ShutdownSnapshot (core format) for resume on next startup
+        //    - SnapshotFile (protocol format) for external tools / monitoring
         if let Some(mgr) = session_mgr {
+            if let Err(e) = mgr
+                .save_shutdown_snapshot(agent_core::shutdown_snapshot::ShutdownReason::UserQuit)
+                .await
+            {
+                tracing::warn!("failed to write shutdown snapshot: {}", e);
+            } else {
+                tracing::info!("shutdown snapshot written for resume");
+            }
             if let Some(ref path) = snapshot_path {
                 if let Err(e) = mgr.write_snapshot(&path).await {
                     tracing::warn!("failed to write session snapshot: {}", e);
