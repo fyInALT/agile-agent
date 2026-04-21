@@ -353,6 +353,14 @@ impl SessionManager {
                     },
                     role: slot.role(),
                 };
+                // Also persist per-agent transcript to disk so it survives even if
+                // shutdown snapshot is deleted or corrupted.
+                let _ = store.save_transcript(
+                    &meta.agent_id,
+                    &agent_core::agent_transcript::AgentTranscript::from_entries(
+                        slot.transcript().to_vec(),
+                    ),
+                );
                 AgentShutdownSnapshot {
                     meta,
                     assigned_task_id: slot.assigned_task_id().map(|t| t.as_str().to_string()),
@@ -413,6 +421,10 @@ impl SessionManager {
         // This preserves original agent IDs via AgentPool::restore_slot.
         let mut agent_pool = AgentPool::with_cwd(workplace_id.clone(), max_agents, cwd.clone());
 
+        let store = agent_core::agent_store::AgentStore::new(
+            session.agent_runtime.workplace().clone(),
+        );
+
         for agent_shutdown in &snapshot.agents {
             let meta = &agent_shutdown.meta;
             let session_handle = meta.provider_session_id.as_ref().map(|sid| {
@@ -437,6 +449,17 @@ impl SessionManager {
                 .as_ref()
                 .map(|t| agent_types::TaskId::new(t));
 
+            // Use snapshot transcript if present; otherwise fall back to per-agent
+            // transcript.json on disk (written by save_shutdown_snapshot).
+            let transcript = if agent_shutdown.transcript.is_empty() {
+                store
+                    .load_transcript(&meta.agent_id)
+                    .map(|t| t.entries)
+                    .unwrap_or_default()
+            } else {
+                agent_shutdown.transcript.clone()
+            };
+
             let slot = agent_core::agent_slot::AgentSlot::restored(
                 meta.agent_id.clone(),
                 meta.codename.clone(),
@@ -444,7 +467,7 @@ impl SessionManager {
                 meta.role,
                 status,
                 session_handle,
-                agent_shutdown.transcript.clone(),
+                transcript,
                 assigned_task_id,
             );
             if let Err(e) = agent_pool.restore_slot(slot) {

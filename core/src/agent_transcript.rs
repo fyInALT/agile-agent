@@ -16,6 +16,10 @@ impl AgentTranscript {
         }
     }
 
+    pub fn from_entries(entries: Vec<TranscriptEntry>) -> Self {
+        Self { entries }
+    }
+
     pub fn apply_to_app_state(&self, state: &mut AppState) {
         state.transcript = self.entries.clone();
     }
