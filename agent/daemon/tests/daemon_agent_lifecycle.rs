@@ -388,3 +388,50 @@ async fn restore_without_snapshot_falls_back_to_bootstrap() {
         "fresh bootstrap should have empty agent list"
     );
 }
+
+/// Restore gracefully handles an unknown future format version via best-effort.
+#[tokio::test]
+#[serial_test::serial]
+async fn restore_unknown_format_version_best_effort() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workdir = temp.path().to_path_buf();
+    let workplace_id = WorkplaceId::new("test-daemon-future-version");
+
+    // Bootstrap a session and spawn an agent
+    let session_mgr = SessionManager::bootstrap(workdir.clone(), workplace_id.clone())
+        .await
+        .expect("bootstrap");
+    let agent = session_mgr
+        .spawn_agent(agent_types::ProviderKind::Mock)
+        .await
+        .expect("spawn agent");
+    let agent_id = agent.id.clone();
+
+    // Save shutdown snapshot, then mutate it to a future version
+    let snapshot_path = session_mgr
+        .save_shutdown_snapshot(agent_core::shutdown_snapshot::ShutdownReason::UserQuit)
+        .await
+        .expect("save shutdown snapshot");
+    drop(session_mgr);
+
+    let mut snapshot: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot_path).unwrap()).unwrap();
+    snapshot
+        .as_object_mut()
+        .unwrap()
+        .insert("format_version".to_string(), serde_json::json!(42));
+    std::fs::write(&snapshot_path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
+
+    // Restore should still succeed (best-effort)
+    let restored = SessionManager::restore_from_shutdown_snapshot(
+        workdir.clone(),
+        workplace_id.clone(),
+        agent_types::ProviderKind::Mock,
+        4,
+    )
+    .await
+    .expect("restore should succeed despite unknown version");
+
+    // Agent should still be present with original ID
+    assert!(restored.agent_exists(&agent_id).await, "agent should be restored");
+}
