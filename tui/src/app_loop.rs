@@ -2394,6 +2394,12 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
 /// (not blocked, not active) for a configured duration. The decision layer
 /// will check if there are pending tasks and either continue or stop the agent.
 fn check_idle_agents_for_decision(state: &mut TuiState) {
+    // Guard: only trigger idle agents when backlog has ready tasks
+    let has_ready_tasks = !state.app().backlog.ready_tasks().is_empty();
+    if !has_ready_tasks {
+        return;
+    }
+
     if let Some(pool) = state.agent_pool.as_ref() {
         // Collect agent IDs that have been idle for too long
         let agents_to_check: Vec<agent_core::agent_runtime::AgentId> = pool
@@ -2433,6 +2439,22 @@ fn trigger_decision_for_idle_agent(
     agent_id: &agent_core::agent_runtime::AgentId,
     trigger_reason: &str,
 ) {
+    // Guard: skip if decision agent is already processing a request
+    let decision_agent_busy = state.agent_pool.as_ref().and_then(|pool| {
+        pool.decision_agent_for(agent_id).map(|da| !da.is_idle())
+    }).unwrap_or(false);
+    if decision_agent_busy {
+        logging::debug_event(
+            "decision_layer.idle_trigger_skipped",
+            "decision agent already processing, skipping duplicate trigger",
+            serde_json::json!({
+                "agent_id": agent_id.as_str(),
+                "trigger_reason": trigger_reason,
+            }),
+        );
+        return;
+    }
+
     use agent_decision::context::DecisionContext;
     use agent_decision::initializer::initialize_decision_layer;
     use agent_decision::types::SituationType;
@@ -3173,5 +3195,31 @@ mod tests {
 
         // should_quit is now set in workplace
         assert!(state.workplace().loop_control.should_quit);
+    }
+
+    #[test]
+    fn check_idle_agents_skips_when_no_ready_tasks() {
+        use super::check_idle_agents_for_decision;
+
+        let temp = TempDir::new().expect("tempdir");
+        let session = RuntimeSession::bootstrap(temp.path().into(), ProviderKind::Claude, false)
+            .expect("bootstrap");
+        let mut state = TuiState::from_session(session);
+
+        // Spawn two agents (Claude spawns decision agents automatically)
+        let alpha = state.spawn_agent(ProviderKind::Claude).expect("spawn alpha");
+        let _bravo = state.spawn_agent(ProviderKind::Claude).expect("spawn bravo");
+
+        // Backlog is empty, no ready tasks
+        assert!(state.app().backlog.ready_tasks().is_empty());
+
+        // Call check_idle_agents_for_decision - should return early without triggering
+        check_idle_agents_for_decision(&mut state);
+
+        // Verify no decision request was sent (decision agent still idle)
+        let pool = state.agent_pool.as_ref().unwrap();
+        let decision_agent = pool.decision_agent_for(&alpha).unwrap();
+        assert!(decision_agent.is_idle());
+        assert_eq!(decision_agent.decision_count(), 0);
     }
 }

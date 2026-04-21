@@ -2301,6 +2301,8 @@ mod tests {
     use agent_decision::context::DecisionContext;
     use agent_decision::situation_registry::SituationRegistry;
     use agent_decision::types::SituationType;
+    use agent_decision::model::action::ContinueAllTasksAction;
+    use agent_decision::output::DecisionOutput;
 
     fn make_pool(max_slots: usize) -> AgentPool {
         AgentPool::new(WorkplaceId::new("workplace-001"), max_slots)
@@ -4543,5 +4545,26 @@ mod tests {
                 "Old timestamp should be cleared after poll_decision_agents cleanup"
             );
         }
+    }
+
+    #[test]
+    fn continue_all_tasks_on_idle_agent_with_no_task_returns_accepted() {
+        let mut pool = make_pool(2);
+        let agent_id = pool.spawn_agent(ProviderKind::Mock).unwrap();
+
+        // Agent is idle with no assigned task
+        let slot = pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_idle());
+        assert!(slot.assigned_task_id().is_none());
+
+        // Build continue_all_tasks decision output
+        let action = Box::new(ContinueAllTasksAction::new("continue finish all tasks"));
+        let output = DecisionOutput::new(vec![action], "Rule: continue-on-idle");
+
+        // Execute decision action
+        let result = pool.execute_decision_action(&agent_id, &output);
+
+        // Should return AcceptedRecommendation, not CustomInstruction
+        assert_eq!(result, DecisionExecutionResult::AcceptedRecommendation);
     }
 }

@@ -397,6 +397,20 @@ impl DecisionExecutor {
             .to_string();
 
         let slot = &mut slots[slot_index];
+
+        // Guard: if agent is idle with no assigned task, don't start provider
+        if slot.status().is_idle() && slot.assigned_task_id().is_none() {
+            logging::debug_event(
+                "decision_layer.continue_all_tasks_no_op",
+                "agent idle with no assigned task, skipping provider start",
+                serde_json::json!({
+                    "work_agent_id": slot.agent_id().as_str(),
+                    "codename": slot.codename().as_str(),
+                }),
+            );
+            return DecisionExecutionResult::AcceptedRecommendation;
+        }
+
         // Add continue instruction as a user message to trigger work
         slot.append_transcript(crate::app::TranscriptEntry::User(instruction.clone()));
 
