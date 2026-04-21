@@ -454,10 +454,13 @@ fn shutdown_restore_cycle() {
         had_error: false,
         provider_thread_state: None,
         captured_at: "2026-04-15T00:00:00Z".to_string(),
+        role: agent_core::agent_role::AgentRole::Developer,
+        transcript: Vec::new(),
     };
 
     // Create snapshot for shutdown
     let snapshot = ShutdownSnapshot {
+        format_version: 1,
         shutdown_at: "2026-04-15T00:00:00Z".to_string(),
         workplace_id: "workplace-001".to_string(),
         agents: vec![agent_snapshot],

@@ -182,6 +182,8 @@ mod tests {
                 had_error: false,
                 provider_thread_state: None,
                 captured_at: "2026-04-14T10:00:00Z".to_string(),
+                role: agent_core::agent_role::AgentRole::Developer,
+                transcript: Vec::new(),
             }],
             BacklogState::default(),
             vec![], // no pending mail

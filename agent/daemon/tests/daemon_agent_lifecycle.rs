@@ -239,6 +239,27 @@ func main() {
         "shutdown snapshot should be written to disk"
     );
 
+    // Verify snapshot format version and transcript content before shutdown
+    let snapshot_json = std::fs::read_to_string(&snapshot_path).expect("read snapshot");
+    let snapshot: agent_core::shutdown_snapshot::ShutdownSnapshot =
+        serde_json::from_str(&snapshot_json).expect("parse snapshot");
+    assert_eq!(snapshot.format_version, 1, "snapshot should be version 1");
+    let agent_a_snapshot = snapshot
+        .agents
+        .iter()
+        .find(|a| a.meta.agent_id.as_str() == agent_a_id)
+        .expect("agent A in snapshot");
+    assert_eq!(
+        agent_a_snapshot.transcript.len(),
+        1,
+        "agent A's transcript should be preserved in snapshot"
+    );
+    assert_eq!(
+        agent_a_snapshot.role,
+        agent_types::AgentRole::Developer,
+        "agent A's role should be Developer in snapshot"
+    );
+
     // 6. Drop SessionManager to simulate shutdown
     drop(session_mgr);
 
@@ -293,6 +314,30 @@ func main() {
         stopped.unwrap().id,
         agent_a_id,
         "agent A's original ID should be preserved after resume"
+    );
+
+    // Verify transcript was restored for agent A
+    let restored_transcript = restored_mgr
+        .agent_transcript(&agent_a_id)
+        .await
+        .expect("agent A transcript should exist after restore");
+    assert_eq!(
+        restored_transcript.len(),
+        1,
+        "agent A's transcript should survive restore"
+    );
+    assert_eq!(
+        restored_transcript[0],
+        agent_core::app::TranscriptEntry::Assistant(
+            "I've written a Go hello world program.".to_string(),
+        ),
+        "agent A's transcript content should match"
+    );
+
+    // Verify role was restored for agent B
+    assert_eq!(
+        active_after[0].role, "Developer",
+        "agent B's role should be preserved as Developer"
     );
 
     // Verify shutdown snapshot was consumed (cleared) by RuntimeSession::bootstrap

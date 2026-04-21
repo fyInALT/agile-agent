@@ -900,6 +900,8 @@ mod tests {
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
+            role: crate::agent_role::AgentRole::Developer,
+            transcript: Vec::new(),
         };
 
         let agent2 = AgentShutdownSnapshot {
@@ -918,9 +920,12 @@ mod tests {
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
+            role: crate::agent_role::AgentRole::Developer,
+            transcript: Vec::new(),
         };
 
         let snapshot = ShutdownSnapshot {
+            format_version: 1,
             workplace_id: "test".to_string(),
             backlog: crate::backlog::BacklogState::default(),
             agents: vec![agent1, agent2],

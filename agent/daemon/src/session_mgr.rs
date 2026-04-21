@@ -315,12 +315,21 @@ impl SessionManager {
     pub async fn save_shutdown_snapshot(&self, reason: ShutdownReason) -> Result<PathBuf> {
         let inner = self.inner.lock().await;
         let cwd = inner.session.app.cwd.clone();
+        let store = agent_core::agent_store::AgentStore::new(
+            inner.session.agent_runtime.workplace().clone(),
+        );
 
         let agents: Vec<AgentShutdownSnapshot> = inner
             .agent_pool
             .slots()
             .iter()
             .map(|slot| {
+                // Preserve original created_at from persisted meta if available.
+                let created_at = store
+                    .load_meta(slot.agent_id())
+                    .map(|m| m.created_at)
+                    .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+
                 let meta = AgentMeta {
                     agent_id: slot.agent_id().clone(),
                     codename: slot.codename().clone(),
@@ -334,7 +343,7 @@ impl SessionManager {
                             agent_core::agent_runtime::ProviderSessionId::new(thread_id.clone())
                         }
                     }),
-                    created_at: chrono::Utc::now().to_rfc3339(),
+                    created_at,
                     updated_at: chrono::Utc::now().to_rfc3339(),
                     status: match slot.status() {
                         CoreAgentStatus::Stopped { .. } => AgentStatus::Stopped,
@@ -349,6 +358,8 @@ impl SessionManager {
                     had_error: slot.status().is_blocked(),
                     provider_thread_state: None,
                     captured_at: chrono::Utc::now().to_rfc3339(),
+                    role: slot.role(),
+                    transcript: slot.transcript().to_vec(),
                 }
             })
             .collect();
@@ -371,7 +382,7 @@ impl SessionManager {
     /// This rebuilds the `RuntimeSession` via `RuntimeSession::bootstrap` (which
     /// automatically loads the snapshot when `resume_snapshot=true`) and then
     /// reconstructs the `AgentPool` to match the saved agents, preserving their
-    /// original IDs.
+    /// original IDs, roles, and transcripts.
     pub async fn restore_from_shutdown_snapshot(
         cwd: PathBuf,
         workplace_id: WorkplaceId,
@@ -384,6 +395,13 @@ impl SessionManager {
             Some(s) => s,
             None => return Self::bootstrap(cwd, workplace_id).await,
         };
+
+        if snapshot.format_version != 1 {
+            tracing::warn!(
+                format_version = snapshot.format_version,
+                "shutdown snapshot format version mismatch; attempting best-effort restore"
+            );
+        }
 
         // RuntimeSession::bootstrap with resume_snapshot=true will automatically
         // load shutdown_snapshot.json from the workplace directory.
@@ -422,10 +440,10 @@ impl SessionManager {
                 meta.agent_id.clone(),
                 meta.codename.clone(),
                 meta.provider_type,
-                agent_core::agent_role::AgentRole::Developer,
+                agent_shutdown.role,
                 status,
                 session_handle,
-                Vec::new(),
+                agent_shutdown.transcript.clone(),
                 assigned_task_id,
             );
             if let Err(e) = agent_pool.restore_slot(slot) {
@@ -503,6 +521,21 @@ impl SessionManager {
             .iter()
             .find(|s| s.agent_id().as_str() == agent_id)
             .map(|s| s.status().label())
+    }
+
+    /// Test helper: read an agent's transcript entries.
+    #[doc(hidden)]
+    pub async fn agent_transcript(
+        &self,
+        agent_id: &str,
+    ) -> Option<Vec<agent_core::app::TranscriptEntry>> {
+        let inner = self.inner.lock().await;
+        inner
+            .agent_pool
+            .slots()
+            .iter()
+            .find(|s| s.agent_id().as_str() == agent_id)
+            .map(|s| s.transcript().to_vec())
     }
 
     /// Test helper: inject a transcript entry directly into an agent's slot.

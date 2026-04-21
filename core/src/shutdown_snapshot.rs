@@ -8,6 +8,8 @@ use serde::Serialize;
 
 use crate::agent_mail::AgentMail;
 use crate::agent_runtime::AgentMeta;
+use crate::agent_role::AgentRole;
+use crate::app::TranscriptEntry;
 use crate::backlog::BacklogState;
 
 /// Reason for shutdown
@@ -43,6 +45,12 @@ pub struct AgentShutdownSnapshot {
     pub provider_thread_state: Option<ProviderThreadSnapshot>,
     /// Timestamp when snapshot was captured
     pub captured_at: String,
+    /// Agent role for Scrum-style coordination
+    #[serde(default)]
+    pub role: AgentRole,
+    /// Agent transcript entries preserved at shutdown
+    #[serde(default)]
+    pub transcript: Vec<TranscriptEntry>,
 }
 
 /// Snapshot of provider thread state
@@ -61,6 +69,9 @@ pub struct ProviderThreadSnapshot {
 /// Complete shutdown snapshot
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShutdownSnapshot {
+    /// Snapshot format version for forward/backward compatibility
+    #[serde(default = "default_format_version")]
+    pub format_version: u32,
     /// Timestamp when shutdown occurred
     pub shutdown_at: String,
     /// Workplace ID
@@ -75,6 +86,10 @@ pub struct ShutdownSnapshot {
     pub shutdown_reason: ShutdownReason,
 }
 
+fn default_format_version() -> u32 {
+    1
+}
+
 impl ShutdownSnapshot {
     /// Create a new shutdown snapshot
     pub fn new(
@@ -85,6 +100,7 @@ impl ShutdownSnapshot {
         reason: ShutdownReason,
     ) -> Self {
         Self {
+            format_version: 1,
             shutdown_at: Utc::now().to_rfc3339(),
             workplace_id,
             agents,
@@ -139,6 +155,8 @@ impl AgentShutdownSnapshot {
             had_error: false,
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
+            role: AgentRole::Developer,
+            transcript: Vec::new(),
         }
     }
 
@@ -155,6 +173,8 @@ impl AgentShutdownSnapshot {
             had_error: false,
             provider_thread_state: Some(thread_state),
             captured_at: Utc::now().to_rfc3339(),
+            role: AgentRole::Developer,
+            transcript: Vec::new(),
         }
     }
 
@@ -167,6 +187,8 @@ impl AgentShutdownSnapshot {
             had_error: true,
             provider_thread_state: None,
             captured_at: Utc::now().to_rfc3339(),
+            role: AgentRole::Developer,
+            transcript: Vec::new(),
         }
     }
 
@@ -203,6 +225,7 @@ mod tests {
     use super::AgentShutdownSnapshot;
     use super::ShutdownReason;
     use super::ShutdownSnapshot;
+    use crate::agent_role::AgentRole;
     use crate::agent_runtime::AgentCodename;
     use crate::agent_runtime::AgentId;
     use crate::agent_runtime::AgentMeta;
@@ -272,9 +295,40 @@ mod tests {
             had_error: false,
             provider_thread_state: None,
             captured_at: "2026-04-14T00:00:00Z".to_string(),
+            role: AgentRole::Developer,
+            transcript: Vec::new(),
         };
 
         assert!(with_task.needs_resume());
+    }
+
+    #[test]
+    fn shutdown_snapshot_has_format_version() {
+        let snapshot = ShutdownSnapshot::new(
+            "wp_test".to_string(),
+            vec![AgentShutdownSnapshot::idle(test_meta("agent_001"))],
+            BacklogState::default(),
+            vec![],
+            ShutdownReason::UserQuit,
+        );
+
+        assert_eq!(snapshot.format_version, 1);
+    }
+
+    #[test]
+    fn snapshot_backward_compat_deserializes_missing_fields() {
+        // Old snapshots without format_version, role, or transcript should deserialize
+        let json = r#"{
+            "shutdown_at": "2026-04-14T00:00:00Z",
+            "workplace_id": "wp_test",
+            "agents": [],
+            "backlog": { "tasks": [], "todos": [] },
+            "pending_mail": [],
+            "shutdown_reason": "user_quit"
+        }"#;
+        let snapshot: ShutdownSnapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(snapshot.format_version, 1);
+        assert!(snapshot.agents.is_empty());
     }
 
     #[test]

@@ -79,6 +79,8 @@ fn shutdown_snapshot_captures_state() {
             had_error: slot.status().is_blocked(),
             provider_thread_state: None,
             captured_at: String::new(),
+            role: slot.role(),
+            transcript: slot.transcript().to_vec(),
         })
         .collect();
 
@@ -126,6 +128,8 @@ fn restore_from_snapshot_recreates_agents() {
             had_error: false,
             provider_thread_state: None,
             captured_at: String::new(),
+            role: slot.role(),
+            transcript: slot.transcript().to_vec(),
         })
         .collect();
 
