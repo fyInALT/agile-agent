@@ -246,10 +246,8 @@ impl TaskPreparationPipeline {
     fn needs_rebase(&self, git_state: &GitState, base_branch: &str) -> bool {
         // If behind base branch, needs rebase
         git_state.commits_behind > 0
-        // Or if not on main/master and has diverged
-        || (git_state.current_branch != base_branch
-            && git_state.commits_ahead > 0
-            && git_state.commits_behind > 0)
+        // Or if on feature branch with commits ahead (may need rebase before merge)
+        || (git_state.current_branch != base_branch && git_state.commits_ahead > 0)
     }
 
     /// Generate pre-actions needed for the preparation

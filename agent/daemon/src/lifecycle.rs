@@ -176,7 +176,11 @@ impl DaemonLifecycle {
 
         // 5. Create backup of snapshot + event log (retain last 3).
         if let Some(ref path) = snapshot_path {
-            if let Err(e) = Self::rotate_backups(path.parent().unwrap_or_else(|| std::path::Path::new("."))).await {
+            // Use snapshot_path's parent, fallback to config_path's parent (workplace dir)
+            let backup_dir = path.parent()
+                .or_else(|| self.config_path.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if let Err(e) = Self::rotate_backups(backup_dir).await {
                 tracing::warn!("failed to rotate backups: {}", e);
             }
         }

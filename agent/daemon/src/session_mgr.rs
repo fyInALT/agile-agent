@@ -199,40 +199,33 @@ impl SessionManager {
             Ok(f) => f,
             Err(e) => {
                 tracing::warn!("Snapshot parse error: {}. Falling back to empty state.", e);
-                return Ok(SnapshotFile {
-                    version: 1,
-                    session_id: String::new(),
-                    written_at: String::new(),
-                    last_event_seq: 0,
-                    state: SessionState::default(),
-                    checksum: None,
-                });
+                return Ok(SnapshotFile::empty_fallback());
             }
         };
 
-        if let Some(ref expected) = file.checksum {
-            let mut file_without_checksum = file.clone();
-            file_without_checksum.checksum = None;
-            let json = serde_json::to_string_pretty(&file_without_checksum)
-                .context("re-serialize snapshot for checksum")?;
-            let actual = format!("{:x}", sha2::Sha256::digest(json.as_bytes()));
-            if actual != *expected {
-                tracing::warn!(
-                    "Snapshot checksum mismatch: expected {}, got {}. Falling back to empty state.",
-                    expected,
-                    actual
-                );
-                return Ok(SnapshotFile {
-                    version: 1,
-                    session_id: String::new(),
-                    written_at: String::new(),
-                    last_event_seq: 0,
-                    state: SessionState::default(),
-                    checksum: None,
-                });
+        // Require checksum for all files (security: reject files without checksum)
+        match &file.checksum {
+            Some(expected) => {
+                let mut file_without_checksum = file.clone();
+                file_without_checksum.checksum = None;
+                let json = serde_json::to_string_pretty(&file_without_checksum)
+                    .context("re-serialize snapshot for checksum")?;
+                let actual = format!("{:x}", sha2::Sha256::digest(json.as_bytes()));
+                if actual != *expected {
+                    tracing::warn!(
+                        "Snapshot checksum mismatch: expected {}, got {}. Falling back to empty state.",
+                        expected,
+                        actual
+                    );
+                    return Ok(SnapshotFile::empty_fallback());
+                }
+                Ok(file)
+            }
+            None => {
+                tracing::warn!("Snapshot missing checksum field. Rejecting for security.");
+                Ok(SnapshotFile::empty_fallback())
             }
         }
-        Ok(file)
     }
 
     /// Return a debug dump of internal session state.
@@ -313,6 +306,20 @@ pub struct SnapshotFile {
     pub state: SessionState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
+}
+
+impl SnapshotFile {
+    /// Create an empty fallback snapshot for error cases.
+    fn empty_fallback() -> Self {
+        Self {
+            version: 1,
+            session_id: String::new(),
+            written_at: String::new(),
+            last_event_seq: 0,
+            state: SessionState::default(),
+            checksum: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +669,34 @@ mod tests {
         let file = SessionManager::read_snapshot(&path).await.unwrap();
         assert!(file.checksum.is_none());
         assert!(file.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn snapshot_missing_checksum_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-nosum");
+        let mgr = SessionManager::bootstrap(tmp.path().to_path_buf(), wp)
+            .await
+            .unwrap();
+
+        let path = tmp.path().join("snapshot.json");
+        mgr.write_snapshot(&path).await.unwrap();
+
+        // Remove checksum field by re-writing without it.
+        let file: SnapshotFile = serde_json::from_str(
+            &tokio::fs::read_to_string(&path).await.unwrap()
+        ).unwrap();
+        let file_no_checksum = SnapshotFile {
+            checksum: None,
+            ..file
+        };
+        tokio::fs::write(&path, serde_json::to_string_pretty(&file_no_checksum).unwrap())
+            .await
+            .unwrap();
+
+        let file = SessionManager::read_snapshot(&path).await.unwrap();
+        assert!(file.checksum.is_none(), "missing checksum should cause fallback");
+        assert!(file.session_id.is_empty(), "should return empty state for security");
     }
 
     #[tokio::test]
