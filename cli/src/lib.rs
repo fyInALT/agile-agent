@@ -9,6 +9,6 @@ pub mod app_runner {
     use anyhow::Result;
 
     pub fn run() -> Result<()> {
-        agent_tui::run_tui()
+        anyhow::bail!("CLI headless mode requires the `core` feature; use protocol mode instead")
     }
 }

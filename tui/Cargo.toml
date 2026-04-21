@@ -29,6 +29,7 @@ uuid = { workspace = true }
 unicode-width.workspace = true
 
 [features]
+default = ["core"]
 core = ["dep:agent-core", "dep:agent-decision", "dep:agent-kanban"]
 
 [dev-dependencies]
