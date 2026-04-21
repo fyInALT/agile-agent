@@ -50,8 +50,8 @@ impl RateLimiter {
 /// Unique identifier for a connection.
 pub type ConnectionId = String;
 
-/// Heartbeat timeout: close connection after 120s of silence.
-const HEARTBEAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// Default heartbeat timeout: close connection after 120s of silence.
+pub const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 
 /// Tracks active connections and enforces a hard limit.
 #[derive(Debug, Clone)]
@@ -225,10 +225,12 @@ impl Connection {
             };
             let mut rate_limiter = rate_limiter;
 
+            let heartbeat_timeout = std::time::Duration::from_secs(DEFAULT_HEARTBEAT_TIMEOUT_SECS);
+
             loop {
                 // Wait for next message with heartbeat timeout, or an event.
                 let next = tokio::select! {
-                    msg = tokio::time::timeout(HEARTBEAT_TIMEOUT, read.next()) => {
+                    msg = tokio::time::timeout(heartbeat_timeout, read.next()) => {
                         match msg {
                             Ok(Some(Ok(Message::Text(text)))) => {
                                 Some(ConnInput::WsText(text))
@@ -264,7 +266,7 @@ impl Connection {
                                 tracing::warn!(
                                     "Connection {} timed out after {:?} of inactivity",
                                     conn.id,
-                                    HEARTBEAT_TIMEOUT
+                                    heartbeat_timeout
                                 );
                                 let _ = write
                                     .send(Message::Close(Some(
