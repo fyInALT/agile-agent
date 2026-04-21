@@ -1,17 +1,31 @@
+#[cfg(test)]
 use crossterm::event::KeyCode;
+#[cfg(test)]
 use crossterm::event::KeyModifiers;
+#[cfg(test)]
 use ratatui::Terminal;
+#[cfg(test)]
 use ratatui::backend::TestBackend;
 
+#[cfg(test)]
 use crate::overview_state::{OverviewFilter, OverviewLogMessage, OverviewMessageType};
+#[cfg(test)]
 use crate::render::render_app;
+#[cfg(test)]
 use crate::test_support::ShellHarness;
+#[cfg(test)]
 use crate::transcript::cells;
+#[cfg(test)]
 use crate::view_mode::ViewMode;
+#[cfg(test)]
 use agent_core::app::TranscriptEntry;
+#[cfg(test)]
 use agent_core::logging;
+#[cfg(test)]
 use agent_core::logging::RunMode;
+#[cfg(test)]
 use agent_core::ProviderKind;
+#[cfg(test)]
 use agent_core::workplace_store::WorkplaceStore;
 
 #[test]

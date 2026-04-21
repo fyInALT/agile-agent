@@ -1,5 +1,4 @@
 use agent_protocol::events::*;
-use agent_protocol::state::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn make_event() -> Event {
