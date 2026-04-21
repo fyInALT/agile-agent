@@ -2411,7 +2411,11 @@ fn check_idle_agents_for_decision(state: &mut TuiState) {
                     // Check if idle for longer than IDLE_DECISION_TRIGGER_SECS
                     let idle_duration = slot.last_activity();
                     let elapsed = idle_duration.elapsed().as_secs();
-                    if elapsed >= IDLE_DECISION_TRIGGER_SECS {
+                    // Cooldown: don't re-trigger if already triggered recently (300s)
+                    let recently_triggered = slot.last_idle_trigger_at()
+                        .map(|t| t.elapsed().as_secs() < 300)
+                        .unwrap_or(false);
+                    if elapsed >= IDLE_DECISION_TRIGGER_SECS && !recently_triggered {
                         Some(slot.agent_id().clone())
                     } else {
                         None
@@ -2477,6 +2481,12 @@ fn trigger_decision_for_idle_agent(
 
     // Send decision request
     if let Some(pool) = state.agent_pool.as_mut() {
+        {
+            let slot = pool.get_slot_mut_by_id(agent_id);
+            if let Some(s) = slot {
+                s.set_last_idle_trigger_at(std::time::Instant::now());
+            }
+        }
         if let Err(e) = pool.send_decision_request(agent_id, request) {
             logging::warn_event(
                 "decision_layer.idle_trigger_failed",

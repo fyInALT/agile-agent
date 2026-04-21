@@ -11,8 +11,11 @@ mod event_handler;
 mod markdown;
 mod markdown_stream;
 mod overview_state;
+// Protocol-only modules (used when core feature is disabled).
+#[cfg(not(feature = "core"))]
 mod protocol_client;
 mod protocol_state;
+#[cfg(not(feature = "core"))]
 mod reconnecting_client;
 mod streaming;
 mod terminal;
@@ -21,6 +24,7 @@ mod text_formatting;
 mod tool_output;
 mod transcript;
 mod view_mode;
+#[cfg(not(feature = "core"))]
 mod websocket_client;
 
 // Embedded-mode-only modules (depend on agent_core / agent_decision / agent_kanban).
@@ -52,7 +56,8 @@ mod provider_overlay;
 mod render;
 #[cfg(feature = "core")]
 mod resume_overlay;
-#[cfg(feature = "core")]
+// Test-only modules (compiled only during test builds with core feature).
+#[cfg(all(feature = "core", test))]
 mod shell_tests;
 #[cfg(feature = "core")]
 mod task_decision_overlay;
@@ -60,7 +65,7 @@ mod task_decision_overlay;
 mod task_detail_view;
 #[cfg(feature = "core")]
 mod task_panel;
-#[cfg(feature = "core")]
+#[cfg(all(feature = "core", test))]
 mod test_support;
 #[cfg(feature = "core")]
 mod tui_snapshot;

@@ -952,8 +952,10 @@ fn daemon_status() -> Result<()> {
     Ok(())
 }
 
+/// Stub for agent list via protocol.
+/// TODO: Will be replaced with actual protocol call in a future sprint.
+#[cfg(test)]
 async fn agent_list_via_protocol() -> Result<Vec<String>> {
-    // Stub: will be replaced with actual protocol call in a future sprint.
     Ok(vec!["agent_001 alpha".to_string()])
 }
 

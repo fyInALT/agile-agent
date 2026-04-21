@@ -331,6 +331,7 @@ impl DecisionExecutor {
         if slot.status().is_blocked() {
             let _ = slot.transition_to(AgentSlotStatus::idle());
         }
+        slot.clear_task();
 
         // Log: Completion confirmed
         logging::debug_event(

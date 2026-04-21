@@ -109,7 +109,9 @@ pub struct TuiState {
     pub launch_config_overlay: Option<LaunchConfigOverlayState>,
     /// Current decision status summary (15 chars or less) for status bar
     pub decision_status: Option<String>,
-    /// Sprint 7: protocol-driven state from daemon events (decoupled from core)
+    /// Sprint 7: protocol-driven state from daemon events (decoupled from core).
+    /// TODO: Used for hybrid mode where TUI connects to daemon while still using core.
+    #[allow(dead_code)]
     pub protocol_state: crate::protocol_state::ProtocolState,
 }
 

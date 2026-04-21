@@ -72,6 +72,8 @@ pub struct AgentSlot {
     worktree_id: Option<String>,
     /// Provider profile ID used for this agent (if profile-based)
     profile_id: Option<String>,
+    /// Timestamp of last idle-triggered decision check (cooldown)
+    last_idle_trigger_at: Option<Instant>,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -117,6 +119,7 @@ impl AgentSlot {
             worktree_branch: None,
             worktree_id: None,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -145,6 +148,7 @@ impl AgentSlot {
             worktree_branch: None,
             worktree_id: None,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -174,6 +178,7 @@ impl AgentSlot {
             worktree_branch: None,
             worktree_id: None,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -204,6 +209,7 @@ impl AgentSlot {
             worktree_branch: None,
             worktree_id: None,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -265,6 +271,7 @@ impl AgentSlot {
             worktree_branch,
             worktree_id,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -294,6 +301,7 @@ impl AgentSlot {
             worktree_branch: None,
             worktree_id: None,
             profile_id: None,
+            last_idle_trigger_at: None,
         }
     }
 
@@ -797,6 +805,16 @@ impl AgentSlot {
             serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "task_id": task_id, "status": self.status.label()}),
         );
         self.assigned_task_id = None;
+    }
+
+    /// Get the last idle trigger timestamp
+    pub fn last_idle_trigger_at(&self) -> Option<Instant> {
+        self.last_idle_trigger_at
+    }
+
+    /// Set the last idle trigger timestamp
+    pub fn set_last_idle_trigger_at(&mut self, instant: Instant) {
+        self.last_idle_trigger_at = Some(instant);
     }
 
     // === Resting State Methods ===
