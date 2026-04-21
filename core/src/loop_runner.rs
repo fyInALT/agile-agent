@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -7,11 +8,45 @@ use crate::app::AppState;
 use crate::app::LoopPhase;
 use crate::backlog::TaskItem;
 use crate::logging;
-// Provider types are re-exported at crate root
 use crate::ProviderEvent;
+use crate::ProviderKind;
+use crate::SessionHandle;
 use crate::task_engine;
 use crate::task_engine::ExecutionGuardrails;
 use crate::task_engine::TurnResolution;
+
+// ============================================================================
+// ProviderStarter trait — injectable provider spawn logic
+// ============================================================================
+
+/// Trait for starting a provider session. Production uses the real CLI; tests inject a mock.
+pub trait ProviderStarter: Send + Sync {
+    /// Start a provider and return the event receiver.
+    fn start_provider(
+        &self,
+        kind: ProviderKind,
+        prompt: String,
+        cwd: PathBuf,
+        session_handle: Option<SessionHandle>,
+    ) -> Result<mpsc::Receiver<ProviderEvent>>;
+}
+
+/// Production implementation that spawns real CLI processes.
+pub struct DefaultProviderStarter;
+
+impl ProviderStarter for DefaultProviderStarter {
+    fn start_provider(
+        &self,
+        kind: ProviderKind,
+        prompt: String,
+        cwd: PathBuf,
+        session_handle: Option<SessionHandle>,
+    ) -> Result<mpsc::Receiver<ProviderEvent>> {
+        let (event_tx, event_rx) = mpsc::channel();
+        crate::start_provider(kind, prompt, cwd, session_handle, event_tx)?;
+        Ok(event_rx)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoopGuardrails {
@@ -48,6 +83,29 @@ pub fn run_single_iteration_with_hook<F>(
 where
     F: FnMut(&AppState) -> Result<()>,
 {
+    run_single_iteration_with_hook_and_starter(
+        state,
+        on_state_change,
+        &DefaultProviderStarter,
+    )
+}
+
+/// Single iteration with an injectable `ProviderStarter`.
+pub fn run_single_iteration_with_starter(
+    state: &mut AppState,
+    starter: &dyn ProviderStarter,
+) -> Result<Option<LoopRunSummary>> {
+    run_single_iteration_with_hook_and_starter(state, &mut |_state| Ok(()), starter)
+}
+
+pub fn run_single_iteration_with_hook_and_starter<F>(
+    state: &mut AppState,
+    on_state_change: &mut F,
+    starter: &dyn ProviderStarter,
+) -> Result<Option<LoopRunSummary>>
+where
+    F: FnMut(&AppState) -> Result<()>,
+{
     logging::debug_event(
         "loop.single_iteration.start",
         "starting single loop iteration",
@@ -76,7 +134,7 @@ where
     };
     state.push_status_message(format!("running task: {}", task.id));
     on_state_change(state)?;
-    execute_task_until_resolution(state, &task, LoopGuardrails::default(), on_state_change)?;
+    execute_task_until_resolution(state, &task, LoopGuardrails::default(), on_state_change, starter)?;
     logging::debug_event(
         "loop.single_iteration.stop",
         "completed single loop iteration",
@@ -100,6 +158,27 @@ pub fn run_loop_with_hook<F>(
     state: &mut AppState,
     guardrails: LoopGuardrails,
     on_state_change: &mut F,
+) -> Result<LoopRunSummary>
+where
+    F: FnMut(&AppState) -> Result<()>,
+{
+    run_loop_with_hook_and_starter(state, guardrails, on_state_change, &DefaultProviderStarter)
+}
+
+/// Run loop with an injectable `ProviderStarter`.
+pub fn run_loop_with_starter(
+    state: &mut AppState,
+    guardrails: LoopGuardrails,
+    starter: &dyn ProviderStarter,
+) -> Result<LoopRunSummary> {
+    run_loop_with_hook_and_starter(state, guardrails, &mut |_state| Ok(()), starter)
+}
+
+pub fn run_loop_with_hook_and_starter<F>(
+    state: &mut AppState,
+    guardrails: LoopGuardrails,
+    on_state_change: &mut F,
+    starter: &dyn ProviderStarter,
 ) -> Result<LoopRunSummary>
 where
     F: FnMut(&AppState) -> Result<()>,
@@ -176,7 +255,7 @@ where
             }),
         );
 
-        let outcome = execute_task_until_resolution(state, &task, guardrails, on_state_change)?;
+        let outcome = execute_task_until_resolution(state, &task, guardrails, on_state_change, starter)?;
         if outcome == LoopExecutionOutcome::VerificationFailed {
             verification_failures += 1;
             if verification_failures >= guardrails.max_verification_failures {
@@ -214,6 +293,7 @@ fn execute_task_until_resolution(
     task: &TaskItem,
     guardrails: LoopGuardrails,
     on_state_change: &mut impl FnMut(&AppState) -> Result<()>,
+    starter: &dyn ProviderStarter,
 ) -> Result<LoopExecutionOutcome> {
     let mut prompt = task_engine::build_task_prompt(task);
     let execution_guardrails = ExecutionGuardrails {
@@ -226,21 +306,22 @@ fn execute_task_until_resolution(
         state.begin_provider_response();
         on_state_change(state)?;
 
-        let (event_tx, event_rx) = mpsc::channel();
         let provider_kind = state.selected_provider;
         let session_handle = state.current_session_handle();
-        if let Err(err) = crate::start_provider(
+        let event_rx = match starter.start_provider(
             provider_kind,
             prompt.clone(),
             state.cwd.clone(),
             session_handle,
-            event_tx,
         ) {
-            state.finish_provider_response();
-            task_engine::handle_provider_start_failure(state, err.to_string());
-            on_state_change(state)?;
-            return Ok(LoopExecutionOutcome::Escalated);
-        }
+            Ok(rx) => rx,
+            Err(err) => {
+                state.finish_provider_response();
+                task_engine::handle_provider_start_failure(state, err.to_string());
+                on_state_change(state)?;
+                return Ok(LoopExecutionOutcome::Escalated);
+            }
+        };
 
         consume_provider_until_finished(state, event_rx, on_state_change)?;
         let resolution = task_engine::resolve_active_task_after_turn(state, execution_guardrails)?;
