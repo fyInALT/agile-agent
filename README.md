@@ -21,10 +21,12 @@ Implemented:
 - multi-agent headless execution mode with `--multi-agent` flag
 - modular decision layer architecture (Core → Model → Pipeline → Engine → Classifier → Provider → State → Runtime → Config)
 - provider profile system for configurable LLM backends
+- daemon-centric architecture with WebSocket JSON-RPC 2.0 protocol
+- modular crate structure: types, toolkit, provider, worktree, backlog, storage, protocol, daemon, commands
+- OpenAI-backed LLM provider with simple/thinking model tiers
 
 In progress:
 
-- OpenAI-backed LLM provider integration for decision support
 - workflow self-improvement
 - full parallel multi-agent runtime across TUI execution
 
@@ -36,26 +38,45 @@ Not started yet:
 
 ```text
 agile-agent/
-├── cli/           # `agile-agent` binary and CLI integration tests
-├── core/          # runtime, providers, persistence, backlog, verification
-├── decision/      # decision layer, classifiers, engines, human-decision types
-├── docs/          # product specs, sprint specs, and superpowers artifacts
-├── kanban/        # trait-based Kanban domain model
-├── llm-provider/  # OpenAI client/provider abstraction for internal use
-├── scripts/       # developer helper scripts
-├── test-support/  # shared test harnesses and fixtures
-└── tui/           # terminal UI, rendering, transcript, overlays, command flow
+├── agent/             # Core agent crates (modular architecture)
+│   ├── daemon/        # WebSocket server, session manager, event pump
+│   ├── protocol/      # JSON-RPC types, events, state snapshots
+│   ├── types/         # Foundation types (AgentId, TaskId, ProviderKind)
+│   ├── toolkit/       # Tool call types (PatchChange, ExecCommand)
+│   ├── provider/      # Provider execution (Claude, Codex, launch config)
+│   ├── worktree/      # Git worktree management
+│   ├── backlog/       # Task/backlog domain
+│   ├── storage/       # Persistence layer
+│   └── commands/      # Slash command system
+├── cli/               # `agile-agent` binary and CLI integration tests
+├── core/              # Runtime engine, AgentPool, AppState, verification
+├── decision/          # Decision layer, classifiers, engines
+├── docs/              # Product specs, sprint specs
+├── kanban/            # Trait-based Kanban domain model
+├── llm-provider/      # OpenAI client/provider abstraction
+├── scripts/           # Developer helper scripts
+├── test-support/      # Shared test harnesses and fixtures
+└── tui/               # Terminal UI, rendering, transcript, overlays
 ```
 
 Workspace crates:
 
-- `agent-cli`: `agile-agent` binary, TUI entrypoint, and CLI subcommands
-- `agent-core`: providers, backlog/task models, runtime loop, persistence, verification, and artifacts
-- `agent-decision`: classifier, tiered decision engine, action/situation registry, and human decision types
-- `agent-tui`: codex-style terminal UI and slash-command routing
-- `agent-kanban`: extensible Kanban domain model with trait and registry architecture
-- `agent-llm-provider`: OpenAI client and provider abstraction used by decision-layer work
-- `agent-test-support`: shared test helpers for workspace crates
+- `agent-daemon`: WebSocket server owning all runtime state
+- `agent-protocol`: JSON-RPC 2.0 types, events, snapshots, auto-link
+- `agent-types`: Foundation types (AgentId, WorkplaceId, TaskId, ProviderKind)
+- `agent-toolkit`: Tool call types (PatchChange, ExecCommandStatus, WebSearchAction)
+- `agent-provider`: Provider execution layer (Claude, Codex, Mock, launch config)
+- `agent-worktree`: Git worktree isolation for multi-agent development
+- `agent-backlog`: Task and backlog management
+- `agent-storage`: Persistence layer (snapshot, events.jsonl)
+- `agent-commands`: Slash command routing and execution
+- `agent-cli`: `agile-agent` binary, TUI entrypoint, CLI subcommands
+- `agent-core`: Runtime engine (AgentPool, AppState), verification, artifacts
+- `agent-decision`: Classifier, tiered decision engine, action/situation registry
+- `agent-tui`: Codex-style terminal UI (protocol-only client)
+- `agent-kanban`: Extensible Kanban domain model with trait architecture
+- `agent-llm-provider`: OpenAI client with simple/thinking model tiers
+- `agent-test-support`: Shared test helpers for workspace crates
 
 Key docs:
 

@@ -83,20 +83,27 @@ The multi-agent foundation provides Scrum-style coordination:
 
 ### Crates
 
-- `cli/`: `agent-cli` crate — binary entrypoints and CLI-facing integration tests (protocol-first, `core` feature for legacy mode)
-- `core/`: `agent-core` crate — runtime, providers, persistence, backlog, verification
-- `tui/`: `agent-tui` crate — terminal UI, rendering, transcript, composer, overlays (protocol-first, `core` feature for legacy mode)
-- `decision/`: `agent-decision` crate — classifiers, engines, actions, situations
-- `kanban/`: `agent-kanban` crate — trait-based Kanban domain model
-- `llm-provider/`: `agent-llm-provider` crate — OpenAI client/provider abstraction
+- `agent/types/`: `agent-types` crate — Foundation types (AgentId, WorkplaceId, TaskId, ProviderKind)
+- `agent/toolkit/`: `agent-toolkit` crate — Tool call types (PatchChange, ExecCommandStatus)
+- `agent/provider/`: `agent-provider` crate — Provider execution (Claude, Codex, launch config)
+- `agent/worktree/`: `agent-worktree` crate — Git worktree isolation
+- `agent/backlog/`: `agent-backlog` crate — Task and backlog management
+- `agent/storage/`: `agent-storage` crate — Persistence layer
 - `agent/daemon/`: `agent-daemon` crate — WebSocket server, session manager, event pump, broadcaster
 - `agent/protocol/`: `agent-protocol` crate — JSON-RPC types, events, snapshots, auto-link, config
-- `agent/commands/`: `agent-commands` crate — command bus and slash command system
-- `test-support/`: `agent-test-support` crate — shared test helpers
+- `agent/commands/`: `agent-commands` crate — Command bus and slash command system
+- `cli/`: `agent-cli` crate — Binary entrypoints and CLI-facing integration tests (protocol-first)
+- `core/`: `agent-core` crate — Runtime engine (AgentPool, AppState), verification, artifacts
+- `tui/`: `agent-tui` crate — Terminal UI, rendering, transcript, composer, overlays (protocol-only)
+- `decision/`: `agent-decision` crate — Classifiers, engines, actions, situations
+- `kanban/`: `agent-kanban` crate — Trait-based Kanban domain model
+- `llm-provider/`: `agent-llm-provider` crate — OpenAI client with simple/thinking model tiers
+- `test-support/`: `agent-test-support` crate — Shared test helpers
 
 ### Documentation
 
 - `docs/plan/spec/`: Implementation-facing sprint specs
+- `docs/plan/spec/frontend-backend-separation/`: Frontend-backend separation sprint specs (Sprints 1-13)
 - `docs/plan/spec/multi-agent/`: Multi-agent sprint specs (sprint-01 through sprint-11)
 - `docs/plan/spec/decision-layer/`: Decision-layer architecture and sprint specs
 - `docs/plan/spec/launch-config/`: Launch configuration sprint specs
