@@ -1,3 +1,5 @@
+#![cfg(feature = "core")]
+
 //! Integration tests for worktree isolation
 //!
 //! Tests that agents correctly use isolated worktrees for concurrent development.

@@ -19,6 +19,7 @@ ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
+tempfile.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-tungstenite = { workspace = true }
@@ -28,7 +29,6 @@ uuid = { workspace = true }
 unicode-width.workspace = true
 
 [features]
-default = ["core"]
 core = ["dep:agent-core", "dep:agent-decision", "dep:agent-kanban"]
 
 [dev-dependencies]

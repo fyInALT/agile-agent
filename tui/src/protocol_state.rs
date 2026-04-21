@@ -67,6 +67,13 @@ pub struct ProtocolState {
     pub agent_view_states: HashMap<String, AgentViewState>,
     pub pending_approvals: Vec<agent_protocol::events::ApprovalRequestData>,
     pub decision_status: Option<String>,
+
+    // -- composer & view state (zero core deps) --
+    pub composer: crate::composer::textarea::TextArea,
+    pub composer_state: crate::composer::textarea::TextAreaState,
+    pub transcript_overlay: Option<crate::transcript::overlay::TranscriptOverlayState>,
+    pub view_state: crate::view_mode::TuiViewState,
+    pub confirmation_overlay: Option<crate::confirmation_overlay::ConfirmationOverlay>,
 }
 
 impl Default for ProtocolState {
@@ -94,6 +101,11 @@ impl Default for ProtocolState {
             agent_view_states: HashMap::new(),
             pending_approvals: Vec::new(),
             decision_status: None,
+            composer: crate::composer::textarea::TextArea::from_text(String::new()),
+            composer_state: crate::composer::textarea::TextAreaState::default(),
+            transcript_overlay: None,
+            view_state: crate::view_mode::TuiViewState::new(),
+            confirmation_overlay: None,
         }
     }
 }

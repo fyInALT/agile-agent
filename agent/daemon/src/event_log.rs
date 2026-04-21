@@ -8,11 +8,17 @@ use tokio::io::AsyncWriteExt;
 /// Append-only JSONL event log.
 pub struct EventLog {
     path: PathBuf,
+    max_size_bytes: u64,
 }
 
 impl EventLog {
-    /// Open or create the event log at `path`.
+    /// Open or create the event log at `path` with default 100MB limit.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_max_size(path, 100).await
+    }
+
+    /// Open or create the event log at `path` with a custom size limit in MB.
+    pub async fn open_with_max_size(path: impl AsRef<Path>, max_event_log_mb: u64) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         // Ensure parent directory exists.
         if let Some(parent) = path.parent() {
@@ -26,16 +32,21 @@ impl EventLog {
                 .await
                 .with_context(|| format!("create event log {}", path.display()))?;
         }
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            max_size_bytes: max_event_log_mb * 1024 * 1024,
+        })
     }
 
     /// Append a single event atomically (newline-delimited JSON).
     pub async fn append(&self, event: &Event) -> Result<()> {
+        self.maybe_rotate().await?;
         let line = serde_json::to_string(event).context("serialize event")?;
         let mut bytes = line.into_bytes();
         bytes.push(b'\n');
         let mut file = tokio::fs::OpenOptions::new()
             .append(true)
+            .create(true)
             .open(&self.path)
             .await
             .with_context(|| format!("open event log {}", self.path.display()))?;
@@ -100,6 +111,34 @@ impl EventLog {
             expected = event.seq.saturating_add(1);
         }
         Ok(gaps)
+    }
+
+    async fn maybe_rotate(&self) -> Result<()> {
+        match tokio::fs::metadata(&self.path).await {
+            Ok(meta) if meta.len() > self.max_size_bytes => {
+                self.rotate().await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn rotate(&self) -> Result<()> {
+        for i in (1..=5).rev() {
+            let src = if i == 1 {
+                self.path.clone()
+            } else {
+                self.path.with_extension(format!("jsonl.{}", i - 1))
+            };
+            let dst = self.path.with_extension(format!("jsonl.{}", i));
+            if tokio::fs::metadata(&src).await.is_ok() {
+                let _ = tokio::fs::remove_file(&dst).await;
+                if let Err(e) = tokio::fs::rename(&src, &dst).await {
+                    tracing::warn!("Failed to rotate event log {:?} -> {:?}: {}", src, dst, e);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -276,5 +315,24 @@ mod tests {
         log.append(&make_event(3)).await.unwrap();
         let gaps = log.detect_gaps().await.unwrap();
         assert!(gaps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn log_rotation_on_size_exceeded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("events.jsonl");
+        // Pre-seed file with 1 byte so it exceeds 0-byte limit.
+        tokio::fs::write(&path, b"x").await.unwrap();
+        let log = EventLog::open_with_max_size(&path, 0).await.unwrap();
+
+        for seq in 1..=7 {
+            log.append(&make_event(seq)).await.unwrap();
+        }
+
+        assert!(path.exists());
+        for i in 1..=5 {
+            assert!(path.with_extension(format!("jsonl.{}", i)).exists());
+        }
+        assert!(!path.with_extension("jsonl.6").exists());
     }
 }

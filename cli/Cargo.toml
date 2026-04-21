@@ -24,7 +24,6 @@ tracing.workspace = true
 uuid = { workspace = true }
 
 [features]
-default = ["core"]
 core = ["dep:agent-core", "dep:agent-decision", "dep:agent-tui"]
 
 [dev-dependencies]

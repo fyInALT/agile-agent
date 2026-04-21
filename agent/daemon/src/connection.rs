@@ -63,6 +63,45 @@ fn is_localhost_origin(origin: &str) -> bool {
         || origin == "null"
 }
 
+/// Validates the bearer token from query param or Authorization header.
+fn check_bearer_token(
+    req: &tokio_tungstenite::tungstenite::http::Request<()>,
+    bearer_token: &Option<String>,
+) -> Result<(), tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
+    if let Some(expected) = bearer_token {
+        let provided = req
+            .uri()
+            .query()
+            .and_then(|q| {
+                q.split('&').find_map(|pair| {
+                    let mut kv = pair.splitn(2, '=');
+                    let k = kv.next()?;
+                    if k == "token" { kv.next() } else { None }
+                })
+            })
+            .or_else(|| {
+                req.headers().get("authorization").and_then(|h| {
+                    let s = h.to_str().ok()?;
+                    let mut parts = s.splitn(2, ' ');
+                    if parts.next()?.eq_ignore_ascii_case("Bearer") {
+                        parts.next()
+                    } else {
+                        None
+                    }
+                })
+            });
+        if provided != Some(expected.as_str()) {
+            return Err(
+                tokio_tungstenite::tungstenite::http::Response::builder()
+                    .status(401)
+                    .body(Some("Unauthorized".to_string()))
+                    .unwrap(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// State of a single client connection.
 pub struct Connection {
     pub id: ConnectionId,
@@ -88,6 +127,7 @@ impl Connection {
         router: RouterHandle,
         mut event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Event>>,
         tracker: Option<ConnectionTracker>,
+        bearer_token: Option<String>,
     ) -> ConnectionId {
         if let Some(ref t) = tracker {
             if !t.try_connect() {
@@ -117,6 +157,9 @@ impl Connection {
                                     .unwrap(),
                             );
                         }
+                    }
+                    if let Err(err_response) = check_bearer_token(req, &bearer_token) {
+                        return Err(err_response);
                     }
                     Ok(response)
                 },
@@ -404,5 +447,45 @@ mod tests {
         let text: String = "a".repeat(MAX_INPUT_SIZE + 100);
         let truncated: String = text.chars().take(MAX_INPUT_SIZE).collect();
         assert_eq!(truncated.len(), MAX_INPUT_SIZE);
+    }
+
+    #[test]
+    fn token_auth_accepted() {
+        let req = tokio_tungstenite::tungstenite::http::Request::builder()
+            .uri("ws://localhost:1234/v1/session?token=secret123")
+            .body(())
+            .unwrap();
+        assert!(check_bearer_token(&req, &Some("secret123".to_string())).is_ok());
+    }
+
+    #[test]
+    fn token_auth_accepted_via_header() {
+        let req = tokio_tungstenite::tungstenite::http::Request::builder()
+            .uri("ws://localhost:1234/v1/session")
+            .header("Authorization", "Bearer secret123")
+            .body(())
+            .unwrap();
+        assert!(check_bearer_token(&req, &Some("secret123".to_string())).is_ok());
+    }
+
+    #[test]
+    fn token_auth_rejected() {
+        let req = tokio_tungstenite::tungstenite::http::Request::builder()
+            .uri("ws://localhost:1234/v1/session?token=wrong")
+            .body(())
+            .unwrap();
+        let result = check_bearer_token(&req, &Some("secret123".to_string()));
+        assert!(result.is_err());
+        let resp = result.unwrap_err();
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[test]
+    fn no_token_required_when_none() {
+        let req = tokio_tungstenite::tungstenite::http::Request::builder()
+            .uri("ws://localhost:1234/v1/session")
+            .body(())
+            .unwrap();
+        assert!(check_bearer_token(&req, &None).is_ok());
     }
 }

@@ -54,6 +54,42 @@ impl Handler for HealthHandler {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn parse_vm_rss_kb(content: &str) -> Option<u64> {
+    content
+        .lines()
+        .find(|l| l.starts_with("VmRSS:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+/// Spawn a background task that warns when RSS exceeds 500MB.
+pub fn spawn_memory_monitor() {
+    #[cfg(target_os = "linux")]
+    {
+        tokio::spawn(async {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                match tokio::fs::read_to_string("/proc/self/status").await {
+                    Ok(content) => {
+                        if let Some(kb) = parse_vm_rss_kb(&content) {
+                            if kb > 500 * 1024 {
+                                tracing::warn!("Daemon RSS exceeds 500MB: {} kB", kb);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to read /proc/self/status: {}", e);
+                    }
+                }
+            }
+        });
+    }
+}
+
 /// JSON-RPC handler for `session.metrics` returning Prometheus text format.
 pub struct MetricsHandler {
     metrics: std::sync::Arc<DaemonMetrics>,
@@ -149,5 +185,23 @@ mod tests {
             }
             other => panic!("expected Response, got {:?}", other),
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn parse_vm_rss_kb_extracts_value() {
+        let content = "Name:   bash\nVmRSS:\t 1234 kB\nVmSize: 5678 kB\n";
+        assert_eq!(super::parse_vm_rss_kb(content), Some(1234));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn parse_vm_rss_kb_missing_returns_none() {
+        assert_eq!(super::parse_vm_rss_kb("Name: foo\n"), None);
+    }
+
+    #[tokio::test]
+    async fn spawn_memory_monitor_does_not_panic() {
+        super::spawn_memory_monitor();
     }
 }

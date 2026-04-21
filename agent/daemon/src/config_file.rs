@@ -18,6 +18,9 @@ pub struct DaemonConfigFile {
     /// Event log retention: max file size in MB before rotation (default: 100).
     #[serde(default = "default_max_event_log_mb")]
     pub max_event_log_mb: u64,
+    /// Optional bearer token for WebSocket authentication.
+    #[serde(default)]
+    pub bearer_token: Option<String>,
 }
 
 fn default_bind() -> String {
@@ -43,6 +46,7 @@ impl Default for DaemonConfigFile {
             heartbeat_timeout: default_heartbeat_timeout(),
             max_clients: default_max_clients(),
             max_event_log_mb: default_max_event_log_mb(),
+            bearer_token: None,
         }
     }
 }
@@ -69,5 +73,6 @@ mod tests {
         assert_eq!(cfg.bind, "127.0.0.1:0");
         assert_eq!(cfg.heartbeat_timeout, 120);
         assert_eq!(cfg.max_clients, 10);
+        assert_eq!(cfg.bearer_token, None);
     }
 }

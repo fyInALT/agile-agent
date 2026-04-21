@@ -160,33 +160,40 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
-    #[tokio::test]
-    async fn cli_client_request_response_roundtrip() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let url = format!("ws://{}", local_addr);
+    #[test]
+    fn cli_client_request_response_roundtrip() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let url = rt.block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let local_addr = listener.local_addr().unwrap();
+            let url = format!("ws://{}", local_addr);
 
-        tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-            let (mut write, mut read) = ws.split();
+            tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                let (mut write, mut read) = ws.split();
 
-            while let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) = read.next().await {
-                if let Ok(JsonRpcMessage::Request(req)) = serde_json::from_str(&text) {
-                    let resp = JsonRpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        id: req.id,
-                        result: Some(serde_json::json!({"echo": req.method})),
-    ext: None,
-                    };
-                    let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
-                    let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
+                while let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) = read.next().await {
+                    if let Ok(JsonRpcMessage::Request(req)) = serde_json::from_str(&text) {
+                        let resp = JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            id: req.id,
+                            result: Some(serde_json::json!({"echo": req.method})),
+                            ext: None,
+                        };
+                        let json = serde_json::to_string(&JsonRpcMessage::Response(resp)).unwrap();
+                        let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
+                    }
                 }
-            }
+            });
+            url
         });
 
-        let client = ProtocolClient::connect(&url).unwrap();
-        let resp = client.request("session.initialize", None).unwrap();
-        assert!(resp.result.is_some());
+        // Run blocking client on a separate thread to avoid nested runtime
+        std::thread::spawn(move || {
+            let client = ProtocolClient::connect(&url).unwrap();
+            let resp = client.request("session.initialize", None).unwrap();
+            assert!(resp.result.is_some());
+        }).join().unwrap();
     }
 }

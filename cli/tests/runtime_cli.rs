@@ -1,3 +1,5 @@
+#![cfg(feature = "core")]
+
 use std::fs;
 
 use serde_json::Value;

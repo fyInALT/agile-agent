@@ -17,20 +17,26 @@ struct CliArgs {
     workplace_id: Option<String>,
     alias: Option<String>,
     log_file: Option<String>,
+    json_log: bool,
 }
 
-fn parse_args() -> CliArgs {
+fn parse_args<I>(iter: I) -> CliArgs
+where
+    I: Iterator<Item = String>,
+{
     let mut args = CliArgs {
         workplace_id: None,
         alias: None,
         log_file: None,
+        json_log: false,
     };
-    let mut iter = std::env::args().skip(1);
+    let mut iter = iter.skip(1);
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--workplace-id" => args.workplace_id = iter.next(),
             "--alias" => args.alias = iter.next(),
             "--log-file" => args.log_file = iter.next(),
+            "--json-log" => args.json_log = true,
             _ => {}
         }
     }
@@ -39,9 +45,13 @@ fn parse_args() -> CliArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let args = parse_args(std::env::args());
 
-    let args = parse_args();
+    if args.json_log {
+        tracing_subscriber::fmt().json().init();
+    } else {
+        tracing_subscriber::fmt::init();
+    }
 
     // Resolve workplace.
     let workplace = if let Some(_id) = args.workplace_id {
@@ -72,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Event infrastructure.
     let broadcaster = EventBroadcaster::new();
-    let _event_log = Arc::new(EventLog::open(&event_log_path).await?);
+    let _event_log = Arc::new(EventLog::open_with_max_size(&event_log_path, config_file.max_event_log_mb).await?);
     let metrics = Arc::new(DaemonMetrics::default());
     let tracker = ConnectionTracker::new(config_file.max_clients);
 
@@ -81,6 +91,8 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = server.local_addr();
     tracing::info!("agent-daemon listening on ws://{}/v1/session", addr);
+
+    agent_daemon::health::spawn_memory_monitor();
 
     let mut router = Router::new();
     router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
@@ -93,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let router_handle = router.handle();
 
     // Spawn the server run loop in a separate task so we can wait for signals.
+    let bearer_token = config_file.bearer_token.clone();
     let server_handle = tokio::spawn({
         let broadcaster = broadcaster.clone();
         let tracker = tracker.clone();
@@ -102,10 +115,11 @@ async fn main() -> anyhow::Result<()> {
                     let router = router_handle.clone();
                     let broadcaster = broadcaster.clone();
                     let tracker = tracker.clone();
+                    let bearer_token = bearer_token.clone();
                     async move {
                         let event_rx = broadcaster.register("conn".to_string()).await;
                         agent_daemon::connection::Connection::spawn(
-                            stream, peer_addr, router, Some(event_rx), Some(tracker),
+                            stream, peer_addr, router, Some(event_rx), Some(tracker), bearer_token,
                         );
                     }
                 })
@@ -141,4 +155,30 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("daemon exited cleanly");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_extracts_flags() {
+        let args = parse_args(
+            vec!["agent-daemon", "--json-log", "--workplace-id", "wp1", "--alias", "a1"]
+                .into_iter()
+                .map(String::from),
+        );
+        assert!(args.json_log);
+        assert_eq!(args.workplace_id, Some("wp1".to_string()));
+        assert_eq!(args.alias, Some("a1".to_string()));
+    }
+
+    #[test]
+    fn parse_args_defaults() {
+        let args = parse_args(vec!["agent-daemon"].into_iter().map(String::from));
+        assert!(!args.json_log);
+        assert!(args.workplace_id.is_none());
+        assert!(args.alias.is_none());
+        assert!(args.log_file.is_none());
+    }
 }

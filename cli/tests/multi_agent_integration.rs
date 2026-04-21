@@ -1,3 +1,5 @@
+#![cfg(feature = "core")]
+
 //! Integration tests for multi-agent runtime
 //!
 //! Tests concurrent execution, shutdown/restore, persistence, and coordination.
