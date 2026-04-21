@@ -150,3 +150,141 @@ async fn snapshot_empty_state_roundtrip() {
     let file = SessionManager::read_snapshot(&path).await.expect("read");
     assert!(file.state.agents.is_empty());
 }
+
+/// Full shutdown and resume roundtrip using core-format shutdown snapshot.
+///
+/// Scenario:
+/// 1. Bootstrap SessionManager
+/// 2. Spawn agent A and agent B
+/// 3. Agent A writes a Go hello world file
+/// 4. Stop agent A
+/// 5. Save shutdown snapshot
+/// 6. Drop SessionManager (simulate shutdown)
+/// 7. Restore from shutdown snapshot
+/// 8. Assert only agent B remains active
+/// 9. Assert the Go file still exists
+#[tokio::test]
+async fn daemon_shutdown_and_resume_roundtrip() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workdir = temp.path().to_path_buf();
+    let workplace_id = WorkplaceId::new("test-daemon-resume");
+
+    // 1. Bootstrap daemon session
+    let session_mgr = SessionManager::bootstrap(workdir.clone(), workplace_id.clone())
+        .await
+        .expect("bootstrap session manager");
+
+    // 2. Spawn agent A and agent B
+    let agent_a = session_mgr
+        .spawn_agent(agent_types::ProviderKind::Mock)
+        .await
+        .expect("spawn agent A");
+    let agent_b = session_mgr
+        .spawn_agent(agent_types::ProviderKind::Mock)
+        .await
+        .expect("spawn agent B");
+
+    let agent_a_id = agent_a.id.clone();
+    let agent_b_id = agent_b.id.clone();
+
+    assert_eq!(session_mgr.agent_count().await, 2);
+
+    // 3. Simulate agent A completing work
+    session_mgr
+        .inject_transcript_entry(
+            &agent_a_id,
+            agent_core::app::TranscriptEntry::Assistant(
+                "I've written a Go hello world program.".to_string(),
+            ),
+        )
+        .await
+        .expect("inject transcript");
+
+    let go_file = workdir.join("hello.go");
+    std::fs::write(
+        &go_file,
+        r#"package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+"#,
+    )
+    .expect("write go file");
+    assert!(go_file.exists(), "Go file should exist on disk");
+
+    // 4. Stop agent A
+    session_mgr
+        .stop_agent(&agent_a_id)
+        .await
+        .expect("stop agent A");
+
+    // Verify agent A is stopped, agent B is still active
+    let active_before = session_mgr.list_agents(false).await;
+    assert_eq!(active_before.len(), 1, "only agent B should be active before shutdown");
+    assert_eq!(active_before[0].id, agent_b_id);
+
+    // 5. Save shutdown snapshot in core format
+    let snapshot_path = session_mgr
+        .save_shutdown_snapshot(agent_core::shutdown_snapshot::ShutdownReason::UserQuit)
+        .await
+        .expect("save shutdown snapshot");
+    assert!(
+        snapshot_path.exists(),
+        "shutdown snapshot should be written to disk"
+    );
+
+    // 6. Drop SessionManager to simulate shutdown
+    drop(session_mgr);
+
+    // 7. Restore from shutdown snapshot
+    let restored_mgr = SessionManager::restore_from_shutdown_snapshot(
+        workdir.clone(),
+        workplace_id.clone(),
+        agent_types::ProviderKind::Mock,
+        4,
+    )
+    .await
+    .expect("restore from shutdown snapshot");
+
+    // 8. Assert only agent B remains active
+    let active_after = restored_mgr.list_agents(false).await;
+    assert_eq!(
+        active_after.len(),
+        1,
+        "only one agent should remain active after resume"
+    );
+
+    // The restored agent will have a new ID, but its status should be active
+    assert_ne!(
+        active_after[0].status,
+        agent_protocol::state::AgentSlotStatus::Stopped,
+        "remaining agent should not be stopped"
+    );
+
+    // Verify stopped agent is also present in the full list
+    let all_after = restored_mgr.list_agents(true).await;
+    assert_eq!(
+        all_after.len(),
+        2,
+        "both agents should exist in pool (one active, one stopped)"
+    );
+    let stopped_count = all_after
+        .iter()
+        .filter(|a| a.status == agent_protocol::state::AgentSlotStatus::Stopped)
+        .count();
+    assert_eq!(
+        stopped_count, 1,
+        "exactly one agent should be stopped after resume"
+    );
+
+    // 9. Verify Go file still exists and content is intact
+    assert!(
+        go_file.exists(),
+        "Go file should persist after shutdown and resume"
+    );
+    let content = std::fs::read_to_string(&go_file).expect("read go file");
+    assert!(content.contains("Hello, World!"));
+}

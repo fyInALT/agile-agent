@@ -5,10 +5,12 @@
 
 use agent_core::agent_mail::AgentMailbox;
 use agent_core::agent_pool::AgentPool;
+use agent_core::agent_runtime::{AgentMeta, AgentStatus, ProviderType};
 use agent_core::agent_slot::{AgentSlot, AgentSlotStatus as CoreAgentStatus};
 use agent_core::app::{AppStatus, TranscriptEntry};
 use agent_core::event_aggregator::EventAggregator;
 use agent_core::runtime_session::RuntimeSession;
+use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownSnapshot, ShutdownReason};
 use agent_protocol::state::*;
 use agent_types::WorkplaceId;
 use anyhow::{Context, Result};
@@ -276,6 +278,135 @@ impl SessionManager {
     /// List active connections (placeholder — actual connections tracked externally).
     pub async fn list_connections(&self) -> Vec<serde_json::Value> {
         vec![]
+    }
+
+    /// Save a shutdown snapshot in agent-core format so that `RuntimeSession::bootstrap`
+    /// can resume from it on the next startup.
+    pub async fn save_shutdown_snapshot(&self, reason: ShutdownReason) -> Result<PathBuf> {
+        let inner = self.inner.lock().await;
+        let cwd = inner.session.app.cwd.clone();
+
+        let workplace = agent_core::workplace_store::WorkplaceStore::for_cwd(&cwd)
+            .context("resolve workplace for snapshot")?;
+        let store = agent_core::agent_store::AgentStore::new(workplace.clone());
+
+        let agents: Vec<AgentShutdownSnapshot> = inner
+            .agent_pool
+            .slots()
+            .iter()
+            .map(|slot| {
+                let meta = AgentMeta {
+                    agent_id: slot.agent_id().clone(),
+                    codename: slot.codename().clone(),
+                    workplace_id: self.workplace_id.clone(),
+                    provider_type: slot.provider_type(),
+                    provider_session_id: slot.session_handle().map(|h| match h {
+                        agent_core::SessionHandle::ClaudeSession { session_id } => {
+                            agent_core::agent_runtime::ProviderSessionId::new(session_id.clone())
+                        }
+                        agent_core::SessionHandle::CodexThread { thread_id } => {
+                            agent_core::agent_runtime::ProviderSessionId::new(thread_id.clone())
+                        }
+                    }),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                    status: match slot.status() {
+                        CoreAgentStatus::Stopped { .. } => AgentStatus::Stopped,
+                        _ if slot.status().is_active() => AgentStatus::Running,
+                        _ => AgentStatus::Idle,
+                    },
+                };
+                // Persist the updated meta so restore can read accurate status from disk.
+                let _ = store.save_meta(&meta);
+                AgentShutdownSnapshot {
+                    meta,
+                    assigned_task_id: slot.assigned_task_id().map(|t| t.as_str().to_string()),
+                    was_active: slot.status().is_active(),
+                    had_error: slot.status().is_blocked(),
+                    provider_thread_state: None,
+                    captured_at: chrono::Utc::now().to_rfc3339(),
+                }
+            })
+            .collect();
+
+        let snapshot = ShutdownSnapshot::new(
+            self.workplace_id.as_str().to_string(),
+            agents,
+            inner.session.workplace.backlog.clone(),
+            inner.mailbox.pending_mail_for_snapshot(),
+            reason,
+        );
+
+        workplace.save_shutdown_snapshot(&snapshot)
+    }
+
+    /// Restore session from an existing shutdown snapshot.
+    ///
+    /// This rebuilds the `RuntimeSession` via `RuntimeSession::bootstrap` (which
+    /// automatically loads the snapshot when `resume_snapshot=true`) and then
+    /// reconstructs the `AgentPool` to match the saved agents.
+    pub async fn restore_from_shutdown_snapshot(
+        cwd: PathBuf,
+        workplace_id: WorkplaceId,
+        default_provider: agent_types::ProviderKind,
+        max_agents: usize,
+    ) -> Result<Self> {
+        // RuntimeSession::bootstrap with resume_snapshot=true will automatically
+        // load shutdown_snapshot.json from the workplace directory.
+        let session = RuntimeSession::bootstrap(cwd.clone(), default_provider, true)
+            .context("bootstrap runtime session from snapshot")?;
+
+        // Rebuild agent pool from the snapshot file that RuntimeSession just consumed.
+        // Since RuntimeSession clears the file after loading, we can't re-read it.
+        // Instead, we rely on AgentRuntime::meta() for the primary agent and
+        // scan the agents directory for any additional agent meta files.
+        let mut agent_pool = AgentPool::with_cwd(workplace_id.clone(), max_agents, cwd.clone());
+        let store = agent_core::agent_store::AgentStore::new(session.agent_runtime.workplace().clone());
+
+        // Try to load all agent metas from the workplace store and spawn them.
+        if let Ok(metas) = store.list_meta() {
+            for meta in metas {
+                let provider = meta.provider_type.to_provider_kind().unwrap_or(default_provider);
+                if let Ok(agent_id) = agent_pool.spawn_agent(provider) {
+                    if let Some(slot) = agent_pool.get_slot_mut_by_id(&agent_id) {
+                        // Restore session handle if present
+                        if let Some(session_id) = &meta.provider_session_id {
+                            let handle = match meta.provider_type {
+                                ProviderType::Claude => agent_core::SessionHandle::ClaudeSession {
+                                    session_id: session_id.as_str().to_string(),
+                                },
+                                ProviderType::Codex => agent_core::SessionHandle::CodexThread {
+                                    thread_id: session_id.as_str().to_string(),
+                                },
+                                _ => agent_core::SessionHandle::ClaudeSession {
+                                    session_id: session_id.as_str().to_string(),
+                                },
+                            };
+                            slot.set_session_handle(handle);
+                        }
+                        // Restore status from meta
+                        let _ = slot.transition_to(match meta.status {
+                            AgentStatus::Stopped => CoreAgentStatus::stopped("restored from snapshot"),
+                            _ => CoreAgentStatus::idle(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let event_aggregator = EventAggregator::new();
+        let mailbox = AgentMailbox::new();
+
+        Ok(Self {
+            inner: Arc::new(Mutex::new(SessionInner {
+                session,
+                agent_pool,
+                event_aggregator,
+                mailbox,
+            })),
+            session_id: format!("sess-{}", uuid::Uuid::new_v4()),
+            workplace_id,
+        })
     }
 
     pub async fn debug_dump(&self) -> Result<serde_json::Value> {
