@@ -284,9 +284,12 @@ impl AgentSlotStatus {
         matches!(self, Self::Stopping)
     }
 
-    /// Check if agent is blocked
+    /// Check if agent is blocked (including rate-limit resting state)
+    ///
+    /// Includes `Resting` since it represents a rate-limit escalation,
+    /// which is a form of blocking that requires recovery.
     pub fn is_blocked(&self) -> bool {
-        matches!(self, Self::Blocked { .. } | Self::BlockedForDecision { .. })
+        matches!(self, Self::Blocked { .. } | Self::BlockedForDecision { .. } | Self::Resting { .. })
     }
 
     /// Check if agent is paused
@@ -413,8 +416,21 @@ mod tests {
 
     #[test]
     fn status_blocked_is_blocked() {
+        // Blocked status is blocked
         assert!(AgentSlotStatus::blocked("test").is_blocked());
+
+        // BlockedForDecision is blocked
+        let blocked_state = test_blocked_state();
+        assert!(AgentSlotStatus::blocked_for_decision(blocked_state).is_blocked());
+
+        // Resting is blocked (rate limit escalation)
+        let blocked_state = test_blocked_state();
+        assert!(AgentSlotStatus::resting(blocked_state).is_blocked());
+
+        // Other statuses are not blocked
         assert!(!AgentSlotStatus::idle().is_blocked());
+        assert!(!AgentSlotStatus::starting().is_blocked());
+        assert!(!AgentSlotStatus::stopped("test").is_blocked());
     }
 
     #[test]
