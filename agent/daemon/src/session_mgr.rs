@@ -428,7 +428,13 @@ impl SessionManager {
                 Vec::new(),
                 assigned_task_id,
             );
-            let _ = agent_pool.restore_slot(slot);
+            if let Err(e) = agent_pool.restore_slot(slot) {
+                tracing::warn!(
+                    agent_id = %meta.agent_id.as_str(),
+                    error = %e,
+                    "failed to restore agent slot from shutdown snapshot"
+                );
+            }
         }
 
         let event_aggregator = EventAggregator::new();

@@ -13,6 +13,7 @@ use agent_types::WorkplaceId;
 
 /// Full lifecycle: spawn, work, stop, snapshot, restore.
 #[tokio::test]
+#[serial_test::serial]
 async fn daemon_agent_lifecycle_and_snapshot_roundtrip() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let workdir = temp.path().to_path_buf();
@@ -132,6 +133,7 @@ func main() {
 
 /// Snapshot gracefully handles empty state.
 #[tokio::test]
+#[serial_test::serial]
 async fn snapshot_empty_state_roundtrip() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let workdir = temp.path().to_path_buf();
@@ -164,6 +166,7 @@ async fn snapshot_empty_state_roundtrip() {
 /// 8. Assert only agent B remains active
 /// 9. Assert the Go file still exists
 #[tokio::test]
+#[serial_test::serial]
 async fn daemon_shutdown_and_resume_roundtrip() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let workdir = temp.path().to_path_buf();
@@ -292,6 +295,12 @@ func main() {
         "agent A's original ID should be preserved after resume"
     );
 
+    // Verify shutdown snapshot was consumed (cleared) by RuntimeSession::bootstrap
+    assert!(
+        !snapshot_path.exists(),
+        "shutdown snapshot should be cleared after successful restore"
+    );
+
     // 9. Verify Go file still exists and content is intact
     assert!(
         go_file.exists(),
@@ -299,4 +308,38 @@ func main() {
     );
     let content = std::fs::read_to_string(&go_file).expect("read go file");
     assert!(content.contains("Hello, World!"));
+}
+
+/// Restore without an existing snapshot falls back to clean bootstrap.
+#[tokio::test]
+#[serial_test::serial]
+async fn restore_without_snapshot_falls_back_to_bootstrap() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workdir = temp.path().to_path_buf();
+    let workplace_id = WorkplaceId::new("test-daemon-no-snapshot");
+
+    // Ensure no shutdown snapshot exists
+    let workplace = agent_core::workplace_store::WorkplaceStore::for_cwd(&workdir)
+        .expect("resolve workplace");
+    let _ = workplace.clear_shutdown_snapshot();
+
+    // Restore should bootstrap a fresh session
+    let restored = SessionManager::restore_from_shutdown_snapshot(
+        workdir.clone(),
+        workplace_id.clone(),
+        agent_types::ProviderKind::Mock,
+        4,
+    )
+    .await
+    .expect("restore should fall back to bootstrap");
+
+    assert_eq!(
+        restored.agent_count().await,
+        0,
+        "fresh bootstrap should have no agents"
+    );
+    assert!(
+        restored.list_agents(true).await.is_empty(),
+        "fresh bootstrap should have empty agent list"
+    );
 }
