@@ -4,7 +4,7 @@ use agent_protocol::config::DaemonConfig;
 use agent_protocol::state::SessionState;
 use crate::server::{ShutdownHandle, WebSocketServer};
 use crate::session_mgr::SessionManager;
-use crate::workplace::ResolvedWorkplace;
+use agent_protocol::workplace::ResolvedWorkplace;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::PathBuf;
@@ -253,7 +253,7 @@ impl DaemonLifecycle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workplace::ResolvedWorkplace;
+    use agent_protocol::workplace::ResolvedWorkplace;
 
     #[tokio::test]
     async fn lifecycle_start_writes_config() {

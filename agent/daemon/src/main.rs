@@ -9,7 +9,7 @@ use agent_daemon::lifecycle::DaemonLifecycle;
 use agent_daemon::router::Router;
 use agent_daemon::session_mgr::SessionManager;
 use agent_daemon::health::DaemonMetrics;
-use agent_daemon::workplace;
+use agent_protocol::workplace;
 use std::sync::Arc;
 
 #[derive(Debug)]

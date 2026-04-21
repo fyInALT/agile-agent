@@ -150,6 +150,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "criterion",
+ "dirs",
  "libc",
  "serde",
  "serde_json",
