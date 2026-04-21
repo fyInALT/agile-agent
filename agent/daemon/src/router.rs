@@ -18,32 +18,28 @@ impl RouterHandle {
         if let Some(handler) = self.inner.handlers.get(&req.method) {
             handler.handle(req).await
         } else if req.method.starts_with("plugin.") {
-            let mut ext = serde_json::Map::new();
-            ext.insert("error".to_string(), serde_json::to_value(JsonRpcError {
-                code: -32601,
-                message: "Method not found: plugin namespace not yet implemented".to_string(),
-                data: Some(serde_json::json!({"method": req.method})),
-                ..Default::default()
-            }).unwrap());
-            Ok(JsonRpcMessage::Response(JsonRpcResponse {
+            Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
-                result: None,
-                ext: Some(ext),
+                error: JsonRpcError {
+                    code: -32601,
+                    message: "Method not found: plugin namespace not yet implemented".to_string(),
+                    data: Some(serde_json::json!({"method": req.method})),
+                    ext: None,
+                },
+                ext: None,
             }))
         } else {
-            let mut ext = serde_json::Map::new();
-            ext.insert("error".to_string(), serde_json::to_value(JsonRpcError {
-                code: -32601,
-                message: format!("Method not found: {}", req.method),
-                data: Some(serde_json::json!({"method": req.method})),
-                ..Default::default()
-            }).unwrap());
-            Ok(JsonRpcMessage::Response(JsonRpcResponse {
+            Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
-                result: None,
-                ext: Some(ext),
+                error: JsonRpcError {
+                    code: -32601,
+                    message: format!("Method not found: {}", req.method),
+                    data: Some(serde_json::json!({"method": req.method})),
+                    ext: None,
+                },
+                ext: None,
             }))
         }
     }
@@ -150,13 +146,11 @@ mod tests {
 
         let resp = handle.dispatch(req).await.unwrap();
         match resp {
-            JsonRpcMessage::Response(r) => {
-                assert!(r.result.is_none());
-                let ext = r.ext.expect("ext should contain error");
-                let err: JsonRpcError = serde_json::from_value(ext["error"].clone()).unwrap();
-                assert_eq!(err.code, -32601);
+            JsonRpcMessage::Error(e) => {
+                assert_eq!(e.error.code, -32601);
+                assert!(e.error.message.contains("unknown"));
             }
-            _ => panic!("expected response"),
+            _ => panic!("expected error response"),
         }
     }
 
@@ -175,13 +169,11 @@ mod tests {
 
         let resp = handle.dispatch(req).await.unwrap();
         match resp {
-            JsonRpcMessage::Response(r) => {
-                let ext = r.ext.expect("ext should contain error");
-                let err: JsonRpcError = serde_json::from_value(ext["error"].clone()).unwrap();
-                assert_eq!(err.code, -32601);
-                assert!(err.message.contains("plugin namespace"));
+            JsonRpcMessage::Error(e) => {
+                assert_eq!(e.error.code, -32601);
+                assert!(e.error.message.contains("plugin namespace"));
             }
-            _ => panic!("expected response"),
+            _ => panic!("expected error response"),
         }
     }
 }

@@ -30,6 +30,7 @@ impl EventBroadcaster {
     /// Remove a connection from the broadcast list.
     pub async fn unregister(&self, conn_id: &str) {
         self.clients.lock().await.remove(conn_id);
+        self.client_seqs.lock().await.remove(conn_id);
     }
 
     /// Broadcast an event to all connected clients.
@@ -206,5 +207,27 @@ mod tests {
             broadcaster.detect_lagging_clients(10, 5).await.is_empty(),
             "client should recover after updating seq"
         );
+    }
+
+    #[tokio::test]
+    async fn unregister_clears_client_seqs() {
+        let broadcaster = EventBroadcaster::new();
+        let _rx = broadcaster.register("conn-1".to_string()).await;
+        broadcaster.update_client_seq("conn-1", 42).await;
+
+        // Verify seq was recorded
+        let seqs = broadcaster.client_seqs.lock().await;
+        assert_eq!(seqs.get("conn-1"), Some(&42));
+        drop(seqs);
+
+        // Unregister should clear both maps
+        broadcaster.unregister("conn-1").await;
+
+        let clients = broadcaster.clients.lock().await;
+        assert!(clients.get("conn-1").is_none());
+        drop(clients);
+
+        let seqs = broadcaster.client_seqs.lock().await;
+        assert!(seqs.get("conn-1").is_none(), "seq should be cleared after unregister");
     }
 }

@@ -5,6 +5,7 @@ use anyhow::Result;
 // Modules available in both protocol-only and embedded modes.
 mod composer;
 mod confirmation_overlay;
+#[cfg(feature = "core")]
 mod diff_render;
 mod event_handler;
 mod markdown;
@@ -16,6 +17,7 @@ mod reconnecting_client;
 mod streaming;
 mod terminal;
 mod text_formatting;
+#[cfg(feature = "core")]
 mod tool_output;
 mod transcript;
 mod view_mode;

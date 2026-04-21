@@ -25,7 +25,7 @@ impl ReconnectingClient {
         loop {
             let _ = self.state_tx.send(ConnectionState::Connecting);
             match WebSocketClient::connect(&self.url).await {
-                Ok((client, mut rx)) => {
+                Ok((_client, mut rx)) => {
                     attempt = 0;
                     let _ = self.state_tx.send(ConnectionState::Connected);
                     // Forward events until the channel closes.
