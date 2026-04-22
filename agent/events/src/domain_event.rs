@@ -253,136 +253,110 @@ impl DomainEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecCommandStatus, McpToolCallStatus, PatchApplyStatus};
-
-    // ── Construction tests for all variants ──────────────────────
+    use crate::{
+        ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, SessionHandle,
+        WebSearchAction,
+    };
 
     #[test]
-    fn construct_session_handle() {
-        let _ = DomainEvent::SessionHandle(SessionHandle::ClaudeSession {
-            session_id: "sess-1".to_string(),
+    fn domain_event_comprehensive() {
+        // Construct every variant (compilation already guarantees this, but we
+        // need instances to exercise the helper methods and equality).
+        let session_handle = DomainEvent::SessionHandle(SessionHandle::ClaudeSession {
+            session_id: "s".to_string(),
         });
-    }
-
-    #[test]
-    fn construct_assistant_chunk() {
-        let _ = DomainEvent::AssistantChunk("hello".to_string());
-    }
-
-    #[test]
-    fn construct_thinking_chunk() {
-        let _ = DomainEvent::ThinkingChunk("thinking...".to_string());
-    }
-
-    #[test]
-    fn construct_status() {
-        let _ = DomainEvent::Status("working".to_string());
-    }
-
-    #[test]
-    fn construct_exec_command_started() {
-        let _ = DomainEvent::ExecCommandStarted {
-            call_id: Some("cmd-1".to_string()),
-            input_preview: Some("ls -la".to_string()),
-            source: None,
+        let assistant_chunk = DomainEvent::AssistantChunk("a".to_string());
+        let thinking_chunk = DomainEvent::ThinkingChunk("t".to_string());
+        let status = DomainEvent::Status("st".to_string());
+        let exec_started = DomainEvent::ExecCommandStarted {
+            call_id: Some("c".to_string()),
+            input_preview: Some("i".to_string()),
+            source: Some("src".to_string()),
         };
-    }
-
-    #[test]
-    fn construct_exec_command_finished() {
-        let _ = DomainEvent::ExecCommandFinished {
-            call_id: Some("cmd-1".to_string()),
-            output_preview: Some("file1 file2".to_string()),
+        let exec_finished_ok = DomainEvent::ExecCommandFinished {
+            call_id: Some("c".to_string()),
+            output_preview: Some("o".to_string()),
             status: ExecCommandStatus::Completed,
             exit_code: Some(0),
-            duration_ms: Some(100),
+            duration_ms: Some(1),
             source: None,
         };
-    }
-
-    #[test]
-    fn construct_exec_command_output_delta() {
-        let _ = DomainEvent::ExecCommandOutputDelta {
-            call_id: Some("cmd-1".to_string()),
-            delta: "output".to_string(),
+        let exec_finished_fail = DomainEvent::ExecCommandFinished {
+            call_id: Some("c".to_string()),
+            output_preview: None,
+            status: ExecCommandStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            source: None,
         };
-    }
-
-    #[test]
-    fn construct_generic_tool_call_started() {
-        let _ = DomainEvent::GenericToolCallStarted {
-            name: "read_file".to_string(),
-            call_id: Some("tool-1".to_string()),
-            input_preview: Some("/path".to_string()),
+        let exec_finished_declined = DomainEvent::ExecCommandFinished {
+            call_id: Some("c".to_string()),
+            output_preview: None,
+            status: ExecCommandStatus::Declined,
+            exit_code: None,
+            duration_ms: None,
+            source: None,
         };
-    }
-
-    #[test]
-    fn construct_generic_tool_call_finished() {
-        let _ = DomainEvent::GenericToolCallFinished {
-            name: "read_file".to_string(),
-            call_id: Some("tool-1".to_string()),
-            output_preview: Some("content".to_string()),
+        let exec_delta = DomainEvent::ExecCommandOutputDelta {
+            call_id: Some("c".to_string()),
+            delta: "d".to_string(),
+        };
+        let generic_started = DomainEvent::GenericToolCallStarted {
+            name: "n".to_string(),
+            call_id: Some("c".to_string()),
+            input_preview: None,
+        };
+        let generic_finished_ok = DomainEvent::GenericToolCallFinished {
+            name: "n".to_string(),
+            call_id: Some("c".to_string()),
+            output_preview: Some("o".to_string()),
             success: true,
             exit_code: None,
-            duration_ms: Some(50),
+            duration_ms: Some(1),
         };
-    }
-
-    #[test]
-    fn construct_web_search_started() {
-        let _ = DomainEvent::WebSearchStarted {
-            call_id: Some("ws-1".to_string()),
-            query: "rust".to_string(),
+        let generic_finished_fail = DomainEvent::GenericToolCallFinished {
+            name: "n".to_string(),
+            call_id: Some("c".to_string()),
+            output_preview: None,
+            success: false,
+            exit_code: Some(1),
+            duration_ms: None,
         };
-    }
-
-    #[test]
-    fn construct_web_search_finished() {
-        let _ = DomainEvent::WebSearchFinished {
-            call_id: Some("ws-1".to_string()),
-            query: "rust".to_string(),
-            action: None,
+        let websearch_started = DomainEvent::WebSearchStarted {
+            call_id: Some("c".to_string()),
+            query: "q".to_string(),
         };
-    }
-
-    #[test]
-    fn construct_view_image() {
-        let _ = DomainEvent::ViewImage {
-            call_id: Some("img-1".to_string()),
-            path: "/tmp/img.png".to_string(),
+        let websearch_finished = DomainEvent::WebSearchFinished {
+            call_id: Some("c".to_string()),
+            query: "q".to_string(),
+            action: Some(WebSearchAction::Search {
+                query: Some("q".to_string()),
+                queries: None,
+            }),
         };
-    }
-
-    #[test]
-    fn construct_image_generation_finished() {
-        let _ = DomainEvent::ImageGenerationFinished {
-            call_id: Some("gen-1".to_string()),
+        let view_image = DomainEvent::ViewImage {
+            call_id: Some("c".to_string()),
+            path: "p".to_string(),
+        };
+        let image_gen = DomainEvent::ImageGenerationFinished {
+            call_id: Some("c".to_string()),
             revised_prompt: None,
             result: None,
-            saved_path: Some("/tmp/out.png".to_string()),
+            saved_path: Some("p".to_string()),
         };
-    }
-
-    #[test]
-    fn construct_mcp_tool_call_started() {
-        let _ = DomainEvent::McpToolCallStarted {
-            call_id: Some("mcp-1".to_string()),
+        let mcp_started = DomainEvent::McpToolCallStarted {
+            call_id: Some("c".to_string()),
             invocation: McpInvocation {
-                server: "srv".to_string(),
-                tool: "tool".to_string(),
+                server: "s".to_string(),
+                tool: "t".to_string(),
                 arguments: None,
             },
         };
-    }
-
-    #[test]
-    fn construct_mcp_tool_call_finished() {
-        let _ = DomainEvent::McpToolCallFinished {
-            call_id: Some("mcp-1".to_string()),
+        let mcp_finished_ok = DomainEvent::McpToolCallFinished {
+            call_id: Some("c".to_string()),
             invocation: McpInvocation {
-                server: "srv".to_string(),
-                tool: "tool".to_string(),
+                server: "s".to_string(),
+                tool: "t".to_string(),
                 arguments: None,
             },
             result_blocks: vec![],
@@ -390,132 +364,152 @@ mod tests {
             status: McpToolCallStatus::Completed,
             is_error: false,
         };
-    }
-
-    #[test]
-    fn construct_patch_apply_started() {
-        let _ = DomainEvent::PatchApplyStarted {
-            call_id: Some("patch-1".to_string()),
-            changes: vec![],
-        };
-    }
-
-    #[test]
-    fn construct_patch_apply_finished() {
-        let _ = DomainEvent::PatchApplyFinished {
-            call_id: Some("patch-1".to_string()),
-            changes: vec![],
-            status: PatchApplyStatus::Completed,
-        };
-    }
-
-    #[test]
-    fn construct_patch_apply_output_delta() {
-        let _ = DomainEvent::PatchApplyOutputDelta {
-            call_id: Some("patch-1".to_string()),
-            delta: "diff".to_string(),
-        };
-    }
-
-    #[test]
-    fn construct_error() {
-        let _ = DomainEvent::Error("something went wrong".to_string());
-    }
-
-    #[test]
-    fn construct_finished() {
-        let _ = DomainEvent::Finished;
-    }
-
-    // ── Helper method tests ──────────────────────────────────────
-
-    #[test]
-    fn assistant_chunk_is_running() {
-        assert!(DomainEvent::AssistantChunk("hi".to_string()).is_running());
-        assert!(!DomainEvent::AssistantChunk("hi".to_string()).may_need_decision());
-    }
-
-    #[test]
-    fn exec_command_failed_is_failure() {
-        let e = DomainEvent::ExecCommandFinished {
-            call_id: None,
-            output_preview: None,
-            status: ExecCommandStatus::Failed,
-            exit_code: Some(1),
-            duration_ms: None,
-            source: None,
-        };
-        assert!(e.is_failure());
-        assert!(e.may_need_decision());
-    }
-
-    #[test]
-    fn exec_command_completed_is_success() {
-        let e = DomainEvent::ExecCommandFinished {
-            call_id: None,
-            output_preview: None,
-            status: ExecCommandStatus::Completed,
-            exit_code: Some(0),
-            duration_ms: None,
-            source: None,
-        };
-        assert!(e.is_success());
-        assert!(!e.is_failure());
-    }
-
-    #[test]
-    fn generic_tool_call_failed_is_failure() {
-        let e = DomainEvent::GenericToolCallFinished {
-            name: "test".to_string(),
-            call_id: None,
-            output_preview: None,
-            success: false,
-            exit_code: None,
-            duration_ms: None,
-        };
-        assert!(e.is_failure());
-    }
-
-    #[test]
-    fn mcp_tool_call_error_is_failure() {
-        let e = DomainEvent::McpToolCallFinished {
-            call_id: None,
+        let mcp_finished_fail = DomainEvent::McpToolCallFinished {
+            call_id: Some("c".to_string()),
             invocation: McpInvocation {
                 server: "s".to_string(),
                 tool: "t".to_string(),
                 arguments: None,
             },
             result_blocks: vec![],
-            error: Some("err".to_string()),
+            error: Some("e".to_string()),
             status: McpToolCallStatus::Failed,
             is_error: true,
         };
-        assert!(e.is_failure());
-    }
-
-    #[test]
-    fn patch_apply_declined_is_failure() {
-        let e = DomainEvent::PatchApplyFinished {
-            call_id: None,
+        let patch_started = DomainEvent::PatchApplyStarted {
+            call_id: Some("c".to_string()),
+            changes: vec![],
+        };
+        let patch_finished_ok = DomainEvent::PatchApplyFinished {
+            call_id: Some("c".to_string()),
+            changes: vec![],
+            status: PatchApplyStatus::Completed,
+        };
+        let patch_finished_fail = DomainEvent::PatchApplyFinished {
+            call_id: Some("c".to_string()),
+            changes: vec![],
+            status: PatchApplyStatus::Failed,
+        };
+        let patch_finished_declined = DomainEvent::PatchApplyFinished {
+            call_id: Some("c".to_string()),
             changes: vec![],
             status: PatchApplyStatus::Declined,
         };
-        assert!(e.is_failure());
-    }
+        let patch_delta = DomainEvent::PatchApplyOutputDelta {
+            call_id: Some("c".to_string()),
+            delta: "d".to_string(),
+        };
+        let error = DomainEvent::Error("e".to_string());
+        let finished = DomainEvent::Finished;
 
-    #[test]
-    fn all_events_broadcast_by_default() {
-        assert!(DomainEvent::Status("ok".to_string()).should_broadcast());
-        assert!(DomainEvent::Error("e".to_string()).should_broadcast());
-        assert!(DomainEvent::Finished.should_broadcast());
-    }
+        // ---- is_running ----
+        assert!(session_handle.is_running());
+        assert!(assistant_chunk.is_running());
+        assert!(thinking_chunk.is_running());
+        assert!(status.is_running());
+        assert!(exec_started.is_running());
+        assert!(exec_delta.is_running());
+        assert!(generic_started.is_running());
+        assert!(websearch_started.is_running());
+        assert!(view_image.is_running());
+        assert!(image_gen.is_running());
+        assert!(mcp_started.is_running());
+        assert!(patch_started.is_running());
+        assert!(patch_delta.is_running());
+        assert!(!exec_finished_ok.is_running());
+        assert!(!exec_finished_fail.is_running());
+        assert!(!generic_finished_ok.is_running());
+        assert!(!websearch_finished.is_running());
+        assert!(!mcp_finished_ok.is_running());
+        assert!(!patch_finished_ok.is_running());
+        assert!(!error.is_running());
+        assert!(!finished.is_running());
 
-    #[test]
-    fn equality_works() {
-        let a = DomainEvent::Status("x".to_string());
-        let b = DomainEvent::Status("x".to_string());
-        let c = DomainEvent::Status("y".to_string());
-        assert_eq!(a, b);
-        assert_ne!(a, c);
+        // ---- may_need_decision ----
+        assert!(error.may_need_decision());
+        assert!(finished.may_need_decision());
+        assert!(exec_finished_ok.may_need_decision());
+        assert!(exec_finished_fail.may_need_decision());
+        assert!(generic_finished_ok.may_need_decision());
+        assert!(websearch_finished.may_need_decision());
+        assert!(mcp_finished_ok.may_need_decision());
+        assert!(patch_finished_ok.may_need_decision());
+        assert!(!session_handle.may_need_decision());
+        assert!(!assistant_chunk.may_need_decision());
+        assert!(!exec_started.may_need_decision());
+        assert!(!exec_delta.may_need_decision());
+        assert!(!patch_delta.may_need_decision());
+
+        // ---- is_failure ----
+        assert!(error.is_failure());
+        assert!(exec_finished_fail.is_failure());
+        assert!(exec_finished_declined.is_failure());
+        assert!(generic_finished_fail.is_failure());
+        assert!(mcp_finished_fail.is_failure());
+        assert!(patch_finished_fail.is_failure());
+        assert!(patch_finished_declined.is_failure());
+        assert!(!session_handle.is_failure());
+        assert!(!assistant_chunk.is_failure());
+        assert!(!finished.is_failure());
+        assert!(!exec_finished_ok.is_failure());
+        assert!(!generic_finished_ok.is_failure());
+        assert!(!mcp_finished_ok.is_failure());
+        assert!(!patch_finished_ok.is_failure());
+
+        // ---- is_success ----
+        assert!(finished.is_success());
+        assert!(exec_finished_ok.is_success());
+        assert!(generic_finished_ok.is_success());
+        assert!(mcp_finished_ok.is_success());
+        assert!(patch_finished_ok.is_success());
+        assert!(!error.is_success());
+        assert!(!exec_finished_fail.is_success());
+        assert!(!exec_finished_declined.is_success());
+        assert!(!generic_finished_fail.is_success());
+        assert!(!mcp_finished_fail.is_success());
+        assert!(!patch_finished_fail.is_success());
+        assert!(!patch_finished_declined.is_success());
+
+        // ---- should_broadcast ----
+        assert!(session_handle.should_broadcast());
+        assert!(error.should_broadcast());
+        assert!(finished.should_broadcast());
+        assert!(assistant_chunk.should_broadcast());
+        assert!(exec_started.should_broadcast());
+
+        // ---- equality ----
+        // Same variant, same fields
+        assert_eq!(
+            DomainEvent::Status("x".to_string()),
+            DomainEvent::Status("x".to_string())
+        );
+        // Same variant, different fields
+        assert_ne!(
+            DomainEvent::Status("x".to_string()),
+            DomainEvent::Status("y".to_string())
+        );
+        // Cross-variant inequality
+        assert_ne!(assistant_chunk, thinking_chunk);
+        assert_ne!(status, error);
+        assert_ne!(exec_started, exec_finished_ok);
+        assert_ne!(finished, error);
+        // Same variant with struct field differences
+        let exec_a = DomainEvent::ExecCommandFinished {
+            call_id: Some("1".to_string()),
+            output_preview: None,
+            status: ExecCommandStatus::Completed,
+            exit_code: None,
+            duration_ms: None,
+            source: None,
+        };
+        let exec_b = DomainEvent::ExecCommandFinished {
+            call_id: Some("2".to_string()),
+            output_preview: None,
+            status: ExecCommandStatus::Completed,
+            exit_code: None,
+            duration_ms: None,
+            source: None,
+        };
+        assert_ne!(exec_a, exec_b);
     }
 }

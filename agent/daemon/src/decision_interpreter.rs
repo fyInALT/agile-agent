@@ -190,4 +190,157 @@ mod tests {
         let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
         assert!(cmds.is_empty());
     }
+
+    #[test]
+    fn interpret_retry_tool_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::RetryTool {
+            tool_name: "test_tool".to_string(),
+            args: None,
+            max_attempts: 3,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_switch_provider_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::SwitchProvider {
+            provider_type: "openai".to_string(),
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_skip_decision_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::SkipDecision;
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_confirm_completion_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::ConfirmCompletion;
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_suggest_commit_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::SuggestCommit {
+            message: "feat: add X".to_string(),
+            mandatory: false,
+            reason: "feature complete".to_string(),
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_prepare_pr_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::PreparePr {
+            title: "Add X".to_string(),
+            description: "Adds X".to_string(),
+            base_branch: "main".to_string(),
+            as_draft: false,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_commit_changes_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::CommitChanges {
+            message: "wip".to_string(),
+            is_wip: true,
+            worktree_path: None,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_stash_changes_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::StashChanges {
+            description: "stash".to_string(),
+            include_untracked: false,
+            worktree_path: None,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_discard_changes_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::DiscardChanges {
+            worktree_path: None,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_create_task_branch_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::CreateTaskBranch {
+            branch_name: "feature/x".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_rebase_to_main_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::RebaseToMain {
+            base_branch: "main".to_string(),
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn interpret_unknown_returns_none() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::Unknown {
+            action_type: "foo".to_string(),
+            params: "{}".to_string(),
+        };
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+    }
+
+    #[test]
+    fn mixed_interpretable_and_non_interpretable_commands() {
+        let interp = DecisionCommandInterpreter::new();
+        let agent_id = AgentId::new("ag-1");
+
+        let commands = vec![
+            DecisionCommand::EscalateToHuman {
+                reason: "stuck".to_string(),
+                context: None,
+            },
+            DecisionCommand::SkipDecision,
+            DecisionCommand::TerminateAgent {
+                reason: "done".to_string(),
+            },
+        ];
+
+        let mut all_interpreted = true;
+        let mut runtime_cmds = Vec::new();
+
+        for cmd in &commands {
+            match interp.interpret(&agent_id, cmd) {
+                Some(mut cmds) => runtime_cmds.append(&mut cmds),
+                None => {
+                    all_interpreted = false;
+                    break;
+                }
+            }
+        }
+
+        assert!(!all_interpreted, "SkipDecision returns None, so all_interpreted should be false");
+        // Only EscalateToHuman should have been collected before hitting SkipDecision
+        assert_eq!(runtime_cmds.len(), 1);
+        assert!(matches!(&runtime_cmds[0], RuntimeCommand::NotifyUser { .. }));
+    }
 }

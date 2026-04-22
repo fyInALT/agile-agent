@@ -639,8 +639,16 @@ impl EventLoop {
         // Phase 6: Reconcile worktrees
         self.phase_6_reconcile_worktrees(&mut inner).await;
 
-        // Phase 7: Dispatch commands (placeholder for RuntimeCommand system)
-        self.phase_7_dispatch_commands(&mut inner).await;
+        // Phase 7: Collect commands while holding lock, then drop lock before
+        // dispatch to avoid deadlock (handlers acquire the same mutex).
+        let commands = self.phase_7_collect_commands(&mut inner).await;
+        drop(inner);
+
+        for cmd in &commands {
+            if let Err(e) = self.effect_handler.handle(cmd) {
+                tracing::warn!(command = ?cmd, error = %e, "EffectHandler failed");
+            }
+        }
 
         Ok(broadcast_events)
     }
@@ -1072,7 +1080,7 @@ impl EventLoop {
     // Phase 4: Process pending mailbox deliveries
     // ------------------------------------------------------------------
     async fn phase_4_process_mailbox(&self, inner: &mut SessionInner) {
-        if inner.mailbox.pending_count() > 0 {
+        if inner.mailbox.outgoing_count() > 0 {
             let _delivered = inner.mailbox.process_pending();
         }
     }
@@ -1092,21 +1100,17 @@ impl EventLoop {
     }
 
     // ------------------------------------------------------------------
-    // Phase 7: Dispatch commands
+    // Phase 7: Collect commands
     // ------------------------------------------------------------------
-    async fn phase_7_dispatch_commands(&self, inner: &mut SessionInner) {
-        // Collect RuntimeCommands from all worker queues
+    async fn phase_7_collect_commands(
+        &self,
+        inner: &mut SessionInner,
+    ) -> Vec<agent_core::runtime_command::RuntimeCommand> {
         let mut all_commands = Vec::new();
         for slot in inner.agent_pool.slots_mut() {
             all_commands.extend(slot.drain_commands());
         }
-
-        // Dispatch through effect handler
-        for cmd in &all_commands {
-            if let Err(e) = self.effect_handler.handle(cmd) {
-                tracing::warn!(command = ?cmd, error = %e, "EffectHandler failed");
-            }
-        }
+        all_commands
     }
 
     /// Replace the effect handler (useful for testing).
@@ -1775,9 +1779,68 @@ macro_rules! daemon_handler {
 daemon_handler!(
     DaemonSpawnProviderHandler,
     SpawnProviderHandler,
-    (&self, _agent_id: &agent_types::AgentId, _prompt: &str),
+    (&self, agent_id: &agent_types::AgentId, prompt: &str),
     {
-        // TODO: Implement provider thread spawning via SessionInner
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        let slot = inner
+            .agent_pool
+            .get_slot_by_id(&core_agent_id)
+            .ok_or_else(|| agent_behavior_infra::EffectError::ExecutionFailed(
+                format!("agent {} not found", agent_id.as_str())
+            ))?;
+
+        if slot.has_provider_thread() {
+            return Err(agent_behavior_infra::EffectError::ExecutionFailed(
+                format!("agent {} is already busy", agent_id.as_str())
+            ));
+        }
+
+        let provider_kind = slot
+            .provider_type()
+            .to_provider_kind()
+            .unwrap_or(agent_types::ProviderKind::Mock);
+        let session_handle = slot.session_handle().cloned();
+        let cwd = slot.cwd();
+        let thread_name = format!("agent-{}-provider", agent_id.as_str());
+
+        let handle = agent_core::start_provider_with_handle(
+            provider_kind,
+            prompt.to_string(),
+            cwd.clone(),
+            session_handle,
+            thread_name,
+        ).map_err(|e| agent_behavior_infra::EffectError::ExecutionFailed(
+            format!("failed to start provider thread: {e}")
+        ))?;
+
+        let (event_rx, join_handle) = handle.into_parts();
+
+        let slot = inner
+            .agent_pool
+            .get_slot_mut_by_id(&core_agent_id)
+            .ok_or_else(|| agent_behavior_infra::EffectError::ExecutionFailed(
+                format!("agent {} not found", agent_id.as_str())
+            ))?;
+
+        slot.append_transcript(TranscriptEntry::User(prompt.to_string()));
+        if let Some(jh) = join_handle {
+            slot.set_thread_handle(jh);
+        }
+        let current_status = slot.status().clone();
+        if current_status.is_idle() {
+            let _ = slot.transition_to(CoreAgentStatus::starting());
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+        } else if current_status.is_active()
+            || current_status.is_blocked()
+            || current_status.is_waiting_for_input()
+        {
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+        }
+
+        inner.event_aggregator.add_receiver(core_agent_id.clone(), event_rx);
+
         Ok(())
     }
 );
@@ -1785,9 +1848,27 @@ daemon_handler!(
 daemon_handler!(
     DaemonSendToProviderHandler,
     SendToProviderHandler,
-    (&self, _agent_id: &agent_types::AgentId, _event: &agent_events::DomainEvent),
+    (&self, agent_id: &agent_types::AgentId, event: &agent_events::DomainEvent),
     {
-        // TODO: Implement event sending to provider channel
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&core_agent_id) {
+            // There is no provider input channel in the current architecture;
+            // apply the event to the worker as a best-effort fallback.
+            slot.apply_provider_event_to_worker(event);
+            tracing::warn!(
+                agent_id = %agent_id.as_str(),
+                event = ?event,
+                "SendToProvider: no provider input channel available; applied event to worker instead"
+            );
+        } else {
+            tracing::warn!(
+                agent_id = %agent_id.as_str(),
+                event = ?event,
+                "SendToProvider: agent not found"
+            );
+        }
         Ok(())
     }
 );
@@ -1795,9 +1876,33 @@ daemon_handler!(
 daemon_handler!(
     DaemonRequestDecisionHandler,
     RequestDecisionHandler,
-    (&self, _agent_id: &agent_types::AgentId, _situation_type: &str),
+    (&self, agent_id: &agent_types::AgentId, situation_type: &str),
     {
-        // TODO: Implement decision request routing
+        let inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        let situation_type_obj = agent_decision::types::SituationType::new(situation_type);
+        let components = agent_decision::initializer::initialize_decision_layer();
+        let situation = components
+            .situation_registry
+            .build(situation_type_obj.clone());
+        let context = agent_decision::context::DecisionContext::new(
+            situation,
+            agent_id.as_str(),
+        );
+        let request = agent_core::decision_mail::DecisionRequest::new(
+            core_agent_id.clone(),
+            situation_type_obj,
+            context,
+        );
+
+        inner
+            .agent_pool
+            .send_decision_request(&core_agent_id, request)
+            .map_err(|e| agent_behavior_infra::EffectError::ExecutionFailed(
+                format!("failed to send decision request: {e}")
+            ))?;
+
         Ok(())
     }
 );
@@ -1805,9 +1910,17 @@ daemon_handler!(
 daemon_handler!(
     DaemonNotifyUserHandler,
     NotifyUserHandler,
-    (&self, _agent_id: &agent_types::AgentId, _message: &str),
+    (&self, agent_id: &agent_types::AgentId, message: &str),
     {
-        // TODO: Implement user notification via event aggregator
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&core_agent_id) {
+            slot.append_transcript(TranscriptEntry::Status(format!("Notification: {}", message)));
+        }
+
+        tracing::info!(agent_id = %agent_id.as_str(), message, "user notification");
+
         Ok(())
     }
 );
@@ -1815,9 +1928,24 @@ daemon_handler!(
 daemon_handler!(
     DaemonUpdateWorktreeHandler,
     UpdateWorktreeHandler,
-    (&self, _agent_id: &agent_types::AgentId, _path: &std::path::Path, _branch: &str),
+    (&self, agent_id: &agent_types::AgentId, path: &std::path::Path, branch: &str),
     {
-        // TODO: Implement worktree update via worktree coordinator
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&core_agent_id) {
+            let worktree_id = format!("wt-{}", uuid::Uuid::new_v4());
+            slot.set_worktree(path.to_path_buf(), Some(branch.to_string()), worktree_id);
+            tracing::info!(
+                agent_id = %agent_id.as_str(),
+                path = %path.display(),
+                branch,
+                "worktree updated"
+            );
+        } else {
+            tracing::warn!(agent_id = %agent_id.as_str(), "UpdateWorktree: agent not found");
+        }
+
         Ok(())
     }
 );
@@ -1825,9 +1953,22 @@ daemon_handler!(
 daemon_handler!(
     DaemonTerminateHandler,
     TerminateHandler,
-    (&self, _agent_id: &agent_types::AgentId, _reason: &str),
+    (&self, agent_id: &agent_types::AgentId, reason: &str),
     {
-        // TODO: Implement graceful agent termination
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        inner
+            .agent_pool
+            .stop_agent(&core_agent_id)
+            .map_err(|e| agent_behavior_infra::EffectError::ExecutionFailed(
+                format!("stop failed: {e}")
+            ))?;
+
+        inner.event_aggregator.remove_receiver(&core_agent_id);
+
+        tracing::info!(agent_id = %agent_id.as_str(), reason, "agent terminated");
+
         Ok(())
     }
 );

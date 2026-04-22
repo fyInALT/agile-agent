@@ -775,6 +775,35 @@ impl DecisionExecutor {
 mod tests {
     use super::*;
 
+    // Generic test helper for actions without dedicated structs
+    #[derive(Debug, Clone)]
+    struct GenericAction {
+        type_name: &'static str,
+        params: String,
+    }
+
+    impl agent_decision::model::action::DecisionAction for GenericAction {
+        fn action_type(&self) -> agent_decision::core::types::ActionType {
+            agent_decision::core::types::ActionType::new(self.type_name)
+        }
+
+        fn implementation_type(&self) -> &'static str {
+            "GenericAction"
+        }
+
+        fn to_prompt_format(&self) -> String {
+            String::new()
+        }
+
+        fn serialize_params(&self) -> String {
+            self.params.clone()
+        }
+
+        fn clone_boxed(&self) -> Box<dyn agent_decision::model::action::DecisionAction> {
+            Box::new(self.clone())
+        }
+    }
+
     #[test]
     fn decision_executor_execute_agent_not_found() {
         let mut slots: Vec<AgentSlot> = vec![];
@@ -922,5 +951,557 @@ mod tests {
         assert_eq!(commands.len(), 2);
         assert!(matches!(&commands[0], DecisionCommand::ApproveAndContinue));
         assert!(matches!(&commands[1], DecisionCommand::SendCustomInstruction { .. }));
+    }
+
+    #[test]
+    fn translate_select_option_with_option_id() {
+        use agent_decision::model::action::SelectOptionAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = SelectOptionAction::new("B", "test reason");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SelectOption { option_id } if option_id == "B"
+        ));
+    }
+
+    #[test]
+    fn translate_select_option_default() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "select_option",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SelectOption { option_id } if option_id == "a"
+        ));
+    }
+
+    #[test]
+    fn translate_skip() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "skip",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], DecisionCommand::SkipDecision));
+    }
+
+    #[test]
+    fn translate_request_human() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "request_human",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::EscalateToHuman { reason, context }
+            if reason == "awaiting_human" && context.is_none()
+        ));
+    }
+
+    #[test]
+    fn translate_confirm_completion() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "confirm_completion",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], DecisionCommand::ConfirmCompletion));
+    }
+
+    #[test]
+    fn translate_retry_with_prompt() {
+        use agent_decision::model::action::RetryAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = RetryAction::new("retry this");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SendCustomInstruction { prompt, target_agent }
+            if prompt == "retry this" && target_agent == "ag-1"
+        ));
+    }
+
+    #[test]
+    fn translate_retry_default_prompt() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "retry",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SendCustomInstruction { prompt, target_agent }
+            if prompt == "Please retry the previous action." && target_agent == "ag-1"
+        ));
+    }
+
+    #[test]
+    fn translate_continue_all_tasks_with_instruction() {
+        use agent_decision::model::action::ContinueAllTasksAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = ContinueAllTasksAction::new("keep going");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SendCustomInstruction { prompt, target_agent }
+            if prompt == "keep going" && target_agent == "ag-1"
+        ));
+    }
+
+    #[test]
+    fn translate_continue_all_tasks_default() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "continue_all_tasks",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SendCustomInstruction { prompt, target_agent }
+            if prompt == "continue finish all tasks" && target_agent == "ag-1"
+        ));
+    }
+
+    #[test]
+    fn translate_prepare_task_start_with_params() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "prepare_task_start",
+            params: r#"{"task_id":"TASK-1","task_description":"do it"}"#.to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::PrepareTaskStart { task_id, task_description }
+            if task_id == "TASK-1" && task_description == "do it"
+        ));
+    }
+
+    #[test]
+    fn translate_prepare_task_start_default() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "prepare_task_start",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::PrepareTaskStart { task_id, task_description }
+            if task_id == "unknown" && task_description.is_empty()
+        ));
+    }
+
+    #[test]
+    fn translate_wake_up() {
+        use agent_decision::model::action::WakeUpAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = WakeUpAction::new();
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], DecisionCommand::WakeUp));
+    }
+
+    #[test]
+    fn translate_commit_changes_with_params() {
+        use agent_decision::model::action::CommitChangesAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = CommitChangesAction::new("fix bug")
+            .with_wip(true)
+            .with_worktree_path("/wt");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::CommitChanges { message, is_wip, worktree_path }
+            if message == "fix bug" && *is_wip && worktree_path.as_deref() == Some("/wt")
+        ));
+    }
+
+    #[test]
+    fn translate_commit_changes_default() {
+        use agent_decision::model::action::CommitChangesAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = CommitChangesAction::new("wip");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::CommitChanges { message, is_wip, worktree_path }
+            if message == "wip" && !*is_wip && worktree_path.is_none()
+        ));
+    }
+
+    #[test]
+    fn translate_stash_changes_with_params() {
+        use agent_decision::model::action::StashChangesAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = StashChangesAction::new("stash desc")
+            .with_include_untracked(false)
+            .with_worktree_path("/wt");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::StashChanges { description, include_untracked, worktree_path }
+            if description == "stash desc" && !*include_untracked && worktree_path.as_deref() == Some("/wt")
+        ));
+    }
+
+    #[test]
+    fn translate_stash_changes_default() {
+        use agent_decision::model::action::StashChangesAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = StashChangesAction::new("stash desc");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::StashChanges { description, include_untracked, worktree_path }
+            if description == "stash desc" && *include_untracked && worktree_path.is_none()
+        ));
+    }
+
+    #[test]
+    fn translate_discard_changes_with_path() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "discard_changes",
+            params: r#"{"worktree_path":"/wt"}"#.to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::DiscardChanges { worktree_path }
+            if worktree_path.as_deref() == Some("/wt")
+        ));
+    }
+
+    #[test]
+    fn translate_discard_changes_default() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "discard_changes",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::DiscardChanges { worktree_path }
+            if worktree_path.is_none()
+        ));
+    }
+
+    #[test]
+    fn translate_suggest_commit_with_params() {
+        use agent_decision::model::action::SuggestCommitAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = SuggestCommitAction::new("fix bug", "reason").with_mandatory(true);
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SuggestCommit { message, mandatory, reason }
+            if message == "fix bug" && *mandatory && reason == "reason"
+        ));
+    }
+
+    #[test]
+    fn translate_suggest_commit_default() {
+        use agent_decision::model::action::SuggestCommitAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = SuggestCommitAction::new("fix bug", "reason");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SuggestCommit { message, mandatory, reason }
+            if message == "fix bug" && !*mandatory && reason == "reason"
+        ));
+    }
+
+    #[test]
+    fn translate_prepare_pr_with_params() {
+        use agent_decision::model::action::PreparePrAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = PreparePrAction::new("title", "desc", "develop").with_draft(false);
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::PreparePr { title, description, base_branch, as_draft }
+            if title == "title" && description == "desc" && base_branch == "develop" && !*as_draft
+        ));
+    }
+
+    #[test]
+    fn translate_prepare_pr_default() {
+        use agent_decision::model::action::PreparePrAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = PreparePrAction::new("title", "desc", "develop");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::PreparePr { title, description, base_branch, as_draft }
+            if title == "title" && description == "desc" && base_branch == "develop" && *as_draft
+        ));
+    }
+
+    #[test]
+    fn translate_create_task_branch_with_params() {
+        use agent_decision::model::action::CreateTaskBranchAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = CreateTaskBranchAction::new("feat/x", "main").with_worktree_path("/wt");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::CreateTaskBranch { branch_name, base_branch, worktree_path }
+            if branch_name == "feat/x" && base_branch == "main" && worktree_path.as_deref() == Some("/wt")
+        ));
+    }
+
+    #[test]
+    fn translate_create_task_branch_default() {
+        use agent_decision::model::action::CreateTaskBranchAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = CreateTaskBranchAction::new("feat/x", "main");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::CreateTaskBranch { branch_name, base_branch, worktree_path }
+            if branch_name == "feat/x" && base_branch == "main" && worktree_path.is_none()
+        ));
+    }
+
+    #[test]
+    fn translate_rebase_to_main_with_param() {
+        use agent_decision::model::action::RebaseToMainAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = RebaseToMainAction::new("master");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::RebaseToMain { base_branch } if base_branch == "master"
+        ));
+    }
+
+    #[test]
+    fn translate_rebase_to_main_default() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "rebase_to_main",
+            params: "{}".to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::RebaseToMain { base_branch } if base_branch == "main"
+        ));
+    }
+
+    #[test]
+    fn translate_unknown() {
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = GenericAction {
+            type_name: "unknown_action",
+            params: r#"{"key":"val"}"#.to_string(),
+        };
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::Unknown { action_type, params }
+            if action_type == "unknown_action" && params == r#"{"key":"val"}"#
+        ));
     }
 }
