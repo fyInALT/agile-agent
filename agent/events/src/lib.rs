@@ -9,9 +9,8 @@
 //! - All event variants are exhaustively matchable (no `_ =>` catches)
 //! - Conversion between event types is compile-time verified
 
-// Modules will be added in subsequent stories:
-// pub mod domain_event;
-// pub mod decision_event;
+pub mod domain_event;
+// decision_event module will be added in Story 1.3
 
 // Re-export toolkit types that are part of the event vocabulary
 pub use agent_toolkit::{
