@@ -16,7 +16,7 @@ use crate::provider_thread::ProviderThreadHandle;
 // Re-export SessionHandle from shared event kernel
 pub use agent_events::SessionHandle;
 // Tool call types from agent-toolkit
-use agent_toolkit::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
+use agent_toolkit::{ExecCommandStatus, McpInvocation, PatchApplyStatus, PatchChange, WebSearchAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderCapabilities {
@@ -37,89 +37,8 @@ pub fn provider_capabilities(kind: ProviderKind) -> ProviderCapabilities {
 
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderEvent {
-    Status(String),
-    AssistantChunk(String),
-    ThinkingChunk(String),
-    ExecCommandStarted {
-        call_id: Option<String>,
-        input_preview: Option<String>,
-        source: Option<String>,
-    },
-    ExecCommandFinished {
-        call_id: Option<String>,
-        output_preview: Option<String>,
-        status: ExecCommandStatus,
-        exit_code: Option<i32>,
-        duration_ms: Option<u64>,
-        source: Option<String>,
-    },
-    ExecCommandOutputDelta {
-        call_id: Option<String>,
-        delta: String,
-    },
-    GenericToolCallStarted {
-        name: String,
-        call_id: Option<String>,
-        input_preview: Option<String>,
-    },
-    GenericToolCallFinished {
-        name: String,
-        call_id: Option<String>,
-        output_preview: Option<String>,
-        success: bool,
-        exit_code: Option<i32>,
-        duration_ms: Option<u64>,
-    },
-    WebSearchStarted {
-        call_id: Option<String>,
-        query: String,
-    },
-    WebSearchFinished {
-        call_id: Option<String>,
-        query: String,
-        action: Option<WebSearchAction>,
-    },
-    ViewImage {
-        call_id: Option<String>,
-        path: String,
-    },
-    ImageGenerationFinished {
-        call_id: Option<String>,
-        revised_prompt: Option<String>,
-        result: Option<String>,
-        saved_path: Option<String>,
-    },
-    PatchApplyOutputDelta {
-        call_id: Option<String>,
-        delta: String,
-    },
-    McpToolCallStarted {
-        call_id: Option<String>,
-        invocation: McpInvocation,
-    },
-    McpToolCallFinished {
-        call_id: Option<String>,
-        invocation: McpInvocation,
-        result_blocks: Vec<serde_json::Value>,
-        error: Option<String>,
-        status: McpToolCallStatus,
-        is_error: bool,
-    },
-    PatchApplyStarted {
-        call_id: Option<String>,
-        changes: Vec<PatchChange>,
-    },
-    PatchApplyFinished {
-        call_id: Option<String>,
-        changes: Vec<PatchChange>,
-        status: PatchApplyStatus,
-    },
-    SessionHandle(SessionHandle),
-    Error(String),
-    Finished,
-}
+// Re-export unified DomainEvent as ProviderEvent for backward compatibility
+pub use agent_events::DomainEvent as ProviderEvent;
 
 pub fn default_provider() -> ProviderKind {
     if probe::is_provider_available("claude") {

@@ -21,7 +21,7 @@ pub mod blocked_handler;
 pub mod decision_coordinator;
 pub mod decision_executor;
 pub mod decision_spawner;
-pub mod event_converter;
+// event_converter removed — conversion now handled by agent-events::From impls
 pub mod focus_manager;
 pub mod lifecycle;
 pub mod queries;
@@ -35,7 +35,7 @@ pub use blocked_handler::{BlockedHandler, AgentBlockedNotifier, AgentBlockedEven
 pub use decision_coordinator::{DecisionAgentCoordinator, DecisionAgentStats};
 pub use decision_executor::DecisionExecutor;
 pub use decision_spawner::{spawn_decision_agent_for, spawn_decision_agent_with_profile_for, stop_decision_agent_for};
-pub use event_converter::convert_provider_event_to_decision;
+
 pub use focus_manager::{FocusManager, FocusError};
 pub use lifecycle::{AgentLifecycleManager, LifecycleError};
 pub use queries::PoolQueries;

@@ -27,17 +27,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainEvent {
     // ── Lifecycle ──────────────────────────────────────────────
-    /// Provider thread started successfully
-    WorkerStarted,
-
-    /// Provider finished normally (all work complete)
-    WorkerFinished,
-
-    /// Provider failed with an error message
-    WorkerFailed { reason: String },
-
     /// Session handle acquired for multi-turn continuity
-    SessionAcquired(SessionHandle),
+    SessionHandle(SessionHandle),
 
     // ── Streaming ──────────────────────────────────────────────
     /// Assistant response text chunk
@@ -47,7 +38,7 @@ pub enum DomainEvent {
     ThinkingChunk(String),
 
     /// Status update message
-    StatusUpdate(String),
+    Status(String),
 
     // ── Tool execution ─────────────────────────────────────────
     /// External command execution started
@@ -176,7 +167,7 @@ impl DomainEvent {
             self,
             DomainEvent::AssistantChunk(_)
                 | DomainEvent::ThinkingChunk(_)
-                | DomainEvent::StatusUpdate(_)
+                | DomainEvent::Status(_)
                 | DomainEvent::ExecCommandOutputDelta { .. }
                 | DomainEvent::PatchApplyOutputDelta { .. }
                 | DomainEvent::ExecCommandStarted { .. }
@@ -186,7 +177,7 @@ impl DomainEvent {
                 | DomainEvent::ImageGenerationFinished { .. }
                 | DomainEvent::McpToolCallStarted { .. }
                 | DomainEvent::PatchApplyStarted { .. }
-                | DomainEvent::SessionAcquired(_)
+                | DomainEvent::SessionHandle(_)
         )
     }
 
@@ -198,9 +189,7 @@ impl DomainEvent {
     pub fn may_need_decision(&self) -> bool {
         matches!(
             self,
-            DomainEvent::WorkerFinished
-                | DomainEvent::WorkerFailed { .. }
-                | DomainEvent::Error(_)
+            DomainEvent::Error(_)
                 | DomainEvent::Finished
                 | DomainEvent::ExecCommandFinished { .. }
                 | DomainEvent::GenericToolCallFinished { .. }
@@ -224,8 +213,7 @@ impl DomainEvent {
     pub fn is_failure(&self) -> bool {
         matches!(
             self,
-            DomainEvent::WorkerFailed { .. }
-                | DomainEvent::Error(_)
+            DomainEvent::Error(_)
                 | DomainEvent::ExecCommandFinished {
                     status: ExecCommandStatus::Failed | ExecCommandStatus::Declined,
                     ..
@@ -243,8 +231,7 @@ impl DomainEvent {
     pub fn is_success(&self) -> bool {
         matches!(
             self,
-            DomainEvent::WorkerFinished
-                | DomainEvent::Finished
+            DomainEvent::Finished
                 | DomainEvent::ExecCommandFinished {
                     status: ExecCommandStatus::Completed,
                     ..
@@ -271,25 +258,8 @@ mod tests {
     // ── Construction tests for all variants ──────────────────────
 
     #[test]
-    fn construct_worker_started() {
-        let _ = DomainEvent::WorkerStarted;
-    }
-
-    #[test]
-    fn construct_worker_finished() {
-        let _ = DomainEvent::WorkerFinished;
-    }
-
-    #[test]
-    fn construct_worker_failed() {
-        let _ = DomainEvent::WorkerFailed {
-            reason: "timeout".to_string(),
-        };
-    }
-
-    #[test]
-    fn construct_session_acquired() {
-        let _ = DomainEvent::SessionAcquired(SessionHandle::ClaudeSession {
+    fn construct_session_handle() {
+        let _ = DomainEvent::SessionHandle(SessionHandle::ClaudeSession {
             session_id: "sess-1".to_string(),
         });
     }
@@ -305,8 +275,8 @@ mod tests {
     }
 
     #[test]
-    fn construct_status_update() {
-        let _ = DomainEvent::StatusUpdate("working".to_string());
+    fn construct_status() {
+        let _ = DomainEvent::Status("working".to_string());
     }
 
     #[test]
@@ -466,22 +436,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_finished_needs_decision() {
-        assert!(!DomainEvent::WorkerFinished.is_running());
-        assert!(DomainEvent::WorkerFinished.may_need_decision());
-    }
-
-    #[test]
-    fn worker_failed_is_failure() {
-        let e = DomainEvent::WorkerFailed {
-            reason: "panic".to_string(),
-        };
-        assert!(e.is_failure());
-        assert!(!e.is_running());
-        assert!(e.may_need_decision());
-    }
-
-    #[test]
     fn exec_command_failed_is_failure() {
         let e = DomainEvent::ExecCommandFinished {
             call_id: None,
@@ -551,16 +505,16 @@ mod tests {
 
     #[test]
     fn all_events_broadcast_by_default() {
-        assert!(DomainEvent::WorkerStarted.should_broadcast());
+        assert!(DomainEvent::Status("ok".to_string()).should_broadcast());
         assert!(DomainEvent::Error("e".to_string()).should_broadcast());
         assert!(DomainEvent::Finished.should_broadcast());
     }
 
     #[test]
     fn equality_works() {
-        let a = DomainEvent::StatusUpdate("x".to_string());
-        let b = DomainEvent::StatusUpdate("x".to_string());
-        let c = DomainEvent::StatusUpdate("y".to_string());
+        let a = DomainEvent::Status("x".to_string());
+        let b = DomainEvent::Status("x".to_string());
+        let c = DomainEvent::Status("y".to_string());
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

@@ -24,7 +24,7 @@ pub use crate::pool::{
     BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
     FocusManager, PoolQueries, DecisionExecutor,
     WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
-    convert_provider_event_to_decision,
+
     AgentLifecycleManager,
     spawn_decision_agent_for, spawn_decision_agent_with_profile_for, stop_decision_agent_for,
 };
@@ -1019,14 +1019,18 @@ impl AgentPool {
                     ProviderKind::Mock => agent_decision::provider_kind::ProviderKind::Unknown,
                 };
 
-                // Convert core ProviderEvent to decision ProviderEvent
-                let decision_event = convert_provider_event_to_decision(event);
+                // Convert core ProviderEvent to decision ProviderEvent via shared kernel
+                let decision_event: Option<agent_decision::provider::ProviderEvent> = event.into();
 
                 // Use classifier registry to classify the event
-                self.decision_coordinator
-                    .components()
-                    .classifier_registry
-                    .classify(&decision_event, decision_provider)
+                if let Some(decision_event) = decision_event {
+                    self.decision_coordinator
+                        .components()
+                        .classifier_registry
+                        .classify(&decision_event, decision_provider)
+                } else {
+                    ClassifyResult::running(None)
+                }
             } else {
                 // No ProviderKind mapping, return Running result
                 ClassifyResult::running(None)

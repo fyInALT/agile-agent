@@ -106,6 +106,7 @@ dependencies = [
 name = "agent-decision"
 version = "0.1.0"
 dependencies = [
+ "agent-events",
  "chrono",
  "serde",
  "serde_json",
