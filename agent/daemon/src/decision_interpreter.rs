@@ -53,15 +53,11 @@ impl DecisionCommandInterpreter {
                 },
             ]),
 
-            DecisionCommand::ApproveAndContinue => {
-                // No-op: the agent resumes on next tick cycle
-                Some(vec![])
-            }
-
-            DecisionCommand::WakeUp => {
-                // No-op: wake-up is handled by state transition on next event
-                Some(vec![])
-            }
+            // ApproveAndContinue and WakeUp require state transitions
+            // (Blocked/Resting → Idle) that are not yet expressible as
+            // RuntimeCommand effects. Fall back to legacy path until a
+            // TransitionState RuntimeCommand variant is added.
+            DecisionCommand::ApproveAndContinue | DecisionCommand::WakeUp => None,
 
             // Commands that require transcript manipulation or provider thread
             // management — not yet expressible as RuntimeCommand. Fall back to
@@ -143,11 +139,11 @@ mod tests {
     }
 
     #[test]
-    fn interpret_approve_and_continue_is_noop() {
+    fn interpret_approve_and_continue_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::ApproveAndContinue;
-        let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
-        assert!(cmds.is_empty());
+        // Falls back to legacy path until TransitionState RuntimeCommand exists
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
 
     #[test]
@@ -184,11 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn interpret_wakeup_is_noop() {
+    fn interpret_wakeup_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::WakeUp;
-        let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
-        assert!(cmds.is_empty());
+        // Falls back to legacy path until TransitionState RuntimeCommand exists
+        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
 
     #[test]

@@ -16,6 +16,8 @@ pub use domain_event::DomainEvent;
 pub use decision_event::DecisionEvent;
 
 // Re-export toolkit types that are part of the event vocabulary
+use serde::{Deserialize, Serialize};
+
 pub use agent_toolkit::{
     ExecCommandStatus, McpInvocation, McpToolCallStatus,
     PatchApplyStatus, PatchChange, WebSearchAction, PatchChangeKind,
@@ -25,7 +27,7 @@ pub use agent_toolkit::{
 ///
 /// This type is part of the event kernel because it appears in
 /// `DomainEvent::SessionHandle` and is used across multiple crates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionHandle {
     ClaudeSession { session_id: String },
     CodexThread { thread_id: String },

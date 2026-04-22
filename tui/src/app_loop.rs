@@ -179,7 +179,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             // Collect responses first, preserving output details for transcript
             let decision_results: Vec<(
                 agent_core::agent_runtime::AgentId,
-                agent_core::agent_pool::DecisionExecutionResult,
+                Vec<agent_core::agent_pool::DecisionExecutionResult>,
                 Option<DecisionOutputInfo>,
             )> = {
                 if let Some(pool) = state.agent_pool.as_mut() {
@@ -238,153 +238,155 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             };
 
             // Process results after releasing pool borrow
-            for (agent_id, result, output_info) in decision_results {
-                match result {
-                    agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
-                        // Push decision entry to transcript for detailed display
-                        if let Some(info) = output_info {
-                            state.app_mut().push_decision(
-                                agent_id.as_str().to_string(),
-                                info.situation_type,
-                                format!("{} → {}", info.action_type, option_id),
-                                info.reasoning,
-                                info.confidence,
-                                info.tier,
-                            );
-                            // Set decision status in status bar (max 15 chars)
-                            state.set_decision_status(Some(option_id.clone()));
-                        }
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: decision executed ({})",
-                            agent_id.as_str(),
-                            option_id
-                        ));
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
-                        if let Some(info) = output_info {
-                            state.app_mut().push_decision(
-                                agent_id.as_str().to_string(),
-                                info.situation_type,
-                                info.action_type.clone(),
-                                info.reasoning,
-                                info.confidence,
-                                info.tier,
-                            );
-                            // Set decision status in status bar (max 15 chars)
-                            state.set_decision_status(Some(info.action_type));
-                        }
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: recommendation accepted",
-                            agent_id.as_str()
-                        ));
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
-                        instruction,
-                    } => {
-                        if let Some(info) = output_info {
-                            state.app_mut().push_decision(
-                                agent_id.as_str().to_string(),
-                                info.situation_type,
-                                "custom_instruction".to_string(),
-                                info.reasoning,
-                                info.confidence,
-                                info.tier,
-                            );
-                        }
-                        // Set decision status in status bar (max 15 chars)
-                        state.set_decision_status(Some("custom".to_string()));
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: custom instruction sent",
-                            agent_id.as_str()
-                        ));
-
-                        // Trigger new provider request with the instruction
-                        // Use start_raw_provider_for_agent to avoid duplicate transcript entry
-                        // since instruction was already added in execute_decision_action
-                        logging::debug_event(
-                            "decision_layer.custom_instruction_trigger",
-                            "triggering provider request for custom instruction",
-                            serde_json::json!({
-                                "agent_id": agent_id.as_str(),
-                            }),
-                        );
-
-                        // Check if agent slot is in a valid state for new provider request
-                        // Valid states include:
-                        // - "responding": Already ready (rare case)
-                        // - "starting": Just transitioned from idle/blocked/waiting
-                        // - "idle": Agent ready for new work (will be transitioned in start_provider_for_agent_with_mode)
-                        // - "blocked": Decision triggered work (will be transitioned)
-                        // - "waiting_for_input": Idle timeout recovery (will be transitioned)
-                        //
-                        // Invalid states: "stopping", "stopped", "tool_executing", "finishing"
-                        let slot_status = state
-                            .agent_pool
-                            .as_ref()
-                            .and_then(|pool| pool.get_slot_by_id(&agent_id))
-                            .map(|slot| slot.status().label());
-
-                        if let Some(status) = slot_status {
-                            let is_valid_for_request = status == "responding"
-                                || status == "starting"
-                                || status == "idle"
-                                || status.starts_with("blocked:")
-                                || status == "waiting_for_input";
-
-                            if is_valid_for_request {
-                                // Agent is ready to process the instruction
-                                // Start provider request without injecting mail (instruction is the prompt)
-                                let _started = start_multi_agent_provider_request_for_agent(
-                                    &mut state,
-                                    agent_id.clone(),
-                                    instruction.clone(),
-                                    false, // Don't inject mail, instruction is the prompt
+            for (agent_id, results, output_info) in decision_results {
+                for result in results {
+                    match result {
+                        agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
+                            // Push decision entry to transcript for detailed display
+                            if let Some(ref info) = output_info {
+                                state.app_mut().push_decision(
+                                    agent_id.as_str().to_string(),
+                                    info.situation_type.clone(),
+                                    format!("{} → {}", info.action_type, option_id),
+                                    info.reasoning.clone(),
+                                    info.confidence,
+                                    info.tier.clone(),
                                 );
-                            } else {
-                                logging::warn_event(
-                                    "decision_layer.custom_instruction_skip",
-                                    "agent not in valid state for provider request",
-                                    serde_json::json!({
-                                        "agent_id": agent_id.as_str(),
-                                        "status": status,
-                                        "valid_states": ["responding", "starting", "idle", "blocked:*", "waiting_for_input"],
-                                    }),
+                                // Set decision status in status bar (max 15 chars)
+                                state.set_decision_status(Some(option_id.clone()));
+                            }
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: decision executed ({})",
+                                agent_id.as_str(),
+                                option_id
+                            ));
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
+                            if let Some(ref info) = output_info {
+                                state.app_mut().push_decision(
+                                    agent_id.as_str().to_string(),
+                                    info.situation_type.clone(),
+                                    info.action_type.clone(),
+                                    info.reasoning.clone(),
+                                    info.confidence,
+                                    info.tier.clone(),
+                                );
+                                // Set decision status in status bar (max 15 chars)
+                                state.set_decision_status(Some(info.action_type.clone()));
+                            }
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: recommendation accepted",
+                                agent_id.as_str()
+                            ));
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
+                            instruction,
+                        } => {
+                            if let Some(ref info) = output_info {
+                                state.app_mut().push_decision(
+                                    agent_id.as_str().to_string(),
+                                    info.situation_type.clone(),
+                                    "custom_instruction".to_string(),
+                                    info.reasoning.clone(),
+                                    info.confidence,
+                                    info.tier.clone(),
                                 );
                             }
+                            // Set decision status in status bar (max 15 chars)
+                            state.set_decision_status(Some("custom".to_string()));
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: custom instruction sent",
+                                agent_id.as_str()
+                            ));
+
+                            // Trigger new provider request with the instruction
+                            // Use start_raw_provider_for_agent to avoid duplicate transcript entry
+                            // since instruction was already added in execute_decision_action
+                            logging::debug_event(
+                                "decision_layer.custom_instruction_trigger",
+                                "triggering provider request for custom instruction",
+                                serde_json::json!({
+                                    "agent_id": agent_id.as_str(),
+                                }),
+                            );
+
+                            // Check if agent slot is in a valid state for new provider request
+                            // Valid states include:
+                            // - "responding": Already ready (rare case)
+                            // - "starting": Just transitioned from idle/blocked/waiting
+                            // - "idle": Agent ready for new work (will be transitioned in start_provider_for_agent_with_mode)
+                            // - "blocked": Decision triggered work (will be transitioned)
+                            // - "waiting_for_input": Idle timeout recovery (will be transitioned)
+                            //
+                            // Invalid states: "stopping", "stopped", "tool_executing", "finishing"
+                            let slot_status = state
+                                .agent_pool
+                                .as_ref()
+                                .and_then(|pool| pool.get_slot_by_id(&agent_id))
+                                .map(|slot| slot.status().label());
+
+                            if let Some(status) = slot_status {
+                                let is_valid_for_request = status == "responding"
+                                    || status == "starting"
+                                    || status == "idle"
+                                    || status.starts_with("blocked:")
+                                    || status == "waiting_for_input";
+
+                                if is_valid_for_request {
+                                    // Agent is ready to process the instruction
+                                    // Start provider request without injecting mail (instruction is the prompt)
+                                    let _started = start_multi_agent_provider_request_for_agent(
+                                        &mut state,
+                                        agent_id.clone(),
+                                        instruction.clone(),
+                                        false, // Don't inject mail, instruction is the prompt
+                                    );
+                                } else {
+                                    logging::warn_event(
+                                        "decision_layer.custom_instruction_skip",
+                                        "agent not in valid state for provider request",
+                                        serde_json::json!({
+                                            "agent_id": agent_id.as_str(),
+                                            "status": status,
+                                            "valid_states": ["responding", "starting", "idle", "blocked:*", "waiting_for_input"],
+                                        }),
+                                    );
+                                }
+                            }
                         }
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::Skipped => {
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: decision skipped",
-                            agent_id.as_str()
-                        ));
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::Cancelled => {
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: decision cancelled",
-                            agent_id.as_str()
-                        ));
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::AgentNotFound
-                    | agent_core::agent_pool::DecisionExecutionResult::NotBlocked => {}
-                    agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
-                        branch,
-                        worktree_path: _,
-                    } => {
-                        state.set_decision_status(Some("prepared".to_string()));
-                        state.app_mut().push_status_message(format!(
-                            "🧠 {}: task prepared (branch: {})",
-                            agent_id.as_str(),
-                            branch
-                        ));
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::PreparationFailed { reason } => {
-                        state.set_decision_status(Some("prep-fail".to_string()));
-                        state.app_mut().push_status_message(format!(
-                            "⚠️ {}: preparation failed ({})",
-                            agent_id.as_str(),
-                            reason
-                        ));
+                        agent_core::agent_pool::DecisionExecutionResult::Skipped => {
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: decision skipped",
+                                agent_id.as_str()
+                            ));
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::Cancelled => {
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: decision cancelled",
+                                agent_id.as_str()
+                            ));
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::AgentNotFound
+                        | agent_core::agent_pool::DecisionExecutionResult::NotBlocked => {}
+                        agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
+                            branch,
+                            worktree_path: _,
+                        } => {
+                            state.set_decision_status(Some("prepared".to_string()));
+                            state.app_mut().push_status_message(format!(
+                                "🧠 {}: task prepared (branch: {})",
+                                agent_id.as_str(),
+                                branch
+                            ));
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::PreparationFailed { reason } => {
+                            state.set_decision_status(Some("prep-fail".to_string()));
+                            state.app_mut().push_status_message(format!(
+                                "⚠️ {}: preparation failed ({})",
+                                agent_id.as_str(),
+                                reason
+                            ));
+                        }
                     }
                 }
             }

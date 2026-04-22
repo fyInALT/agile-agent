@@ -8,9 +8,10 @@ use std::path::PathBuf;
 
 use agent_events::DomainEvent;
 use agent_types::AgentId;
+use serde::{Deserialize, Serialize};
 
 /// A command produced by `Worker::apply()` describing a side effect to execute.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeCommand {
     /// Spawn a provider thread for the given agent
     SpawnProvider {

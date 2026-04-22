@@ -184,14 +184,14 @@ impl DecisionExecutor {
         worktree_coordinator: &WorktreeCoordinator,
         work_agent_id: &AgentId,
         output: &agent_decision::output::DecisionOutput,
-    ) -> DecisionExecutionResult {
+    ) -> Vec<DecisionExecutionResult> {
         // Find the work agent
         let slot_index = slots.iter()
             .position(|s| s.agent_id() == work_agent_id);
 
         let slot_index = match slot_index {
             Some(idx) => idx,
-            None => return DecisionExecutionResult::AgentNotFound,
+            None => return vec![DecisionExecutionResult::AgentNotFound],
         };
 
         let slot = &mut slots[slot_index];
@@ -202,11 +202,25 @@ impl DecisionExecutor {
             && !slot.status().is_idle()
             && !slot.status().is_waiting_for_input()
         {
-            return DecisionExecutionResult::NotBlocked;
+            return vec![DecisionExecutionResult::NotBlocked];
         }
 
-        // Execute the first action from the output
-        if let Some(action) = output.actions.first() {
+        if output.actions.is_empty() {
+            // No actions in output - nothing to execute
+            logging::warn_event(
+                "decision_layer.no_actions",
+                "decision output has no actions - nothing to execute",
+                serde_json::json!({
+                    "work_agent_id": work_agent_id.as_str(),
+                    "reasoning": output.reasoning,
+                }),
+            );
+            return vec![DecisionExecutionResult::Cancelled];
+        }
+
+        let mut results = Vec::with_capacity(output.actions.len());
+
+        for action in &output.actions {
             let action_type = action.action_type().name.clone();
             let params_str = action.serialize_params();
 
@@ -223,7 +237,7 @@ impl DecisionExecutor {
                 }),
             );
 
-            match action_type.as_str() {
+            let result = match action_type.as_str() {
                 "select_option" => Self::execute_select_option(
                     slots,
                     human_queue,
@@ -276,19 +290,12 @@ impl DecisionExecutor {
                     params_str,
                 ),
                 _ => Self::execute_unknown(work_agent_id, action_type, params_str),
-            }
-        } else {
-            // No actions in output - nothing to execute
-            logging::warn_event(
-                "decision_layer.no_actions",
-                "decision output has no actions - nothing to execute",
-                serde_json::json!({
-                    "work_agent_id": work_agent_id.as_str(),
-                    "reasoning": output.reasoning,
-                }),
-            );
-            DecisionExecutionResult::Cancelled
+            };
+
+            results.push(result);
         }
+
+        results
     }
 
     fn execute_select_option(
@@ -820,7 +827,8 @@ mod tests {
             &output,
         );
 
-        assert!(matches!(result, DecisionExecutionResult::AgentNotFound));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], DecisionExecutionResult::AgentNotFound));
     }
 
     #[test]
@@ -848,7 +856,8 @@ mod tests {
         );
 
         // Empty actions result in Cancelled
-        assert!(matches!(result, DecisionExecutionResult::Cancelled));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], DecisionExecutionResult::Cancelled));
     }
 
     // ── translate() tests ───────────────────────────────────────

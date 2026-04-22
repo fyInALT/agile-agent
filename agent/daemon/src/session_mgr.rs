@@ -627,8 +627,10 @@ impl EventLoop {
         // Phase 2: Check idle agents and trigger decision layer
         self.phase_2_check_idle_agents(&mut inner).await;
 
-        // Phase 3: Poll decision agents
-        self.phase_3_poll_decision_agents(&mut inner).await;
+        // Phase 3: Poll decision agents — collect pure-path commands while
+        // holding lock, but defer dispatch until after lock is released to
+        // avoid deadlock (handlers acquire the same mutex).
+        let phase3_cmds = self.phase_3_poll_decision_agents(&mut inner).await;
 
         // Phase 4: Process pending mailbox deliveries
         self.phase_4_process_mailbox(&mut inner).await;
@@ -639,9 +641,10 @@ impl EventLoop {
         // Phase 6: Reconcile worktrees
         self.phase_6_reconcile_worktrees(&mut inner).await;
 
-        // Phase 7: Collect commands while holding lock, then drop lock before
-        // dispatch to avoid deadlock (handlers acquire the same mutex).
-        let commands = self.phase_7_collect_commands(&mut inner).await;
+        // Phase 7: Collect Worker-generated commands, merge with Phase 3
+        // pure-path commands, then drop lock before dispatch.
+        let mut commands = phase3_cmds;
+        commands.extend(self.phase_7_collect_commands(&mut inner).await);
         drop(inner);
 
         for cmd in &commands {
@@ -950,18 +953,23 @@ impl EventLoop {
     // ------------------------------------------------------------------
     // Phase 3: Poll decision agents
     // ------------------------------------------------------------------
-    async fn phase_3_poll_decision_agents(&self, inner: &mut SessionInner) {
+    async fn phase_3_poll_decision_agents(
+        &self,
+        inner: &mut SessionInner,
+    ) -> Vec<agent_core::runtime_command::RuntimeCommand> {
         use agent_core::pool::DecisionExecutor;
         use crate::decision_interpreter::DecisionCommandInterpreter;
 
         let interpreter = DecisionCommandInterpreter::new();
         let decision_responses = inner.agent_pool.poll_decision_agents();
+        let mut pending_cmds = Vec::new();
 
         for (work_agent_id, response) in decision_responses {
             if let Some(output) = response.output() {
                 // New path: translate to pure DecisionCommands, then interpret
-                // to RuntimeCommands. If all commands can be interpreted, dispatch
-                // them and skip legacy execute(). Otherwise fall back.
+                // to RuntimeCommands. If all commands can be interpreted, collect
+                // them for deferred dispatch (lock will be dropped first). Otherwise
+                // fall back to legacy execute().
                 let commands = DecisionExecutor::translate(&work_agent_id, output);
                 let mut all_interpreted = true;
                 let mut runtime_cmds = Vec::new();
@@ -977,103 +985,99 @@ impl EventLoop {
                 }
 
                 if all_interpreted && !commands.is_empty() {
-                    // Dispatch RuntimeCommands through effect handler
-                    for cmd in &runtime_cmds {
-                        if let Err(e) = self.effect_handler.handle(cmd) {
-                            tracing::warn!(
-                                agent_id = %work_agent_id.as_str(),
-                                command = ?cmd,
-                                error = %e,
-                                "DecisionCommand effect handler failed"
-                            );
-                        }
-                    }
+                    // Defer dispatch — collect commands to be dispatched after
+                    // the lock is released (avoids deadlock with handlers).
+                    pending_cmds.extend(runtime_cmds);
                     tracing::info!(
                         agent_id = %work_agent_id.as_str(),
                         commands = commands.len(),
-                        "decision commands dispatched via effect handler"
+                        "decision commands collected for deferred dispatch"
                     );
                     continue;
                 }
 
                 // Legacy path: direct execution via DecisionExecutor
-                let result =
+                let results =
                     inner.agent_pool.execute_decision_action(&work_agent_id, output);
 
-                match result {
-                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
-                        instruction,
-                    } => {
-                        // Decision executor already appended the instruction as a
-                        // TranscriptEntry::User, so we must NOT record it again.
-                        let slot_status = inner
-                            .agent_pool
-                            .get_slot_by_id(&work_agent_id)
-                            .map(|s| s.status().label());
+                for result in results {
+                    match result {
+                        agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
+                            instruction,
+                        } => {
+                            // Decision executor already appended the instruction as a
+                            // TranscriptEntry::User, so we must NOT record it again.
+                            let slot_status = inner
+                                .agent_pool
+                                .get_slot_by_id(&work_agent_id)
+                                .map(|s| s.status().label());
 
-                        let is_valid = slot_status.as_deref().is_some_and(|status| {
-                            status == "responding"
-                                || status == "starting"
-                                || status == "idle"
-                                || status.starts_with("blocked:")
-                                || status == "waiting_for_input"
-                        });
+                            let is_valid = slot_status.as_deref().is_some_and(|status| {
+                                status == "responding"
+                                    || status == "starting"
+                                    || status == "idle"
+                                    || status.starts_with("blocked:")
+                                    || status == "waiting_for_input"
+                            });
 
-                        if is_valid {
-                            if let Err(e) = Self::start_provider_for_agent_inner(
-                                inner,
-                                &work_agent_id,
-                                &instruction,
-                                false, // do not duplicate transcript entry
-                            )
-                            .await
-                            {
+                            if is_valid {
+                                if let Err(e) = Self::start_provider_for_agent_inner(
+                                    inner,
+                                    &work_agent_id,
+                                    &instruction,
+                                    false, // do not duplicate transcript entry
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        agent_id = %work_agent_id.as_str(),
+                                        error = %e,
+                                        "failed to start provider for custom instruction"
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        agent_id = %work_agent_id.as_str(),
+                                        instruction = %instruction,
+                                        "started provider for custom instruction"
+                                    );
+                                }
+                            } else {
                                 tracing::warn!(
                                     agent_id = %work_agent_id.as_str(),
-                                    error = %e,
-                                    "failed to start provider for custom instruction"
-                                );
-                            } else {
-                                tracing::info!(
-                                    agent_id = %work_agent_id.as_str(),
-                                    instruction = %instruction,
-                                    "started provider for custom instruction"
+                                    status = ?slot_status,
+                                    "agent not in valid state for custom instruction provider start"
                                 );
                             }
-                        } else {
-                            tracing::warn!(
+                        }
+                        agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
+                            branch,
+                            ..
+                        } => {
+                            tracing::info!(
                                 agent_id = %work_agent_id.as_str(),
-                                status = ?slot_status,
-                                "agent not in valid state for custom instruction provider start"
+                                branch = %branch,
+                                "task prepared by decision layer"
                             );
                         }
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
-                        branch,
-                        ..
-                    } => {
-                        tracing::info!(
-                            agent_id = %work_agent_id.as_str(),
-                            branch = %branch,
-                            "task prepared by decision layer"
-                        );
-                    }
-                    agent_core::agent_pool::DecisionExecutionResult::PreparationFailed {
-                        reason,
-                    } => {
-                        tracing::warn!(
-                            agent_id = %work_agent_id.as_str(),
-                            reason = %reason,
-                            "task preparation failed"
-                        );
-                    }
-                    _ => {
-                        // Other results (Executed, Skipped, Cancelled, etc.) do not
-                        // require additional provider thread management.
+                        agent_core::agent_pool::DecisionExecutionResult::PreparationFailed {
+                            reason,
+                        } => {
+                            tracing::warn!(
+                                agent_id = %work_agent_id.as_str(),
+                                reason = %reason,
+                                "task preparation failed"
+                            );
+                        }
+                        _ => {
+                            // Other results (Executed, Skipped, Cancelled, etc.) do not
+                            // require additional provider thread management.
+                        }
                     }
                 }
             }
         }
+
+        pending_cmds
     }
 
     // ------------------------------------------------------------------
@@ -1730,6 +1734,394 @@ mod tests {
         assert_eq!(snapshot.len(), 2, "Expected NotifyUser + Terminate");
         assert!(matches!(&snapshot[0], agent_core::runtime_command::RuntimeCommand::NotifyUser { .. }));
         assert!(matches!(&snapshot[1], agent_core::runtime_command::RuntimeCommand::Terminate { .. }));
+    }
+
+    // ------------------------------------------------------------------
+    // Test helper
+    // ------------------------------------------------------------------
+
+    async fn make_test_event_loop() -> (EventLoop, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-test");
+        let session = RuntimeSession::bootstrap(tmp.path().to_path_buf(), agent_types::ProviderKind::Mock, false)
+            .unwrap();
+        let agent_pool = AgentPool::with_cwd(wp.clone(), 4, tmp.path().to_path_buf());
+        let event_aggregator = EventAggregator::new();
+        let mailbox = AgentMailbox::new();
+
+        let mgr = EventLoop {
+            inner: Arc::new(Mutex::new(SessionInner {
+                session,
+                agent_pool,
+                event_aggregator,
+                mailbox,
+            })),
+            session_id: "test-session".to_string(),
+            workplace_id: wp,
+            effect_handler: Arc::new(NoopEffectHandler),
+        };
+
+        (mgr, tmp)
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 1: Poll provider events
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn phase_1_finished_event_transitions_slot_to_idle() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_core::ProviderEvent;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-1");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("alpha"), ProviderType::Mock);
+            let (_dummy_tx, dummy_rx) = std::sync::mpsc::channel();
+            let dummy_handle = std::thread::spawn(|| {});
+            slot.set_provider_thread(dummy_rx, dummy_handle);
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+            inner.agent_pool.restore_slot(slot).unwrap();
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(ProviderEvent::Finished).unwrap();
+        {
+            let mut inner = mgr.inner.lock().await;
+            inner.event_aggregator.add_receiver(agent_id.clone(), rx);
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_idle(), "Finished should transition slot to idle");
+        assert!(!slot.has_provider_thread(), "Provider thread should be cleared");
+    }
+
+    #[tokio::test]
+    async fn phase_1_error_event_transitions_slot_to_blocked() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_core::ProviderEvent;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-2");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("beta"), ProviderType::Mock);
+            let (_dummy_tx, dummy_rx) = std::sync::mpsc::channel();
+            let dummy_handle = std::thread::spawn(|| {});
+            slot.set_provider_thread(dummy_rx, dummy_handle);
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+            inner.agent_pool.restore_slot(slot).unwrap();
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(ProviderEvent::Error("provider crashed".to_string())).unwrap();
+        {
+            let mut inner = mgr.inner.lock().await;
+            inner.event_aggregator.add_receiver(agent_id.clone(), rx);
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_blocked(), "Error should transition slot to blocked");
+        assert!(!slot.has_provider_thread(), "Provider thread should be cleared");
+        let transcript = slot.transcript();
+        assert!(transcript.iter().any(|e| matches!(e, TranscriptEntry::Error(msg) if msg == "provider crashed")));
+    }
+
+    #[tokio::test]
+    async fn phase_1_assistant_chunk_appends_to_transcript() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_core::ProviderEvent;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-3");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("gamma"), ProviderType::Mock);
+            let (_dummy_tx, dummy_rx) = std::sync::mpsc::channel();
+            let dummy_handle = std::thread::spawn(|| {});
+            slot.set_provider_thread(dummy_rx, dummy_handle);
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+            inner.agent_pool.restore_slot(slot).unwrap();
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(ProviderEvent::AssistantChunk("hello world".to_string())).unwrap();
+        {
+            let mut inner = mgr.inner.lock().await;
+            inner.event_aggregator.add_receiver(agent_id.clone(), rx);
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        let transcript = slot.transcript();
+        assert!(transcript.iter().any(|e| matches!(e, TranscriptEntry::Assistant(text) if text == "hello world")));
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2: Check idle agents
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn phase_2_idle_agent_triggers_decision_after_timeout() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-4");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("delta"), ProviderType::Mock);
+            slot.set_last_activity(std::time::Instant::now() - std::time::Duration::from_secs(70));
+            inner.agent_pool.restore_slot(slot).unwrap();
+            inner.agent_pool.spawn_decision_agent_for(&agent_id).unwrap();
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.last_idle_trigger_at().is_some(), "Idle trigger should have been recorded");
+    }
+
+    #[tokio::test]
+    async fn phase_2_cooldown_prevents_repeated_triggers() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-5");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("epsilon"), ProviderType::Mock);
+            slot.set_last_activity(std::time::Instant::now() - std::time::Duration::from_secs(70));
+            slot.set_last_idle_trigger_at(std::time::Instant::now() - std::time::Duration::from_secs(10));
+            inner.agent_pool.restore_slot(slot).unwrap();
+            inner.agent_pool.spawn_decision_agent_for(&agent_id).unwrap();
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        let trigger = slot.last_idle_trigger_at().unwrap();
+        assert!(trigger.elapsed().as_secs() >= 10, "Cooldown should prevent new trigger");
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 3: Poll decision agents
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn phase_3_decision_response_processed_via_fallback() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_decision::context::DecisionContext;
+        use agent_decision::types::SituationType;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-6");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("zeta"), ProviderType::Mock);
+            inner.agent_pool.restore_slot(slot).unwrap();
+            inner.agent_pool.spawn_decision_agent_for(&agent_id).unwrap();
+        }
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            inner.agent_pool.assign_task(&agent_id, agent_types::TaskId::new("task-1")).unwrap();
+        }
+
+        let situation_type = SituationType::new("agent_idle");
+        let components = agent_decision::initializer::initialize_decision_layer();
+        let situation = components.situation_registry.build(situation_type.clone());
+        let context = DecisionContext::new(situation, agent_id.as_str());
+
+        mgr.send_decision_request(agent_id.as_str(), situation_type, context).await.unwrap();
+
+        // First tick spawns async decision processing
+        mgr.tick().await.unwrap();
+
+        // Rule engine is fast but runs in a thread; give it time
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // Second tick collects the response and executes fallback
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        let transcript = slot.transcript();
+        assert!(!transcript.is_empty(), "Decision fallback should have appended a transcript entry");
+    }
+
+    #[tokio::test]
+    async fn phase_3_all_interpreted_flag_with_mixed_commands() {
+        use agent_core::agent_runtime::AgentId;
+        use agent_core::pool::DecisionExecutor;
+        use agent_decision::builtin_actions::{CustomInstructionAction, StopIfCompleteAction};
+        use agent_decision::output::DecisionOutput;
+        use crate::decision_interpreter::DecisionCommandInterpreter;
+
+        let agent_id = AgentId::new("agent-7");
+        let interpreter = DecisionCommandInterpreter::new();
+
+        let actions: Vec<Box<dyn agent_decision::DecisionAction>> = vec![
+            Box::new(StopIfCompleteAction::new("done")),
+            Box::new(CustomInstructionAction::new("do X")),
+        ];
+        let output = DecisionOutput::new(actions, "mixed test");
+        let commands = DecisionExecutor::translate(&agent_id, &output);
+
+        let mut all_interpreted = true;
+        let mut runtime_cmds = Vec::new();
+        for cmd in &commands {
+            match interpreter.interpret(&agent_id, cmd) {
+                Some(mut cmds) => runtime_cmds.append(&mut cmds),
+                None => {
+                    all_interpreted = false;
+                    break;
+                }
+            }
+        }
+
+        assert!(!all_interpreted, "Mixed commands should set all_interpreted to false");
+        assert_eq!(runtime_cmds.len(), 1, "Only the first interpretable command should be collected");
+        assert!(matches!(&runtime_cmds[0], agent_core::runtime_command::RuntimeCommand::Terminate { .. }));
+    }
+
+    #[tokio::test]
+    async fn phase_3_fallback_when_interpreter_returns_none() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_decision::context::DecisionContext;
+        use agent_decision::types::SituationType;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-8");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("eta"), ProviderType::Mock);
+            inner.agent_pool.restore_slot(slot).unwrap();
+            inner.agent_pool.spawn_decision_agent_for(&agent_id).unwrap();
+        }
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            inner.agent_pool.assign_task(&agent_id, agent_types::TaskId::new("task-1")).unwrap();
+        }
+
+        let situation_type = SituationType::new("agent_idle");
+        let components = agent_decision::initializer::initialize_decision_layer();
+        let situation = components.situation_registry.build(situation_type.clone());
+        let context = DecisionContext::new(situation, agent_id.as_str());
+
+        mgr.send_decision_request(agent_id.as_str(), situation_type, context).await.unwrap();
+
+        mgr.tick().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        let transcript = slot.transcript();
+        assert!(!transcript.is_empty(), "Fallback to DecisionExecutor::execute should append transcript");
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 4: Process mailbox
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn phase_4_direct_mail_delivered_to_inbox() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-9");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("theta"), ProviderType::Mock);
+            inner.agent_pool.restore_slot(slot).unwrap();
+
+            let mail = agent_core::agent_mail::AgentMail::new(
+                AgentId::new("sender"),
+                agent_core::agent_mail::MailTarget::Direct(agent_id.clone()),
+                agent_core::agent_mail::MailSubject::Custom { label: "Test".to_string() },
+                agent_core::agent_mail::MailBody::Text("Hello".to_string()),
+            );
+            inner.mailbox.send_mail(mail);
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        assert_eq!(inner.mailbox.unread_count(&agent_id), 1, "Direct mail should be delivered to inbox");
+        assert_eq!(inner.mailbox.outgoing_count(), 0, "Outgoing queue should be empty");
+    }
+
+    #[tokio::test]
+    async fn phase_4_broadcast_mail_goes_to_pending_delivery() {
+        use agent_core::agent_runtime::AgentId;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mail = agent_core::agent_mail::AgentMail::new(
+                AgentId::new("sender"),
+                agent_core::agent_mail::MailTarget::Broadcast,
+                agent_core::agent_mail::MailSubject::Custom { label: "Announcement".to_string() },
+                agent_core::agent_mail::MailBody::Text("To all".to_string()),
+            );
+            inner.mailbox.send_mail(mail);
+        }
+
+        mgr.tick().await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        assert_eq!(inner.mailbox.pending_count(), 1, "Broadcast mail should be in pending delivery");
+        assert_eq!(inner.mailbox.outgoing_count(), 0, "Outgoing queue should be empty");
+    }
+
+    #[tokio::test]
+    async fn stop_agent_api_stops_the_agent() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+
+        let (mgr, _tmp) = make_test_event_loop().await;
+        let agent_id = AgentId::new("agent-10");
+
+        {
+            let mut inner = mgr.inner.lock().await;
+            let slot = AgentSlot::new(agent_id.clone(), AgentCodename::new("iota"), ProviderType::Mock);
+            inner.agent_pool.restore_slot(slot).unwrap();
+        }
+
+        mgr.stop_agent(agent_id.as_str()).await.unwrap();
+
+        let inner = mgr.inner.lock().await;
+        let slot = inner.agent_pool.get_slot_by_id(&agent_id).unwrap();
+        assert!(slot.status().is_terminal(), "Agent should be stopped");
     }
 }
 

@@ -133,7 +133,7 @@ impl Clone for BlockedState {
 }
 
 /// Blocking context
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockingContext {
     pub task_id: Option<String>,
     pub story_id: Option<String>,

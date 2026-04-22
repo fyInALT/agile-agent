@@ -219,6 +219,11 @@ impl TieredDecisionEngine {
         self.llm_engine.set_llm_caller(caller);
     }
 
+    /// Get the currently set LLM caller, if any.
+    pub fn llm_caller(&self) -> Option<Arc<dyn LLMCaller>> {
+        self.llm_engine.llm_caller()
+    }
+
     /// Select tier for situation
     fn select_tier(&self, situation: &dyn DecisionSituation) -> DecisionTier {
         DecisionTier::from_situation(situation)
@@ -324,6 +329,11 @@ impl TieredDecisionEngine {
     /// This allows callers to track the reflection round across decision cycles.
     pub fn reflection_round(&self) -> u8 {
         self.llm_engine.reflection_round()
+    }
+
+    /// Set reflection round (for sync with async thread)
+    pub fn set_reflection_round(&mut self, round: u8) {
+        self.llm_engine.set_reflection_round(round);
     }
 
     /// Reset reflection round (for new task)

@@ -201,6 +201,11 @@ impl LLMDecisionEngine {
         self.llm_caller = Some(caller);
     }
 
+    /// Get the currently set LLM caller, if any.
+    pub fn llm_caller(&self) -> Option<Arc<dyn LLMCaller>> {
+        self.llm_caller.clone()
+    }
+
     /// Set the prompt builder after creation
     pub fn set_prompt_builder(&mut self, builder: PromptBuilder) {
         self.prompt_builder = Some(builder);

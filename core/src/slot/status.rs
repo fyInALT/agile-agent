@@ -58,17 +58,36 @@ impl PartialEq for AgentSlotStatus {
             (Self::Stopped { reason: a }, Self::Stopped { reason: b }) => a == b,
             (Self::Error { message: a }, Self::Error { message: b }) => a == b,
             (Self::Blocked { reason: a }, Self::Blocked { reason: b }) => a == b,
-            // BlockedForDecision compares by reason_type only
+            // BlockedForDecision compares by reason_type, urgency, and context
             (
                 Self::BlockedForDecision { blocked_state: a },
                 Self::BlockedForDecision { blocked_state: b },
-            ) => a.reason().reason_type() == b.reason().reason_type(),
+            ) => {
+                a.reason().reason_type() == b.reason().reason_type()
+                    && a.reason().urgency() == b.reason().urgency()
+                    && a.context() == b.context()
+            }
             (Self::Paused { reason: a }, Self::Paused { reason: b }) => a == b,
             (Self::WaitingForInput { started_at: a }, Self::WaitingForInput { started_at: b }) => {
                 a == b
             }
-            // Resting compares by started_at only
-            (Self::Resting { started_at: a, .. }, Self::Resting { started_at: b, .. }) => a == b,
+            // Resting compares by started_at, blocked_state reason_type, and on_resume
+            (
+                Self::Resting {
+                    started_at: a,
+                    blocked_state: ba,
+                    on_resume: oa,
+                },
+                Self::Resting {
+                    started_at: b,
+                    blocked_state: bb,
+                    on_resume: ob,
+                },
+            ) => {
+                a == b
+                    && ba.reason().reason_type() == bb.reason().reason_type()
+                    && oa == ob
+            }
             _ => false,
         }
     }

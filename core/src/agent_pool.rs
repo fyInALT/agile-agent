@@ -1232,7 +1232,7 @@ impl WorkerPool {
         &mut self,
         work_agent_id: &AgentId,
         output: &agent_decision::output::DecisionOutput,
-    ) -> DecisionExecutionResult {
+    ) -> Vec<DecisionExecutionResult> {
         DecisionExecutor::execute(
             &mut self.slots,
             &mut self.human_queue,
@@ -4614,7 +4614,8 @@ mod tests {
         let result = pool.execute_decision_action(&agent_id, &output);
 
         // Should return AcceptedRecommendation, not CustomInstruction
-        assert_eq!(result, DecisionExecutionResult::AcceptedRecommendation);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], DecisionExecutionResult::AcceptedRecommendation);
     }
 }
 

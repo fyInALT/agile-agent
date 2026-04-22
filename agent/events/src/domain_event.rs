@@ -10,6 +10,7 @@ use crate::{
     ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange,
     SessionHandle, WebSearchAction,
 };
+use serde::{Deserialize, Serialize};
 
 /// Unified domain event — single source of truth for all provider events.
 ///
@@ -24,7 +25,7 @@ use crate::{
 /// - **MCP**: McpToolCallStarted/Finished
 /// - **Patch apply**: PatchApplyStarted/Finished, PatchApplyOutputDelta
 /// - **System**: Error, Finished
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DomainEvent {
     // ── Lifecycle ──────────────────────────────────────────────
     /// Session handle acquired for multi-turn continuity

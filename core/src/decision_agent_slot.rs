@@ -543,6 +543,9 @@ impl DecisionAgentSlot {
             if let Ok(mut guard) = self.pending_reflection_round.lock() {
                 if let Some(r) = *guard {
                     self.reflection_round = r;
+                    // Keep the main-thread engine in sync so mixed sync/async
+                    // decisions don't use a stale reflection count.
+                    self.engine.set_reflection_round(r);
                 }
                 *guard = None;
             }
@@ -565,6 +568,7 @@ impl DecisionAgentSlot {
 
         // Take ownership of what we need for the thread
         let engine_config = self.engine.config();
+        let llm_caller = self.engine.llm_caller();
         let work_agent_id = request.work_agent_id.clone();
         let agent_id = self.agent_id.clone();
         let reflection_round = self.reflection_round;
@@ -592,6 +596,9 @@ impl DecisionAgentSlot {
         std::thread::spawn(move || {
             // Create engine in thread (can't move self.engine due to borrow)
             let mut engine = TieredDecisionEngine::new(engine_config);
+            if let Some(caller) = llm_caller {
+                engine.set_llm_caller(caller);
+            }
             let action_registry = ActionRegistry::new();
             register_action_builtins(&action_registry);
 
