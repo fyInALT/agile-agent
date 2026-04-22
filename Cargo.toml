@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agent/daemon",
+    "agent/events",
     "agent/protocol",
     "agent/types",
     "agent/toolkit",

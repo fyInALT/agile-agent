@@ -13,6 +13,8 @@ use crate::logging;
 use crate::mock_provider;
 use crate::probe;
 use crate::provider_thread::ProviderThreadHandle;
+// Re-export SessionHandle from shared event kernel
+pub use agent_events::SessionHandle;
 // Tool call types from agent-toolkit
 use agent_toolkit::{ExecCommandStatus, McpInvocation, McpToolCallStatus, PatchApplyStatus, PatchChange, WebSearchAction};
 
@@ -33,12 +35,7 @@ pub fn provider_capabilities(kind: ProviderKind) -> ProviderCapabilities {
     }
 }
 
-/// Session handle for multi-turn conversation continuity.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionHandle {
-    ClaudeSession { session_id: String },
-    CodexThread { thread_id: String },
-}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderEvent {
