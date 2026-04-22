@@ -560,7 +560,7 @@ mod tests {
             .unwrap();
 
         // Poll only agent1
-        let result = aggregator.poll_agents(&[agent1.clone()]);
+        let result = aggregator.poll_agents(std::slice::from_ref(&agent1));
         assert_eq!(result.events.len(), 1);
         assert_eq!(result.events[0].agent_id(), &agent1);
     }

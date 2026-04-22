@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
 //! Integration test: single-agent loop — guardrails
 //!
 //! Tests that loop guardrails (max iterations, max verification failures)

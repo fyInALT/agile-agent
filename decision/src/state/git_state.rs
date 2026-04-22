@@ -757,22 +757,24 @@ mod tests {
 
     #[test]
     fn test_git_state_change_summary() {
-        let mut state = GitState::default();
-        state.uncommitted_files = vec![
-            FileStatus {
-                path: "file1.rs".to_string(),
-                change_type: FileChangeType::Modified,
-                is_staged: false,
-                is_new: false,
-            },
-            FileStatus {
-                path: "file2.rs".to_string(),
-                change_type: FileChangeType::Added,
-                is_staged: true,
-                is_new: true,
-            },
-        ];
-        state.has_uncommitted = true;
+        let state = GitState {
+            uncommitted_files: vec![
+                FileStatus {
+                    path: "file1.rs".to_string(),
+                    change_type: FileChangeType::Modified,
+                    is_staged: false,
+                    is_new: false,
+                },
+                FileStatus {
+                    path: "file2.rs".to_string(),
+                    change_type: FileChangeType::Added,
+                    is_staged: true,
+                    is_new: true,
+                },
+            ],
+            has_uncommitted: true,
+            ..Default::default()
+        };
 
         let summary = state.change_summary();
         assert!(summary.contains("Modified"));
@@ -787,14 +789,16 @@ mod tests {
 
     #[test]
     fn test_git_state_has_staged_changes() {
-        let mut state = GitState::default();
-        state.uncommitted_files = vec![FileStatus {
-            path: "file.rs".to_string(),
-            change_type: FileChangeType::Modified,
-            is_staged: true,
-            is_new: false,
-        }];
-        state.has_uncommitted = true;
+        let state = GitState {
+            uncommitted_files: vec![FileStatus {
+                path: "file.rs".to_string(),
+                change_type: FileChangeType::Modified,
+                is_staged: true,
+                is_new: false,
+            }],
+            has_uncommitted: true,
+            ..Default::default()
+        };
 
         assert!(state.has_staged_changes());
     }
@@ -908,8 +912,10 @@ mod tests {
         use crate::model::task::task_metadata::TaskMetadata;
 
         let meta = TaskMetadata::new("PROJ-123", "Add user authentication");
-        let mut git_state = GitState::default();
-        git_state.current_branch = "main".to_string();
+        let git_state = GitState {
+            current_branch: "main".to_string(),
+            ..Default::default()
+        };
 
         let context = BranchSetupContext::new(meta, git_state, "/path/to/worktree")
             .with_base_branch("main");

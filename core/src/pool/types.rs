@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn no_op_notifier_does_not_panic() {
-        let notifier = NoOpAgentBlockedNotifier::default();
+        let notifier = NoOpAgentBlockedNotifier;
         let event = AgentBlockedEvent {
             agent_id: AgentId::new("test"),
             reason_type: "test".to_string(),

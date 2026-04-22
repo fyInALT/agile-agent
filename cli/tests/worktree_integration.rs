@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 #![cfg(feature = "core")]
 
 //! Integration tests for worktree isolation
@@ -690,7 +692,7 @@ fn pool_capacity_limits_worktrees() {
             Some(format!("feature/limit-{}", i)),
             None,
         )
-        .expect(&format!("spawn agent {}", i));
+        .unwrap_or_else(|_| panic!("spawn agent {}", i));
     }
 
     // Fifth should fail

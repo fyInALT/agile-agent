@@ -1,3 +1,6 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
+
 //! Integration test: multi-agent provider event flow
 //!
 //! Tests that ProviderEvents injected via channels are correctly processed
@@ -59,7 +62,7 @@ fn two_agents_receive_distinct_events() {
     // Verify agent A state
     let slot_a = session.agents().get_slot_by_id(&id_a).unwrap();
     assert!(
-        matches!(slot_a.status(), AgentSlotStatus::Finishing { .. }),
+        matches!(slot_a.status(), AgentSlotStatus::Finishing),
         "agent A should be finishing, got {:?}",
         slot_a.status()
     );
@@ -67,7 +70,7 @@ fn two_agents_receive_distinct_events() {
     // Verify agent B state
     let slot_b = session.agents().get_slot_by_id(&id_b).unwrap();
     assert!(
-        matches!(slot_b.status(), AgentSlotStatus::Finishing { .. }),
+        matches!(slot_b.status(), AgentSlotStatus::Finishing),
         "agent B should be finishing, got {:?}",
         slot_b.status()
     );
@@ -189,17 +192,14 @@ fn mixed_events_routed_to_correct_agents() {
     let mut a_count = 0;
     let mut b_count = 0;
     for event in &poll_result.events {
-        match event {
-            AgentEvent::FromProvider { agent_id, .. } => {
-                if agent_id == &id_a {
-                    a_count += 1;
-                } else if agent_id == &id_b {
-                    b_count += 1;
-                } else {
-                    panic!("unexpected agent_id in event: {:?}", agent_id);
-                }
+        if let AgentEvent::FromProvider { agent_id, .. } = event {
+            if agent_id == &id_a {
+                a_count += 1;
+            } else if agent_id == &id_b {
+                b_count += 1;
+            } else {
+                panic!("unexpected agent_id in event: {:?}", agent_id);
             }
-            _ => {}
         }
     }
     assert_eq!(a_count, 3, "agent A should have 3 events");

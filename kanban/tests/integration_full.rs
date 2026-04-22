@@ -119,17 +119,16 @@ impl KanbanEventSubscriber for EventCollector {
     }
 }
 
+type IntegrationServiceTuple = (
+    KanbanService<IntegrationRepository>,
+    Arc<IntegrationRepository>,
+    Arc<KanbanEventBus>,
+    EventCollector,
+);
+
 fn create_integration_service(
     temp_dir: &tempfile::TempDir,
-) -> Result<
-    (
-        KanbanService<IntegrationRepository>,
-        Arc<IntegrationRepository>,
-        Arc<KanbanEventBus>,
-        EventCollector,
-    ),
-    agent_kanban::KanbanError,
-> {
+) -> Result<IntegrationServiceTuple, agent_kanban::KanbanError> {
     let path = temp_dir.path().join("kanban");
     let repo = Arc::new(IntegrationRepository::new(&path)?);
     let event_bus = Arc::new(KanbanEventBus::new());
@@ -519,7 +518,7 @@ fn test_full_concurrent_event_publishing() {
             .create_element(KanbanElement::new_task(&format!("Task {}", i)))
             .unwrap();
         service
-            .update_status(&task.id().unwrap(), Status::Backlog, "agent-1")
+            .update_status(task.id().unwrap(), Status::Backlog, "agent-1")
             .unwrap();
     }
 

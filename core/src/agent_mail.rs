@@ -956,7 +956,7 @@ mod tests {
         assert_eq!(mailbox.pending_count(), 2);
 
         // Deliver pending mail
-        let events = mailbox.deliver(&[agent1.clone()]);
+        let events = mailbox.deliver(std::slice::from_ref(&agent1));
         assert_eq!(events.len(), 2);
         assert_eq!(mailbox.unread_count(&agent1), 2);
     }
@@ -976,7 +976,7 @@ mod tests {
             },
             MailBody::Text("Test message".to_string()),
         );
-        mailbox.restore_pending(&[mail.clone()]);
+        mailbox.restore_pending(std::slice::from_ref(&mail));
 
         // Deliver and get events
         let events = mailbox.deliver(&[agent1.clone(), agent2.clone()]);
@@ -1000,7 +1000,7 @@ mod tests {
             },
             MailBody::Text("Test".to_string()),
         );
-        mailbox.restore_pending(&[mail.clone()]);
+        mailbox.restore_pending(std::slice::from_ref(&mail));
 
         let snapshot_mails = mailbox.pending_mail_for_snapshot();
         assert_eq!(snapshot_mails.len(), 1);

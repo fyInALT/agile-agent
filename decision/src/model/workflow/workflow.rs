@@ -420,6 +420,161 @@ impl DecisionProcess {
     }
 }
 
+
+
+/// Create the default "Simple Agile" decision process
+pub fn default_process() -> DecisionProcess {
+    let stages = vec![
+        // Stage 1: Start
+        DecisionStage::new(
+            StageId::new("start"),
+            "Start Development".to_string(),
+            "Task starts, AI begins execution".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("developing"),
+            Condition::Custom("ai_response".to_string()),
+            "Begin implementing task".to_string(),
+        ))
+        .with_action(WorkflowAction::Continue),
+        // Stage 2: Developing
+        DecisionStage::new(
+            StageId::new("developing"),
+            "Developing".to_string(),
+            "AI developing, needs continuous decisions".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("check_quality"),
+            Condition::Custom("ai_output".to_string()),
+            "Check AI output for issues".to_string(),
+        ))
+        .with_action(WorkflowAction::Continue)
+        .with_action(WorkflowAction::Reflect {
+            reason: "Issue found".to_string(),
+        }),
+        // Stage 3: Check Quality
+        DecisionStage::new(
+            StageId::new("check_quality"),
+            "Quality Check".to_string(),
+            "Check output quality".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("reflecting"),
+            Condition::Custom("issue_found".to_string()),
+            "Issue found, reflect and fix".to_string(),
+        ))
+        .with_transition(StageTransition::new(
+            StageId::new("check_completion"),
+            Condition::Custom("no_issue".to_string()),
+            "No issues, check completion".to_string(),
+        ))
+        .with_action(WorkflowAction::Reflect {
+            reason: "Quality issue".to_string(),
+        })
+        .with_action(WorkflowAction::AdvanceTo {
+            stage: StageId::new("check_completion"),
+        }),
+        // Stage 4: Reflecting
+        DecisionStage::new(
+            StageId::new("reflecting"),
+            "Reflecting".to_string(),
+            "Reflect and fix issues".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("developing"),
+            Condition::Custom("fixed".to_string()),
+            "Issue fixed, continue development".to_string(),
+        ))
+        .with_transition(StageTransition::new(
+            StageId::new("human_decision"),
+            Condition::MaxReflectionsReached,
+            "Reflection limit reached, need human".to_string(),
+        ))
+        .with_action(WorkflowAction::Reflect {
+            reason: "Fix issue".to_string(),
+        })
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Reflection limit".to_string(),
+        }),
+        // Stage 5: Check Completion
+        DecisionStage::new(
+            StageId::new("check_completion"),
+            "Completion Check".to_string(),
+            "Check if task fully completed".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("developing"),
+            Condition::Custom("not_complete".to_string()),
+            "Not fully complete, continue".to_string(),
+        ))
+        .with_transition(StageTransition::new(
+            StageId::new("confirming"),
+            Condition::GoalsAchieved,
+            "Goals achieved, confirm completion".to_string(),
+        ))
+        .with_action(WorkflowAction::Continue)
+        .with_action(WorkflowAction::ConfirmCompletion),
+        // Stage 6: Confirming
+        DecisionStage::new(
+            StageId::new("confirming"),
+            "Confirming Completion".to_string(),
+            "Final confirmation of completion".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("completed"),
+            Condition::HumanApproved,
+            "Completion confirmed".to_string(),
+        ))
+        .with_transition(StageTransition::new(
+            StageId::new("reflecting"),
+            Condition::Custom("rejected".to_string()),
+            "Confirmation rejected, reflect".to_string(),
+        ))
+        .with_action(WorkflowAction::ConfirmCompletion)
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Confirm completion?".to_string(),
+        }),
+        // Stage 7: Human Decision
+        DecisionStage::new(
+            StageId::new("human_decision"),
+            "Human Decision".to_string(),
+            "Wait for human decision".to_string(),
+        )
+        .with_transition(StageTransition::new(
+            StageId::new("developing"),
+            Condition::HumanApproved,
+            "Human approved, continue".to_string(),
+        ))
+        .with_transition(StageTransition::new(
+            StageId::new("cancelled"),
+            Condition::Custom("human_cancelled".to_string()),
+            "Human cancelled".to_string(),
+        ))
+        .with_action(WorkflowAction::RequestHuman {
+            question: "Decision needed".to_string(),
+        }),
+        // Stage 8: Completed
+        DecisionStage::new(
+            StageId::new("completed"),
+            "Completed".to_string(),
+            "Task completed".to_string(),
+        ),
+        // Stage 9: Cancelled
+        DecisionStage::new(
+            StageId::new("cancelled"),
+            "Cancelled".to_string(),
+            "Task cancelled".to_string(),
+        ),
+    ];
+
+    DecisionProcess::new(
+        "Simple Agile".to_string(),
+        "Default agile development workflow".to_string(),
+        stages,
+        StageId::new("start"),
+        StageId::new("completed"),
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -839,158 +994,4 @@ mod tests {
 
         assert_eq!(process.final_stage.as_str(), "completed");
     }
-}
-
-/// Create the default "Simple Agile" decision process
-pub fn default_process() -> DecisionProcess {
-    let stages = vec![
-        // Stage 1: Start
-        DecisionStage::new(
-            StageId::new("start"),
-            "Start Development".to_string(),
-            "Task starts, AI begins execution".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("developing"),
-            Condition::Custom("ai_response".to_string()),
-            "Begin implementing task".to_string(),
-        ))
-        .with_action(WorkflowAction::Continue),
-        // Stage 2: Developing
-        DecisionStage::new(
-            StageId::new("developing"),
-            "Developing".to_string(),
-            "AI developing, needs continuous decisions".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("check_quality"),
-            Condition::Custom("ai_output".to_string()),
-            "Check AI output for issues".to_string(),
-        ))
-        .with_action(WorkflowAction::Continue)
-        .with_action(WorkflowAction::Reflect {
-            reason: "Issue found".to_string(),
-        }),
-        // Stage 3: Check Quality
-        DecisionStage::new(
-            StageId::new("check_quality"),
-            "Quality Check".to_string(),
-            "Check output quality".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("reflecting"),
-            Condition::Custom("issue_found".to_string()),
-            "Issue found, reflect and fix".to_string(),
-        ))
-        .with_transition(StageTransition::new(
-            StageId::new("check_completion"),
-            Condition::Custom("no_issue".to_string()),
-            "No issues, check completion".to_string(),
-        ))
-        .with_action(WorkflowAction::Reflect {
-            reason: "Quality issue".to_string(),
-        })
-        .with_action(WorkflowAction::AdvanceTo {
-            stage: StageId::new("check_completion"),
-        }),
-        // Stage 4: Reflecting
-        DecisionStage::new(
-            StageId::new("reflecting"),
-            "Reflecting".to_string(),
-            "Reflect and fix issues".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("developing"),
-            Condition::Custom("fixed".to_string()),
-            "Issue fixed, continue development".to_string(),
-        ))
-        .with_transition(StageTransition::new(
-            StageId::new("human_decision"),
-            Condition::MaxReflectionsReached,
-            "Reflection limit reached, need human".to_string(),
-        ))
-        .with_action(WorkflowAction::Reflect {
-            reason: "Fix issue".to_string(),
-        })
-        .with_action(WorkflowAction::RequestHuman {
-            question: "Reflection limit".to_string(),
-        }),
-        // Stage 5: Check Completion
-        DecisionStage::new(
-            StageId::new("check_completion"),
-            "Completion Check".to_string(),
-            "Check if task fully completed".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("developing"),
-            Condition::Custom("not_complete".to_string()),
-            "Not fully complete, continue".to_string(),
-        ))
-        .with_transition(StageTransition::new(
-            StageId::new("confirming"),
-            Condition::GoalsAchieved,
-            "Goals achieved, confirm completion".to_string(),
-        ))
-        .with_action(WorkflowAction::Continue)
-        .with_action(WorkflowAction::ConfirmCompletion),
-        // Stage 6: Confirming
-        DecisionStage::new(
-            StageId::new("confirming"),
-            "Confirming Completion".to_string(),
-            "Final confirmation of completion".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("completed"),
-            Condition::HumanApproved,
-            "Completion confirmed".to_string(),
-        ))
-        .with_transition(StageTransition::new(
-            StageId::new("reflecting"),
-            Condition::Custom("rejected".to_string()),
-            "Confirmation rejected, reflect".to_string(),
-        ))
-        .with_action(WorkflowAction::ConfirmCompletion)
-        .with_action(WorkflowAction::RequestHuman {
-            question: "Confirm completion?".to_string(),
-        }),
-        // Stage 7: Human Decision
-        DecisionStage::new(
-            StageId::new("human_decision"),
-            "Human Decision".to_string(),
-            "Wait for human decision".to_string(),
-        )
-        .with_transition(StageTransition::new(
-            StageId::new("developing"),
-            Condition::HumanApproved,
-            "Human approved, continue".to_string(),
-        ))
-        .with_transition(StageTransition::new(
-            StageId::new("cancelled"),
-            Condition::Custom("human_cancelled".to_string()),
-            "Human cancelled".to_string(),
-        ))
-        .with_action(WorkflowAction::RequestHuman {
-            question: "Decision needed".to_string(),
-        }),
-        // Stage 8: Completed
-        DecisionStage::new(
-            StageId::new("completed"),
-            "Completed".to_string(),
-            "Task completed".to_string(),
-        ),
-        // Stage 9: Cancelled
-        DecisionStage::new(
-            StageId::new("cancelled"),
-            "Cancelled".to_string(),
-            "Task cancelled".to_string(),
-        ),
-    ];
-
-    DecisionProcess::new(
-        "Simple Agile".to_string(),
-        "Default agile development workflow".to_string(),
-        stages,
-        StageId::new("start"),
-        StageId::new("completed"),
-    )
 }

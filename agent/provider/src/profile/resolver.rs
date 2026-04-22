@@ -178,8 +178,7 @@ mod tests {
         let profile = ProviderProfile::new("test".to_string(), CliBaseType::Claude);
         let result = resolve_profile(&profile);
         // This may fail if claude is not in PATH, but we test the conversion logic
-        if result.is_ok() {
-            let resolved = result.unwrap();
+        if let Ok(resolved) = result {
             assert_eq!(resolved.provider, ProviderKind::Claude);
         }
     }
@@ -188,8 +187,7 @@ mod tests {
     fn test_resolve_profile_by_id() {
         let store = ProfileStore::with_defaults();
         let result = resolve_profile_by_id(&store, &"claude-default".to_string());
-        if result.is_ok() {
-            let resolved = result.unwrap();
+        if let Ok(resolved) = result {
             assert_eq!(resolved.provider, ProviderKind::Claude);
         }
     }

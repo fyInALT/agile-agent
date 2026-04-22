@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 //! Integration test: daemon decision action → provider thread closure
 //!
 //! Verifies that when a decision agent returns a `custom_instruction` action,

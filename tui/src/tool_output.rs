@@ -25,6 +25,7 @@ pub enum ToolRenderMode {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub fn render_tool_call_lines(
     name: &str,
     input_preview: Option<&str>,
@@ -897,8 +898,8 @@ mod tests {
 
         let lines = render_tool_call_lines(
             "exec_command",
-            Some(&input_preview),
-            Some(&output_preview),
+            Some(input_preview),
+            Some(output_preview),
             true,
             false,
             Some(0),

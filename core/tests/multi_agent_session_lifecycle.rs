@@ -1,3 +1,6 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
+
 //! Integration test: multi-agent session lifecycle
 //!
 //! Tests session bootstrap, shutdown snapshot creation, and restore.

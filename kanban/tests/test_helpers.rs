@@ -15,12 +15,18 @@ pub struct TestRepository {
     counters: RwLock<HashMap<ElementType, u32>>,
 }
 
-impl TestRepository {
-    pub fn new() -> Self {
+impl Default for TestRepository {
+    fn default() -> Self {
         TestRepository {
             elements: RwLock::new(Vec::new()),
             counters: RwLock::new(HashMap::new()),
         }
+    }
+}
+
+impl TestRepository {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -132,11 +138,17 @@ pub struct EventCollector {
     events: RwLock<Vec<KanbanEvent>>,
 }
 
-impl EventCollector {
-    pub fn new() -> Self {
+impl Default for EventCollector {
+    fn default() -> Self {
         EventCollector {
             events: RwLock::new(Vec::new()),
         }
+    }
+}
+
+impl EventCollector {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get_events(&self) -> Vec<KanbanEvent> {

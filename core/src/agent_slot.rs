@@ -1088,6 +1088,9 @@ impl WorkerHandle {
     }
 }
 
+/// Backward compatibility alias — use `WorkerHandle` in new code.
+pub type AgentSlot = WorkerHandle;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1513,7 +1516,7 @@ mod tests {
         let slot = make_slot();
         let cwd = slot.cwd();
         // Should return current directory or fallback
-        assert!(cwd.is_absolute() || cwd == PathBuf::from("."));
+        assert!(cwd.is_absolute() || cwd == std::path::Path::new("."));
     }
 
     #[test]
@@ -1841,7 +1844,4 @@ mod tests {
         assert!(commands.is_empty());
     }
 }
-
-/// Backward compatibility alias — use `WorkerHandle` in new code.
-pub type AgentSlot = WorkerHandle;
 

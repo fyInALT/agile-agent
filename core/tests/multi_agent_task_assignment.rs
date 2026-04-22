@@ -1,3 +1,6 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
+
 //! Integration test: multi-agent task assignment
 //!
 //! Tests that ready tasks from the backlog are assigned to idle agents
@@ -16,7 +19,7 @@ fn ready_task_assigned_to_idle_agent() {
     let harness = TestHarness::new();
     let mut session = harness.create_session(2);
 
-    let agent_id = session.spawn_agent(agent_core::ProviderKind::Mock).unwrap();
+    let _agent_id = session.spawn_agent(agent_core::ProviderKind::Mock).unwrap();
 
     // Add a ready task directly to backlog
     session.workplace_mut().backlog.push_todo(TodoItem {

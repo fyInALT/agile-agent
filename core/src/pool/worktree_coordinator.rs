@@ -215,6 +215,8 @@ fn parse_agent_index(agent_id: &str) -> Option<usize> {
     agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
 }
 
+pub type WorktreeCoordinator = WorkerWorktreeManager;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +252,4 @@ mod tests {
         assert!(branches.is_empty());
     }
 }
-pub type WorktreeCoordinator = WorkerWorktreeManager;
 

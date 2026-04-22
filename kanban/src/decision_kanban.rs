@@ -528,19 +528,19 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Backlog, "test")
+            .update_status(kanban_id, Status::Backlog, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Todo, "test")
+            .update_status(kanban_id, Status::Todo, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::InProgress, "test")
+            .update_status(kanban_id, Status::InProgress, "test")
             .unwrap();
 
         // Register mapping
@@ -560,7 +560,7 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .get_element(&kanban_id)
+            .get_element(kanban_id)
             .unwrap()
             .unwrap();
         assert_eq!(kanban_elem.status(), Status::Done);
@@ -588,19 +588,19 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Backlog, "test")
+            .update_status(kanban_id, Status::Backlog, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Todo, "test")
+            .update_status(kanban_id, Status::Todo, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::InProgress, "test")
+            .update_status(kanban_id, Status::InProgress, "test")
             .unwrap();
 
         // Register mapping
@@ -622,7 +622,7 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .get_element(&kanban_id)
+            .get_element(kanban_id)
             .unwrap()
             .unwrap();
         assert_eq!(kanban_elem.status(), Status::Todo);
@@ -659,13 +659,13 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Backlog, "test")
+            .update_status(kanban_id, Status::Backlog, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Todo, "test")
+            .update_status(kanban_id, Status::Todo, "test")
             .unwrap();
 
         let mut backlog = BacklogState::default();
@@ -747,19 +747,19 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Backlog, "test")
+            .update_status(kanban_id, Status::Backlog, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::Todo, "test")
+            .update_status(kanban_id, Status::Todo, "test")
             .unwrap();
         integration
             .kanban
             .as_ref()
             .unwrap()
-            .update_status(&kanban_id, Status::InProgress, "test")
+            .update_status(kanban_id, Status::InProgress, "test")
             .unwrap();
 
         // Register mapping
@@ -775,7 +775,7 @@ mod tests {
             .kanban
             .as_ref()
             .unwrap()
-            .get_element(&kanban_id)
+            .get_element(kanban_id)
             .unwrap()
             .unwrap();
         assert_eq!(kanban_elem.status(), Status::InProgress);

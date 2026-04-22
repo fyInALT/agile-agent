@@ -440,8 +440,10 @@ mod tests {
 
     #[test]
     fn migration_result_is_success() {
-        let mut result = MigrationResult::default();
-        result.status = MigrationStatus::Completed;
+        let result = MigrationResult {
+            status: MigrationStatus::Completed,
+            ..Default::default()
+        };
         assert!(result.is_success());
         assert!(!result.is_failed());
     }

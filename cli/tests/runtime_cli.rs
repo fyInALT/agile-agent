@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 #![cfg(feature = "core")]
 
 use std::fs;
@@ -48,8 +50,8 @@ fn resume_last_reuses_claude_session_id() {
 
     let log = harness.read_provider_log();
     let lines: Vec<&str> = log.lines().collect();
-    assert!(lines.iter().any(|line| *line == "resume=<none>"));
-    assert!(lines.iter().any(|line| *line == "resume=sess-cli-1"));
+    assert!(lines.contains(&"resume=<none>"));
+    assert!(lines.contains(&"resume=sess-cli-1"));
 }
 
 #[test]
@@ -75,7 +77,7 @@ fn resume_last_reuses_codex_thread_id() {
 
     let log = harness.read_provider_log();
     let lines: Vec<&str> = log.lines().collect();
-    assert!(lines.iter().any(|line| *line == "resume=thr-cli-1"));
+    assert!(lines.contains(&"resume=thr-cli-1"));
 }
 
 #[test]

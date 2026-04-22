@@ -709,7 +709,7 @@ mod tests {
 
         // is_running() returns bool (computed value)
         let running = handle.is_running();
-        assert!(running || !running); // Boolean check, not state access
+        let _ = running; // Verify is_running() returns bool
 
         // Stop thread to clean up
         let mut handle = handle;

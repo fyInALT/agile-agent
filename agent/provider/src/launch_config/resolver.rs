@@ -171,8 +171,7 @@ mod tests {
         // This test may fail if 'claude' is not in PATH
         let result = resolve_executable_path(ProviderKind::Claude, None);
         // We just verify it doesn't panic - actual resolution depends on environment
-        if result.is_ok() {
-            let path = result.unwrap();
+        if let Ok(path) = result {
             assert!(!path.is_empty());
         }
     }
@@ -232,11 +231,10 @@ mod tests {
         let input = LaunchInputSpec::new(ProviderKind::Claude);
         let result = resolve_launch_spec(&input);
         // May fail if claude is not in PATH
-        if result.is_ok() {
-            let resolved = result.unwrap();
+        if let Ok(resolved) = result {
             assert_eq!(resolved.provider, ProviderKind::Claude);
             assert!(!resolved.resolved_executable_path.is_empty());
-            assert!(resolved.resolved_at.len() > 0);
+            assert!(!resolved.resolved_at.is_empty());
         }
     }
 
@@ -246,8 +244,7 @@ mod tests {
         env.insert("ANTHROPIC_MODEL".to_string(), "opus-4".to_string());
         let input = LaunchInputSpec::env_only(ProviderKind::Claude, env);
         let result = resolve_launch_spec(&input);
-        if result.is_ok() {
-            let resolved = result.unwrap();
+        if let Ok(resolved) = result {
             assert_eq!(
                 resolved.effective_env.get("ANTHROPIC_MODEL"),
                 Some(&"opus-4".to_string())
@@ -280,12 +277,8 @@ mod tests {
         // Actually, since decision has no env_overrides, it will just have host env
         // The key point is it doesn't INHERIT from work_resolved
         assert!(
-            decision_resolved
-                .effective_env
-                .get("ANTHROPIC_MODEL")
-                .is_none()
-                || decision_resolved.effective_env.get("ANTHROPIC_MODEL")
-                    != Some(&"claude-opus".to_string())
+            decision_resolved.effective_env.get("ANTHROPIC_MODEL")
+                != Some(&"claude-opus".to_string())
         );
     }
 
@@ -295,8 +288,7 @@ mod tests {
         let decision_input = LaunchInputSpec::new(ProviderKind::Codex);
 
         let result = resolve_bundle(work_input, decision_input);
-        if result.is_ok() {
-            let (work_resolved, decision_resolved) = result.unwrap();
+        if let Ok((work_resolved, decision_resolved)) = result {
             assert_eq!(work_resolved.provider, ProviderKind::Claude);
             assert_eq!(decision_resolved.provider, ProviderKind::Codex);
         }

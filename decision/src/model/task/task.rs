@@ -489,10 +489,12 @@ mod tests {
             // Manually set status for testing
             task.status = initial_status;
 
-            task.transition_to(TaskStatus::Cancelled).expect(&format!(
-                "{} -> Cancelled should work",
-                initial_status.display()
-            ));
+            task.transition_to(TaskStatus::Cancelled).unwrap_or_else(|_| {
+                panic!(
+                    "{} -> Cancelled should work",
+                    initial_status.display()
+                )
+            });
 
             assert_eq!(task.status, TaskStatus::Cancelled);
         }

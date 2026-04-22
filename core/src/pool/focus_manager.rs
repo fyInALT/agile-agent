@@ -193,6 +193,8 @@ impl Default for WorkerFocusManager {
     }
 }
 
+pub type FocusManager = WorkerFocusManager;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +311,3 @@ mod tests {
         assert_eq!(fm.focused_index(), 2); // Should not change
     }
 }
-pub type FocusManager = WorkerFocusManager;
-

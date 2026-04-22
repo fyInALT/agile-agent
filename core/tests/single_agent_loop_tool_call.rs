@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
 //! Integration test: single-agent loop — tool call flow
 //!
 //! Tests that ExecCommand tool events flowing through the loop update

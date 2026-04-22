@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
 //! Integration test: single-agent loop — simple task completion
 //!
 //! Tests the full autonomous loop with an injectable ProviderStarter.

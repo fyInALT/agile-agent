@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 //! Integration test: daemon agent lifecycle with snapshot persistence
 //!
 //! Scenario:

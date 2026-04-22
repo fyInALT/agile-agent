@@ -979,7 +979,7 @@ mod tests {
         let started = Utc::now() - chrono::Duration::minutes(15);
         let situation = RateLimitRecoverySituation::new(started, 2);
         let elapsed = situation.elapsed_minutes();
-        assert!(elapsed >= 14 && elapsed <= 16);
+        assert!((14..=16).contains(&elapsed));
     }
 
     #[test]

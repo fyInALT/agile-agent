@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
 use agent_core::logging::RunMode;
 use agent_core::logging::current_log_path;
 use agent_core::logging::debug_event;

@@ -59,10 +59,10 @@ Ensure the protocol layer in `agent-protocol-infra` is robust and well-tested.
 
 **Priority**: P0
 **Effort**: 2 points
-**Status**: Partially Completed ⚠️ — `event_converter.rs` deleted. Clippy fixed in `agent-commands`, `agent-storage`, `agent-worktree`. Remaining:
-- Deprecation aliases still exist (`AgentSlot`, `SessionManager`, `AgentPool`, `AgentStatus`)
-- `AgentSlotStatus` still exists as a real enum (not yet replaced by `WorkerState`)
-- `cargo clippy --workspace -- -D warnings` does not pass (pre-existing issues in `agent-decision`, `agent-kanban`, `agent-llm-provider`)
+**Status**: Partially Completed ⚠️ — `event_converter.rs` deleted. Clippy fixed across all 19 workspace crates including test targets. Remaining:
+- Deprecation aliases still exist (`AgentSlot`, `SessionManager`, `AgentPool`, `AgentStatus`) — kept for backward compatibility
+- `AgentSlotStatus` still exists as a real enum (not yet replaced by `WorkerState`) — requires Sprint 3.4 gap-fill
+- `cargo clippy --workspace --tests -- -D warnings` passes ✅
 
 Clean up all backward-compatibility aliases and dead code.
 
@@ -76,7 +76,7 @@ Clean up all backward-compatibility aliases and dead code.
 | T6.2.4 | Remove `DecisionAction` enum (replaced by `DecisionCommand`) | Todo | - |
 | T6.2.5 | Remove `event_converter.rs` remnants (should already be gone) | Todo | - |
 | T6.2.6 | Remove unused imports and `#[allow(dead_code)]` attributes | Todo | - |
-| T6.2.7 | Run `cargo clippy --workspace -- -D warnings` | Todo | - |
+| T6.2.7 | Run `cargo clippy --workspace -- -D warnings` | Done ✅ | - |
 | T6.2.8 | Run `cargo udeps` (if available) to find unused dependencies | Todo | - |
 
 #### Acceptance Criteria

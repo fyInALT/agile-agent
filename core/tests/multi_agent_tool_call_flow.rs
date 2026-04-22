@@ -1,3 +1,6 @@
+#![allow(dead_code, unused_imports, deprecated)]
+
+
 //! Integration test: multi-agent tool call event flow
 //!
 //! Tests that tool execution events (ExecCommandStarted/Finished) are

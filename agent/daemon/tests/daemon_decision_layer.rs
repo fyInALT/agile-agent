@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 //! Integration test: daemon decision layer integration
 //!
 //! Verifies that the daemon can:
@@ -62,13 +64,12 @@ async fn daemon_tick_processes_provider_events_and_triggers_decisions() {
                         saw_assistant = true;
                     }
                 }
-                agent_protocol::events::EventPayload::AgentStatusChanged(status) => {
+                agent_protocol::events::EventPayload::AgentStatusChanged(status)
                     if status.agent_id == agent_id
                         && status.status == agent_protocol::state::AgentSlotStatus::Idle
-                    {
+                    => {
                         saw_finished_event = true;
                     }
-                }
                 _ => {}
             }
         }
@@ -235,11 +236,11 @@ async fn daemon_idle_agent_triggers_decision_layer() {
 
         // Check whether a decision request was enqueued by looking at the
         // decision agent's status (it should transition from idle to thinking).
-        if let Some(da) = session_mgr.decision_agent_status(&agent_id).await {
-            if da == "thinking" {
-                saw_decision_request = true;
-                break;
-            }
+        if let Some(da) = session_mgr.decision_agent_status(&agent_id).await
+            && da == "thinking"
+        {
+            saw_decision_request = true;
+            break;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

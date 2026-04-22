@@ -231,9 +231,9 @@ mod tests {
         let opencode_available = CliBaseType::OpenCode.is_available();
 
         // These are boolean results, just verify they're valid
-        assert!(claude_available == true || claude_available == false);
-        assert!(codex_available == true || codex_available == false);
-        assert!(opencode_available == true || opencode_available == false);
+        let _: bool = claude_available;
+        let _: bool = codex_available;
+        let _: bool = opencode_available;
     }
 
     #[test]

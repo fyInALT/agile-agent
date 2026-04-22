@@ -1114,7 +1114,7 @@ mod tests {
         let started = Utc::now() - chrono::Duration::minutes(10);
         let reason = RateLimitBlockedReason::new(started);
         let elapsed = reason.elapsed_minutes();
-        assert!(elapsed >= 9 && elapsed <= 11);
+        assert!((9..=11).contains(&elapsed));
     }
 
     #[test]

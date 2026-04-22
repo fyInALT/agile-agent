@@ -407,7 +407,7 @@ mod tests {
             provider_type: ProviderType::Claude,
             role,
             status: AgentSlotStatus::idle(),
-            assigned_task_id: task_id.map(|t| TaskId::new(t)),
+            assigned_task_id: task_id.map(TaskId::new),
             worktree_branch: None,
             has_worktree: false,
             worktree_exists: false,

@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_final_commit_verifier_clean() {
-        let verifier = FinalCommitVerifier::default();
+        let verifier = FinalCommitVerifier;
         let result = verifier.verify(false, &[]);
 
         assert!(matches!(result, FinalCommitResult::Verified { .. }));
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_final_commit_verifier_dirty() {
-        let verifier = FinalCommitVerifier::default();
+        let verifier = FinalCommitVerifier;
         let files = vec![CompletionCandidateFile {
             path: "src/main.rs".to_string(),
             change_type: "Modified".to_string(),

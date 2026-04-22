@@ -2330,8 +2330,12 @@ fn parse_agent_index(agent_id: &str) -> Option<usize> {
     agent_id.strip_prefix("agent_")?.parse::<usize>().ok()
 }
 
+/// Backward compatibility alias — use `WorkerPool` in new code.
+pub type AgentPool = WorkerPool;
+
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::agent_slot::AgentSlotStatus;
     use crate::provider_profile::{ProfileStore, ProviderProfile, CliBaseType};
@@ -3326,8 +3330,10 @@ mod tests {
             count: count.clone(),
         });
 
-        let mut config = BlockedHandlingConfig::default();
-        config.notify_others = false; // Disable
+        let config = BlockedHandlingConfig {
+            notify_others: false,
+            ..Default::default()
+        };
 
         let mut pool = AgentPool::with_blocked_config(WorkplaceId::new("workplace-001"), 2, config);
         pool.set_blocked_notifier(notifier);
@@ -4611,7 +4617,4 @@ mod tests {
         assert_eq!(result, DecisionExecutionResult::AcceptedRecommendation);
     }
 }
-
-/// Backward compatibility alias — use `WorkerPool` in new code.
-pub type AgentPool = WorkerPool;
 

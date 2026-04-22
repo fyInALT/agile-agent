@@ -261,8 +261,10 @@ mod tests {
 
     #[test]
     fn overview_state_push_log_evicts_old() {
-        let mut state = OverviewViewState::default();
-        state.max_log_size = 3;
+        let mut state = OverviewViewState {
+            max_log_size: 3,
+            ..Default::default()
+        };
         for i in 0..5 {
             state.push_log_message(OverviewLogMessage {
                 timestamp: i,
@@ -290,8 +292,10 @@ mod tests {
 
     #[test]
     fn overview_state_verbosity_override() {
-        let mut state = OverviewViewState::default();
-        state.global_verbosity = OutputVerbosity::Minimal;
+        let mut state = OverviewViewState {
+            global_verbosity: OutputVerbosity::Minimal,
+            ..Default::default()
+        };
         state.set_agent_verbosity("alpha", OutputVerbosity::Full);
         assert_eq!(state.verbosity_for("alpha"), OutputVerbosity::Full);
         assert_eq!(state.verbosity_for("bravo"), OutputVerbosity::Minimal);

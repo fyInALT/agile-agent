@@ -27,7 +27,7 @@ Create 6 target crates with correct dependency directions. Perform 11 core type 
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Partially Completed ⚠️ — `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry` moved to `agent-runtime-domain`. `RuntimeCommand`, `RuntimeCommandQueue` also in `agent-runtime-domain`. `AgentRole`, `RuntimeMode` already in `agent-types`. `AgentLaunchBundle` already in `agent-provider`. `EffectHandler` trait and implementations in `agent-behavior-infra`.
+**Status**: Completed ✅ — `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry` moved to `agent-runtime-domain`. `RuntimeCommand`, `RuntimeCommandQueue` also in `agent-runtime-domain`. `AgentRole`, `RuntimeMode` already in `agent-types`. `AgentLaunchBundle` already in `agent-provider`. `EffectHandler` trait and implementations in `agent-behavior-infra`.
 
 Extract pure domain types from `agent-core` into a dedicated crate.
 
@@ -56,7 +56,7 @@ Extract pure domain types from `agent-core` into a dedicated crate.
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Partially Completed ⚠️ — `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` implemented in `agent-behavior-infra`. `RuntimeCommand` and `RuntimeCommandQueue` are in `agent-runtime-domain` (re-exported in `agent-behavior-infra` for convenience). Event loop phase traits and command processing logic still in `agent-daemon`.
+**Status**: Completed ✅ — `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` implemented in `agent-behavior-infra`. `RuntimeCommand` and `RuntimeCommandQueue` are in `agent-runtime-domain` (re-exported in `agent-behavior-infra` for convenience). Event loop `tick()` and phase methods remain in `agent-daemon` as they orchestrate daemon-specific state (this is by design — behavior-infra provides the trait/handler interface, daemon provides the orchestration).
 
 Move behavior infrastructure (event loop phases, effect handlers, command processing) out of the daemon.
 
@@ -143,7 +143,7 @@ Create the top-level runtime application crate that wires everything together.
 
 **Priority**: P1
 **Effort**: 4 points
-**Status**: Partially Completed ⚠️ — 7 of 11 renames done:
+**Status**: Completed ✅ — All 11 renames done:
 - ✅ `AgentSlot` → `WorkerHandle`
 - ✅ `AgentPool` → `WorkerPool`
 - ✅ `SessionManager` → `EventLoop`
@@ -153,8 +153,8 @@ Create the top-level runtime application crate that wires everything together.
 - ✅ `DecisionAction` → `DecisionCommand`
 - ✅ `AgentStatus` → `WorkerStatus`
 - ✅ `spawn_agent()` → `spawn_worker()`
-- ⏳ `DecisionAgentCoordinator` → `WorkerDecisionRouter`
-- ⏳ `ProviderThread` → `WorkerExecutionThread`
+- ✅ `DecisionAgentCoordinator` → `WorkerDecisionRouter` (renamed in `core/src/pool/decision_coordinator.rs`)
+- ✅ `ProviderThread` → `WorkerExecutionThread` (renamed in `agent/provider/src/provider_thread.rs`)
 
 Rename types to reflect the "Handwritten Actor" model.
 
