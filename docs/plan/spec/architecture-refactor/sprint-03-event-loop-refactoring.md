@@ -88,7 +88,7 @@ Create a type representing side effects that `Worker::apply()` can request. This
 
 **Priority**: P0
 **Effort**: 4 points
-**Status**: Partially Completed ⚠️ — `EffectHandler` trait with `NoopEffectHandler` and `RecordingEffectHandler` implemented. Individual per-variant handler structs (T3.3.1–T3.3.6) not implemented; monolithic trait approach used instead.
+**Status**: Completed ✅ — Per-variant handler traits (`SpawnProviderHandler`, `SendToProviderHandler`, `RequestDecisionHandler`, `NotifyUserHandler`, `UpdateWorktreeHandler`, `TerminateHandler`) defined in `agent-behavior-infra/src/handlers.rs`. `CompositeEffectHandler` implements `EffectHandler` by routing each `RuntimeCommand` variant to its corresponding trait implementation. Daemon uses `daemon_handler!` macro to generate per-variant wrappers over `Arc<Mutex<SessionInner>>`.
 
 Create the bridge between pure `RuntimeCommand` effects and actual I/O/threads.
 
@@ -118,7 +118,7 @@ Create the bridge between pure `RuntimeCommand` effects and actual I/O/threads.
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Partially Completed ⚠️ — `AgentSlot` is a thin wrapper (`pub type AgentSlot = WorkerHandle`). `AgentSlotStatus` still used for runtime state; full transition to `WorkerState` pending.
+**Status**: Partially Completed ⚠️ — `WorkerHandle` now always holds a `Worker` (no longer `Option<Worker>`). `EventLoop::tick()` forwards all provider events to `Worker::apply()` via `apply_provider_event_to_worker()` (dual-write enabled in production). `AgentSlotStatus` remains the operational state authority; `WorkerState` is the parallel domain authority. Full transition requires replacing all direct `AgentSlotStatus` mutations with `Worker::apply()`-derived updates.
 
 Switch from `AgentSlot` as primary state to `Worker` as primary state. Remove dual-write.
 

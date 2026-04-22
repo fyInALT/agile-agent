@@ -76,8 +76,8 @@ pub struct WorkerHandle {
     profile_id: Option<String>,
     /// Timestamp of last idle-triggered decision check (cooldown)
     last_idle_trigger_at: Option<Instant>,
-    /// Worker aggregate root (domain model, shadow-initialized for dual-write)
-    worker: Option<Worker>,
+    /// Worker aggregate root — primary domain state authority
+    worker: Worker,
     /// Pending runtime commands produced by Worker::apply()
     command_queue: RuntimeCommandQueue,
 }
@@ -107,6 +107,7 @@ impl std::fmt::Debug for WorkerHandle {
 impl WorkerHandle {
     /// Create a new agent slot with given identity
     pub fn new(agent_id: AgentId, codename: AgentCodename, provider_type: ProviderType) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), AgentRole::default());
         Self {
             agent_id,
             codename,
@@ -126,7 +127,7 @@ impl WorkerHandle {
             worktree_id: None,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -138,6 +139,7 @@ impl WorkerHandle {
         provider_type: ProviderType,
         role: AgentRole,
     ) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), role);
         Self {
             agent_id,
             codename,
@@ -157,7 +159,7 @@ impl WorkerHandle {
             worktree_id: None,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -170,6 +172,7 @@ impl WorkerHandle {
         event_rx: Receiver<ProviderEvent>,
         thread_handle: JoinHandle<()>,
     ) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), AgentRole::default());
         Self {
             agent_id,
             codename,
@@ -189,7 +192,7 @@ impl WorkerHandle {
             worktree_id: None,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -203,6 +206,7 @@ impl WorkerHandle {
         event_rx: Receiver<ProviderEvent>,
         thread_handle: JoinHandle<()>,
     ) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), role);
         Self {
             agent_id,
             codename,
@@ -222,7 +226,7 @@ impl WorkerHandle {
             worktree_id: None,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -269,6 +273,7 @@ impl WorkerHandle {
         worktree_branch: Option<String>,
         worktree_id: Option<String>,
     ) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), role);
         Self {
             agent_id,
             codename,
@@ -288,7 +293,7 @@ impl WorkerHandle {
             worktree_id,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -301,6 +306,7 @@ impl WorkerHandle {
         role: AgentRole,
         decision_policy: DecisionAgentCreationPolicy,
     ) -> Self {
+        let worker = Worker::new(agent_id.clone(), codename.clone(), role);
         Self {
             agent_id,
             codename,
@@ -320,7 +326,7 @@ impl WorkerHandle {
             worktree_id: None,
             profile_id: None,
             last_idle_trigger_at: None,
-            worker: None,
+            worker,
             command_queue: RuntimeCommandQueue::new(),
         }
     }
@@ -521,54 +527,35 @@ impl WorkerHandle {
         self.event_rx.is_some() && self.thread_handle.is_some()
     }
 
-    /// Get the Worker aggregate root (if initialized)
-    pub fn worker(&self) -> Option<&Worker> {
-        self.worker.as_ref()
+    /// Get the Worker aggregate root
+    pub fn worker(&self) -> &Worker {
+        &self.worker
     }
 
-    /// Get mutable reference to the Worker (if initialized)
-    pub fn worker_mut(&mut self) -> Option<&mut Worker> {
-        self.worker.as_mut()
-    }
-
-    /// Initialize the Worker aggregate root for this slot.
-    ///
-    /// This is called during dual-write transition (Sprint 2).
-    /// Once initialized, provider events can be forwarded to the Worker.
-    pub fn init_worker(&mut self) {
-        if self.worker.is_none() {
-            self.worker = Some(Worker::new(
-                self.agent_id.clone(),
-                self.codename.clone(),
-                self.role,
-            ));
-        }
+    /// Get mutable reference to the Worker
+    pub fn worker_mut(&mut self) -> &mut Worker {
+        &mut self.worker
     }
 
     /// Apply a provider event to the Worker (dual-write bridge).
     ///
-    /// Initializes the Worker on first call. Returns the Worker's apply result.
-    /// Errors from the Worker are logged but not propagated (AgentSlot remains
-    /// the primary state authority during transition).
+    /// Errors from the Worker are logged but not propagated. The Worker's
+    /// state becomes the primary authority; AgentSlotStatus is derived from it.
     pub fn apply_provider_event_to_worker(&mut self, event: &ProviderEvent) {
-        self.init_worker();
-        if let Some(worker) = &mut self.worker {
-            // ProviderEvent is DomainEvent, so we can apply directly
-            match worker.apply(event.clone()) {
-                Ok(commands) => {
-                    // Queue RuntimeCommands for later dispatch by the event loop (Phase 7)
-                    self.command_queue.extend(commands);
-                }
-                Err(e) => {
-                    logging::warn_event(
-                        "slot.worker.apply_error",
-                        "Worker rejected event",
-                        serde_json::json!({
-                            "agent_id": self.agent_id.as_str(),
-                            "error": e.to_string(),
-                        }),
-                    );
-                }
+        match self.worker.apply(event.clone()) {
+            Ok(commands) => {
+                // Queue RuntimeCommands for later dispatch by the event loop (Phase 7)
+                self.command_queue.extend(commands);
+            }
+            Err(e) => {
+                logging::warn_event(
+                    "slot.worker.apply_error",
+                    "Worker rejected event",
+                    serde_json::json!({
+                        "agent_id": self.agent_id.as_str(),
+                        "error": e.to_string(),
+                    }),
+                );
             }
         }
     }
@@ -1763,43 +1750,40 @@ mod tests {
     // ── Worker dual-write bridge tests ──────────────────────────
 
     #[test]
-    fn worker_initially_none() {
+    fn worker_initially_idle() {
         let slot = make_slot();
-        assert!(slot.worker().is_none());
+        let worker = slot.worker();
+        assert!(matches!(worker.state(), crate::worker_state::WorkerState::Idle));
     }
 
     #[test]
-    fn init_worker_creates_worker() {
-        let mut slot = make_slot();
-        slot.init_worker();
-        assert!(slot.worker().is_some());
-        let worker = slot.worker().unwrap();
+    fn worker_always_present() {
+        let slot = make_slot();
+        let worker = slot.worker();
         assert_eq!(worker.agent_id().as_str(), "agent_001");
         assert_eq!(worker.codename().as_str(), "alpha");
+        assert!(matches!(worker.state(), crate::worker_state::WorkerState::Idle));
     }
 
     #[test]
-    fn apply_provider_event_initializes_worker() {
+    fn apply_provider_event_updates_worker() {
         let mut slot = make_slot();
-        assert!(slot.worker().is_none());
 
         slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));
 
-        assert!(slot.worker().is_some());
-        let worker = slot.worker().unwrap();
+        let worker = slot.worker();
         assert!(matches!(worker.state(), crate::worker_state::WorkerState::Starting));
     }
 
     #[test]
     fn apply_provider_event_forwards_to_worker() {
         let mut slot = make_slot();
-        slot.init_worker();
 
         slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));
         slot.apply_provider_event_to_worker(&ProviderEvent::AssistantChunk("hello".to_string()));
         slot.apply_provider_event_to_worker(&ProviderEvent::Finished);
 
-        let worker = slot.worker().unwrap();
+        let worker = slot.worker();
         assert!(matches!(worker.state(), crate::worker_state::WorkerState::Completed));
         assert_eq!(worker.transcript().len(), 3);
     }
@@ -1807,7 +1791,6 @@ mod tests {
     #[test]
     fn apply_provider_event_tool_call_sync() {
         let mut slot = make_slot();
-        slot.init_worker();
 
         slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));
         slot.apply_provider_event_to_worker(&ProviderEvent::AssistantChunk("using tool".to_string()));
@@ -1817,7 +1800,7 @@ mod tests {
             input_preview: None,
         });
 
-        let worker = slot.worker().unwrap();
+        let worker = slot.worker();
         assert!(matches!(
             worker.state(),
             crate::worker_state::WorkerState::ProcessingTool { name } if name == "read_file"
@@ -1827,7 +1810,6 @@ mod tests {
     #[test]
     fn drain_commands_collects_queued_runtime_commands() {
         let mut slot = make_slot();
-        slot.init_worker();
 
         // Apply events that produce RuntimeCommands
         slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));

@@ -670,6 +670,11 @@ impl EventLoop {
                     }
                 }
 
+                // Dual-write: forward event to Worker aggregate root
+                if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&agent_id) {
+                    slot.apply_provider_event_to_worker(&event);
+                }
+
                 // Update slot state based on event type.
                 match &event {
                     agent_core::ProviderEvent::Finished => {
