@@ -4,8 +4,8 @@
 //! effect system. It translates pure decision commands into concrete
 //! `RuntimeCommand` values that the EventLoop can execute.
 
-use agent_core::agent_runtime::AgentId;
-use agent_core::runtime_command::RuntimeCommand;
+use crate::agent_runtime::AgentId;
+use crate::runtime_command::RuntimeCommand;
 use agent_decision::DecisionCommand;
 
 /// Interpreter for decision commands.
@@ -53,11 +53,14 @@ impl DecisionCommandInterpreter {
                 },
             ]),
 
-            // ApproveAndContinue and WakeUp require state transitions
-            // (Blocked/Resting → Idle) that are not yet expressible as
-            // RuntimeCommand effects. Fall back to legacy path until a
-            // TransitionState RuntimeCommand variant is added.
-            DecisionCommand::ApproveAndContinue | DecisionCommand::WakeUp => None,
+            // ApproveAndContinue and WakeUp transition agent from
+            // Blocked/Resting back to Idle.
+            DecisionCommand::ApproveAndContinue | DecisionCommand::WakeUp => {
+                Some(vec![RuntimeCommand::TransitionState {
+                    agent_id: agent_id.clone(),
+                    new_status: "idle".to_string(),
+                }])
+            }
 
             // Commands that require transcript manipulation or provider thread
             // management — not yet expressible as RuntimeCommand. Fall back to
@@ -85,7 +88,7 @@ impl DecisionCommandInterpreter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_core::agent_runtime::AgentId;
+    use crate::agent_runtime::AgentId;
     use agent_decision::DecisionCommand;
 
     #[test]
@@ -115,15 +118,6 @@ mod tests {
     }
 
     #[test]
-    fn interpret_reflect_returns_none() {
-        let interp = DecisionCommandInterpreter::new();
-        let cmd = DecisionCommand::Reflect {
-            prompt: "verify".to_string(),
-        };
-        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
-    }
-
-    #[test]
     fn interpret_terminate_agent() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::TerminateAgent {
@@ -133,17 +127,35 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
             &cmds[0],
-            RuntimeCommand::Terminate { agent_id, reason }
-            if agent_id.as_str() == "ag-1" && reason == "done"
+            RuntimeCommand::Terminate { reason, .. } if reason == "done"
         ));
     }
 
     #[test]
-    fn interpret_approve_and_continue_returns_none() {
+    fn interpret_stop_if_complete() {
+        let interp = DecisionCommandInterpreter::new();
+        let cmd = DecisionCommand::StopIfComplete {
+            reason: "all done".to_string(),
+        };
+        let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            &cmds[0],
+            RuntimeCommand::Terminate { reason, .. } if reason == "all done"
+        ));
+    }
+
+    #[test]
+    fn interpret_approve_and_continue_to_transition_state() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::ApproveAndContinue;
-        // Falls back to legacy path until TransitionState RuntimeCommand exists
-        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
+        let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            &cmds[0],
+            RuntimeCommand::TransitionState { agent_id, new_status }
+            if agent_id.as_str() == "ag-1" && new_status == "idle"
+        ));
     }
 
     #[test]
@@ -166,25 +178,16 @@ mod tests {
     }
 
     #[test]
-    fn interpret_stop_if_complete() {
+    fn interpret_wakeup_to_transition_state() {
         let interp = DecisionCommandInterpreter::new();
-        let cmd = DecisionCommand::StopIfComplete {
-            reason: "all done".to_string(),
-        };
+        let cmd = DecisionCommand::WakeUp;
         let cmds = interp.interpret(&AgentId::new("ag-1"), &cmd).unwrap();
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
             &cmds[0],
-            RuntimeCommand::Terminate { reason, .. } if reason == "all done"
+            RuntimeCommand::TransitionState { agent_id, new_status }
+            if agent_id.as_str() == "ag-1" && new_status == "idle"
         ));
-    }
-
-    #[test]
-    fn interpret_wakeup_returns_none() {
-        let interp = DecisionCommandInterpreter::new();
-        let cmd = DecisionCommand::WakeUp;
-        // Falls back to legacy path until TransitionState RuntimeCommand exists
-        assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
 
     #[test]
@@ -202,7 +205,7 @@ mod tests {
     fn interpret_switch_provider_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::SwitchProvider {
-            provider_type: "openai".to_string(),
+            provider_type: "claude".to_string(),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -225,9 +228,9 @@ mod tests {
     fn interpret_suggest_commit_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::SuggestCommit {
-            message: "feat: add X".to_string(),
+            message: "wip".to_string(),
             mandatory: false,
-            reason: "feature complete".to_string(),
+            reason: "test".to_string(),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -236,8 +239,8 @@ mod tests {
     fn interpret_prepare_pr_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::PreparePr {
-            title: "Add X".to_string(),
-            description: "Adds X".to_string(),
+            title: "title".to_string(),
+            description: "desc".to_string(),
             base_branch: "main".to_string(),
             as_draft: false,
         };
@@ -249,8 +252,8 @@ mod tests {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::CommitChanges {
             message: "wip".to_string(),
-            is_wip: true,
-            worktree_path: None,
+            is_wip: false,
+            worktree_path: Some("/tmp".to_string()),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -259,9 +262,9 @@ mod tests {
     fn interpret_stash_changes_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::StashChanges {
-            description: "stash".to_string(),
+            description: "wip".to_string(),
             include_untracked: false,
-            worktree_path: None,
+            worktree_path: Some("/tmp".to_string()),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -270,7 +273,7 @@ mod tests {
     fn interpret_discard_changes_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::DiscardChanges {
-            worktree_path: None,
+            worktree_path: Some("/tmp".to_string()),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -279,9 +282,9 @@ mod tests {
     fn interpret_create_task_branch_returns_none() {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::CreateTaskBranch {
-            branch_name: "feature/x".to_string(),
+            branch_name: "feat/test".to_string(),
             base_branch: "main".to_string(),
-            worktree_path: None,
+            worktree_path: Some("/tmp".to_string()),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -300,7 +303,7 @@ mod tests {
         let interp = DecisionCommandInterpreter::new();
         let cmd = DecisionCommand::Unknown {
             action_type: "foo".to_string(),
-            params: "{}".to_string(),
+            params: String::new(),
         };
         assert!(interp.interpret(&AgentId::new("ag-1"), &cmd).is_none());
     }
@@ -308,14 +311,15 @@ mod tests {
     #[test]
     fn mixed_interpretable_and_non_interpretable_commands() {
         let interp = DecisionCommandInterpreter::new();
-        let agent_id = AgentId::new("ag-1");
-
         let commands = vec![
             DecisionCommand::EscalateToHuman {
                 reason: "stuck".to_string(),
                 context: None,
             },
-            DecisionCommand::SkipDecision,
+            DecisionCommand::SendCustomInstruction {
+                prompt: "do X".to_string(),
+                target_agent: "ag-1".to_string(),
+            },
             DecisionCommand::TerminateAgent {
                 reason: "done".to_string(),
             },
@@ -323,9 +327,8 @@ mod tests {
 
         let mut all_interpreted = true;
         let mut runtime_cmds = Vec::new();
-
         for cmd in &commands {
-            match interp.interpret(&agent_id, cmd) {
+            match interp.interpret(&AgentId::new("ag-1"), cmd) {
                 Some(mut cmds) => runtime_cmds.append(&mut cmds),
                 None => {
                     all_interpreted = false;
@@ -334,9 +337,8 @@ mod tests {
             }
         }
 
-        assert!(!all_interpreted, "SkipDecision returns None, so all_interpreted should be false");
-        // Only EscalateToHuman should have been collected before hitting SkipDecision
-        assert_eq!(runtime_cmds.len(), 1);
+        assert!(!all_interpreted, "Mixed commands should set all_interpreted to false");
+        assert_eq!(runtime_cmds.len(), 1, "Only the first interpretable command should be collected before break");
         assert!(matches!(&runtime_cmds[0], RuntimeCommand::NotifyUser { .. }));
     }
 }

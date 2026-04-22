@@ -11,6 +11,7 @@ use agent_core::commands::parse_legacy_alias;
 use agent_core::logging;
 use agent_core::probe;
 use agent_core::ProviderEvent;
+use agent_core::runtime_command::RuntimeCommand;
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::task_engine;
 use agent_core::task_engine::ExecutionGuardrails;
@@ -60,6 +61,15 @@ const RESPONDING_IDLE_TIMEOUT_SECS: u64 = 60;
 /// Idle timeout for triggering decision layer intervention
 /// If an agent is idle for this duration, decision layer will check if there are pending tasks
 const IDLE_DECISION_TRIGGER_SECS: u64 = 60;
+
+/// Outcome of a decision execution — either pure path (RuntimeCommands)
+/// or legacy path (DecisionExecutionResults).
+enum DecisionOutcome {
+    /// Pure effect path: interpreter successfully mapped all DecisionCommands
+    Pure(Vec<RuntimeCommand>),
+    /// Legacy path: one or more commands could not be interpreted
+    Legacy(Vec<agent_core::agent_pool::DecisionExecutionResult>),
+}
 
 /// Decision output info for transcript display
 ///
@@ -179,7 +189,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             // Collect responses first, preserving output details for transcript
             let decision_results: Vec<(
                 agent_core::agent_runtime::AgentId,
-                Vec<agent_core::agent_pool::DecisionExecutionResult>,
+                DecisionOutcome,
                 Option<DecisionOutputInfo>,
             )> = {
                 if let Some(pool) = state.agent_pool.as_mut() {
@@ -214,9 +224,40 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                         "confidence": output.confidence,
                                     }),
                                 );
-                                // Execute decision action
-                                let result = pool.execute_decision_action(&agent_id, output);
-                                Some((agent_id, result, Some(output_info)))
+
+                                // NEW: Try pure path first (translate + interpreter)
+                                use agent_core::pool::DecisionExecutor;
+                                use agent_core::pool::DecisionCommandInterpreter;
+                                let interpreter = DecisionCommandInterpreter::new();
+                                let commands = DecisionExecutor::translate(&agent_id, output);
+                                let mut all_interpreted = true;
+                                let mut runtime_cmds = Vec::new();
+                                for cmd in &commands {
+                                    match interpreter.interpret(&agent_id, cmd) {
+                                        Some(mut cmds) => runtime_cmds.append(&mut cmds),
+                                        None => {
+                                            all_interpreted = false;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if all_interpreted && !commands.is_empty() {
+                                    tracing::info!(
+                                        agent_id = %agent_id.as_str(),
+                                        commands = commands.len(),
+                                        "TUI decision pure path"
+                                    );
+                                    Some((agent_id, DecisionOutcome::Pure(runtime_cmds), Some(output_info)))
+                                } else {
+                                    // Legacy fallback
+                                    tracing::info!(
+                                        agent_id = %agent_id.as_str(),
+                                        "TUI decision legacy fallback"
+                                    );
+                                    let result = pool.execute_decision_action(&agent_id, output);
+                                    Some((agent_id, DecisionOutcome::Legacy(result), Some(output_info)))
+                                }
                             } else if response.is_error() {
                                 logging::warn_event(
                                     "app_loop.decision_error",
@@ -238,10 +279,56 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             };
 
             // Process results after releasing pool borrow
-            for (agent_id, results, output_info) in decision_results {
-                for result in results {
-                    match result {
-                        agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
+            for (agent_id, outcome, output_info) in decision_results {
+                match outcome {
+                    DecisionOutcome::Pure(cmds) => {
+                        // Pure path: dispatch RuntimeCommands inline
+                        for cmd in cmds {
+                            match cmd {
+                                RuntimeCommand::NotifyUser { agent_id: _, message } => {
+                                    state.app_mut().push_status_message(message);
+                                }
+                                RuntimeCommand::Terminate { agent_id, reason } => {
+                                    state.app_mut().push_status_message(format!(
+                                        "🧠 {}: agent terminated ({})",
+                                        agent_id.as_str(), reason
+                                    ));
+                                    if let Some(pool) = state.agent_pool.as_mut() {
+                                        let _ = pool.stop_agent(&agent_id);
+                                    }
+                                }
+                                RuntimeCommand::TransitionState { agent_id, new_status } => {
+                                    if let Some(pool) = state.agent_pool.as_mut() {
+                                        use agent_core::agent_slot::AgentSlotStatus as CoreAgentStatus;
+                                        if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                                            let target = match new_status.as_str() {
+                                                "idle" => CoreAgentStatus::idle(),
+                                                "starting" => CoreAgentStatus::starting(),
+                                                "responding" => CoreAgentStatus::responding_now(),
+                                                _ => CoreAgentStatus::idle(),
+                                            };
+                                            let _ = slot.transition_to(target);
+                                        }
+                                    }
+                                    state.app_mut().push_status_message(format!(
+                                        "🧠 {}: state transitioned to {}",
+                                        agent_id.as_str(), new_status
+                                    ));
+                                }
+                                _ => {
+                                    // Other commands not yet supported in TUI pure path
+                                    tracing::warn!(
+                                        command = ?cmd,
+                                        "TUI pure path: unhandled RuntimeCommand"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    DecisionOutcome::Legacy(results) => {
+                        for result in results {
+                            match result {
+                                agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
                             // Push decision entry to transcript for detailed display
                             if let Some(ref info) = output_info {
                                 state.app_mut().push_decision(
@@ -390,6 +477,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     }
                 }
             }
+        }
+    }
             last_decision_poll = Instant::now();
         }
 

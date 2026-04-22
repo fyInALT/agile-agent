@@ -49,6 +49,13 @@ pub enum RuntimeCommand {
         agent_id: AgentId,
         reason: String,
     },
+
+    /// Transition agent to a new operational status.
+    /// Used by ApproveAndContinue, WakeUp, and other state-transition decisions.
+    TransitionState {
+        agent_id: AgentId,
+        new_status: String,
+    },
 }
 
 /// Ordered queue of runtime commands.
@@ -150,5 +157,25 @@ mod tests {
         });
         assert!(matches!(q.peek(), Some(RuntimeCommand::SpawnProvider { .. })));
         assert_eq!(q.len(), 1); // peek does not remove
+    }
+
+    #[test]
+    fn transition_state_command_construction() {
+        let cmd = RuntimeCommand::TransitionState {
+            agent_id: AgentId::new("ag-1"),
+            new_status: "idle".to_string(),
+        };
+        assert!(matches!(cmd, RuntimeCommand::TransitionState { .. }));
+    }
+
+    #[test]
+    fn transition_state_serde_roundtrip() {
+        let cmd = RuntimeCommand::TransitionState {
+            agent_id: AgentId::new("ag-1"),
+            new_status: "idle".to_string(),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let decoded: RuntimeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(cmd, decoded);
     }
 }

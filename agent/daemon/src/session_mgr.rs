@@ -958,7 +958,7 @@ impl EventLoop {
         inner: &mut SessionInner,
     ) -> Vec<agent_core::runtime_command::RuntimeCommand> {
         use agent_core::pool::DecisionExecutor;
-        use crate::decision_interpreter::DecisionCommandInterpreter;
+        use agent_core::pool::DecisionCommandInterpreter;
 
         let interpreter = DecisionCommandInterpreter::new();
         let decision_responses = inner.agent_pool.poll_decision_agents();
@@ -1978,7 +1978,7 @@ mod tests {
         use agent_core::pool::DecisionExecutor;
         use agent_decision::builtin_actions::{CustomInstructionAction, StopIfCompleteAction};
         use agent_decision::output::DecisionOutput;
-        use crate::decision_interpreter::DecisionCommandInterpreter;
+        use agent_core::pool::DecisionCommandInterpreter;
 
         let agent_id = AgentId::new("agent-7");
         let interpreter = DecisionCommandInterpreter::new();
@@ -2135,7 +2135,8 @@ pub type SessionManager = EventLoop;
 
 use agent_behavior_infra::{
     CompositeEffectHandler, NotifyUserHandler, RequestDecisionHandler,
-    SendToProviderHandler, SpawnProviderHandler, TerminateHandler, UpdateWorktreeHandler,
+    SendToProviderHandler, SpawnProviderHandler, TerminateHandler, TransitionStateHandler,
+    UpdateWorktreeHandler,
 };
 
 #[allow(dead_code)]
@@ -2154,6 +2155,7 @@ impl DaemonEffectHandler {
             Box::new(DaemonNotifyUserHandler(daemon.clone())),
             Box::new(DaemonUpdateWorktreeHandler(daemon.clone())),
             Box::new(DaemonTerminateHandler(daemon.clone())),
+            Box::new(DaemonTransitionStateHandler(daemon.clone())),
         )
     }
 }
@@ -2360,6 +2362,47 @@ daemon_handler!(
         inner.event_aggregator.remove_receiver(&core_agent_id);
 
         tracing::info!(agent_id = %agent_id.as_str(), reason, "agent terminated");
+
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonTransitionStateHandler,
+    TransitionStateHandler,
+    (&self, agent_id: &agent_types::AgentId, new_status: &str),
+    {
+        let mut inner = self.0.inner.blocking_lock();
+        let core_agent_id = CoreAgentId::new(agent_id.as_str());
+
+        if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&core_agent_id) {
+            let target_status = match new_status {
+                "idle" => CoreAgentStatus::idle(),
+                "starting" => CoreAgentStatus::starting(),
+                "responding" => CoreAgentStatus::responding_now(),
+                "blocked" => CoreAgentStatus::Blocked { reason: "decision".to_string() },
+                "stopped" => CoreAgentStatus::stopped("decision".to_string()),
+                _ => {
+                    tracing::warn!(
+                        agent_id = %agent_id.as_str(),
+                        new_status,
+                        "unknown transition state, defaulting to idle"
+                    );
+                    CoreAgentStatus::idle()
+                }
+            };
+            let _ = slot.transition_to(target_status);
+            tracing::info!(
+                agent_id = %agent_id.as_str(),
+                new_status,
+                "agent state transitioned via effect handler"
+            );
+        } else {
+            tracing::warn!(
+                agent_id = %agent_id.as_str(),
+                "TransitionState: agent not found"
+            );
+        }
 
         Ok(())
     }

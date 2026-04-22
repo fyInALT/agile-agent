@@ -17,7 +17,8 @@ pub mod runtime_command;
 
 pub use handlers::{
     CompositeEffectHandler, NotifyUserHandler, RequestDecisionHandler,
-    SendToProviderHandler, SpawnProviderHandler, TerminateHandler, UpdateWorktreeHandler,
+    SendToProviderHandler, SpawnProviderHandler, TerminateHandler, TransitionStateHandler,
+    UpdateWorktreeHandler,
 };
 pub use runtime_command::{
     EffectError, EffectHandler, NoopEffectHandler, RecordingEffectHandler,

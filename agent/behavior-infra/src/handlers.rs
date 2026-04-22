@@ -47,6 +47,12 @@ pub trait TerminateHandler: Send + Sync {
     fn execute(&self, agent_id: &AgentId, reason: &str) -> Result<(), EffectError>;
 }
 
+/// Handler for `RuntimeCommand::TransitionState`.
+pub trait TransitionStateHandler: Send + Sync {
+    /// Transition agent to a new operational status.
+    fn execute(&self, agent_id: &AgentId, new_status: &str) -> Result<(), EffectError>;
+}
+
 /// Composite effect handler that delegates each `RuntimeCommand` variant
 /// to its corresponding per-variant handler.
 ///
@@ -59,6 +65,7 @@ pub struct CompositeEffectHandler {
     pub notify_user: Box<dyn NotifyUserHandler>,
     pub update_worktree: Box<dyn UpdateWorktreeHandler>,
     pub terminate: Box<dyn TerminateHandler>,
+    pub transition_state: Box<dyn TransitionStateHandler>,
 }
 
 impl CompositeEffectHandler {
@@ -71,6 +78,7 @@ impl CompositeEffectHandler {
         notify_user: Box<dyn NotifyUserHandler>,
         update_worktree: Box<dyn UpdateWorktreeHandler>,
         terminate: Box<dyn TerminateHandler>,
+        transition_state: Box<dyn TransitionStateHandler>,
     ) -> Self {
         Self {
             spawn_provider,
@@ -79,6 +87,7 @@ impl CompositeEffectHandler {
             notify_user,
             update_worktree,
             terminate,
+            transition_state,
         }
     }
 }
@@ -103,6 +112,9 @@ impl crate::EffectHandler for CompositeEffectHandler {
             }
             crate::RuntimeCommand::Terminate { agent_id, reason } => {
                 self.terminate.execute(agent_id, reason)
+            }
+            crate::RuntimeCommand::TransitionState { agent_id, new_status } => {
+                self.transition_state.execute(agent_id, new_status)
             }
         }
     }
