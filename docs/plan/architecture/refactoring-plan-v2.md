@@ -1319,24 +1319,20 @@ External protocol JSON structure **does not change at all**. `ProtocolGateway` c
 | `DecisionExecutor::translate()` | Sprint 4 | Pure `DecisionOutput → Vec<DecisionCommand>` |
 | `DecisionCommandInterpreter` | Sprint 4 | Maps commands to `RuntimeCommand` |
 | Circular dependency elimination | Sprint 4 | `agent-decision` has zero `agent-core`/`agent-daemon` deps |
-| `agent-runtime-domain` crate | Sprint 5 | `WorkerState`, `TranscriptJournal`, `JournalEntry` |
-| `agent-behavior-infra` crate | Sprint 5 | `EffectHandler` trait, handler implementations |
-| Type renames (7/11) | Sprint 5 | `AgentSlot`→`WorkerHandle`, `AgentPool`→`WorkerPool`, `SessionManager`→`EventLoop`, `FocusManager`→`WorkerFocusManager`, `WorktreeCoordinator`→`WorkerWorktreeManager`, `ProviderEvent`→`DomainEvent`, `DecisionAction`→`DecisionCommand` |
-| `AgentStatus` → `WorkerStatus` | Sprint 5 | Protocol-level enum renamed with alias |
-| `spawn_agent()` → `spawn_worker()` | Sprint 5 | All variants renamed with deprecated wrappers |
-| Clippy fixes | Sprint 6 | `agent-commands`, `agent-storage`, `agent-worktree` |
+| `agent-runtime-domain` crate | Sprint 5 | `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry`, `RuntimeCommand`, `RuntimeCommandQueue` |
+| `agent-behavior-infra` crate | Sprint 5 | `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` |
+| Type renames (11/11) | Sprint 5 | All 11 renames complete: `AgentSlot`→`WorkerHandle`, `AgentPool`→`WorkerPool`, `SessionManager`→`EventLoop`, `FocusManager`→`WorkerFocusManager`, `WorktreeCoordinator`→`WorkerWorktreeManager`, `ProviderEvent`→`DomainEvent`, `DecisionAction`→`DecisionCommand`, `AgentStatus`→`WorkerStatus`, `spawn_agent()`→`spawn_worker()`, `DecisionCoordinator`→`WorkerDecisionRouter`, `ProviderThread`→`WorkerExecutionThread` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Sprint 6 | ✅ Passes — all warnings resolved across workspace |
 | Documentation | Sprint 6 | `dependency-graph.md`, `new-crate-structure.md`, sprint specs updated |
 
 ### Partially Completed ⚠️
 
 | Item | Sprint | Gap |
 |------|--------|-----|
-| `Worker` in `agent-runtime-domain` | Sprint 5 | ✅ Completed — `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry` all in `agent-runtime-domain` |
-| `RuntimeCommand` in `agent-runtime-domain` | Sprint 5 | ✅ Completed — `RuntimeCommand` and `RuntimeCommandQueue` in `agent-runtime-domain` |
-| `AgentSlotStatus` removal | Sprint 6 | Old 13-variant enum still coexists with `WorkerState` |
-| `cargo clippy --workspace -- -D warnings` | Sprint 6 | Pre-existing issues in `agent-decision` (55), `agent-kanban` (8), `agent-llm-provider` (6) |
-| Deprecation aliases | Sprint 6 | `AgentSlot`, `AgentPool`, `SessionManager`, `AgentStatus` aliases still present |
-| Phase 5/6 TODOs | Sprint 6 | Cleanup and worktree sync still inline in Phase 1 |
+| `AgentSlotStatus` removal | Sprint 6 | Old 13-variant enum still coexists with `WorkerState` — kept for backward compatibility |
+| Deprecation aliases | Sprint 6 | `AgentSlot`, `AgentPool`, `SessionManager`, `AgentStatus` aliases still present — kept for backward compatibility |
+| Per-variant EffectHandler structs | Sprint 3 | Monolithic `EffectHandler` trait used instead of per-variant structs |
+| Worker as primary state authority | Sprint 3 | `AgentSlotStatus` still used for runtime state; `WorkerState` not yet primary |
 
 ### Skipped / Not Started ❌
 
@@ -1347,8 +1343,6 @@ External protocol JSON structure **does not change at all**. `ProtocolGateway` c
 | Protocol hardening | Sprint 6 | Requires external tooling and baseline |
 | Protocol compatibility validation | Sprint 6 | Requires running full system with TUI |
 | Performance regression testing | Sprint 6 | Requires pre-refactoring baseline measurements |
-| `DecisionAgentCoordinator` → `WorkerDecisionRouter` | Sprint 5 | Large mechanical change, deferred |
-| `ProviderThread` → `WorkerExecutionThread` | Sprint 5 | Large mechanical change, deferred |
 
 ---
 
