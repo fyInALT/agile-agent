@@ -1,0 +1,16 @@
+[package]
+name = "agent-runtime-domain"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+agent-types = { path = "../types" }
+agent-events = { path = "../events" }
+agent-toolkit = { path = "../toolkit" }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

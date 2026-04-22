@@ -8,6 +8,8 @@ license.workspace = true
 agent-types = { path = "../agent/types" }
 agent-toolkit = { path = "../agent/toolkit" }
 agent-events = { path = "../agent/events" }
+agent-runtime-domain = { path = "../agent/runtime-domain" }
+agent-behavior-infra = { path = "../agent/behavior-infra" }
 agent-provider = { path = "../agent/provider" }
 agent-worktree = { path = "../agent/worktree" }
 anyhow.workspace = true

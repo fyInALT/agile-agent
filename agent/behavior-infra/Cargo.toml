@@ -1,0 +1,12 @@
+[package]
+name = "agent-behavior-infra"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+agent-types = { path = "../types" }
+agent-events = { path = "../events" }
+agent-runtime-domain = { path = "../runtime-domain" }
+thiserror = { workspace = true }
+
+[dev-dependencies]

@@ -3,6 +3,8 @@ members = [
     "agent/daemon",
     "agent/events",
     "agent/protocol",
+    "agent/runtime-domain",
+    "agent/behavior-infra",
     "agent/types",
     "agent/toolkit",
     "agent/provider",
