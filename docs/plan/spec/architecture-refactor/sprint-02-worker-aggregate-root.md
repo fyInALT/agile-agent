@@ -57,7 +57,7 @@ Replace the implicit state transitions in `AgentSlot` with an explicit enum.
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Completed ✅ — `Worker` struct with `apply(event) -> Result<Vec<RuntimeCommand>, WorkerError>` in `agent-core`.
+**Status**: Completed ✅ — `Worker` struct with `apply(event) -> Result<Vec<RuntimeCommand>, WorkerError>` in `agent-runtime-domain`.
 
 Create the `Worker` struct as the single authority over all mutable state for one agent.
 
