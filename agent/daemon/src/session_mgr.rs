@@ -210,7 +210,7 @@ impl SessionManager {
     /// appended. Set to `false` when the prompt was already recorded by the
     /// caller (e.g. decision action executor).
     async fn start_provider_for_agent_inner(
-        inner: &mut tokio::sync::MutexGuard<'_, SessionInner>,
+        inner: &mut SessionInner,
         agent_id: &CoreAgentId,
         text: &str,
         record_user_prompt: bool,
@@ -610,9 +610,40 @@ impl SessionManager {
         let mut pump = crate::event_pump::EventPump::new();
         let mut broadcast_events = Vec::new();
 
-        // ------------------------------------------------------------------
-        // 1. Poll provider events
-        // ------------------------------------------------------------------
+        // Phase 1: Poll provider events
+        self.phase_1_poll_provider_events(&mut inner, &mut pump, &mut broadcast_events)
+            .await;
+
+        // Phase 2: Check idle agents and trigger decision layer
+        self.phase_2_check_idle_agents(&mut inner).await;
+
+        // Phase 3: Poll decision agents
+        self.phase_3_poll_decision_agents(&mut inner).await;
+
+        // Phase 4: Process pending mailbox deliveries
+        self.phase_4_process_mailbox(&mut inner).await;
+
+        // Phase 5: Cleanup completed agents
+        self.phase_5_cleanup_completed(&mut inner).await;
+
+        // Phase 6: Reconcile worktrees
+        self.phase_6_reconcile_worktrees(&mut inner).await;
+
+        // Phase 7: Dispatch commands (placeholder for RuntimeCommand system)
+        self.phase_7_dispatch_commands(&mut inner).await;
+
+        Ok(broadcast_events)
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 1: Poll provider events
+    // ------------------------------------------------------------------
+    async fn phase_1_poll_provider_events(
+        &self,
+        inner: &mut SessionInner,
+        pump: &mut crate::event_pump::EventPump,
+        broadcast_events: &mut Vec<Event>,
+    ) {
         let poll_result = inner.event_aggregator.poll_all();
 
         for agent_event in poll_result.events {
@@ -821,10 +852,12 @@ impl SessionManager {
             }
             inner.event_aggregator.remove_receiver(&disconnected_id);
         }
+    }
 
-        // ------------------------------------------------------------------
-        // 2. Check idle agents and trigger decision layer intervention
-        // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Phase 2: Check idle agents and trigger decision layer intervention
+    // ------------------------------------------------------------------
+    async fn phase_2_check_idle_agents(&self, inner: &mut SessionInner) {
         const IDLE_DECISION_TRIGGER_SECS: u64 = 60;
         const IDLE_DECISION_COOLDOWN_SECS: u64 = 300;
 
@@ -894,10 +927,12 @@ impl SessionManager {
                 }
             }
         }
+    }
 
-        // ------------------------------------------------------------------
-        // 3. Poll decision agents
-        // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Phase 3: Poll decision agents
+    // ------------------------------------------------------------------
+    async fn phase_3_poll_decision_agents(&self, inner: &mut SessionInner) {
         let decision_responses = inner.agent_pool.poll_decision_agents();
         for (work_agent_id, response) in decision_responses {
             if let Some(output) = response.output() {
@@ -925,7 +960,7 @@ impl SessionManager {
 
                         if is_valid {
                             if let Err(e) = Self::start_provider_for_agent_inner(
-                                &mut inner,
+                                inner,
                                 &work_agent_id,
                                 &instruction,
                                 false, // do not duplicate transcript entry
@@ -978,15 +1013,36 @@ impl SessionManager {
                 }
             }
         }
+    }
 
-        // ------------------------------------------------------------------
-        // 4. Process pending mailbox deliveries
-        // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Phase 4: Process pending mailbox deliveries
+    // ------------------------------------------------------------------
+    async fn phase_4_process_mailbox(&self, inner: &mut SessionInner) {
         if inner.mailbox.pending_count() > 0 {
             let _delivered = inner.mailbox.process_pending();
         }
+    }
 
-        Ok(broadcast_events)
+    // ------------------------------------------------------------------
+    // Phase 5: Cleanup completed agents
+    // ------------------------------------------------------------------
+    async fn phase_5_cleanup_completed(&self, _inner: &mut SessionInner) {
+        // TODO: Move terminal agent cleanup here (currently done inline in Phase 1)
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 6: Reconcile worktrees
+    // ------------------------------------------------------------------
+    async fn phase_6_reconcile_worktrees(&self, _inner: &mut SessionInner) {
+        // TODO: Move worktree sync logic here (currently done via AgentPool)
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 7: Dispatch commands
+    // ------------------------------------------------------------------
+    async fn phase_7_dispatch_commands(&self, _inner: &mut SessionInner) {
+        // Placeholder for RuntimeCommand effect system (Story 3.2)
     }
 
     // ---------------------------------------------------------------------------
