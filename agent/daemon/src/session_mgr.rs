@@ -937,9 +937,52 @@ impl SessionManager {
     // Phase 3: Poll decision agents
     // ------------------------------------------------------------------
     async fn phase_3_poll_decision_agents(&self, inner: &mut SessionInner) {
+        use agent_core::pool::DecisionExecutor;
+        use crate::decision_interpreter::DecisionCommandInterpreter;
+
+        let interpreter = DecisionCommandInterpreter::new();
         let decision_responses = inner.agent_pool.poll_decision_agents();
+
         for (work_agent_id, response) in decision_responses {
             if let Some(output) = response.output() {
+                // New path: translate to pure DecisionCommands, then interpret
+                // to RuntimeCommands. If all commands can be interpreted, dispatch
+                // them and skip legacy execute(). Otherwise fall back.
+                let commands = DecisionExecutor::translate(&work_agent_id, output);
+                let mut all_interpreted = true;
+                let mut runtime_cmds = Vec::new();
+
+                for cmd in &commands {
+                    match interpreter.interpret(&work_agent_id, cmd) {
+                        Some(mut cmds) => runtime_cmds.append(&mut cmds),
+                        None => {
+                            all_interpreted = false;
+                            break;
+                        }
+                    }
+                }
+
+                if all_interpreted && !commands.is_empty() {
+                    // Dispatch RuntimeCommands through effect handler
+                    for cmd in &runtime_cmds {
+                        if let Err(e) = self.effect_handler.handle(cmd) {
+                            tracing::warn!(
+                                agent_id = %work_agent_id.as_str(),
+                                command = ?cmd,
+                                error = %e,
+                                "DecisionCommand effect handler failed"
+                            );
+                        }
+                    }
+                    tracing::info!(
+                        agent_id = %work_agent_id.as_str(),
+                        commands = commands.len(),
+                        "decision commands dispatched via effect handler"
+                    );
+                    continue;
+                }
+
+                // Legacy path: direct execution via DecisionExecutor
                 let result =
                     inner.agent_pool.execute_decision_action(&work_agent_id, output);
 

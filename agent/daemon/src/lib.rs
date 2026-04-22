@@ -6,6 +6,7 @@ pub mod audit;
 pub mod broadcaster;
 pub mod config_file;
 pub mod connection;
+pub mod decision_interpreter;
 pub mod event_log;
 pub mod event_pump;
 pub mod handler;
