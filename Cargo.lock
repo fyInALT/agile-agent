@@ -50,6 +50,7 @@ dependencies = [
  "agent-backlog",
  "agent-commands",
  "agent-decision",
+ "agent-events",
  "agent-kanban",
  "agent-provider",
  "agent-storage",
