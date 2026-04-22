@@ -43,6 +43,7 @@ pub mod task_artifacts;
 pub mod task_engine;
 pub mod verification;
 pub mod workplace_store;
+pub mod worker_state;
 
 // Re-export tool call types from agent-toolkit for backward compatibility
 pub use agent_toolkit::{
