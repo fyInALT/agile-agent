@@ -1302,7 +1302,7 @@ External protocol JSON structure **does not change at all**. `ProtocolGateway` c
 
 ## Completion Status
 
-> Updated: 2026-04-20
+> Updated: 2026-04-22
 
 ### Completed ✅
 
@@ -1310,7 +1310,7 @@ External protocol JSON structure **does not change at all**. `ProtocolGateway` c
 |------|--------|-------|
 | `agent-events` shared kernel | Sprint 1 | `DomainEvent` (24 variants), `DecisionEvent`, `From<&DomainEvent>` |
 | `WorkerState` state machine | Sprint 2 | 6 variants + `RespondingSubState` in `agent-runtime-domain` |
-| `Worker` aggregate root | Sprint 2 | `apply(event) -> Vec<RuntimeCommand>` in `agent-core` |
+| `Worker` aggregate root | Sprint 2 | `apply(event) -> Vec<RuntimeCommand>` in `agent-runtime-domain` |
 | `TranscriptJournal` | Sprint 2 | Moved to `agent-runtime-domain` |
 | 7-phase `tick()` | Sprint 3 | `EventLoop` with explicit phases |
 | `RuntimeCommand` effect system | Sprint 3 | Pure command enum + queue |
@@ -1331,8 +1331,8 @@ External protocol JSON structure **does not change at all**. `ProtocolGateway` c
 
 | Item | Sprint | Gap |
 |------|--------|-----|
-| `Worker` in `agent-runtime-domain` | Sprint 5 | Still in `agent-core`; blocked on `RuntimeCommand` location |
-| `RuntimeCommand` in `agent-runtime-domain` | Sprint 5 | Currently in `agent-behavior-infra` |
+| `Worker` in `agent-runtime-domain` | Sprint 5 | ✅ Completed — `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry` all in `agent-runtime-domain` |
+| `RuntimeCommand` in `agent-runtime-domain` | Sprint 5 | ✅ Completed — `RuntimeCommand` and `RuntimeCommandQueue` in `agent-runtime-domain` |
 | `AgentSlotStatus` removal | Sprint 6 | Old 13-variant enum still coexists with `WorkerState` |
 | `cargo clippy --workspace -- -D warnings` | Sprint 6 | Pre-existing issues in `agent-decision` (55), `agent-kanban` (8), `agent-llm-provider` (6) |
 | Deprecation aliases | Sprint 6 | `AgentSlot`, `AgentPool`, `SessionManager`, `AgentStatus` aliases still present |

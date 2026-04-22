@@ -27,7 +27,7 @@ Create 6 target crates with correct dependency directions. Perform 11 core type 
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Partially Completed ⚠️ — `WorkerState`, `TranscriptJournal`, `JournalEntry` moved. `Worker` aggregate root still in `agent-core` (blocked on `RuntimeCommand` location). `AgentRole`, `RuntimeMode` already in `agent-types`. `AgentLaunchBundle` already in `agent-provider`.
+**Status**: Partially Completed ⚠️ — `Worker`, `WorkerState`, `TranscriptJournal`, `JournalEntry` moved to `agent-runtime-domain`. `RuntimeCommand`, `RuntimeCommandQueue` also in `agent-runtime-domain`. `AgentRole`, `RuntimeMode` already in `agent-types`. `AgentLaunchBundle` already in `agent-provider`. `EffectHandler` trait and implementations in `agent-behavior-infra`.
 
 Extract pure domain types from `agent-core` into a dedicated crate.
 
@@ -56,7 +56,7 @@ Extract pure domain types from `agent-core` into a dedicated crate.
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Partially Completed ⚠️ — `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` moved. `RuntimeCommand` and `RuntimeCommandQueue` currently here (should move to `agent-runtime-domain`). Event loop phase traits and command processing logic still in `agent-daemon`.
+**Status**: Partially Completed ⚠️ — `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` implemented in `agent-behavior-infra`. `RuntimeCommand` and `RuntimeCommandQueue` are in `agent-runtime-domain` (re-exported in `agent-behavior-infra` for convenience). Event loop phase traits and command processing logic still in `agent-daemon`.
 
 Move behavior infrastructure (event loop phases, effect handlers, command processing) out of the daemon.
 
