@@ -99,7 +99,7 @@ impl RuntimeCommandQueue {
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum EffectError {
     #[error("handler not implemented for command: {0:?}")]
-    NotImplemented(RuntimeCommand),
+    NotImplemented(Box<RuntimeCommand>),
     #[error("execution failed: {0}")]
     ExecutionFailed(String),
 }

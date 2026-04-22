@@ -10,7 +10,16 @@
 
 ## Architecture
 
-Layered architecture: `agent-daemon` owns all runtime state; `agent-cli` and `agent-tui` are thin protocol clients. `agent-protocol` defines the JSON-RPC 2.0 + WebSocket contract. `agent-core` provides the runtime engine (AgentPool, RuntimeSession, EventAggregator). `agent-decision` provides decision-layer capabilities, `agent-kanban` provides Kanban domain model, and `agent-llm-provider` provides LLM client abstraction.
+Layered architecture: `agent-daemon` owns all runtime state via the `EventLoop`; `agent-cli` and `agent-tui` are thin protocol clients. `agent-protocol` defines the JSON-RPC 2.0 + WebSocket contract. `agent-core` provides the runtime engine (`WorkerPool`, `RuntimeSession`, `EventAggregator`). `agent-decision` provides decision-layer capabilities (read-only, returns `DecisionCommand`). `agent-kanban` provides Kanban domain model, and `agent-llm-provider` provides LLM client abstraction.
+
+### Refactored Architecture (Sprints 1–5)
+
+- **Shared Kernel** (`agent-events`): Unified `DomainEvent` (24 variants) shared across provider and decision layers.
+- **Domain Model** (`agent-runtime-domain`): Pure types — `WorkerState`, `TranscriptJournal`, `JournalEntry`.
+- **Behavior Infrastructure** (`agent-behavior-infra`): `RuntimeCommand` effect system + `EffectHandler` trait.
+- **Worker Aggregate Root**: `Worker::apply(event) -> Vec<RuntimeCommand>` — pure state transitions, effectful execution delegated to `EffectHandler`.
+- **EventLoop** (formerly `SessionManager`): 7 explicit phases with `RuntimeCommand` dispatch in Phase 7.
+- **Decision Layer Decoupling**: `agent-decision` is read-only — produces `DecisionCommand`, interpreted by `DecisionCommandInterpreter` in the daemon.
 
 ### Frontend-Backend Separation
 
@@ -46,8 +55,8 @@ The multi-agent foundation provides Scrum-style coordination:
 
 ### Key Modules (core)
 
-- `agent_pool.rs`: AgentPool managing multiple concurrent agent slots
-- `agent_slot.rs`: AgentSlot representing a single agent's runtime state
+- `agent_pool.rs`: WorkerPool (alias AgentPool) managing multiple concurrent agent slots
+- `agent_slot.rs`: WorkerHandle (alias AgentSlot) representing a single agent's runtime state
 - `agent_role.rs`: AgentRole enum (ProductOwner, ScrumMaster, Developer)
 - `runtime_mode.rs`: RuntimeMode enum for backward compatibility
 - `sprint_planning.rs`: SprintPlanningSession for ProductOwner sprint planning
@@ -89,15 +98,17 @@ The multi-agent foundation provides Scrum-style coordination:
 - `agent/worktree/`: `agent-worktree` crate — Git worktree isolation
 - `agent/backlog/`: `agent-backlog` crate — Task and backlog management
 - `agent/storage/`: `agent-storage` crate — Persistence layer
-- `agent/daemon/`: `agent-daemon` crate — WebSocket server, session manager, event pump, broadcaster
+- `agent/daemon/`: `agent-daemon` crate — WebSocket server, EventLoop, event pump, broadcaster, decision interpreter
 - `agent/protocol/`: `agent-protocol` crate — JSON-RPC types, events, snapshots, auto-link, config
 - `agent/commands/`: `agent-commands` crate — Command bus and slash command system
 - `cli/`: `agent-cli` crate — Binary entrypoints and CLI-facing integration tests (protocol-first)
-- `core/`: `agent-core` crate — Runtime engine (AgentPool, AppState), verification, artifacts
+- `core/`: `agent-core` crate — Runtime engine (WorkerPool, AppState), verification, artifacts, decision executor
 - `tui/`: `agent-tui` crate — Terminal UI, rendering, transcript, composer, overlays (protocol-only)
-- `decision/`: `agent-decision` crate — Classifiers, engines, actions, situations
+- `decision/`: `agent-decision` crate — Classifiers, engines, actions, situations, DecisionCommand
 - `kanban/`: `agent-kanban` crate — Trait-based Kanban domain model
 - `llm-provider/`: `agent-llm-provider` crate — OpenAI client with simple/thinking model tiers
+- `agent/runtime-domain/`: `agent-runtime-domain` crate — Pure domain types (WorkerState, TranscriptJournal)
+- `agent/behavior-infra/`: `agent-behavior-infra` crate — Effect system (RuntimeCommand, EffectHandler)
 - `test-support/`: `agent-test-support` crate — Shared test helpers
 
 ### Documentation

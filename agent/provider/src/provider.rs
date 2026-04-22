@@ -16,7 +16,8 @@ use crate::provider_thread::ProviderThreadHandle;
 // Re-export SessionHandle from shared event kernel
 pub use agent_events::SessionHandle;
 // Tool call types from agent-toolkit
-use agent_toolkit::{ExecCommandStatus, McpInvocation, PatchApplyStatus, PatchChange, WebSearchAction};
+// Re-export tool call types from agent-toolkit for backward compatibility
+pub use agent_toolkit::{ExecCommandStatus, McpInvocation, PatchApplyStatus, PatchChange, WebSearchAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderCapabilities {

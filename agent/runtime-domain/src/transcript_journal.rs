@@ -64,7 +64,7 @@ impl TranscriptJournal {
                 }
                 JournalEntry::AssistantResponse { text: text.clone() }
             }
-            DomainEvent::ThinkingChunk(text) => {
+            DomainEvent::ThinkingChunk(_text) => {
                 // Thinking chunks are recorded as system events
                 JournalEntry::SystemEvent { event }
             }
@@ -84,14 +84,12 @@ impl TranscriptJournal {
                 // Update last tool call if it's an exec
                 if let Some(JournalEntry::ToolCall { name, success, output, .. }) =
                     self.entries.last_mut()
-                {
-                    if name == "exec" && !*success {
+                    && name == "exec" && !*success {
                         *success = matches!(status, agent_events::ExecCommandStatus::Completed);
                         *output = output_preview.clone();
                         self.next_seq += 1;
                         return;
                     }
-                }
                 JournalEntry::ToolCall {
                     name: "exec".to_string(),
                     input: None,
@@ -119,14 +117,12 @@ impl TranscriptJournal {
                     output,
                     ..
                 }) = self.entries.last_mut()
-                {
-                    if prev_name == name && !*prev_success {
+                    && prev_name == name && !*prev_success {
                         *prev_success = *success;
                         *output = output_preview.clone();
                         self.next_seq += 1;
                         return;
                     }
-                }
                 JournalEntry::ToolCall {
                     name: name.clone(),
                     input: None,
@@ -143,14 +139,12 @@ impl TranscriptJournal {
             DomainEvent::McpToolCallFinished { error, .. } => {
                 if let Some(JournalEntry::ToolCall { name, success, output, .. }) =
                     self.entries.last_mut()
-                {
-                    if name == "mcp" && !*success {
+                    && name == "mcp" && !*success {
                         *success = error.is_none();
                         *output = error.clone();
                         self.next_seq += 1;
                         return;
                     }
-                }
                 JournalEntry::ToolCall {
                     name: "mcp".to_string(),
                     input: None,
@@ -167,13 +161,11 @@ impl TranscriptJournal {
             DomainEvent::PatchApplyFinished { status, .. } => {
                 if let Some(JournalEntry::ToolCall { name, success, .. }) =
                     self.entries.last_mut()
-                {
-                    if name == "patch" && !*success {
+                    && name == "patch" && !*success {
                         *success = matches!(status, agent_events::PatchApplyStatus::Completed);
                         self.next_seq += 1;
                         return;
                     }
-                }
                 JournalEntry::ToolCall {
                     name: "patch".to_string(),
                     input: None,
@@ -190,13 +182,11 @@ impl TranscriptJournal {
             DomainEvent::WebSearchFinished { .. } => {
                 if let Some(JournalEntry::ToolCall { name, success, .. }) =
                     self.entries.last_mut()
-                {
-                    if name == "websearch" && !*success {
+                    && name == "websearch" && !*success {
                         *success = true;
                         self.next_seq += 1;
                         return;
                     }
-                }
                 JournalEntry::ToolCall {
                     name: "websearch".to_string(),
                     input: None,
