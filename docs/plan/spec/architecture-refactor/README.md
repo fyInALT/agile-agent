@@ -21,8 +21,11 @@ The refactoring transforms the current monolithic event loop into a structured "
 | [Sprint 4](./sprint-04-decision-layer-decoupling.md) | Decision Layer Decoupling | 2 weeks | Read-only `DecisionCommand` + interpreter |
 | [Sprint 5](./sprint-05-crate-reorganization.md) | Crate Reorganization & Type Renaming | 1 week | 6 target crates + 11 type renames |
 | [Sprint 6](./sprint-06-cleanup-and-polish.md) | Protocol Layer, Cleanup & Polish | 1 week | Protocol hardening + performance validation |
+| [Sprint 7](./sprint-07-tui-effect-system.md) | TUI Effect System Integration | 2 weeks | `TuiEffectHandler` + pure path in `AppLoop` |
+| [Sprint 8](./sprint-08-worker-state-synchronization.md) | WorkerState Synchronization | 2 weeks | Extended `WorkerState` (11 variants) + bidirectional sync |
+| [Sprint 9](./sprint-09-decision-event-protocol.md) | DecisionEvent Protocol Enhancement | 1.5 weeks | Specific `DecisionEvent` variants + classifier improvements |
 
-**Total Duration: 10 weeks**
+**Total Duration: 15.5 weeks**
 
 ## Dependency Graph
 
@@ -43,7 +46,22 @@ Sprint 5 (Crate Reorg)
     │
     ▼
 Sprint 6 (Cleanup)
+    │
+    ▼
+Sprint 7 (TUI Effect System) ──┐
+    │                          │
+    ▼                          │
+Sprint 8 (WorkerState Sync)    │
+    │                          │
+    ▼                          │
+Sprint 9 (DecisionEvent) ◄─────┘
 ```
+
+Sprints 7–9 address critical architecture gaps discovered during the Sprint 4–6 implementation:
+
+- **Sprint 7** closes the TUI/daemon behavioral divergence by giving the TUI its own `EffectHandler`
+- **Sprint 8** eliminates the `AgentSlotStatus`/`WorkerState` split-brain problem
+- **Sprint 9** restores decision-layer visibility into events that were previously collapsed to generic status updates
 
 ## Target Crate Structure
 
