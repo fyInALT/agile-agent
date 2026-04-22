@@ -28,6 +28,8 @@
 //! persistence.save_global(&store)?;
 //! ```
 
+#![allow(clippy::module_inception)]
+
 pub mod error;
 pub mod interpolate;
 pub mod persistence;

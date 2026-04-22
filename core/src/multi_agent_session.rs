@@ -152,7 +152,7 @@ impl MultiAgentSession {
             let assigned_task_id = agent_snapshot
                 .assigned_task_id
                 .as_ref()
-                .map(|t| TaskId::new(t));
+                .map(TaskId::new);
 
             let slot = AgentSlot::restored_with_worktree(
                 meta.agent_id.clone(),

@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Pipeline layer - core decision execution flow
 //!
 //! This layer orchestrates the complete decision flow:

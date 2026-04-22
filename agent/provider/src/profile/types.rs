@@ -99,6 +99,7 @@ impl CliBaseType {
 }
 
 impl Default for CliBaseType {
+    #[allow(clippy::derivable_impls)]
     fn default() -> Self {
         Self::Claude
     }

@@ -40,6 +40,7 @@ impl MailId {
     }
 
     /// Create mail ID from string
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: impl Into<String>) -> Self {
         Self(s.into())
     }

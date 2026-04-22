@@ -47,6 +47,7 @@ pub struct ElementSerde {
 
 impl ElementSerde {
     /// Create from element data (called by KanbanElementTrait::to_serde)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         element_type: String,
         title: String,

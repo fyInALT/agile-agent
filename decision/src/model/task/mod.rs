@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Task subsystem - task entity and lifecycle
 //!
 //! Provides:

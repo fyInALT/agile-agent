@@ -275,8 +275,8 @@ impl WorkerPool {
 
         // Spawn decision agent for this work agent (if provider supports it)
         // All non-Mock agents should have decision layer support
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                 logging::warn_event(
                     "pool.agent.decision_agent_failed",
                     "failed to spawn decision agent for work agent",
@@ -286,7 +286,6 @@ impl WorkerPool {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -374,8 +373,8 @@ impl WorkerPool {
         self.focus_manager.focus_on_first_spawn(self.slots.len(), &agent_id);
 
         // Spawn decision agent for this work agent (if provider supports it)
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                 logging::warn_event(
                     "pool.agent.decision_agent_failed",
                     "failed to spawn decision agent for work agent",
@@ -385,7 +384,6 @@ impl WorkerPool {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -573,8 +571,8 @@ impl WorkerPool {
         self.focus_manager.focus_on_first_spawn(self.slots.len(), &agent_id);
 
         // Spawn decision agent for this work agent (if provider supports it)
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                 logging::warn_event(
                     "pool.agent.decision_agent_failed",
                     "failed to spawn decision agent for work agent",
@@ -584,7 +582,6 @@ impl WorkerPool {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -778,12 +775,12 @@ impl WorkerPool {
 
         // Ensure decision agent exists for this work agent
         // It may have been stopped or lost during pause/crash
-        if !self.has_decision_agent(agent_id) {
-            if let Ok(slot_index) = self.find_slot_index(agent_id) {
+        if !self.has_decision_agent(agent_id)
+            && let Ok(slot_index) = self.find_slot_index(agent_id) {
                 let provider_kind_opt = self.slots[slot_index].provider_type().to_provider_kind();
-                if let Some(provider_kind) = provider_kind_opt {
-                    if provider_kind != ProviderKind::Mock {
-                        if let Err(e) = self.spawn_decision_agent_for(agent_id) {
+                if let Some(provider_kind) = provider_kind_opt
+                    && provider_kind != ProviderKind::Mock
+                        && let Err(e) = self.spawn_decision_agent_for(agent_id) {
                             logging::warn_event(
                                 "pool.resume.decision_agent_failed",
                                 "failed to spawn decision agent for resumed agent",
@@ -793,10 +790,7 @@ impl WorkerPool {
                                 }),
                             );
                         }
-                    }
-                }
             }
-        }
 
         logging::debug_event(
             "pool.agent.resume_with_worktree",
@@ -924,8 +918,8 @@ impl WorkerPool {
 
         // Spawn decision agent for OVERVIEW (if provider supports it)
         // All non-Mock agents should have decision layer support
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                 logging::warn_event(
                     "pool.overview.decision_agent_failed",
                     "failed to spawn decision agent for OVERVIEW",
@@ -935,7 +929,6 @@ impl WorkerPool {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -1196,15 +1189,14 @@ impl WorkerPool {
 
             // If no channel response received, check for fallback response
             // This handles the case where async thread couldn't send via channel
-            if !received_this_poll {
-                if let Some(response) = decision_agent.take_fallback_response() {
+            if !received_this_poll
+                && let Some(response) = decision_agent.take_fallback_response() {
                     if response.is_error() {
                         had_error = true;
                     }
                     responses.push((work_agent_id.clone(), response));
                     received_this_poll = true;
                 }
-            }
 
             // Only clear thinking status if we actually received a response
             // This prevents premature reset when async thread is still running
@@ -1458,9 +1450,9 @@ impl WorkerPool {
         // All non-Mock agents should have decision layer support
         if let Ok(slot_index) = self.find_slot_index(&agent_id) {
             let provider_kind_opt = self.slots[slot_index].provider_type().to_provider_kind();
-            if let Some(provider_kind) = provider_kind_opt {
-                if provider_kind != ProviderKind::Mock {
-                    if let Err(e) = self.spawn_decision_agent_for(&agent_id) {
+            if let Some(provider_kind) = provider_kind_opt
+                && provider_kind != ProviderKind::Mock
+                    && let Err(e) = self.spawn_decision_agent_for(&agent_id) {
                         logging::warn_event(
                             "pool.restore.decision_agent_failed",
                             "failed to spawn decision agent for restored agent",
@@ -1470,8 +1462,6 @@ impl WorkerPool {
                             }),
                         );
                     }
-                }
-            }
         }
 
         logging::debug_event(
@@ -2009,11 +1999,10 @@ impl WorkerPool {
                                 .unwrap_or(false);
 
                             // Only clear from blocked slot if reassignment succeeded
-                            if reassignment_succeeded {
-                                if let Some(blocked_slot) = self.get_slot_mut_by_id(agent_id) {
+                            if reassignment_succeeded
+                                && let Some(blocked_slot) = self.get_slot_mut_by_id(agent_id) {
                                     blocked_slot.clear_task();
                                 }
-                            }
                             // If reassignment failed, task stays with blocked agent
                         }
                     }

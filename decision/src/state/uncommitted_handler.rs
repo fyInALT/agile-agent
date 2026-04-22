@@ -247,7 +247,7 @@ impl UncommittedAnalyzer {
                 format!("Uncertain context with {} - human decision needed", file_summary)
             }
             (ChangesContext::Temporary, _) => {
-                format!("Temporary/debug changes detected - discarding")
+                "Temporary/debug changes detected - discarding".to_string()
             }
         }
     }

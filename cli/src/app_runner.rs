@@ -630,8 +630,8 @@ fn run_loop_headless_multi_agent(
                     if status.is_idle() && !has_task {
                         // Find a ready task
                         for (task_id, task_status) in &ready_tasks {
-                            if *task_status == TaskStatus::Ready {
-                                if let Some(slot_mut) = session.agents.get_slot_mut(slot_idx) {
+                            if *task_status == TaskStatus::Ready
+                                && let Some(slot_mut) = session.agents.get_slot_mut(slot_idx) {
                                     let tid = agent_core::agent_slot::TaskId::new(task_id);
                                     if slot_mut.assign_task(tid).is_ok() {
                                         eprintln!(
@@ -644,7 +644,6 @@ fn run_loop_headless_multi_agent(
                                         break;
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -761,7 +760,7 @@ fn persist_agent_runtime_bundle(agent_runtime: &AgentRuntime, state: &AppState) 
 
 fn print_decision_list(_pending: bool) -> Result<()> {
     println!("No pending decision requests.");
-    println!("");
+    println!();
     println!("Usage:");
     println!("  agile-agent decision list --pending    List pending requests");
     println!("  agile-agent decision show <id>         Show request details");
@@ -812,7 +811,7 @@ fn respond_to_decision(
 
 fn print_decision_history(count: usize) -> Result<()> {
     println!("Decision History (last {} entries):", count);
-    println!("");
+    println!();
     println!("No decision history available.");
     Ok(())
 }
@@ -832,7 +831,7 @@ fn print_profile_list(verbose: bool) -> Result<()> {
     let store = persistence.load_merged()?;
 
     println!("Provider Profiles:");
-    println!("");
+    println!();
 
     for profile in store.list_profiles() {
         let marker = if profile.id == *store.default_work_profile_id() {
@@ -856,11 +855,11 @@ fn print_profile_list(verbose: bool) -> Result<()> {
             if let Some(ref desc) = profile.description {
                 println!("    Description: {}", desc);
             }
-            println!("");
+            println!();
         }
     }
 
-    println!("");
+    println!();
     println!("Default work profile: {}", store.default_work_profile_id());
     println!("Default decision profile: {}", store.default_decision_profile_id());
 

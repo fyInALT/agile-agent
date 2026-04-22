@@ -848,7 +848,7 @@ impl PromptVariables {
             .iter()
             .filter_map(|action_type| {
                 action_registry
-                    .get(&action_type)
+                    .get(action_type)
                     .map(|action| action.to_prompt_format())
             })
             .collect();

@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Action subsystem - decision execution actions
 //!
 //! Provides:

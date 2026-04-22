@@ -66,6 +66,7 @@ pub enum KanbanSyncResult {
 
 /// Next task selection result
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum NextTaskResult {
     /// Task selected successfully
     Selected {
@@ -186,7 +187,7 @@ impl DecisionKanbanIntegration {
                             {
                                 // Update status
                                 let result = kanban.update_status(
-                                    &elem.id().unwrap(),
+                                    elem.id().unwrap(),
                                     Status::Done,
                                     "decision_layer",
                                 );
@@ -340,10 +341,10 @@ impl DecisionKanbanIntegration {
         if let Some(kanban) = &self.kanban {
             let element_id = ElementId::parse(story_id).ok()?;
 
-            if let Ok(Some(element)) = kanban.get_element(&element_id) {
-                if element.element_type() == ElementType::Story {
-                    return Some(element.content().to_string());
-                }
+            if let Ok(Some(element)) = kanban.get_element(&element_id)
+                && element.element_type() == ElementType::Story
+            {
+                return Some(element.content().to_string());
             }
         }
         None
@@ -356,10 +357,10 @@ impl DecisionKanbanIntegration {
         if let Some(kanban) = &self.kanban {
             let element_id = ElementId::parse(task_id).ok()?;
 
-            if let Ok(Some(element)) = kanban.get_element(&element_id) {
-                if element.element_type() == ElementType::Task {
-                    return Some(element);
-                }
+            if let Ok(Some(element)) = kanban.get_element(&element_id)
+                && element.element_type() == ElementType::Task
+            {
+                return Some(element);
             }
         }
         None

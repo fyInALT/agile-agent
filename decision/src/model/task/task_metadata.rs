@@ -85,7 +85,9 @@ impl TaskMetadata {
 /// Task type classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TaskType {
+    #[default]
     Feature,
     Bugfix,
     Refactor,
@@ -95,11 +97,6 @@ pub enum TaskType {
     Hotfix,
 }
 
-impl Default for TaskType {
-    fn default() -> Self {
-        TaskType::Feature
-    }
-}
 
 impl TaskType {
     /// Get the branch prefix for this task type
@@ -138,18 +135,15 @@ impl std::fmt::Display for TaskType {
 /// Task priority classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TaskPriority {
     Critical,
     High,
+    #[default]
     Medium,
     Low,
 }
 
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Medium
-    }
-}
 
 impl std::fmt::Display for TaskPriority {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -407,11 +401,10 @@ pub fn has_numeric_suffix(branch_name: &str) -> Option<u8> {
 /// Generate next branch name with incremented suffix
 pub fn increment_branch_suffix(branch_name: &str) -> String {
     let parts: Vec<&str> = branch_name.rsplitn(2, '-').collect();
-    if parts.len() == 2 {
-        if let Ok(suffix) = parts[0].parse::<u8>() {
+    if parts.len() == 2
+        && let Ok(suffix) = parts[0].parse::<u8>() {
             return format!("{}-{}", parts[1], suffix + 1);
         }
-    }
     format!("{}-2", branch_name)
 }
 

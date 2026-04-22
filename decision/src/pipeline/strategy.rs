@@ -233,10 +233,12 @@ impl TieredStrategy {
 
 /// Decision tier level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DecisionTier {
     /// Tier 1: Simple - use rule-based maker
     Simple,
     /// Tier 2: Medium - Use LLM maker
+    #[default]
     Medium,
     /// Tier 3: Complex - Use LLM maker with more context
     Complex,
@@ -244,11 +246,6 @@ pub enum DecisionTier {
     Critical,
 }
 
-impl Default for DecisionTier {
-    fn default() -> Self {
-        DecisionTier::Medium
-    }
-}
 
 impl DecisionTier {
     /// Get tier number (1-4)
@@ -496,15 +493,14 @@ impl DecisionStrategy for AdaptiveStrategy {
         let success_rate = self.success_rate(&base_selection);
 
         // If below threshold and we have fallback, use fallback
-        if success_rate < self.adaptation_threshold {
-            if let Some(fallback) = self.base_strategy.fallback() {
+        if success_rate < self.adaptation_threshold
+            && let Some(fallback) = self.base_strategy.fallback() {
                 // Check fallback success rate
                 let fallback_rate = self.success_rate(&fallback);
                 if fallback_rate > success_rate {
                     return fallback;
                 }
             }
-        }
 
         base_selection
     }

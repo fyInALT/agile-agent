@@ -37,6 +37,7 @@ impl ConditionExpr {
     }
 
     /// Create a NOT expression
+    #[allow(clippy::should_implement_trait)]
     pub fn not(expr: ConditionExpr) -> Self {
         ConditionExpr::Not(Box::new(expr))
     }

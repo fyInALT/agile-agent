@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Provider kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ProviderKind {
     /// Claude provider
     Claude,
@@ -12,6 +13,7 @@ pub enum ProviderKind {
     /// ACP provider (OpenCode/Kimi)
     ACP,
     /// Unknown provider
+    #[default]
     Unknown,
 }
 
@@ -42,11 +44,6 @@ impl ProviderKind {
     }
 }
 
-impl Default for ProviderKind {
-    fn default() -> Self {
-        ProviderKind::Unknown
-    }
-}
 
 impl std::fmt::Display for ProviderKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

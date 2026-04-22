@@ -80,6 +80,7 @@ pub fn spawn_decision_agent_with_profile_for(
 }
 
 /// Internal helper to spawn decision agent with provider kind and optional profile
+#[allow(clippy::ptr_arg)]
 fn spawn_with_provider(
     decision_coordinator: &mut WorkerDecisionRouter,
     cwd: &PathBuf,

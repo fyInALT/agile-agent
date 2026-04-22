@@ -207,8 +207,8 @@ impl DecisionMakerRegistry {
         // 4. Try each maker in order
         let mut last_error = None;
         for maker_type in &maker_chain {
-            if let Some(mut maker) = self.get_for_execution(maker_type) {
-                if maker.is_healthy() {
+            if let Some(mut maker) = self.get_for_execution(maker_type)
+                && maker.is_healthy() {
                     // Note: context is consumed, so we can only try one maker
                     // with the original context. If we need fallback support,
                     // we would need to clone context or pass by reference.
@@ -226,7 +226,6 @@ impl DecisionMakerRegistry {
                         }
                     }
                 }
-            }
         }
 
         // 5. All makers failed or unavailable
@@ -267,8 +266,8 @@ impl DecisionMakerRegistry {
         // 4. Try each maker
         let mut last_error = None;
         for maker_type in &maker_chain {
-            if let Some(mut maker) = self.get_for_execution(maker_type) {
-                if maker.is_healthy() {
+            if let Some(mut maker) = self.get_for_execution(maker_type)
+                && maker.is_healthy() {
                     // Create a clone of context for each attempt
                     // Note: DecisionContext needs Clone for this to work
                     // Currently this approach won't work since DecisionContext
@@ -282,7 +281,6 @@ impl DecisionMakerRegistry {
                         }
                     }
                 }
-            }
         }
 
         // 5. All makers failed

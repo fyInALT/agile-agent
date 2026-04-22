@@ -228,6 +228,7 @@ impl WorkerHandle {
     }
 
     /// Restore a slot from persisted state without an active provider thread.
+    #[allow(clippy::too_many_arguments)]
     pub fn restored(
         agent_id: AgentId,
         codename: AgentCodename,
@@ -254,6 +255,7 @@ impl WorkerHandle {
     }
 
     /// Restore a slot from persisted state with worktree information.
+    #[allow(clippy::too_many_arguments)]
     pub fn restored_with_worktree(
         agent_id: AgentId,
         codename: AgentCodename,
@@ -968,30 +970,27 @@ impl WorkerHandle {
     ///
     /// Resets the on_resume flag to false after the attempt.
     pub fn record_recovery_attempt(&mut self) {
-        match &mut self.status {
-            AgentSlotStatus::Resting {
+        if let AgentSlotStatus::Resting {
                 started_at,
                 blocked_state,
                 on_resume,
-            } => {
-                // Just check it's a rate limit - we don't need to update internal state
-                // since we're using the elapsed time from started_at
-                let _ = blocked_state.is_rate_limit();
+            } = &mut self.status {
+            // Just check it's a rate limit - we don't need to update internal state
+            // since we're using the elapsed time from started_at
+            let _ = blocked_state.is_rate_limit();
 
-                // Reset on_resume flag
-                *on_resume = false;
+            // Reset on_resume flag
+            *on_resume = false;
 
-                logging::debug_event(
-                    "slot.resting.attempt",
-                    "rate limit recovery attempt recorded",
-                    serde_json::json!({
-                        "agent_id": self.agent_id.as_str(),
-                        "codename": self.codename.as_str(),
-                        "started_at": started_at.to_rfc3339(),
-                    }),
-                );
-            }
-            _ => {}
+            logging::debug_event(
+                "slot.resting.attempt",
+                "rate limit recovery attempt recorded",
+                serde_json::json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "codename": self.codename.as_str(),
+                    "started_at": started_at.to_rfc3339(),
+                }),
+            );
         }
     }
 

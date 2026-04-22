@@ -170,6 +170,7 @@ impl WorkerWorktreeManager {
     }
 
     /// Check if worktree has changes
+    #[allow(clippy::ptr_arg)]
     pub fn has_changes(&self, worktree_path: &PathBuf) -> bool {
         self.manager
             .as_ref()
@@ -178,6 +179,7 @@ impl WorkerWorktreeManager {
     }
 
     /// Get head commit for worktree
+    #[allow(clippy::ptr_arg)]
     pub fn get_head_commit(&self, worktree_path: &PathBuf) -> Option<String> {
         self.manager
             .as_ref()

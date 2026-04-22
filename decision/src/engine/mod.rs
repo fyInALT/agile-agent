@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Engine layer - decision execution implementations
 //!
 //! Provides various decision engines:

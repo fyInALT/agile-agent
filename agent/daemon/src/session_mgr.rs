@@ -540,7 +540,7 @@ impl EventLoop {
             let assigned_task_id = agent_shutdown
                 .assigned_task_id
                 .as_ref()
-                .map(|t| agent_types::TaskId::new(t));
+                .map(agent_types::TaskId::new);
 
             // Use snapshot transcript if present; otherwise fall back to per-agent
             // transcript.json on disk (written by save_shutdown_snapshot).
@@ -657,196 +657,191 @@ impl EventLoop {
         let poll_result = inner.event_aggregator.poll_all();
 
         for agent_event in poll_result.events {
-            match agent_event {
-                agent_core::event_aggregator::AgentEvent::FromProvider {
+            if let agent_core::event_aggregator::AgentEvent::FromProvider {
                     agent_id,
                     event,
-                } => {
-                    // Update activity timestamp.
-                    if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&agent_id) {
-                        slot.touch_activity();
-                        if slot.status().is_waiting_for_input() {
-                            let _ = slot
-                                .transition_to(CoreAgentStatus::responding_now());
-                        }
+                } = agent_event {
+                // Update activity timestamp.
+                if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&agent_id) {
+                    slot.touch_activity();
+                    if slot.status().is_waiting_for_input() {
+                        let _ = slot
+                            .transition_to(CoreAgentStatus::responding_now());
                     }
+                }
 
-                    // Update slot state based on event type.
-                    match &event {
-                        agent_core::ProviderEvent::Finished => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                if slot.status().is_active() {
-                                    let _ = slot
-                                        .transition_to(CoreAgentStatus::idle());
-                                }
-                                slot.clear_provider_thread();
-                            }
-                            inner.event_aggregator.remove_receiver(&agent_id);
-                        }
-                        agent_core::ProviderEvent::Error(error) => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                slot.append_transcript(TranscriptEntry::Error(
-                                    error.clone(),
-                                ));
-                                let _ = slot.transition_to(
-                                    CoreAgentStatus::blocked(error.clone()),
-                                );
-                                slot.clear_provider_thread();
-                            }
-                            inner.event_aggregator.remove_receiver(&agent_id);
-                        }
-                        agent_core::ProviderEvent::AssistantChunk(chunk) => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                slot.append_transcript(
-                                    TranscriptEntry::Assistant(chunk.clone()),
-                                );
-                            }
-                        }
-                        agent_core::ProviderEvent::ThinkingChunk(chunk) => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                slot.append_transcript(
-                                    TranscriptEntry::Thinking(chunk.clone()),
-                                );
-                            }
-                        }
-                        agent_core::ProviderEvent::Status(text) => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                slot.append_transcript(TranscriptEntry::Status(
-                                    text.clone(),
-                                ));
-                            }
-                        }
-                        agent_core::ProviderEvent::ExecCommandStarted {
-                            call_id,
-                            input_preview,
-                            source,
-                        } => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                slot.append_transcript(
-                                    TranscriptEntry::ExecCommand {
-                                        call_id: call_id.clone(),
-                                        source: source.clone(),
-                                        allow_exploring_group: true,
-                                        input_preview: input_preview.clone(),
-                                        output_preview: None,
-                                        status: agent_core::ExecCommandStatus::InProgress,
-                                        exit_code: None,
-                                        duration_ms: None,
-                                    },
-                                );
-                            }
-                        }
-                        agent_core::ProviderEvent::ExecCommandOutputDelta {
-                            call_id: _,
-                            delta,
-                        } => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                // Append to the last ExecCommand entry.
-                                if let Some(
-                                    TranscriptEntry::ExecCommand {
-                                        output_preview, ..
-                                    },
-                                ) = slot.transcript_mut().last_mut()
-                                {
-                                    if let Some(preview) = output_preview {
-                                        preview.push_str(delta);
-                                    } else {
-                                        *output_preview = Some(delta.clone());
-                                    }
-                                }
-                            }
-                        }
-                        agent_core::ProviderEvent::ExecCommandFinished {
-                            call_id: _,
-                            output_preview,
-                            status,
-                            exit_code,
-                            duration_ms: _,
-                            source: _,
-                        } => {
-                            if let Some(slot) =
-                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
-                            {
-                                if let Some(
-                                    TranscriptEntry::ExecCommand {
-                                        output_preview: out,
-                                        status: st,
-                                        exit_code: ec,
-                                        duration_ms: dm,
-                                        ..
-                                    },
-                                ) = slot.transcript_mut().last_mut()
-                                {
-                                    if out.is_none() {
-                                        *out = output_preview.clone();
-                                    }
-                                    *st = *status;
-                                    *ec = *exit_code;
-                                    *dm = None;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    // Decision layer integration.
-                    let classify_result =
-                        inner.agent_pool.classify_event(&agent_id, &event);
-                    if classify_result.is_needs_decision() {
-                        let situation = classify_result
-                            .situation()
-                            .map(|s| s.clone_boxed())
-                            .unwrap_or_else(|| {
-                                let components =
-                                    agent_decision::initializer::initialize_decision_layer();
-                                components.situation_registry.build(
-                                    classify_result
-                                        .situation_type()
-                                        .unwrap()
-                                        .clone(),
-                                )
-                            });
-                        let situation_type = classify_result.situation_type().unwrap();
-                        let context = agent_decision::context::DecisionContext::new(
-                            situation.clone_boxed(),
-                            agent_id.as_str(),
-                        );
-                        let request = agent_core::decision_mail::DecisionRequest::new(
-                            agent_id.clone(),
-                            situation_type.clone(),
-                            context,
-                        );
-                        if let Err(e) =
-                            inner.agent_pool.send_decision_request(&agent_id, request)
+                // Update slot state based on event type.
+                match &event {
+                    agent_core::ProviderEvent::Finished => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
                         {
-                            tracing::warn!(
-                                agent_id = %agent_id.as_str(),
-                                error = %e,
-                                "failed to send decision request"
+                            if slot.status().is_active() {
+                                let _ = slot
+                                    .transition_to(CoreAgentStatus::idle());
+                            }
+                            slot.clear_provider_thread();
+                        }
+                        inner.event_aggregator.remove_receiver(&agent_id);
+                    }
+                    agent_core::ProviderEvent::Error(error) => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.append_transcript(TranscriptEntry::Error(
+                                error.clone(),
+                            ));
+                            let _ = slot.transition_to(
+                                CoreAgentStatus::blocked(error.clone()),
+                            );
+                            slot.clear_provider_thread();
+                        }
+                        inner.event_aggregator.remove_receiver(&agent_id);
+                    }
+                    agent_core::ProviderEvent::AssistantChunk(chunk) => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.append_transcript(
+                                TranscriptEntry::Assistant(chunk.clone()),
                             );
                         }
                     }
-
-                    // Convert to protocol events and collect for broadcast.
-                    let protocol_events =
-                        pump.process(agent_id.as_str().to_string(), event);
-                    broadcast_events.extend(protocol_events);
+                    agent_core::ProviderEvent::ThinkingChunk(chunk) => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.append_transcript(
+                                TranscriptEntry::Thinking(chunk.clone()),
+                            );
+                        }
+                    }
+                    agent_core::ProviderEvent::Status(text) => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.append_transcript(TranscriptEntry::Status(
+                                text.clone(),
+                            ));
+                        }
+                    }
+                    agent_core::ProviderEvent::ExecCommandStarted {
+                        call_id,
+                        input_preview,
+                        source,
+                    } => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.append_transcript(
+                                TranscriptEntry::ExecCommand {
+                                    call_id: call_id.clone(),
+                                    source: source.clone(),
+                                    allow_exploring_group: true,
+                                    input_preview: input_preview.clone(),
+                                    output_preview: None,
+                                    status: agent_core::ExecCommandStatus::InProgress,
+                                    exit_code: None,
+                                    duration_ms: None,
+                                },
+                            );
+                        }
+                    }
+                    agent_core::ProviderEvent::ExecCommandOutputDelta {
+                        call_id: _,
+                        delta,
+                    } => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            // Append to the last ExecCommand entry.
+                            if let Some(
+                                TranscriptEntry::ExecCommand {
+                                    output_preview, ..
+                                },
+                            ) = slot.transcript_mut().last_mut()
+                            {
+                                if let Some(preview) = output_preview {
+                                    preview.push_str(delta);
+                                } else {
+                                    *output_preview = Some(delta.clone());
+                                }
+                            }
+                        }
+                    }
+                    agent_core::ProviderEvent::ExecCommandFinished {
+                        call_id: _,
+                        output_preview,
+                        status,
+                        exit_code,
+                        duration_ms: _,
+                        source: _,
+                    } => {
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            && let Some(
+                                TranscriptEntry::ExecCommand {
+                                    output_preview: out,
+                                    status: st,
+                                    exit_code: ec,
+                                    duration_ms: dm,
+                                    ..
+                                },
+                            ) = slot.transcript_mut().last_mut()
+                            {
+                                if out.is_none() {
+                                    *out = output_preview.clone();
+                                }
+                                *st = *status;
+                                *ec = *exit_code;
+                                *dm = None;
+                            }
+                    }
+                    _ => {}
                 }
-                _ => {}
+
+                // Decision layer integration.
+                let classify_result =
+                    inner.agent_pool.classify_event(&agent_id, &event);
+                if classify_result.is_needs_decision() {
+                    let situation = classify_result
+                        .situation()
+                        .map(|s| s.clone_boxed())
+                        .unwrap_or_else(|| {
+                            let components =
+                                agent_decision::initializer::initialize_decision_layer();
+                            components.situation_registry.build(
+                                classify_result
+                                    .situation_type()
+                                    .unwrap()
+                                    .clone(),
+                            )
+                        });
+                    let situation_type = classify_result.situation_type().unwrap();
+                    let context = agent_decision::context::DecisionContext::new(
+                        situation.clone_boxed(),
+                        agent_id.as_str(),
+                    );
+                    let request = agent_core::decision_mail::DecisionRequest::new(
+                        agent_id.clone(),
+                        situation_type.clone(),
+                        context,
+                    );
+                    if let Err(e) =
+                        inner.agent_pool.send_decision_request(&agent_id, request)
+                    {
+                        tracing::warn!(
+                            agent_id = %agent_id.as_str(),
+                            error = %e,
+                            "failed to send decision request"
+                        );
+                    }
+                }
+
+                // Convert to protocol events and collect for broadcast.
+                let protocol_events =
+                    pump.process(agent_id.as_str().to_string(), event);
+                broadcast_events.extend(protocol_events);
             }
         }
 
@@ -1003,7 +998,7 @@ impl EventLoop {
                             .get_slot_by_id(&work_agent_id)
                             .map(|s| s.status().label());
 
-                        let is_valid = slot_status.as_deref().map_or(false, |status| {
+                        let is_valid = slot_status.as_deref().is_some_and(|status| {
                             status == "responding"
                                 || status == "starting"
                                 || status == "idle"
@@ -1742,11 +1737,13 @@ use agent_behavior_infra::{
     SendToProviderHandler, SpawnProviderHandler, TerminateHandler, UpdateWorktreeHandler,
 };
 
+#[allow(dead_code)]
 struct DaemonEffectHandler {
     inner: Arc<Mutex<SessionInner>>,
 }
 
 impl DaemonEffectHandler {
+    #[allow(clippy::new_ret_no_self)]
     fn new(inner: Arc<Mutex<SessionInner>>) -> CompositeEffectHandler {
         let daemon = Arc::new(Self { inner });
         CompositeEffectHandler::new(
@@ -1762,6 +1759,7 @@ impl DaemonEffectHandler {
 
 macro_rules! daemon_handler {
     ($name:ident, $trait:ident, $fn_sig:tt, $body:block) => {
+        #[allow(dead_code)]
         struct $name(Arc<DaemonEffectHandler>);
         impl $trait for $name {
             fn execute $fn_sig -> Result<(), agent_behavior_infra::EffectError> $body

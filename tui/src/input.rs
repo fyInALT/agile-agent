@@ -304,10 +304,9 @@ pub fn handle_key_event(state: &mut TuiState, key_event: KeyEvent) -> InputOutco
         } if modifiers.contains(KeyModifiers::ALT)
             && state.composer.is_empty()
             && state.view_state.mode == crate::view_mode::ViewMode::Dashboard
-            && c >= '1'
-            && c <= '9' =>
+            && ('1'..='9').contains(&c) =>
         {
-            InputOutcome::DashboardSelect(c as u8 - '1' as u8 + 1)
+            InputOutcome::DashboardSelect(c as u8 - b'1' + 1)
         }
 
         // Mail view: arrow keys, c compose, r reply, m mark read

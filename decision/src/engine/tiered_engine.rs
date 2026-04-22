@@ -21,8 +21,10 @@ use std::sync::Arc;
 
 /// Tier level for engine selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DecisionTier {
     /// Tier 1: Simple - use RuleBased engine
+    #[default]
     Simple,
 
     /// Tier 2: Medium - use LLM engine
@@ -35,11 +37,6 @@ pub enum DecisionTier {
     Critical,
 }
 
-impl Default for DecisionTier {
-    fn default() -> Self {
-        DecisionTier::Simple
-    }
-}
 
 impl DecisionTier {
     /// Determine tier from situation complexity
@@ -261,7 +258,7 @@ impl TieredDecisionEngine {
         let context = DecisionContext::new(situation, "tiered-agent");
 
         match engine.decide(context, action_registry) {
-            Ok(output) => return Ok(output),
+            Ok(output) => Ok(output),
             Err(e) => {
                 // Try fallback tier
                 let fallback_tier = self.config.fallback_tier;
@@ -272,7 +269,7 @@ impl TieredDecisionEngine {
                     let context2 = DecisionContext::new(situation2, "tiered-agent");
                     return fallback_engine.decide(context2, action_registry);
                 }
-                return Err(e);
+                Err(e)
             }
         }
     }

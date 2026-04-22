@@ -314,15 +314,13 @@ impl RunningContextCache {
             }
 
             // Compress thinking
-            if self.current_size > self.max_total_bytes {
-                if let Some(thinking) = &self.thinking_summary {
-                    if thinking.len() > 100 {
+            if self.current_size > self.max_total_bytes
+                && let Some(thinking) = &self.thinking_summary
+                    && thinking.len() > 100 {
                         let compressed = thinking.chars().skip(thinking.len() - 100).collect();
                         self.thinking_summary = Some(compressed);
                         self.recalculate_size();
                     }
-                }
-            }
 
             // Remove diff previews from file changes
             if self.current_size > self.max_total_bytes {

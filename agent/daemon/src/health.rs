@@ -75,11 +75,10 @@ pub fn spawn_memory_monitor() {
                 interval.tick().await;
                 match tokio::fs::read_to_string("/proc/self/status").await {
                     Ok(content) => {
-                        if let Some(kb) = parse_vm_rss_kb(&content) {
-                            if kb > 500 * 1024 {
+                        if let Some(kb) = parse_vm_rss_kb(&content)
+                            && kb > 500 * 1024 {
                                 tracing::warn!("Daemon RSS exceeds 500MB: {} kB", kb);
                             }
-                        }
                     }
                     Err(e) => {
                         tracing::debug!("Failed to read /proc/self/status: {}", e);

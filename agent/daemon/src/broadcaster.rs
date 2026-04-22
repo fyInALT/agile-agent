@@ -12,6 +12,12 @@ pub struct EventBroadcaster {
     client_seqs: Arc<Mutex<HashMap<String, u64>>>,
 }
 
+impl Default for EventBroadcaster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventBroadcaster {
     pub fn new() -> Self {
         Self {

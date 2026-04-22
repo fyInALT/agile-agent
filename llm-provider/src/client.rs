@@ -267,29 +267,22 @@ impl LlmProvider for LlmClient {
         Ok(())
     }
 
-    fn complete_async(
-        &self,
-        prompt: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
-        async move {
-            Ok(LlmResponse {
-                content: self.send(prompt)?,
-                usage: None,
-            })
-        }
+    async fn complete_async(&self, prompt: &str) -> anyhow::Result<LlmResponse> {
+        Ok(LlmResponse {
+            content: self.send(prompt)?,
+            usage: None,
+        })
     }
 
-    fn complete_async_with_model(
+    async fn complete_async_with_model(
         &self,
         prompt: &str,
         model: ModelType,
-    ) -> impl std::future::Future<Output = anyhow::Result<LlmResponse>> + Send {
-        async move {
-            Ok(LlmResponse {
-                content: self.send_with_model(prompt, model)?,
-                usage: None,
-            })
-        }
+    ) -> anyhow::Result<LlmResponse> {
+        Ok(LlmResponse {
+            content: self.send_with_model(prompt, model)?,
+            usage: None,
+        })
     }
 }
 

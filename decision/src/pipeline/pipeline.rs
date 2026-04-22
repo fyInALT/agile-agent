@@ -486,7 +486,7 @@ impl DecisionPreProcessor for ReflectionRoundPreProcessor {
     fn process(&self, context: &mut DecisionContext) -> crate::error::Result<()> {
         // Reflection round is already in context metadata
         // This processor ensures it's properly set
-        if context.metadata.get("reflection_round").is_none() {
+        if !context.metadata.contains_key("reflection_round") {
             context
                 .metadata
                 .insert("reflection_round".to_string(), "0".to_string());

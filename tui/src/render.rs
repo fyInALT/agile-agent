@@ -884,7 +884,7 @@ fn render_profile_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
 
     let profile_count = overlay.profiles().len();
     // Height: title(1) + section headers(2) + profiles + hints(3) + gap(1)
-    let height = (1 + 2 + profile_count + 4).max(12).min(22) as u16;
+    let height = (1 + 2 + profile_count + 4).clamp(12, 22) as u16;
     let area = centered_rect(65, height, frame.area());
 
     frame.render_widget(Clear, area);
@@ -930,9 +930,7 @@ fn render_profile_selection_overlay(frame: &mut Frame<'_>, state: &TuiState) {
         let is_decision_focused = overlay.section() == ProfileSection::Decision;
 
         // Determine marker based on which section is focused and selected
-        let marker = if is_work_focused && is_work_selected {
-            ">"
-        } else if is_decision_focused && is_decision_selected {
+        let marker = if (is_work_focused && is_work_selected) || (is_decision_focused && is_decision_selected) {
             ">"
         } else {
             " "
@@ -1251,18 +1249,17 @@ fn render_human_decision_overlay(frame: &mut Frame<'_>, state: &TuiState) {
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines = Vec::new();
-
-    // Request info
-    lines.push(Line::from(vec![
-        Span::styled("Request: ", Style::default().fg(Color::Gray)),
-        Span::styled(
-            overlay.request.id.clone(),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Request: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                overlay.request.id.clone(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
 
     lines.push(Line::from(vec![
         Span::styled("Agent: ", Style::default().fg(Color::Gray)),
@@ -2455,8 +2452,8 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
 
     let header_spans: Vec<Span> = columns
         .iter()
-        .enumerate()
-        .map(|(_i, col)| {
+        
+        .map(|col| {
             Span::styled(
                 format!("  {:width$}", col, width = column_width as usize - 2),
                 Style::default()
@@ -2512,8 +2509,8 @@ fn render_task_matrix_grid(frame: &mut Frame<'_>, state: &mut TuiState, area: Re
             (verified_task, Color::Blue),
         ]
         .iter()
-        .enumerate()
-        .map(|(_col_idx, (task, color))| {
+        
+        .map(|(task, color)| {
             let task_text = if let Some(t) = task {
                 // Truncate title to fit column
                 let title = t.title();

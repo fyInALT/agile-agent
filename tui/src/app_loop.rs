@@ -110,8 +110,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
         use agent_core::global_config::GlobalConfigStore;
         use agent_core::provider_profile::ProfilePersistence;
 
-        if let Ok(config_store) = GlobalConfigStore::new() {
-            if let Ok(profile_store) = config_store.load_profile_store() {
+        if let Ok(config_store) = GlobalConfigStore::new()
+            && let Ok(profile_store) = config_store.load_profile_store() {
                 // Merge with workplace profiles if available
                 let persistence = ProfilePersistence::for_paths(
                     config_store.path().clone(),
@@ -130,7 +130,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                     );
                 }
             }
-        }
     }
 
     let mut provider_rx: Option<mpsc::Receiver<ProviderEvent>> = None;
@@ -927,9 +926,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         handle_paste_event(&mut state, &text);
                     }
                 }
-                Event::Mouse(mouse_event) => {
+                Event::Mouse(mouse_event)
                     // Handle mouse click in Overview mode for agent selection
-                    if state.view_state.mode == crate::view_mode::ViewMode::Overview {
+                    if state.view_state.mode == crate::view_mode::ViewMode::Overview => {
                         use crossterm::event::MouseEventKind;
                         if let MouseEventKind::Down(crossterm::event::MouseButton::Left) =
                             mouse_event.kind
@@ -957,7 +956,6 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             }
                         }
                     }
-                }
                 Event::Resize(_, _) => {}
                 _ => {}
             }
@@ -1262,8 +1260,8 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
                 // by projecting the session reference directly
                 {
                     let backlog_ref = &mut state.session.app.backlog;
-                    if let Some(pool) = state.agent_pool.as_mut() {
-                        if let Some(idle_agent_id) = pool.find_idle_agent_id() {
+                    if let Some(pool) = state.agent_pool.as_mut()
+                        && let Some(idle_agent_id) = pool.find_idle_agent_id() {
                             // Assign task to agent via assign_task_with_backlog to trigger trigger_task_preparation
                             if let Err(e) = pool.assign_task_with_backlog(
                                 &idle_agent_id,
@@ -1290,7 +1288,6 @@ fn handle_local_command(state: &mut TuiState, command: LocalCommand) -> Option<S
                                 );
                             }
                         }
-                    }
                 }
             }
 
@@ -1377,14 +1374,13 @@ fn start_multi_agent_provider_request(state: &mut TuiState, prompt: String) {
         }),
     );
 
-    if let Some(agent_id) = focused_id {
-        if !start_multi_agent_provider_request_for_agent(state, agent_id, prompt, true) {
+    if let Some(agent_id) = focused_id
+        && !start_multi_agent_provider_request_for_agent(state, agent_id, prompt, true) {
             task_engine::handle_provider_start_failure(
                 state.app_mut(),
                 "failed to start provider for agent".to_string(),
             );
         }
-    }
 }
 
 fn start_multi_agent_provider_request_for_agent(
@@ -1703,9 +1699,7 @@ fn next_loop_prompt(state: &mut TuiState) -> Option<(String, bool)> {
         return Some((task_engine::build_task_prompt(&task), false));
     }
 
-    let Some(todo_id) = state.app().next_ready_todo_id() else {
-        return None;
-    };
+    let todo_id = state.app().next_ready_todo_id()?;
 
     state.app_mut().set_loop_phase(LoopPhase::Planning);
     let Some(task) = state.app_mut().begin_task_from_todo(&todo_id) else {
@@ -2368,8 +2362,8 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
     // Transition each agent and trigger decision layer
     for (agent_id, trigger_reason) in agents_to_process {
         // Transition agent status
-        if let Some(pool) = state.agent_pool.as_mut() {
-            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+        if let Some(pool) = state.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                 let _ = slot
                     .transition_to(agent_core::agent_slot::AgentSlotStatus::waiting_for_input());
                 logging::debug_event(
@@ -2381,7 +2375,6 @@ fn check_for_idle_responding_agents(state: &mut TuiState) {
                     }),
                 );
             }
-        }
 
         // Trigger decision layer for this agent to determine next action
         trigger_decision_for_idle_agent(state, &agent_id, &trigger_reason);
@@ -2594,7 +2587,7 @@ fn handle_agent_channel_disconnect(
 /// Get current time as HH:MM:SS packed into u32
 fn current_time_as_u32() -> u32 {
     let now = chrono::Local::now();
-    (now.hour() as u32 * 10000) + (now.minute() as u32 * 100) + now.second() as u32
+    (now.hour() * 10000) + (now.minute() * 100) + now.second()
 }
 
 #[cfg(test)]

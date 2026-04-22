@@ -101,6 +101,7 @@ fn is_localhost_origin(origin: &str) -> bool {
 }
 
 /// Validates the bearer token from query param or Authorization header.
+#[allow(clippy::result_large_err)]
 fn check_bearer_token(
     req: &tokio_tungstenite::tungstenite::http::Request<()>,
     bearer_token: &Option<String>,
@@ -159,6 +160,7 @@ impl Connection {
     ///
     /// If `event_rx` is provided, events are forwarded to the client as
     /// JSON-RPC notifications.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         stream: TcpStream,
         addr: std::net::SocketAddr,
@@ -169,13 +171,12 @@ impl Connection {
         rate_limiter: Option<RateLimiter>,
         audit_log: Option<crate::audit::AuditLog>,
     ) -> ConnectionId {
-        if let Some(ref t) = tracker {
-            if !t.try_connect() {
+        if let Some(ref t) = tracker
+            && !t.try_connect() {
                 tracing::warn!("Connection from {} rejected: max connections reached", addr);
                 // Drop the TCP stream immediately.
                 return String::new();
             }
-        }
 
         let id = format!("conn-{}", uuid::Uuid::new_v4());
         let id_clone = id.clone();
@@ -184,6 +185,7 @@ impl Connection {
         tokio::spawn(async move {
             let ws_stream = match tokio_tungstenite::accept_hdr_async(
                 stream,
+                #[allow(clippy::result_large_err)]
                 |req: &tokio_tungstenite::tungstenite::http::Request<()>,
                  response: tokio_tungstenite::tungstenite::http::Response<()>| {
                     if let Some(origin) = req.headers().get("origin") {
@@ -198,9 +200,7 @@ impl Connection {
                             );
                         }
                     }
-                    if let Err(err_response) = check_bearer_token(req, &bearer_token) {
-                        return Err(err_response);
-                    }
+                    check_bearer_token(req, &bearer_token)?;
                     Ok(response)
                 },
             )
@@ -307,8 +307,8 @@ impl Connection {
                         let _enter = _req_span.enter();
 
                         // Rate limiting check
-                        if let Some(ref mut limiter) = rate_limiter {
-                            if !limiter.try_acquire() {
+                        if let Some(ref mut limiter) = rate_limiter
+                            && !limiter.try_acquire() {
                                 tracing::warn!("Rate limit exceeded on {}", conn.id);
                                 // Attempt to echo the client's request ID; fallback to Null.
                                 let req_id = serde_json::from_str::<JsonRpcRequest>(&text)
@@ -330,7 +330,6 @@ impl Connection {
                                 }
                                 continue;
                             }
-                        }
 
                         let text = if text.len() > MAX_INPUT_SIZE {
                             tracing::warn!(
@@ -419,13 +418,11 @@ impl Connection {
         match msg {
             JsonRpcMessage::Request(req) => {
                 // Parse client_type from initialize params
-                if req.method == "session.initialize" {
-                    if let Some(ref params) = req.params {
-                        if let Ok(init) = serde_json::from_value::<agent_protocol::methods::InitializeParams>(params.clone()) {
+                if req.method == "session.initialize"
+                    && let Some(ref params) = req.params
+                        && let Ok(init) = serde_json::from_value::<agent_protocol::methods::InitializeParams>(params.clone()) {
                             self.client_type = Some(init.client_type);
                         }
-                    }
-                }
 
                 // Initialization gate
                 if self.state == ConnectionState::Connected
@@ -445,8 +442,8 @@ impl Connection {
                 }
 
                 // Debug commands restricted to CLI client type
-                if matches!(req.method.as_str(), "session.debugDump" | "session.forceSnapshot" | "session.listConnections") {
-                    if self.client_type != Some(agent_protocol::methods::ClientType::Cli) {
+                if matches!(req.method.as_str(), "session.debugDump" | "session.forceSnapshot" | "session.listConnections")
+                    && self.client_type != Some(agent_protocol::methods::ClientType::Cli) {
                         return Ok(Some(JsonRpcMessage::Error(JsonRpcErrorResponse {
                             jsonrpc: "2.0".to_string(),
                             id: req.id,
@@ -459,14 +456,13 @@ impl Connection {
                             ext: None,
                         })));
                     }
-                }
 
                 let method = req.method.clone();
                 let result = router.dispatch(req).await?;
 
                 // Audit log for sensitive operations
-                if let Some(log) = audit_log {
-                    if matches!(method.as_str(), "agent.spawn" | "agent.stop" | "tool.approve") {
+                if let Some(log) = audit_log
+                    && matches!(method.as_str(), "agent.spawn" | "agent.stop" | "tool.approve") {
                         let entry = crate::audit::AuditEntry::new(
                             &method,
                             &self.addr.to_string(),
@@ -476,15 +472,12 @@ impl Connection {
                             tracing::warn!("Audit log append failed: {}", e);
                         }
                     }
-                }
 
-                if self.state == ConnectionState::Connected {
-                    if let JsonRpcMessage::Response(ref resp) = result {
-                        if resp.result.is_some() {
+                if self.state == ConnectionState::Connected
+                    && let JsonRpcMessage::Response(ref resp) = result
+                        && resp.result.is_some() {
                             self.state = ConnectionState::Initialized;
                         }
-                    }
-                }
 
                 Ok(Some(result))
             }

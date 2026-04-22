@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Situation subsystem - decision triggering situations
 //!
 //! Provides:

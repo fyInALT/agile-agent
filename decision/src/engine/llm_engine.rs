@@ -235,11 +235,10 @@ impl LLMDecisionEngine {
     /// from the DecisionContext's running context.
     fn sync_reflection_round_from_context(&mut self, context: &DecisionContext) {
         // If context has reflection_round metadata, sync it
-        if let Some(round) = context.metadata.get("reflection_round") {
-            if let Ok(r) = round.parse::<u8>() {
+        if let Some(round) = context.metadata.get("reflection_round")
+            && let Ok(r) = round.parse::<u8>() {
                 self.reflection_round = r;
             }
-        }
     }
 
     /// Build prompt from context using PromptBuilder if available
@@ -305,7 +304,7 @@ impl LLMDecisionEngine {
             .iter()
             .filter_map(|action_type| {
                 action_registry
-                    .get(&action_type)
+                    .get(action_type)
                     .map(|action| action.to_prompt_format())
             })
             .collect();
@@ -540,7 +539,7 @@ impl LLMDecisionEngine {
             config: self.config.clone(),
         };
 
-        let json = serde_json::to_string_pretty(&state).map_err(|e| DecisionError::JsonError(e))?;
+        let json = serde_json::to_string_pretty(&state).map_err(DecisionError::JsonError)?;
 
         std::fs::write(path, json).map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
@@ -557,7 +556,7 @@ impl LLMDecisionEngine {
             .map_err(|e| DecisionError::PersistenceError(e.to_string()))?;
 
         let state: LLMSessionState =
-            serde_json::from_str(&json).map_err(|e| DecisionError::JsonError(e))?;
+            serde_json::from_str(&json).map_err(DecisionError::JsonError)?;
 
         self.provider = state.provider;
         self.history = state.history;

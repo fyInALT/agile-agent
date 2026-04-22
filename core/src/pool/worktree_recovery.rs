@@ -181,7 +181,7 @@ impl WorktreeRecovery {
 
         for (agent_id, state) in &all_states {
             let slot = slots.iter().find(|s| s.agent_id().as_str() == agent_id);
-            let is_pool_idle = slot.map_or(false, |s| s.status().is_idle() || s.status().is_paused());
+            let is_pool_idle = slot.is_some_and(|s| s.status().is_idle() || s.status().is_paused());
 
             // Skip if agent is active
             if slot.is_some() && !is_pool_idle {
@@ -197,21 +197,19 @@ impl WorktreeRecovery {
 
         // Second pass: do the cleanup
         for (agent_id, state, in_pool) in to_cleanup {
-            if state.exists() {
-                if let Some(wm) = worktree_coordinator.manager() {
+            if state.exists()
+                && let Some(wm) = worktree_coordinator.manager() {
                     wm.remove(&state.worktree_id, true)?;
                 }
-            }
 
             if let Some(store) = worktree_coordinator.state_store() {
                 store.delete(&agent_id)?;
             }
 
-            if in_pool {
-                if let Some(slot) = slots.iter_mut().find(|s| s.agent_id().as_str() == agent_id) {
+            if in_pool
+                && let Some(slot) = slots.iter_mut().find(|s| s.agent_id().as_str() == agent_id) {
                     slot.clear_worktree();
                 }
-            }
 
             cleaned_up.push(state.worktree_id.clone());
 

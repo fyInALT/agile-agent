@@ -83,10 +83,8 @@ pub fn parse_env_only(provider: ProviderKind, input: &str) -> ParseResult<Launch
     }
 
     let mut env_overrides = BTreeMap::new();
-    let mut line_number = 0;
 
-    for line in trimmed.lines() {
-        line_number += 1;
+    for (line_number, line) in trimmed.lines().enumerate() {
         let line = line.trim();
 
         // Skip empty lines
@@ -182,9 +180,9 @@ pub fn parse_command_fragment(provider: ProviderKind, input: &str) -> ParseResul
     let mut executable: Option<String> = None;
     let mut extra_args: Vec<String> = Vec::new();
 
-    let mut tokens_iter = tokens.iter().peekable();
+    let tokens_iter = tokens.iter().peekable();
 
-    while let Some(token) = tokens_iter.next() {
+    for token in tokens_iter {
         // Check if this token is an env var assignment (KEY=VALUE or KEY="value")
         if let Some(eq_pos) = token.find('=') {
             let key = &token[..eq_pos];

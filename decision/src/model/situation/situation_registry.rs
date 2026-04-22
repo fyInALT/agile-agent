@@ -60,22 +60,20 @@ impl SituationRegistry {
         // 1. Try exact type builder
         {
             let builders = self.builders.read().unwrap();
-            if let Some(builder) = builders.get(&type_) {
-                if let Some(situation) = builder() {
+            if let Some(builder) = builders.get(&type_)
+                && let Some(situation) = builder() {
                     return situation;
                 }
-            }
         }
 
         // 2. Try base type (without subtype)
         let base_type = type_.base_type();
         if base_type != type_ {
             let builders = self.builders.read().unwrap();
-            if let Some(builder) = builders.get(&base_type) {
-                if let Some(situation) = builder() {
+            if let Some(builder) = builders.get(&base_type)
+                && let Some(situation) = builder() {
                     return situation;
                 }
-            }
         }
 
         // 3. Try default for exact type

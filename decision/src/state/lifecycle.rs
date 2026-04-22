@@ -272,11 +272,10 @@ impl DecisionAgentState {
 
     pub fn switch_task(&mut self, new_task: TaskId) {
         // Archive current task
-        if let Some(current_id) = &self.current_task_id {
-            if let Some(ctx) = self.task_contexts.get_mut(current_id) {
+        if let Some(current_id) = &self.current_task_id
+            && let Some(ctx) = self.task_contexts.get_mut(current_id) {
                 ctx.mark_complete();
             }
-        }
 
         // Create or restore new task context
         if !self.task_contexts.contains_key(&new_task) {
@@ -297,31 +296,28 @@ impl DecisionAgentState {
     }
 
     pub fn record_decision(&mut self, record: DecisionRecord) {
-        if let Some(task_id) = &self.current_task_id {
-            if let Some(ctx) = self.task_contexts.get_mut(task_id) {
+        if let Some(task_id) = &self.current_task_id
+            && let Some(ctx) = self.task_contexts.get_mut(task_id) {
                 ctx.add_decision(record);
             }
-        }
         self.last_activity = Utc::now();
     }
 
     pub fn increment_reflection(&mut self) {
         self.reflection_rounds += 1;
-        if let Some(task_id) = &self.current_task_id {
-            if let Some(ctx) = self.task_contexts.get_mut(task_id) {
+        if let Some(task_id) = &self.current_task_id
+            && let Some(ctx) = self.task_contexts.get_mut(task_id) {
                 ctx.increment_reflection();
             }
-        }
         self.last_activity = Utc::now();
     }
 
     pub fn increment_retry(&mut self) {
         self.retry_count += 1;
-        if let Some(task_id) = &self.current_task_id {
-            if let Some(ctx) = self.task_contexts.get_mut(task_id) {
+        if let Some(task_id) = &self.current_task_id
+            && let Some(ctx) = self.task_contexts.get_mut(task_id) {
                 ctx.increment_retry();
             }
-        }
         self.last_activity = Utc::now();
     }
 

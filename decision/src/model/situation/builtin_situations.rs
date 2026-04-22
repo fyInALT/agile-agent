@@ -294,6 +294,7 @@ impl DecisionSituation for UncommittedChangesSituation {
 
 /// Situation 1: Waiting for choice
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct WaitingForChoiceSituation {
     /// Available options
     pub options: Vec<ChoiceOption>,
@@ -329,15 +330,6 @@ impl WaitingForChoiceSituation {
     }
 }
 
-impl Default for WaitingForChoiceSituation {
-    fn default() -> Self {
-        Self {
-            options: Vec::new(),
-            permission_type: None,
-            critical: false,
-        }
-    }
-}
 
 impl DecisionSituation for WaitingForChoiceSituation {
     fn situation_type(&self) -> SituationType {
@@ -491,6 +483,7 @@ impl DecisionSituation for ClaimsCompletionSituation {
 
 /// Situation 3: Partial completion
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PartialCompletionSituation {
     pub progress: CompletionProgress,
     pub blocker: Option<String>,
@@ -512,14 +505,6 @@ impl PartialCompletionSituation {
     }
 }
 
-impl Default for PartialCompletionSituation {
-    fn default() -> Self {
-        Self {
-            progress: CompletionProgress::default(),
-            blocker: None,
-        }
-    }
-}
 
 impl DecisionSituation for PartialCompletionSituation {
     fn situation_type(&self) -> SituationType {

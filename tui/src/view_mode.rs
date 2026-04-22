@@ -313,6 +313,7 @@ impl ComposeField {
 
 /// State specific to mail view mode
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct MailViewState {
     /// Currently selected mail index
     pub selected_mail_index: usize,
@@ -330,19 +331,6 @@ pub struct MailViewState {
     pub compose_body: String,
 }
 
-impl Default for MailViewState {
-    fn default() -> Self {
-        Self {
-            selected_mail_index: 0,
-            viewing_agent_index: 0,
-            composing: false,
-            compose_field: ComposeField::default(),
-            compose_to: String::new(),
-            compose_subject: String::new(),
-            compose_body: String::new(),
-        }
-    }
-}
 
 impl MailViewState {
     /// Create new mail view state
@@ -435,6 +423,7 @@ impl MailViewState {
 
 /// State specific to task matrix view mode
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TaskMatrixViewState {
     /// Currently selected row (task)
     pub selected_row: usize,
@@ -442,14 +431,6 @@ pub struct TaskMatrixViewState {
     pub selected_column: usize,
 }
 
-impl Default for TaskMatrixViewState {
-    fn default() -> Self {
-        Self {
-            selected_row: 0,
-            selected_column: 0,
-        }
-    }
-}
 
 impl TaskMatrixViewState {
     /// Create new task matrix view state

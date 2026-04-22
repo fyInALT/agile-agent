@@ -12,6 +12,7 @@ use std::sync::RwLock;
 /// enabling custom transition rules without modifying core code.
 pub trait TransitionRule: Send + Sync + 'static {
     /// Get the from status type
+    #[allow(clippy::wrong_self_convention)]
     fn from_status(&self) -> StatusType;
 
     /// Get the to status type

@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Classifier layer - output classification
 //!
 //! Classifies provider outputs into situation types:

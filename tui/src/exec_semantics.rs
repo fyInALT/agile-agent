@@ -28,10 +28,7 @@ pub(crate) fn parse_exploring_ops(command: &str, source: Option<&str>) -> Option
 fn normalize_exploring_line(line: &str) -> String {
     let mut line = line.trim().to_string();
 
-    loop {
-        let Some(tokens) = shlex::split(&line) else {
-            break;
-        };
+    while let Some(tokens) = shlex::split(&line) {
         if !matches!(tokens.first().map(String::as_str), Some("cd")) {
             break;
         }

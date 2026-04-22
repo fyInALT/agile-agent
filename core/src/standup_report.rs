@@ -61,6 +61,7 @@ pub struct StatusChange {
 
 /// Summary statistics for standup
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct StandupSummary {
     /// Total agents in standup
     pub total_agents: usize,
@@ -240,7 +241,7 @@ impl DailyStandupReport {
                     .collect::<Vec<_>>()
                     .join(", ");
                 output.push_str(&items);
-                output.push_str("\n");
+                output.push('\n');
             }
 
             // Today
@@ -255,7 +256,7 @@ impl DailyStandupReport {
                     .collect::<Vec<_>>()
                     .join(", ");
                 output.push_str(&items);
-                output.push_str("\n");
+                output.push('\n');
             }
 
             // Blockers
@@ -264,10 +265,10 @@ impl DailyStandupReport {
             } else {
                 output.push_str("- Blockers: ");
                 output.push_str(&entry.blockers.join(", "));
-                output.push_str("\n");
+                output.push('\n');
             }
 
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Workplace blockers
@@ -276,7 +277,7 @@ impl DailyStandupReport {
             for blocker in &self.workplace_blockers {
                 output.push_str(&format!("- {}\n", blocker));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Summary
@@ -313,18 +314,6 @@ impl Default for DailyStandupReport {
     }
 }
 
-impl Default for StandupSummary {
-    fn default() -> Self {
-        Self {
-            total_agents: 0,
-            agents_with_blockers: 0,
-            total_blockers: 0,
-            tasks_completed: 0,
-            tasks_planned: 0,
-            tasks_in_progress: 0,
-        }
-    }
-}
 
 /// Task history entry for tracking yesterday's work
 #[derive(Debug, Clone, Serialize, Deserialize)]

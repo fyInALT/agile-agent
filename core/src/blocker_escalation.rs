@@ -43,8 +43,10 @@ pub struct BlockerEscalation {
 /// Status of an escalation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum EscalationStatus {
     /// Blocker detected but not yet escalated
+    #[default]
     Detected,
     /// Blocker escalated to ScrumMaster
     Escalated,
@@ -56,11 +58,6 @@ pub enum EscalationStatus {
     Cancelled,
 }
 
-impl Default for EscalationStatus {
-    fn default() -> Self {
-        Self::Detected
-    }
-}
 
 impl BlockerEscalation {
     /// Create a new blocker escalation record
@@ -176,9 +173,9 @@ impl BlockerEscalationTracker {
 
         for status in statuses {
             // Check if agent has an assigned task that is blocked
-            if let Some(task_id) = &status.assigned_task_id {
-                if let Some(task) = backlog.find_task(task_id.as_str()) {
-                    if task.status == TaskStatus::Blocked {
+            if let Some(task_id) = &status.assigned_task_id
+                && let Some(task) = backlog.find_task(task_id.as_str())
+                    && task.status == TaskStatus::Blocked {
                         // Check if we already have an escalation for this task
                         if !self
                             .escalations
@@ -201,8 +198,6 @@ impl BlockerEscalationTracker {
                             self.escalations.push(escalation);
                         }
                     }
-                }
-            }
         }
 
         new_escalations
@@ -286,6 +281,7 @@ impl BlockerEscalationTracker {
 
 /// Statistics for escalation tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct EscalationStats {
     /// Total number of escalations
     pub total_escalations: usize,
@@ -297,16 +293,6 @@ pub struct EscalationStats {
     pub average_resolution_minutes: Option<u64>,
 }
 
-impl Default for EscalationStats {
-    fn default() -> Self {
-        Self {
-            total_escalations: 0,
-            active_count: 0,
-            resolved_count: 0,
-            average_resolution_minutes: None,
-        }
-    }
-}
 
 /// Blocker escalation helper functions
 pub struct BlockerHelper;

@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 //! Workflow subsystem - decision process definition
 //!
 //! Provides:

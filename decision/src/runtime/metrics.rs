@@ -274,10 +274,10 @@ impl DecisionMetrics {
         }
 
         // Recalculate average
-        if self.total_decisions > 0 {
-            let total_avg = (self.avg_duration_ms * (self.total_decisions - other.total_decisions)
-                + other.avg_duration_ms * other.total_decisions)
-                / self.total_decisions;
+        if let Some(total_avg) = (self.avg_duration_ms * (self.total_decisions - other.total_decisions)
+            + other.avg_duration_ms * other.total_decisions)
+            .checked_div(self.total_decisions)
+        {
             self.avg_duration_ms = total_avg;
         }
 
@@ -577,7 +577,7 @@ impl MetricsSummary {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        top_situation_types.sort_by(|a, b| b.1.cmp(&a.1));
+        top_situation_types.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_situation_types.truncate(5);
 
         let mut top_action_types: Vec<(String, u64)> = metrics
@@ -585,7 +585,7 @@ impl MetricsSummary {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        top_action_types.sort_by(|a, b| b.1.cmp(&a.1));
+        top_action_types.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_action_types.truncate(5);
 
         Self {

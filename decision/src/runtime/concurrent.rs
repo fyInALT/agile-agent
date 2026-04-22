@@ -153,8 +153,8 @@ impl DecisionSessionPool {
         }
 
         // Check available pool
-        if self.config.reuse_enabled {
-            if let Some(pool) = self.available.get_mut(&provider) {
+        if self.config.reuse_enabled
+            && let Some(pool) = self.available.get_mut(&provider) {
                 // Remove expired sessions
                 pool.retain(|s| !s.is_expired(self.config.idle_timeout_ms));
 
@@ -165,7 +165,6 @@ impl DecisionSessionPool {
                     return Ok(session);
                 }
             }
-        }
 
         // Check active count for provider
         let active_count = self
@@ -200,7 +199,7 @@ impl DecisionSessionPool {
                 let pool = self
                     .available
                     .entry(session.provider)
-                    .or_insert_with(VecDeque::new);
+                    .or_default();
 
                 // Don't exceed pool size
                 if pool.len() < self.config.max_per_provider {
@@ -429,8 +428,10 @@ impl Default for DecisionRateLimiter {
 
 /// Arbitration strategy for human decisions
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ArbitrationStrategy {
     /// Handle one at a time, block others
+    #[default]
     Sequential,
 
     /// Batch similar requests, handle together
@@ -440,14 +441,10 @@ pub enum ArbitrationStrategy {
     Parallel { max_concurrent: usize },
 }
 
-impl Default for ArbitrationStrategy {
-    fn default() -> Self {
-        ArbitrationStrategy::Sequential
-    }
-}
 
 /// Arbitration result
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ArbitrationResult {
     /// Request handled immediately
     Immediate { request: HumanDecisionRequest },
@@ -579,11 +576,10 @@ impl HumanDecisionArbitrator {
     /// Find request by ID
     fn find_request(&self, id: &str) -> Option<HumanDecisionRequest> {
         // Check current first
-        if let Some(ref current) = self.current {
-            if current.id == id {
+        if let Some(ref current) = self.current
+            && current.id == id {
                 return Some(current.clone());
             }
-        }
 
         // Check in parallel active
         for req in &self.active_parallel {

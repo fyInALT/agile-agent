@@ -88,17 +88,14 @@ pub struct LaunchConfigOverlayState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum LaunchConfigFocus {
+    #[default]
     WorkConfig,
     DecisionConfig,
     Confirm,
 }
 
-impl Default for LaunchConfigFocus {
-    fn default() -> Self {
-        LaunchConfigFocus::WorkConfig
-    }
-}
 
 /// Command returned from overlay key handling
 #[derive(Debug, Clone)]

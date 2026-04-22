@@ -17,18 +17,15 @@ use std::collections::HashMap;
 
 /// Rule priority
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RulePriority {
     Low,
+    #[default]
     Medium,
     High,
     Critical,
 }
 
-impl Default for RulePriority {
-    fn default() -> Self {
-        RulePriority::Medium
-    }
-}
 
 /// Action specification for rule output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +144,12 @@ impl ActionSpec {
 
 /// Select first option action (simple)
 pub struct SelectFirstAction;
+
+impl Default for SelectFirstAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SelectFirstAction {
     pub fn new() -> Self {

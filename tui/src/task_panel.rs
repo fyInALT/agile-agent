@@ -95,7 +95,7 @@ impl TaskPanel {
     pub fn update_tasks(&mut self, tasks: Vec<TaskInfo>) {
         self.tasks = tasks;
         // Reset selection if out of bounds
-        if self.selected_index >= self.tasks.len() && self.tasks.len() > 0 {
+        if self.selected_index >= self.tasks.len() && !self.tasks.is_empty() {
             self.selected_index = self.tasks.len() - 1;
         }
     }

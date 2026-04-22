@@ -43,8 +43,10 @@ pub struct StorySelection {
 /// Planning session status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PlanningStatus {
     /// Selecting stories for sprint
+    #[default]
     Selecting,
     /// Estimating effort for selected stories
     Estimating,
@@ -56,11 +58,6 @@ pub enum PlanningStatus {
     Complete,
 }
 
-impl Default for PlanningStatus {
-    fn default() -> Self {
-        Self::Selecting
-    }
-}
 
 impl SprintPlanningSession {
     /// Create a new planning session
@@ -224,7 +221,7 @@ impl SprintPlanningHelper {
 
     /// Generate sprint commitment summary
     pub fn generate_commitment_summary(session: &SprintPlanningSession) -> String {
-        let mut summary = format!("Sprint Commitment Summary\n");
+        let mut summary = "Sprint Commitment Summary\n".to_string();
         summary.push_str("========================\n\n");
         summary.push_str(&format!("Goal: {}\n\n", session.goal));
         summary.push_str("Stories:\n");

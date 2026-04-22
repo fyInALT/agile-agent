@@ -66,21 +66,18 @@ impl DaemonConfigFile {
         if let Ok(val) = std::env::var("AGILE_AGENT_BIND") {
             config.bind = val;
         }
-        if let Ok(val) = std::env::var("AGILE_AGENT_HEARTBEAT_TIMEOUT") {
-            if let Ok(v) = val.parse() {
+        if let Ok(val) = std::env::var("AGILE_AGENT_HEARTBEAT_TIMEOUT")
+            && let Ok(v) = val.parse() {
                 config.heartbeat_timeout = v;
             }
-        }
-        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_CLIENTS") {
-            if let Ok(v) = val.parse() {
+        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_CLIENTS")
+            && let Ok(v) = val.parse() {
                 config.max_clients = v;
             }
-        }
-        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_EVENT_LOG_MB") {
-            if let Ok(v) = val.parse() {
+        if let Ok(val) = std::env::var("AGILE_AGENT_MAX_EVENT_LOG_MB")
+            && let Ok(v) = val.parse() {
                 config.max_event_log_mb = v;
             }
-        }
         if let Ok(val) = std::env::var("AGILE_AGENT_BEARER_TOKEN") {
             config.bearer_token = Some(val);
         }

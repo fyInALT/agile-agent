@@ -47,10 +47,10 @@ pub fn resolve_executable_path(
     requested: Option<&str>,
 ) -> anyhow::Result<String> {
     // If a custom path is provided and it's an absolute path, use it directly
-    if let Some(req) = requested {
-        if Path::new(req).is_absolute() {
-            return Ok(req.to_string());
-        }
+    if let Some(req) = requested
+        && Path::new(req).is_absolute()
+    {
+        return Ok(req.to_string());
     }
 
     let executable_name = requested

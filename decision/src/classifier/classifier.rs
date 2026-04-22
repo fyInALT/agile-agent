@@ -140,9 +140,9 @@ impl ClassifyResult {
     }
 
     /// Get situation if needs decision
-    pub fn situation(&self) -> Option<&Box<dyn crate::situation::DecisionSituation>> {
+    pub fn situation(&self) -> Option<&dyn crate::situation::DecisionSituation> {
         match self {
-            ClassifyResult::NeedsDecision { situation, .. } => situation.as_ref(),
+            ClassifyResult::NeedsDecision { situation, .. } => situation.as_deref(),
             _ => None,
         }
     }

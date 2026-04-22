@@ -630,11 +630,10 @@ impl BranchSetupContext {
 
     /// Get the branch name to use (preferred or alternative)
     pub fn effective_branch_name(&self) -> String {
-        if let Some(ref collision) = self.collision_info {
-            if let Some(ref alt) = collision.suggested_alternative {
+        if let Some(ref collision) = self.collision_info
+            && let Some(ref alt) = collision.suggested_alternative {
                 return alt.clone();
             }
-        }
         self.task_meta.branch_name.clone()
     }
 }

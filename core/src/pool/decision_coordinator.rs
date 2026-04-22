@@ -167,7 +167,7 @@ impl WorkerDecisionRouter {
     /// Compute decision agent stats
     pub fn stats(&self) -> DecisionAgentStats {
         let mut stats = DecisionAgentStats::default();
-        for (_, agent) in &self.agents {
+        for agent in self.agents.values() {
             stats.total_agents += 1;
             stats.total_decisions += agent.decision_count();
             stats.total_errors += agent.error_count();

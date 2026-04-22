@@ -421,9 +421,7 @@ impl DecisionExecutor {
         let slot = &mut slots[slot_index];
         // Continue with normal processing - agent should transition to idle
         // Handle Resting state (rate limit recovery) or blocked state
-        if matches!(slot.status(), AgentSlotStatus::Resting { .. }) {
-            let _ = slot.transition_to(AgentSlotStatus::idle());
-        } else if slot.status().is_blocked() {
+        if matches!(slot.status(), AgentSlotStatus::Resting { .. }) || slot.status().is_blocked() {
             let _ = slot.transition_to(AgentSlotStatus::idle());
         }
         // Log: Continue action executed

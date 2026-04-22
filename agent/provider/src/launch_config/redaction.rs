@@ -37,8 +37,7 @@ pub fn is_sensitive_key(key: &str) -> bool {
 
 /// Check if a key matches a pattern (supporting * wildcard).
 fn matches_pattern(key: &str, pattern: &str) -> bool {
-    if pattern.starts_with('*') {
-        let suffix = &pattern[1..];
+    if let Some(suffix) = pattern.strip_prefix('*') {
         key.ends_with(suffix)
     } else {
         key == pattern
@@ -46,8 +45,8 @@ fn matches_pattern(key: &str, pattern: &str) -> bool {
 }
 
 /// Redact all sensitive values in an environment map for display.
-pub fn redact_env_map<'a>(
-    env: &'a std::collections::BTreeMap<String, String>,
+pub fn redact_env_map(
+    env: &std::collections::BTreeMap<String, String>,
 ) -> std::collections::BTreeMap<String, String> {
     env.iter()
         .map(|(k, v)| (k.clone(), redact_env_value(k, v)))

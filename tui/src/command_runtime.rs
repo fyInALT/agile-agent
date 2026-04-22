@@ -279,7 +279,7 @@ fn execute_clear_command(state: &mut TuiState, args: &[&str]) -> Result<Vec<Stri
             state.session.app.codex_thread_id = None;
 
             // Delete saved session files
-            clear_saved_sessions(&state)?;
+            clear_saved_sessions(state)?;
 
             Ok(vec![
                 format!("cleared context for agent: {}", codename),
@@ -309,7 +309,7 @@ fn execute_clear_command(state: &mut TuiState, args: &[&str]) -> Result<Vec<Stri
             state.session.app.codex_thread_id = None;
 
             // Delete saved session files
-            clear_saved_sessions(&state)?;
+            clear_saved_sessions(state)?;
 
             Ok(vec![
                 format!("cleared context for {} agents", agent_count),
@@ -330,8 +330,8 @@ fn clear_saved_sessions(state: &TuiState) -> Result<()> {
         let recent_session_file = store.path().join("recent-session.json");
 
         // Delete individual session files
-        if sessions_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&sessions_dir) {
+        if sessions_dir.exists()
+            && let Ok(entries) = fs::read_dir(&sessions_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().map(|e| e == "json").unwrap_or(false) {
@@ -339,7 +339,6 @@ fn clear_saved_sessions(state: &TuiState) -> Result<()> {
                     }
                 }
             }
-        }
 
         // Delete recent session pointer
         if recent_session_file.exists() {

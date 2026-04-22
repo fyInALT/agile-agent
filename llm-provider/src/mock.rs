@@ -265,19 +265,16 @@ impl LlmProvider for MockLlmProvider {
         Ok(())
     }
 
-    fn complete_async(
-        &self,
-        prompt: &str,
-    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
-        async move { self.complete(prompt) }
+    async fn complete_async(&self, prompt: &str) -> Result<LlmResponse> {
+        self.complete(prompt)
     }
 
-    fn complete_async_with_model(
+    async fn complete_async_with_model(
         &self,
         prompt: &str,
         model: ModelType,
-    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
-        async move { self.complete_with_model(prompt, model) }
+    ) -> Result<LlmResponse> {
+        self.complete_with_model(prompt, model)
     }
 }
 
@@ -343,19 +340,16 @@ impl LlmProvider for EchoMockProvider {
         self.complete_streaming(prompt, callback)
     }
 
-    fn complete_async(
-        &self,
-        prompt: &str,
-    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
-        async move { self.complete(prompt) }
+    async fn complete_async(&self, prompt: &str) -> Result<LlmResponse> {
+        self.complete(prompt)
     }
 
-    fn complete_async_with_model(
+    async fn complete_async_with_model(
         &self,
         prompt: &str,
         model: ModelType,
-    ) -> impl std::future::Future<Output = Result<LlmResponse>> + Send {
-        async move { self.complete_with_model(prompt, model) }
+    ) -> Result<LlmResponse> {
+        self.complete_with_model(prompt, model)
     }
 }
 

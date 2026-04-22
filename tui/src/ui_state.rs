@@ -442,8 +442,8 @@ impl TuiState {
 
         let agent_id = if has_worktree_support {
             // Use worktree-enabled spawn
-            pool.spawn_agent_with_worktree(provider, None, None)
-                .map_err(|e| {
+            pool.spawn_worker_with_worktree(provider, None, None)
+                .inspect_err(|e| {
                     logging::warn_event(
                         "tui.agent.spawn_worktree_failed",
                         "failed to spawn agent with worktree",
@@ -451,19 +451,18 @@ impl TuiState {
                             "error": e.to_string(),
                         }),
                     );
-                    e
                 })
                 .ok()
         } else {
             // Fallback to regular spawn
-            pool.spawn_agent(provider).ok()
+            pool.spawn_worker(provider).ok()
         }?;
 
         // Spawn decision agent for the work agent (if provider supports it)
         // Decision agents don't need worktrees - they only analyze output
-        if provider != ProviderKind::Mock {
-            if let Some(pool) = self.agent_pool.as_mut() {
-                if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
+        if provider != ProviderKind::Mock
+            && let Some(pool) = self.agent_pool.as_mut()
+                && let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
                     // Log warning but don't fail the work agent spawn
                     logging::warn_event(
                         "decision_agent.spawn_failed",
@@ -474,10 +473,17 @@ impl TuiState {
                         }),
                     );
                 }
-            }
-        }
 
         Some(agent_id)
+    }
+
+    /// Alias for `spawn_agent` (backward-compatible naming)
+    #[allow(dead_code)]
+    pub fn spawn_worker(
+        &mut self,
+        provider: ProviderKind,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
+        self.spawn_agent(provider)
     }
 
     /// Spawn a new agent using a provider profile
@@ -498,8 +504,8 @@ impl TuiState {
 
         let pool = self.agent_pool.as_mut()?;
 
-        let agent_id = pool.spawn_agent_with_profile(&profile_id.to_string())
-            .map_err(|e| {
+        let agent_id = pool.spawn_worker_with_profile(&profile_id.to_string())
+            .inspect_err(|e| {
                 logging::warn_event(
                     "tui.agent.spawn_profile_failed",
                     "failed to spawn agent with profile",
@@ -508,14 +514,13 @@ impl TuiState {
                         "profile_id": profile_id,
                     }),
                 );
-                e
             })
             .ok()?;
 
         // Spawn decision agent for the work agent (if provider supports it)
         // Decision agents use the default decision profile from the store
-        if let Some(pool) = self.agent_pool.as_mut() {
-            if let Err(e) = pool.spawn_decision_agent_with_profile_for(&agent_id, None) {
+        if let Some(pool) = self.agent_pool.as_mut()
+            && let Err(e) = pool.spawn_decision_agent_with_profile_for(&agent_id, None) {
                 logging::warn_event(
                     "decision_agent.spawn_failed",
                     "failed to spawn decision agent",
@@ -525,9 +530,17 @@ impl TuiState {
                     }),
                 );
             }
-        }
 
         Some(agent_id)
+    }
+
+    /// Alias for `spawn_agent_with_profile`
+    #[allow(dead_code)]
+    pub fn spawn_worker_with_profile(
+        &mut self,
+        profile_id: &str,
+    ) -> Option<agent_core::agent_runtime::AgentId> {
+        self.spawn_agent_with_profile(profile_id)
     }
 
     /// Spawn a new agent using specific work and decision profiles
@@ -546,8 +559,8 @@ impl TuiState {
         let pool = self.agent_pool.as_mut()?;
 
         let agent_id = pool
-            .spawn_agent_with_profile(&work_profile_id.to_string())
-            .map_err(|e| {
+            .spawn_worker_with_profile(&work_profile_id.to_string())
+            .inspect_err(|e| {
                 logging::warn_event(
                     "tui.agent.spawn_profile_failed",
                     "failed to spawn agent with work profile",
@@ -556,13 +569,12 @@ impl TuiState {
                         "work_profile_id": work_profile_id,
                     }),
                 );
-                e
             })
             .ok()?;
 
         // Spawn decision agent with specified profile
-        if let Some(pool) = self.agent_pool.as_mut() {
-            if let Err(e) =
+        if let Some(pool) = self.agent_pool.as_mut()
+            && let Err(e) =
                 pool.spawn_decision_agent_with_profile_for(&agent_id, Some(&decision_profile_id.to_string()))
             {
                 logging::warn_event(
@@ -575,7 +587,6 @@ impl TuiState {
                     }),
                 );
             }
-        }
 
         Some(agent_id)
     }
@@ -618,8 +629,8 @@ impl TuiState {
 
         let agent_id = if has_worktree_support {
             // Use worktree-enabled spawn
-            pool.spawn_agent_with_worktree(provider, None, None)
-                .map_err(|e| {
+            pool.spawn_worker_with_worktree(provider, None, None)
+                .inspect_err(|e| {
                     logging::warn_event(
                         "tui.agent.spawn_worktree_failed",
                         "failed to spawn agent with worktree",
@@ -627,26 +638,24 @@ impl TuiState {
                             "error": e.to_string(),
                         }),
                     );
-                    e
                 })
                 .ok()
         } else {
             // Fallback to regular spawn
-            pool.spawn_agent(provider).ok()
+            pool.spawn_worker(provider).ok()
         }?;
 
         // Attach launch bundle to the slot
-        if let Some(pool) = self.agent_pool.as_mut() {
-            if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+        if let Some(pool) = self.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                 slot.set_launch_bundle(bundle);
             }
-        }
 
         // Spawn decision agent for the work agent (if provider supports it)
         // Decision agents don't need worktrees - they only analyze output
-        if provider != ProviderKind::Mock {
-            if let Some(pool) = self.agent_pool.as_mut() {
-                if let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
+        if provider != ProviderKind::Mock
+            && let Some(pool) = self.agent_pool.as_mut()
+                && let Err(e) = pool.spawn_decision_agent_for(&agent_id) {
                     logging::warn_event(
                         "decision_agent.spawn_failed",
                         "failed to spawn decision agent",
@@ -656,8 +665,6 @@ impl TuiState {
                         }),
                     );
                 }
-            }
-        }
 
         Some(agent_id)
     }
@@ -1413,11 +1420,10 @@ impl TuiState {
                     }),
                 );
                 // Clear worktree info since we couldn't recreate
-                if let Some(pool) = self.agent_pool.as_mut() {
-                    if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
+                if let Some(pool) = self.agent_pool.as_mut()
+                    && let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
                         slot.clear_worktree();
                     }
-                }
             }
         }
 
@@ -1505,15 +1511,14 @@ impl TuiState {
             .map_err(|e| anyhow::anyhow!("Failed to create worktree: {}", e))?;
 
         // Update slot's worktree info
-        if let Some(pool) = self.agent_pool.as_mut() {
-            if let Some(slot) = pool.get_slot_mut_by_id(agent_id) {
+        if let Some(pool) = self.agent_pool.as_mut()
+            && let Some(slot) = pool.get_slot_mut_by_id(agent_id) {
                 slot.set_worktree(
                     worktree_info.path.clone(),
                     worktree_info.branch.clone(),
                     worktree_id.to_string(),
                 );
             }
-        }
 
         // Save worktree state
         let worktree_state_store = WorktreeStateStore::new(workplace_path.to_path_buf());
@@ -1597,7 +1602,7 @@ impl TuiState {
         if self.agent_pool.is_none() {
             let workplace_id = self.session.workplace().workplace_id.clone();
             self.agent_pool = Some(AgentPool::new(workplace_id, 10));
-            self.agent_pool.as_mut()?.spawn_agent(provider).ok()?;
+            self.agent_pool.as_mut()?.spawn_worker(provider).ok()?;
         }
 
         let focused_id = self.focused_agent_id()?;
@@ -4085,8 +4090,8 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn two agents to enable multi-agent mode
-        state.spawn_agent(ProviderKind::Mock);
-        state.spawn_agent(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
 
         // Set scroll offset for current view
         state.transcript_scroll_offset = 10;
@@ -4111,7 +4116,7 @@ mod tests {
         assert!(state.agent_pool.is_none());
 
         // Spawn creates pool with OVERVIEW agent + worker agent
-        let agent_id = state.spawn_agent(ProviderKind::Claude);
+        let agent_id = state.spawn_worker(ProviderKind::Claude);
         assert!(agent_id.is_some());
         assert!(state.agent_pool.is_some());
         // OVERVIEW agent + 1 worker agent = 2
@@ -4133,7 +4138,7 @@ mod tests {
 
         // Set up profile store - spawn_agent_with_profile will create pool via ensure_overview_agent
         // So we set the store after first spawn (which creates the pool)
-        let _ = state.spawn_agent(ProviderKind::Mock); // Creates the pool
+        let _ = state.spawn_worker(ProviderKind::Mock); // Creates the pool
         {
             let pool = state.agent_pool.as_mut().expect("pool exists");
             let mut store = ProfileStore::new();
@@ -4143,7 +4148,7 @@ mod tests {
         }
 
         // Spawn with profile
-        let agent_id = state.spawn_agent_with_profile("claude-default");
+        let agent_id = state.spawn_worker_with_profile("claude-default");
         assert!(agent_id.is_some());
 
         // Verify the agent has profile_id set
@@ -4163,7 +4168,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Create pool first
-        let _ = state.spawn_agent(ProviderKind::Mock);
+        let _ = state.spawn_worker(ProviderKind::Mock);
 
         // Set up store but only with Mock profile
         {
@@ -4174,7 +4179,7 @@ mod tests {
         }
 
         // Spawn with nonexistent profile should return None
-        let agent_id = state.spawn_agent_with_profile("nonexistent-profile");
+        let agent_id = state.spawn_worker_with_profile("nonexistent-profile");
         assert!(agent_id.is_none());
     }
 
@@ -4186,9 +4191,9 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn multiple agents
-        state.spawn_agent(ProviderKind::Mock);
-        state.spawn_agent(ProviderKind::Mock);
-        state.spawn_agent(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
 
         // Focus should cycle
         let first_codename = state.focused_agent_codename().to_string();
@@ -4209,7 +4214,7 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        state.spawn_agent(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
         let agent_id = state.stop_focused_agent();
         assert!(agent_id.is_some());
 
@@ -4232,7 +4237,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent to activate multi-agent mode
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
         assert!(state.is_multi_agent_mode());
 
         // Start provider for focused agent
@@ -4262,7 +4267,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Setup multi-agent
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
         let (event_tx, event_rx) = mpsc::channel();
         state.register_agent_channel(agent_id.clone(), event_rx);
 
@@ -4307,7 +4312,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
 
         // Focus the spawned worker agent so mail checks work on it
         state.focus_agent(&agent_id);
@@ -4337,7 +4342,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
 
         // Focus the spawned worker agent so mail checks work on it
         state.focus_agent(&agent_id);
@@ -4370,7 +4375,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent but no mail
-        state.spawn_agent(ProviderKind::Mock);
+        state.spawn_worker(ProviderKind::Mock);
 
         let formatted = state.focused_unread_mail_for_prompt();
         assert!(formatted.is_empty());
@@ -4386,7 +4391,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
 
         // Focus the spawned worker agent so mail checks work on it
         state.focus_agent(&agent_id);
@@ -4426,7 +4431,7 @@ mod tests {
         let mut state = TuiState::from_session(session);
 
         // Spawn agent (creates OVERVIEW at index 0, worker at index 1)
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
 
         // Focus the spawned worker agent so mail checks work on it
         state.focus_agent(&agent_id);
@@ -4468,7 +4473,7 @@ mod tests {
             .expect("bootstrap");
         let mut state = TuiState::from_session(session);
 
-        let agent_id = state.spawn_agent(ProviderKind::Mock).expect("spawn agent");
+        let agent_id = state.spawn_worker(ProviderKind::Mock).expect("spawn agent");
         state.focus_agent(&agent_id);
 
         let mail = AgentMail::new(

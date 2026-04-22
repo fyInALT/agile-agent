@@ -132,7 +132,7 @@ impl CLIDecisionEngine {
             .enumerate()
             .filter_map(|(i, action_type)| {
                 action_registry
-                    .get(&action_type)
+                    .get(action_type)
                     .map(|action| format!("[{}] {}", i + 1, action.to_prompt_format()))
             })
             .collect();
@@ -196,8 +196,8 @@ impl CLIDecisionEngine {
 
         // Handle special inputs
         if trimmed == "c" || trimmed.starts_with("c:") {
-            let instruction = if trimmed.starts_with("c:") {
-                trimmed[2..].trim().to_string()
+            let instruction = if let Some(rest) = trimmed.strip_prefix("c:") {
+                rest.trim().to_string()
             } else {
                 "Custom instruction provided via CLI".to_string()
             };
@@ -214,14 +214,13 @@ impl CLIDecisionEngine {
         }
 
         // Try parsing as number
-        if let Ok(num) = trimmed.parse::<usize>() {
-            if num > 0 && num <= available_actions.len() {
+        if let Ok(num) = trimmed.parse::<usize>()
+            && num > 0 && num <= available_actions.len() {
                 let action_type = available_actions[num - 1].clone();
                 if let Some(action) = action_registry.get(&action_type) {
                     return Ok(vec![action.clone_boxed()]);
                 }
             }
-        }
 
         // Fallback: try parsing directly
         for action_type in &available_actions {

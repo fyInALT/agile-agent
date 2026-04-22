@@ -82,7 +82,9 @@ impl AgentLifecycleManager {
     /// Spawn a new agent without worktree
     ///
     /// Creates a simple agent slot without isolated workspace.
-    pub fn spawn_simple(
+    #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
+pub fn spawn_simple(
         slots: &mut Vec<AgentSlot>,
         max_slots: usize,
         next_agent_index: &mut usize,
@@ -148,7 +150,9 @@ impl AgentLifecycleManager {
     /// Spawn a new agent with profile
     ///
     /// Uses the profile to determine provider type.
-    pub fn spawn_with_profile(
+    #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
+pub fn spawn_with_profile(
         slots: &mut Vec<AgentSlot>,
         max_slots: usize,
         next_agent_index: &mut usize,
@@ -207,8 +211,8 @@ impl AgentLifecycleManager {
         }
 
         // Spawn decision agent for this work agent
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, &agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, &agent_id) {
                 logging::warn_event(
                     "pool.agent.decision_agent_failed",
                     "failed to spawn decision agent for work agent",
@@ -218,7 +222,6 @@ impl AgentLifecycleManager {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -226,7 +229,9 @@ impl AgentLifecycleManager {
     /// Spawn a new agent with worktree
     ///
     /// Creates an isolated git worktree workspace for the agent.
-    pub fn spawn_with_worktree(
+    #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
+pub fn spawn_with_worktree(
         slots: &mut Vec<AgentSlot>,
         max_slots: usize,
         next_agent_index: &mut usize,
@@ -325,8 +330,8 @@ impl AgentLifecycleManager {
         }
 
         // Spawn decision agent
-        if provider_kind != ProviderKind::Mock {
-            if let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, &agent_id) {
+        if provider_kind != ProviderKind::Mock
+            && let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, &agent_id) {
                 logging::warn_event(
                     "pool.agent.decision_agent_failed",
                     "failed to spawn decision agent",
@@ -336,7 +341,6 @@ impl AgentLifecycleManager {
                     }),
                 );
             }
-        }
 
         Ok(agent_id)
     }
@@ -344,6 +348,7 @@ impl AgentLifecycleManager {
     /// Pause an agent with worktree preservation
     ///
     /// Saves worktree state before pausing for seamless resume.
+    #[allow(clippy::ptr_arg)]
     pub fn pause_with_worktree(
         slots: &mut Vec<AgentSlot>,
         worktree_coordinator: &WorktreeCoordinator,
@@ -403,7 +408,7 @@ impl AgentLifecycleManager {
             .ok_or_else(|| LifecycleError::AgentNotFound(agent_id.as_str().to_string()))?;
         slot_mut
             .transition_to(AgentSlotStatus::paused("worktree preserved"))
-            .map_err(|e| LifecycleError::SlotTransitionError(e))?;
+            .map_err(LifecycleError::SlotTransitionError)?;
 
         logging::debug_event(
             "pool.agent.pause_with_worktree",
@@ -421,6 +426,7 @@ impl AgentLifecycleManager {
     /// Resume a paused agent with worktree verification
     ///
     /// Loads saved worktree state and verifies/recreates worktree if needed.
+    #[allow(clippy::ptr_arg)]
     pub fn resume_with_worktree(
         slots: &mut Vec<AgentSlot>,
         decision_coordinator: &mut WorkerDecisionRouter,
@@ -512,15 +518,15 @@ impl AgentLifecycleManager {
 
             slot_mut
                 .transition_to(AgentSlotStatus::idle())
-                .map_err(|e| LifecycleError::SlotTransitionError(e))?;
+                .map_err(LifecycleError::SlotTransitionError)?;
         }
 
         // Ensure decision agent exists
-        if !decision_coordinator.has_agent(agent_id) {
-            if let Some(slot) = slots.iter().find(|s| s.agent_id() == agent_id) {
-                if let Some(provider_kind) = slot.provider_type().to_provider_kind() {
-                    if provider_kind != ProviderKind::Mock {
-                        if let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, agent_id) {
+        if !decision_coordinator.has_agent(agent_id)
+            && let Some(slot) = slots.iter().find(|s| s.agent_id() == agent_id)
+                && let Some(provider_kind) = slot.provider_type().to_provider_kind()
+                    && provider_kind != ProviderKind::Mock
+                        && let Err(e) = Self::spawn_decision_agent(slots, decision_coordinator, cwd, agent_id) {
                             logging::warn_event(
                                 "pool.resume.decision_agent_failed",
                                 "failed to spawn decision agent for resumed agent",
@@ -530,10 +536,6 @@ impl AgentLifecycleManager {
                                 }),
                             );
                         }
-                    }
-                }
-            }
-        }
 
         logging::debug_event(
             "pool.agent.resume_with_worktree",
@@ -550,6 +552,7 @@ impl AgentLifecycleManager {
     /// Stop an agent (simple)
     ///
     /// Transitions slot to stopped state and stops decision agent.
+    #[allow(clippy::ptr_arg)]
     pub fn stop_simple(
         slots: &mut Vec<AgentSlot>,
         decision_coordinator: &mut WorkerDecisionRouter,
@@ -585,6 +588,7 @@ impl AgentLifecycleManager {
     /// Stop an agent with optional worktree cleanup
     ///
     /// Handles worktree state preservation or cleanup.
+    #[allow(clippy::ptr_arg)]
     pub fn stop_with_worktree(
         slots: &mut Vec<AgentSlot>,
         decision_coordinator: &mut WorkerDecisionRouter,
@@ -599,18 +603,18 @@ impl AgentLifecycleManager {
         let slot = &mut slots[index];
         let codename = slot.codename().clone();
         let has_worktree = slot.has_worktree();
-        let worktree_id = slot.worktree_id().map(|s| s.clone());
+        let worktree_id = slot.worktree_id().cloned();
 
         slot.transition_to(AgentSlotStatus::stopped("user requested"))
-            .map_err(|e| LifecycleError::SlotTransitionError(e))?;
+            .map_err(LifecycleError::SlotTransitionError)?;
 
         // Stop decision agent
         Self::stop_decision_agent(decision_coordinator, agent_id)
-            .map_err(|e| LifecycleError::SlotTransitionError(e))?;
+            .map_err(LifecycleError::SlotTransitionError)?;
 
         // Handle worktree cleanup
-        if has_worktree && cleanup_worktree && worktree_id.is_some() {
-            if let (Some(worktree_manager), Some(worktree_state_store)) =
+        if has_worktree && cleanup_worktree && worktree_id.is_some()
+            && let (Some(worktree_manager), Some(worktree_state_store)) =
                 (worktree_coordinator.manager(), worktree_coordinator.state_store())
             {
                 let wt_id = worktree_id.unwrap();
@@ -653,7 +657,6 @@ impl AgentLifecycleManager {
                     );
                 }
             }
-        }
 
         logging::debug_event(
             "pool.agent.stop_with_worktree",
@@ -734,6 +737,7 @@ impl AgentLifecycleManager {
     }
 
     /// Spawn decision agent for a work agent
+    #[allow(clippy::ptr_arg)]
     pub fn spawn_decision_agent(
         slots: &[AgentSlot],
         decision_coordinator: &mut WorkerDecisionRouter,
@@ -813,12 +817,12 @@ impl AgentLifecycleManager {
     fn generate_agent_id(workplace_id: &WorkplaceId, next_agent_index: &mut usize) -> AgentId {
         let index = *next_agent_index;
         *next_agent_index += 1;
-        AgentId::new(&format!("{}_{}", workplace_id.as_str(), index))
+        AgentId::new(format!("{}_{}", workplace_id.as_str(), index))
     }
 
     /// Generate codename from index
     fn generate_codename(index: usize) -> AgentCodename {
-        AgentCodename::new(&format!("AGENT_{:03}", index))
+        AgentCodename::new(format!("AGENT_{:03}", index))
     }
 }
 

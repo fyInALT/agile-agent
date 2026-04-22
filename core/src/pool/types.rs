@@ -94,20 +94,17 @@ pub struct TaskQueueSnapshot {
 
 /// Policy for handling tasks when agent becomes blocked
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum BlockedTaskPolicy {
     /// Task stays assigned to blocked agent
     KeepAssigned,
     /// Reassign task to another idle agent if available
+    #[default]
     ReassignIfPossible,
     /// Mark task as waiting in backlog
     MarkWaiting,
 }
 
-impl Default for BlockedTaskPolicy {
-    fn default() -> Self {
-        BlockedTaskPolicy::ReassignIfPossible
-    }
-}
 
 /// Blocked handling configuration
 #[derive(Debug, Clone)]

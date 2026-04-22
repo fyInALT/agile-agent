@@ -610,7 +610,7 @@ impl SelectOptionAction {
         let option_id = option_line
             .split(':')
             .nth(1)
-            .map(|s| s.trim().replace('[', "").replace(']', ""))
+            .map(|s| s.trim().replace(['[', ']'], ""))
             .unwrap_or_default();
 
         let reason = reason_line

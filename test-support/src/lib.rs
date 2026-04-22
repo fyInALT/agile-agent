@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_core::backlog::BacklogState;
@@ -20,6 +20,12 @@ pub struct RuntimeHarness {
     pub fake_codex_path: PathBuf,
     workplace: WorkplaceStore,
     workplaces_root: PathBuf,
+}
+
+impl Default for RuntimeHarness {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RuntimeHarness {
@@ -112,7 +118,7 @@ impl RuntimeHarness {
     }
 }
 
-fn write_fake_claude(script_path: &PathBuf, provider_log: &PathBuf) {
+fn write_fake_claude(script_path: &Path, provider_log: &Path) {
     // Build script with simple string concatenation to avoid format string escaping issues
     let script = String::new()
         + "#!/usr/bin/env bash\n"
@@ -147,7 +153,7 @@ fn write_fake_claude(script_path: &PathBuf, provider_log: &PathBuf) {
     fs::set_permissions(script_path, permissions).expect("chmod");
 }
 
-fn write_fake_codex(script_path: &PathBuf, provider_log: &PathBuf) {
+fn write_fake_codex(script_path: &Path, provider_log: &Path) {
     // Build script with simple string concatenation to avoid format string escaping issues
     let log_path = provider_log.display().to_string();
     let script = String::new()

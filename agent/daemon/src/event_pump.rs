@@ -14,6 +14,12 @@ pub struct EventPump {
     next_item_index: u64,
 }
 
+impl Default for EventPump {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventPump {
     pub fn new() -> Self {
         Self {

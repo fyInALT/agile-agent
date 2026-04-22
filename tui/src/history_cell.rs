@@ -783,6 +783,7 @@ fn wrap_words_without_breaking(text: &str, content_width: usize) -> Vec<String> 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_exec_history_lines(
     source: Option<&str>,
     input_preview: Option<&str>,
@@ -1782,13 +1783,11 @@ fn extract_command_from_input(input_preview: Option<&str>) -> Option<String> {
     }
 
     // Try to parse as JSON to extract "command" field
-    if input.starts_with('{') {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(input) {
-            if let Some(command) = parsed.get("command").and_then(|v| v.as_str()) {
+    if input.starts_with('{')
+        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(input)
+            && let Some(command) = parsed.get("command").and_then(|v| v.as_str()) {
                 return Some(command.to_string());
             }
-        }
-    }
 
     // Return as-is if not JSON
     Some(input.to_string())

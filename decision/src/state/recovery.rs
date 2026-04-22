@@ -10,8 +10,10 @@ use serde::{Deserialize, Serialize};
 
 /// Recovery level for tiered escalation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RecoveryLevel {
     /// Level 0: Automatic retry (same prompt)
+    #[default]
     AutoRetry,
 
     /// Level 1: Adjusted retry (different prompt, more context)
@@ -96,11 +98,6 @@ impl RecoveryLevel {
     }
 }
 
-impl Default for RecoveryLevel {
-    fn default() -> Self {
-        RecoveryLevel::AutoRetry
-    }
-}
 
 impl std::fmt::Display for RecoveryLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -265,8 +262,10 @@ impl From<DecisionAgentError> for DecisionError {
 
 /// Session health status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SessionHealthStatus {
     /// Session is active and healthy
+    #[default]
     Active,
 
     /// Session is stale but usable
@@ -293,16 +292,13 @@ impl SessionHealthStatus {
     }
 }
 
-impl Default for SessionHealthStatus {
-    fn default() -> Self {
-        SessionHealthStatus::Active
-    }
-}
 
 /// Engine health status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum EngineHealthStatus {
     /// Engine is healthy
+    #[default]
     Healthy,
 
     /// Engine is degraded but functional
@@ -329,11 +325,6 @@ impl EngineHealthStatus {
     }
 }
 
-impl Default for EngineHealthStatus {
-    fn default() -> Self {
-        EngineHealthStatus::Healthy
-    }
-}
 
 /// Decision agent health metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
