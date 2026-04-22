@@ -16,6 +16,7 @@ use crate::agent_runtime::{AgentCodename, AgentId, ProviderType};
 use crate::app::TranscriptEntry;
 use crate::launch_config::AgentLaunchBundle;
 use crate::logging;
+use crate::runtime_command::RuntimeCommandQueue;
 use crate::worker::Worker;
 // Re-export slot types for backward compatibility (files importing from agent_slot still work)
 pub use crate::slot::{AgentSlotStatus, TaskCompletionResult, ThreadOutcome};
@@ -77,6 +78,8 @@ pub struct AgentSlot {
     last_idle_trigger_at: Option<Instant>,
     /// Worker aggregate root (domain model, shadow-initialized for dual-write)
     worker: Option<Worker>,
+    /// Pending runtime commands produced by Worker::apply()
+    command_queue: RuntimeCommandQueue,
 }
 
 impl std::fmt::Debug for AgentSlot {
@@ -124,6 +127,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -154,6 +158,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -185,6 +190,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -217,6 +223,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -280,6 +287,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -311,6 +319,7 @@ impl AgentSlot {
             profile_id: None,
             last_idle_trigger_at: None,
             worker: None,
+            command_queue: RuntimeCommandQueue::new(),
         }
     }
 
@@ -544,9 +553,9 @@ impl AgentSlot {
         if let Some(worker) = &mut self.worker {
             // ProviderEvent is DomainEvent, so we can apply directly
             match worker.apply(event.clone()) {
-                Ok(_commands) => {
-                    // RuntimeCommands are collected for later dispatch by the event loop.
-                    // During dual-write transition, we don't execute them yet.
+                Ok(commands) => {
+                    // Queue RuntimeCommands for later dispatch by the event loop (Phase 7)
+                    self.command_queue.extend(commands);
                 }
                 Err(e) => {
                     logging::warn_event(
@@ -560,6 +569,11 @@ impl AgentSlot {
                 }
             }
         }
+    }
+
+    /// Drain all pending runtime commands from this slot's queue.
+    pub fn drain_commands(&mut self) -> Vec<crate::runtime_command::RuntimeCommand> {
+        self.command_queue.drain().collect()
     }
 
     /// Set provider thread components
@@ -1806,5 +1820,25 @@ mod tests {
             worker.state(),
             crate::worker_state::WorkerState::ProcessingTool { name } if name == "read_file"
         ));
+    }
+
+    #[test]
+    fn drain_commands_collects_queued_runtime_commands() {
+        let mut slot = make_slot();
+        slot.init_worker();
+
+        // Apply events that produce RuntimeCommands
+        slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));
+        slot.apply_provider_event_to_worker(&ProviderEvent::Error("boom".to_string()));
+
+        // Commands should be queued
+        let commands = slot.drain_commands();
+        assert_eq!(commands.len(), 2);
+        assert!(matches!(&commands[0], crate::runtime_command::RuntimeCommand::NotifyUser { .. }));
+        assert!(matches!(&commands[1], crate::runtime_command::RuntimeCommand::Terminate { .. }));
+
+        // Draining again should yield nothing
+        let commands = slot.drain_commands();
+        assert!(commands.is_empty());
     }
 }

@@ -1331,6 +1331,11 @@ impl AgentPool {
         &self.slots
     }
 
+    /// Get all slots mutably (for command draining).
+    pub fn slots_mut(&mut self) -> &mut [AgentSlot] {
+        &mut self.slots
+    }
+
     /// Restore an agent slot into the pool.
     pub fn restore_slot(&mut self, slot: AgentSlot) -> Result<(), String> {
         let agent_id = slot.agent_id().as_str().to_string();

@@ -9,6 +9,7 @@ use agent_core::agent_runtime::{AgentId as CoreAgentId, AgentMeta, AgentStatus, 
 use agent_core::agent_slot::{AgentSlot, AgentSlotStatus as CoreAgentStatus};
 use agent_core::app::{AppStatus, TranscriptEntry};
 use agent_core::event_aggregator::EventAggregator;
+use agent_core::runtime_command::{EffectHandler, NoopEffectHandler};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownSnapshot, ShutdownReason};
 use agent_protocol::events::Event;
@@ -26,6 +27,7 @@ pub struct SessionManager {
     inner: Arc<Mutex<SessionInner>>,
     session_id: String,
     workplace_id: WorkplaceId,
+    effect_handler: Arc<dyn EffectHandler>,
 }
 
 struct SessionInner {
@@ -65,6 +67,7 @@ impl SessionManager {
             })),
             session_id,
             workplace_id,
+            effect_handler: Arc::new(NoopEffectHandler),
         })
     }
 
@@ -579,6 +582,7 @@ impl SessionManager {
             })),
             session_id: format!("sess-{}", uuid::Uuid::new_v4()),
             workplace_id,
+            effect_handler: Arc::new(NoopEffectHandler),
         })
     }
 
@@ -1041,8 +1045,26 @@ impl SessionManager {
     // ------------------------------------------------------------------
     // Phase 7: Dispatch commands
     // ------------------------------------------------------------------
-    async fn phase_7_dispatch_commands(&self, _inner: &mut SessionInner) {
-        // Placeholder for RuntimeCommand effect system (Story 3.2)
+    async fn phase_7_dispatch_commands(&self, inner: &mut SessionInner) {
+        // Collect RuntimeCommands from all worker queues
+        let mut all_commands = Vec::new();
+        for slot in inner.agent_pool.slots_mut() {
+            all_commands.extend(slot.drain_commands());
+        }
+
+        // Dispatch through effect handler
+        for cmd in &all_commands {
+            if let Err(e) = self.effect_handler.handle(cmd) {
+                tracing::warn!(command = ?cmd, error = %e, "EffectHandler failed");
+            }
+        }
+    }
+
+    /// Replace the effect handler (useful for testing).
+    #[cfg(test)]
+    pub fn with_effect_handler(mut self, handler: Arc<dyn EffectHandler>) -> Self {
+        self.effect_handler = handler;
+        self
     }
 
     // ---------------------------------------------------------------------------
@@ -1608,5 +1630,44 @@ mod tests {
         assert_eq!(dump["workplace_id"], wp.as_str());
         assert!(dump.get("agent_count").is_some());
         assert!(dump.get("event_queue_depth").is_some());
+    }
+
+    #[tokio::test]
+    async fn phase_7_dispatches_runtime_commands() {
+        use agent_core::agent_runtime::{AgentCodename, AgentId, ProviderType};
+        use agent_core::agent_slot::AgentSlot;
+        use agent_core::runtime_command::RecordingEffectHandler;
+        use agent_core::ProviderEvent;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let wp = WorkplaceId::new("wp-phase7");
+        let handler = Arc::new(RecordingEffectHandler::new());
+        let mgr = SessionManager::bootstrap(tmp.path().to_path_buf(), wp)
+            .await
+            .unwrap()
+            .with_effect_handler(handler.clone());
+
+        // Set up a slot with pending commands
+        {
+            let mut inner = mgr.inner.lock().await;
+            let mut slot = AgentSlot::new(
+                AgentId::new("test-agent"),
+                AgentCodename::new("alpha"),
+                ProviderType::Claude,
+            );
+            // Initialize worker and produce commands
+            slot.apply_provider_event_to_worker(&ProviderEvent::Status("worker started".to_string()));
+            slot.apply_provider_event_to_worker(&ProviderEvent::Error("test error".to_string()));
+            inner.agent_pool.restore_slot(slot).unwrap();
+        }
+
+        // Tick — Phase 7 should drain and dispatch commands
+        mgr.tick().await.unwrap();
+
+        // Verify handler received the commands
+        let snapshot = handler.snapshot();
+        assert_eq!(snapshot.len(), 2, "Expected NotifyUser + Terminate");
+        assert!(matches!(&snapshot[0], agent_core::runtime_command::RuntimeCommand::NotifyUser { .. }));
+        assert!(matches!(&snapshot[1], agent_core::runtime_command::RuntimeCommand::Terminate { .. }));
     }
 }
