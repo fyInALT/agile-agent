@@ -43,6 +43,7 @@ pub mod task_artifacts;
 pub mod task_engine;
 pub mod verification;
 pub mod workplace_store;
+pub mod transcript_journal;
 pub mod worker;
 pub mod worker_state;
 

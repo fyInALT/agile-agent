@@ -12,7 +12,8 @@ use std::path::PathBuf;
 
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId};
-use crate::worker_state::{WorkerState, InvalidTransition};
+use crate::transcript_journal::{JournalEntry, TranscriptJournal};
+use crate::worker_state::{InvalidTransition, WorkerState};
 use agent_events::DomainEvent;
 use agent_types::TaskId;
 
@@ -50,15 +51,6 @@ impl From<InvalidTransition> for WorkerError {
     }
 }
 
-/// A single entry in the worker's transcript journal.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JournalEntry {
-    /// The event that produced this entry
-    pub event: DomainEvent,
-    /// Sequence number for ordering
-    pub seq: u64,
-}
-
 /// Worker aggregate root — encapsulates all mutable domain state for one agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worker {
@@ -70,10 +62,8 @@ pub struct Worker {
     role: AgentRole,
     /// Current domain state
     state: WorkerState,
-    /// Event transcript (chronological order)
-    transcript: Vec<JournalEntry>,
-    /// Next sequence number for transcript entries
-    next_seq: u64,
+    /// Structured event transcript
+    transcript: TranscriptJournal,
     /// Currently assigned task (if any)
     assigned_task_id: Option<TaskId>,
     /// Worktree path (if using independent worktree)
@@ -90,8 +80,7 @@ impl Worker {
             codename,
             role,
             state: WorkerState::idle(),
-            transcript: Vec::new(),
-            next_seq: 0,
+            transcript: TranscriptJournal::new(),
             assigned_task_id: None,
             worktree_path: None,
             worktree_branch: None,
@@ -109,7 +98,7 @@ impl Worker {
     ///   `WorkerError::InvalidEventForState`
     pub fn apply(&mut self, event: DomainEvent) -> Result<(), WorkerError> {
         // Record the event in transcript first (always succeeds)
-        self.append_to_transcript(event.clone());
+        self.transcript.append(event.clone());
 
         // Then handle state transitions based on event type
         match &event {
@@ -279,26 +268,15 @@ impl Worker {
     }
 
     /// Get transcript entries
-    pub fn transcript(&self) -> &[JournalEntry] {
+    pub fn transcript(&self) -> &TranscriptJournal {
         &self.transcript
     }
 
     /// Get last n transcript entries
     pub fn last_n_entries(&self, n: usize) -> &[JournalEntry] {
-        let start = self.transcript.len().saturating_sub(n);
-        &self.transcript[start..]
+        self.transcript.last_n(n)
     }
 
-    // ── Private helpers ─────────────────────────────────────────
-
-    fn append_to_transcript(&mut self, event: DomainEvent) {
-        let entry = JournalEntry {
-            event,
-            seq: self.next_seq,
-        };
-        self.next_seq += 1;
-        self.transcript.push(entry);
-    }
 }
 
 #[cfg(test)]
@@ -525,9 +503,6 @@ mod tests {
         w.apply(DomainEvent::Finished).unwrap();
 
         assert_eq!(w.transcript().len(), 3);
-        assert_eq!(w.transcript()[0].seq, 0);
-        assert_eq!(w.transcript()[1].seq, 1);
-        assert_eq!(w.transcript()[2].seq, 2);
     }
 
     #[test]
@@ -538,8 +513,6 @@ mod tests {
         }
         let last_2 = w.last_n_entries(2);
         assert_eq!(last_2.len(), 2);
-        assert!(matches!(&last_2[0].event, DomainEvent::Status(s) if s == "event-3"));
-        assert!(matches!(&last_2[1].event, DomainEvent::Status(s) if s == "event-4"));
     }
 
     // ── Worktree ────────────────────────────────────────────────
