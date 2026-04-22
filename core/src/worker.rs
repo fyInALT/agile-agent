@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId};
+use crate::runtime_command::RuntimeCommand;
 use crate::transcript_journal::{JournalEntry, TranscriptJournal};
 use crate::worker_state::{InvalidTransition, WorkerState};
 use agent_events::DomainEvent;
@@ -96,23 +97,38 @@ impl Worker {
     /// - Invalid transitions return `WorkerError::InvalidTransition`
     /// - Events that don't make sense in the current state return
     ///   `WorkerError::InvalidEventForState`
-    pub fn apply(&mut self, event: DomainEvent) -> Result<(), WorkerError> {
+    pub fn apply(&mut self, event: DomainEvent) -> Result<Vec<RuntimeCommand>, WorkerError> {
         // Record the event in transcript first (always succeeds)
         self.transcript.append(event.clone());
 
-        // Then handle state transitions based on event type
-        match &event {
+        // State transitions and command generation based on event type
+        let commands = match &event {
             // ── Lifecycle events ──────────────────────────────────
             DomainEvent::Status(text) if text == "worker started" => {
                 self.state = self.state.transition_to(WorkerState::starting())?;
+                vec![]
             }
             DomainEvent::Finished => {
                 self.state = self.state.transition_to(WorkerState::completed())?;
+                vec![RuntimeCommand::Terminate {
+                    agent_id: self.agent_id.clone(),
+                    reason: "completed".to_string(),
+                }]
             }
             DomainEvent::Error(msg) => {
                 self.state = self
                     .state
                     .transition_to(WorkerState::failed(msg.clone()))?;
+                vec![
+                    RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: msg.clone(),
+                    },
+                    RuntimeCommand::Terminate {
+                        agent_id: self.agent_id.clone(),
+                        reason: msg.clone(),
+                    },
+                ]
             }
 
             // ── Streaming events ──────────────────────────────────
@@ -120,9 +136,18 @@ impl Worker {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
                 }
+                vec![]
             }
-            DomainEvent::Status(_) => {
-                // Generic status updates don't change state
+            DomainEvent::Status(text) => {
+                // Generic status updates don't change state but may notify
+                if text.contains("error") || text.contains("failed") {
+                    vec![RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: text.clone(),
+                    }]
+                } else {
+                    vec![]
+                }
             }
 
             // ── Tool execution ────────────────────────────────────
@@ -130,15 +155,23 @@ impl Worker {
                 self.state = self
                     .state
                     .transition_to(WorkerState::processing_tool("exec"))?;
+                vec![]
             }
-            DomainEvent::ExecCommandFinished { .. } => {
-                // Return to responding after tool finishes
+            DomainEvent::ExecCommandFinished { status, .. } => {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
                 }
+                if matches!(status, agent_events::ExecCommandStatus::Failed | agent_events::ExecCommandStatus::Declined) {
+                    vec![RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: "exec command failed".to_string(),
+                    }]
+                } else {
+                    vec![]
+                }
             }
             DomainEvent::ExecCommandOutputDelta { .. } => {
-                // Delta events don't change state
+                vec![]
             }
 
             // ── Generic tool calls ────────────────────────────────
@@ -146,10 +179,19 @@ impl Worker {
                 self.state = self
                     .state
                     .transition_to(WorkerState::processing_tool(name.clone()))?;
+                vec![]
             }
-            DomainEvent::GenericToolCallFinished { .. } => {
+            DomainEvent::GenericToolCallFinished { success, .. } => {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
+                }
+                if !success {
+                    vec![RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: "tool call failed".to_string(),
+                    }]
+                } else {
+                    vec![]
                 }
             }
 
@@ -158,16 +200,18 @@ impl Worker {
                 self.state = self
                     .state
                     .transition_to(WorkerState::processing_tool("websearch"))?;
+                vec![]
             }
             DomainEvent::WebSearchFinished { .. } => {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
                 }
+                vec![]
             }
 
             // ── Images ────────────────────────────────────────────
             DomainEvent::ViewImage { .. } | DomainEvent::ImageGenerationFinished { .. } => {
-                // Image events don't change state
+                vec![]
             }
 
             // ── MCP ───────────────────────────────────────────────
@@ -175,10 +219,19 @@ impl Worker {
                 self.state = self
                     .state
                     .transition_to(WorkerState::processing_tool("mcp"))?;
+                vec![]
             }
-            DomainEvent::McpToolCallFinished { .. } => {
+            DomainEvent::McpToolCallFinished { is_error, .. } => {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
+                }
+                if *is_error {
+                    vec![RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: "MCP tool call failed".to_string(),
+                    }]
+                } else {
+                    vec![]
                 }
             }
 
@@ -187,23 +240,32 @@ impl Worker {
                 self.state = self
                     .state
                     .transition_to(WorkerState::processing_tool("patch"))?;
+                vec![]
             }
-            DomainEvent::PatchApplyFinished { .. } => {
+            DomainEvent::PatchApplyFinished { status, .. } => {
                 if !matches!(self.state, WorkerState::Responding { .. }) {
                     self.state = self.state.transition_to(WorkerState::responding_streaming())?;
                 }
+                if matches!(status, agent_events::PatchApplyStatus::Failed | agent_events::PatchApplyStatus::Declined) {
+                    vec![RuntimeCommand::NotifyUser {
+                        agent_id: self.agent_id.clone(),
+                        message: "patch apply failed".to_string(),
+                    }]
+                } else {
+                    vec![]
+                }
             }
             DomainEvent::PatchApplyOutputDelta { .. } => {
-                // Delta events don't change state
+                vec![]
             }
 
             // ── Session handle ────────────────────────────────────
             DomainEvent::SessionHandle(_) => {
-                // Session acquisition doesn't change worker state
+                vec![]
             }
-        }
+        };
 
-        Ok(())
+        Ok(commands)
     }
 
     /// Get current state
@@ -540,5 +602,181 @@ mod tests {
         let mut w = test_worker();
         let result = w.apply(DomainEvent::Error("e".to_string()));
         assert!(result.is_err());
+    }
+
+    // ── RuntimeCommand generation ───────────────────────────────
+
+    #[test]
+    fn apply_finished_produces_terminate_command() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        w.apply(DomainEvent::AssistantChunk("done".to_string())).unwrap();
+        let commands = w.apply(DomainEvent::Finished).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::Terminate { agent_id, reason } if agent_id.as_str() == "test-agent" && reason == "completed"
+        ));
+    }
+
+    #[test]
+    fn apply_error_produces_notify_and_terminate_commands() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        let commands = w.apply(DomainEvent::Error("connection lost".to_string())).unwrap();
+        assert_eq!(commands.len(), 2);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "connection lost"
+        ));
+        assert!(matches!(
+            &commands[1],
+            RuntimeCommand::Terminate { agent_id, reason } if agent_id.as_str() == "test-agent" && reason == "connection lost"
+        ));
+    }
+
+    #[test]
+    fn apply_exec_command_failed_produces_notify_command() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        w.apply(DomainEvent::AssistantChunk("hi".to_string())).unwrap();
+        w.apply(DomainEvent::ExecCommandStarted { call_id: None, input_preview: None, source: None }).unwrap();
+        let commands = w.apply(DomainEvent::ExecCommandFinished {
+            call_id: None,
+            output_preview: None,
+            status: agent_events::ExecCommandStatus::Failed,
+            exit_code: None,
+            duration_ms: None,
+            source: None,
+        }).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "exec command failed"
+        ));
+    }
+
+    #[test]
+    fn apply_generic_tool_call_failed_produces_notify_command() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        w.apply(DomainEvent::AssistantChunk("hi".to_string())).unwrap();
+        w.apply(DomainEvent::GenericToolCallStarted { name: "read".to_string(), call_id: None, input_preview: None }).unwrap();
+        let commands = w.apply(DomainEvent::GenericToolCallFinished {
+            name: "read".to_string(),
+            call_id: None,
+            output_preview: None,
+            success: false,
+            exit_code: None,
+            duration_ms: None,
+        }).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "tool call failed"
+        ));
+    }
+
+    #[test]
+    fn apply_mcp_tool_call_failed_produces_notify_command() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        w.apply(DomainEvent::AssistantChunk("hi".to_string())).unwrap();
+        w.apply(DomainEvent::McpToolCallStarted { call_id: None, invocation: agent_events::McpInvocation { server: "s".to_string(), tool: "t".to_string(), arguments: None } }).unwrap();
+        let commands = w.apply(DomainEvent::McpToolCallFinished {
+            call_id: None,
+            invocation: agent_events::McpInvocation { server: "s".to_string(), tool: "t".to_string(), arguments: None },
+            result_blocks: vec![],
+            error: Some("fail".to_string()),
+            status: agent_events::McpToolCallStatus::Failed,
+            is_error: true,
+        }).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "MCP tool call failed"
+        ));
+    }
+
+    #[test]
+    fn apply_patch_apply_failed_produces_notify_command() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        w.apply(DomainEvent::AssistantChunk("hi".to_string())).unwrap();
+        w.apply(DomainEvent::PatchApplyStarted { call_id: None, changes: vec![] }).unwrap();
+        let commands = w.apply(DomainEvent::PatchApplyFinished {
+            call_id: None,
+            changes: vec![],
+            status: agent_events::PatchApplyStatus::Failed,
+        }).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "patch apply failed"
+        ));
+    }
+
+    #[test]
+    fn apply_status_with_error_keyword_produces_notify_command() {
+        let mut w = test_worker();
+        let commands = w.apply(DomainEvent::Status("something failed badly".to_string())).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            RuntimeCommand::NotifyUser { agent_id, message } if agent_id.as_str() == "test-agent" && message == "something failed badly"
+        ));
+    }
+
+    #[test]
+    fn apply_successful_events_produce_no_commands() {
+        let mut w = test_worker();
+        w.apply(DomainEvent::Status("worker started".to_string())).unwrap();
+        let cmds = w.apply(DomainEvent::AssistantChunk("hi".to_string())).unwrap();
+        assert!(cmds.is_empty());
+
+        w.apply(DomainEvent::ExecCommandStarted { call_id: None, input_preview: None, source: None }).unwrap();
+        let cmds = w.apply(DomainEvent::ExecCommandFinished {
+            call_id: None,
+            output_preview: None,
+            status: agent_events::ExecCommandStatus::Completed,
+            exit_code: None,
+            duration_ms: None,
+            source: None,
+        }).unwrap();
+        assert!(cmds.is_empty());
+
+        w.apply(DomainEvent::GenericToolCallStarted { name: "read".to_string(), call_id: None, input_preview: None }).unwrap();
+        let cmds = w.apply(DomainEvent::GenericToolCallFinished {
+            name: "read".to_string(),
+            call_id: None,
+            output_preview: None,
+            success: true,
+            exit_code: None,
+            duration_ms: None,
+        }).unwrap();
+        assert!(cmds.is_empty());
+
+        w.apply(DomainEvent::WebSearchStarted { call_id: None, query: "q".to_string() }).unwrap();
+        let cmds = w.apply(DomainEvent::WebSearchFinished { call_id: None, query: "q".to_string(), action: None }).unwrap();
+        assert!(cmds.is_empty());
+
+        w.apply(DomainEvent::McpToolCallStarted { call_id: None, invocation: agent_events::McpInvocation { server: "s".to_string(), tool: "t".to_string(), arguments: None } }).unwrap();
+        let cmds = w.apply(DomainEvent::McpToolCallFinished {
+            call_id: None,
+            invocation: agent_events::McpInvocation { server: "s".to_string(), tool: "t".to_string(), arguments: None },
+            result_blocks: vec![],
+            error: None,
+            status: agent_events::McpToolCallStatus::Completed,
+            is_error: false,
+        }).unwrap();
+        assert!(cmds.is_empty());
+
+        w.apply(DomainEvent::PatchApplyStarted { call_id: None, changes: vec![] }).unwrap();
+        let cmds = w.apply(DomainEvent::PatchApplyFinished {
+            call_id: None,
+            changes: vec![],
+            status: agent_events::PatchApplyStatus::Completed,
+        }).unwrap();
+        assert!(cmds.is_empty());
     }
 }

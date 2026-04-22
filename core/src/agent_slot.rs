@@ -543,15 +543,21 @@ impl AgentSlot {
         self.init_worker();
         if let Some(worker) = &mut self.worker {
             // ProviderEvent is DomainEvent, so we can apply directly
-            if let Err(e) = worker.apply(event.clone()) {
-                logging::warn_event(
-                    "slot.worker.apply_error",
-                    "Worker rejected event",
-                    serde_json::json!({
-                        "agent_id": self.agent_id.as_str(),
-                        "error": e.to_string(),
-                    }),
-                );
+            match worker.apply(event.clone()) {
+                Ok(_commands) => {
+                    // RuntimeCommands are collected for later dispatch by the event loop.
+                    // During dual-write transition, we don't execute them yet.
+                }
+                Err(e) => {
+                    logging::warn_event(
+                        "slot.worker.apply_error",
+                        "Worker rejected event",
+                        serde_json::json!({
+                            "agent_id": self.agent_id.as_str(),
+                            "error": e.to_string(),
+                        }),
+                    );
+                }
             }
         }
     }
