@@ -43,7 +43,7 @@ use agent_decision::{
 };
 
 /// Pool managing multiple agent slots
-pub struct AgentPool {
+pub struct WorkerPool {
     /// All active agent slots
     slots: Vec<AgentSlot>,
     /// Max concurrent agents (configurable)
@@ -68,7 +68,7 @@ pub struct AgentPool {
     profile_store: Option<ProfileStore>,
 }
 
-impl std::fmt::Debug for AgentPool {
+impl std::fmt::Debug for WorkerPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentPool")
             .field("slots", &self.slots)
@@ -84,7 +84,7 @@ impl std::fmt::Debug for AgentPool {
     }
 }
 
-impl AgentPool {
+impl WorkerPool {
     /// Create a new empty agent pool
     pub fn new(workplace_id: WorkplaceId, max_slots: usize) -> Self {
         Self {
@@ -4585,3 +4585,7 @@ mod tests {
         assert_eq!(result, DecisionExecutionResult::AcceptedRecommendation);
     }
 }
+
+/// Backward compatibility alias — use `WorkerPool` in new code.
+pub type AgentPool = WorkerPool;
+

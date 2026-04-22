@@ -39,7 +39,7 @@ pub use agent_types::TaskId;
 /// AgentSlot is owned by the main thread (TUI loop). The provider thread
 /// sends events through the channel, and main thread receives via `event_rx`.
 /// All mutations happen on main thread after receiving events.
-pub struct AgentSlot {
+pub struct WorkerHandle {
     /// Unique agent identifier
     agent_id: AgentId,
     /// Agent display codename (alpha, bravo, etc.)
@@ -82,7 +82,7 @@ pub struct AgentSlot {
     command_queue: RuntimeCommandQueue,
 }
 
-impl std::fmt::Debug for AgentSlot {
+impl std::fmt::Debug for WorkerHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentSlot")
             .field("agent_id", &self.agent_id)
@@ -104,7 +104,7 @@ impl std::fmt::Debug for AgentSlot {
     }
 }
 
-impl AgentSlot {
+impl WorkerHandle {
     /// Create a new agent slot with given identity
     pub fn new(agent_id: AgentId, codename: AgentCodename, provider_type: ProviderType) -> Self {
         Self {
@@ -1842,3 +1842,7 @@ mod tests {
         assert!(commands.is_empty());
     }
 }
+
+/// Backward compatibility alias — use `WorkerHandle` in new code.
+pub type AgentSlot = WorkerHandle;
+

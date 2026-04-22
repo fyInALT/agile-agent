@@ -35,12 +35,12 @@ impl std::error::Error for FocusError {}
 /// This struct tracks which agent slot is currently focused
 /// and provides methods to change focus.
 #[derive(Debug)]
-pub struct FocusManager {
+pub struct WorkerFocusManager {
     /// Currently focused slot index
     focused_slot: usize,
 }
 
-impl FocusManager {
+impl WorkerFocusManager {
     /// Create a new focus manager with focus at index 0
     pub fn new() -> Self {
         Self { focused_slot: 0 }
@@ -187,7 +187,7 @@ impl FocusManager {
     }
 }
 
-impl Default for FocusManager {
+impl Default for WorkerFocusManager {
     fn default() -> Self {
         Self::new()
     }
@@ -309,3 +309,5 @@ mod tests {
         assert_eq!(fm.focused_index(), 2); // Should not change
     }
 }
+pub type FocusManager = WorkerFocusManager;
+

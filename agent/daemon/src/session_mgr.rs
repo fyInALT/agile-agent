@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Owns all daemon-side runtime state.
-pub struct SessionManager {
+pub struct EventLoop {
     inner: Arc<Mutex<SessionInner>>,
     session_id: String,
     workplace_id: WorkplaceId,
@@ -37,7 +37,7 @@ struct SessionInner {
     mailbox: AgentMailbox,
 }
 
-impl SessionManager {
+impl EventLoop {
     /// Bootstrap a new session for the given workplace.
     ///
     /// This performs filesystem I/O and should be called once during daemon startup.
@@ -1714,3 +1714,7 @@ mod tests {
         assert!(matches!(&snapshot[1], agent_core::runtime_command::RuntimeCommand::Terminate { .. }));
     }
 }
+
+/// Backward compatibility alias — use `EventLoop` in new code.
+pub type SessionManager = EventLoop;
+

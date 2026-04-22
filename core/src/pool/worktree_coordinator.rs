@@ -15,7 +15,7 @@ use crate::{
 ///
 /// Manages worktree manager, state store, and git flow executor.
 /// Used as a delegate within AgentPool for worktree state operations.
-pub struct WorktreeCoordinator {
+pub struct WorkerWorktreeManager {
     /// Worktree manager for git worktree operations
     manager: Option<WorktreeManager>,
     /// State store for persistence
@@ -24,7 +24,7 @@ pub struct WorktreeCoordinator {
     git_flow_executor: Option<GitFlowExecutor>,
 }
 
-impl std::fmt::Debug for WorktreeCoordinator {
+impl std::fmt::Debug for WorkerWorktreeManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorktreeCoordinator")
             .field("has_manager", &self.manager.is_some())
@@ -34,7 +34,7 @@ impl std::fmt::Debug for WorktreeCoordinator {
     }
 }
 
-impl WorktreeCoordinator {
+impl WorkerWorktreeManager {
     /// Create a new coordinator without worktree support
     pub fn new() -> Self {
         Self {
@@ -202,7 +202,7 @@ impl WorktreeCoordinator {
     }
 }
 
-impl Default for WorktreeCoordinator {
+impl Default for WorkerWorktreeManager {
     fn default() -> Self {
         Self::new()
     }
@@ -248,3 +248,5 @@ mod tests {
         assert!(branches.is_empty());
     }
 }
+pub type WorktreeCoordinator = WorkerWorktreeManager;
+
