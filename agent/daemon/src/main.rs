@@ -105,6 +105,29 @@ async fn main() -> anyhow::Result<()> {
 
     agent_daemon::health::spawn_memory_monitor();
 
+    // Spawn the daemon event loop: polls provider events, triggers decision
+    // layer, and broadcasts protocol events to all connected clients.
+    let _tick_handle = {
+        let session_mgr = session_mgr.clone();
+        let broadcaster = broadcaster.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+                match session_mgr.tick().await {
+                    Ok(events) => {
+                        for event in events {
+                            broadcaster.broadcast(event).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("daemon tick error: {}", e);
+                    }
+                }
+            }
+        })
+    };
+
     let mut router = Router::new();
     router.register("session.initialize", Arc::new(SessionHandler::new(session_mgr.clone())));
     router.register("session.heartbeat", Arc::new(HeartbeatHandler));

@@ -23,6 +23,7 @@ impl Handler for SessionHandler {
     async fn handle(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcMessage> {
         match req.method.as_str() {
             "session.initialize" => self.handle_initialize(req).await,
+            "session.sendInput" => self.handle_send_input(req).await,
             "session.debugDump" => self.handle_debug_dump(req).await,
             "session.loadHistory" => self.handle_load_history(req).await,
             "session.forceSnapshot" => self.handle_force_snapshot(req).await,
@@ -115,6 +116,52 @@ impl SessionHandler {
             result: Some(serde_json::to_value(conns)?),
             ext: None,
         }))
+    }
+
+    async fn handle_send_input(&self, req: JsonRpcRequest) -> anyhow::Result<JsonRpcMessage> {
+        let params: SendInputParams = req
+            .params
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+
+        // If no target_agent_id is provided, return an error for now.
+        // In the future, we can default to the focused agent.
+        let agent_id = match params.target_agent_id {
+            Some(id) => id,
+            None => {
+                return Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: req.id,
+                    error: JsonRpcError {
+                        code: -32602,
+                        message: "missing target_agent_id".to_string(),
+                        data: None,
+                        ext: None,
+                    },
+                    ext: None,
+                }));
+            }
+        };
+
+        match self.session_mgr.send_input(&agent_id, &params.text).await {
+            Ok(result) => Ok(JsonRpcMessage::Response(JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: req.id,
+                result: Some(serde_json::to_value(result)?),
+                ext: None,
+            })),
+            Err(e) => Ok(JsonRpcMessage::Error(JsonRpcErrorResponse {
+                jsonrpc: "2.0".to_string(),
+                id: req.id,
+                error: JsonRpcError {
+                    code: -32000,
+                    message: format!("send input failed: {}", e),
+                    data: None,
+                    ext: None,
+                },
+                ext: None,
+            })),
+        }
     }
 }
 

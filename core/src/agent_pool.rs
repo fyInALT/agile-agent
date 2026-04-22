@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::agent_role::AgentRole;
 use crate::agent_runtime::{AgentCodename, AgentId, ProviderType, WorkplaceId};
@@ -1469,6 +1470,13 @@ impl AgentPool {
     /// Get mutable slot by agent ID
     pub fn get_slot_mut_by_id(&mut self, agent_id: &AgentId) -> Option<&mut AgentSlot> {
         self.slots.iter_mut().find(|s| s.agent_id() == agent_id)
+    }
+
+    /// Set the last activity timestamp for a slot (testing / snapshot restore)
+    pub fn set_slot_last_activity(&mut self, agent_id: &AgentId, instant: Instant) {
+        if let Some(slot) = self.slots.iter_mut().find(|s| s.agent_id() == agent_id) {
+            slot.set_last_activity(instant);
+        }
     }
 
     /// Get the currently focused slot

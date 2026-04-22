@@ -80,6 +80,15 @@ impl OutputClassifier for FallbackClassifier {
         match event {
             ProviderEvent::Finished { .. } => Some(SituationType::new("claims_completion")),
             ProviderEvent::Error { .. } => Some(SituationType::new("error")),
+            ProviderEvent::ClaudeToolCallFinished { success, .. } => {
+                if !success {
+                    Some(SituationType::with_subtype("error", "tool_failure"))
+                } else {
+                    None
+                }
+            }
+            ProviderEvent::CodexError { .. } => Some(SituationType::with_subtype("error", "codex_error")),
+            ProviderEvent::ACPError { .. } => Some(SituationType::with_subtype("error", "acp_error")),
             _ => None,
         }
     }

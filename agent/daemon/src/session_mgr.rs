@@ -5,12 +5,14 @@
 
 use agent_core::agent_mail::AgentMailbox;
 use agent_core::agent_pool::AgentPool;
-use agent_core::agent_runtime::{AgentMeta, AgentStatus, ProviderType};
+use agent_core::agent_runtime::{AgentId as CoreAgentId, AgentMeta, AgentStatus, ProviderType};
 use agent_core::agent_slot::{AgentSlot, AgentSlotStatus as CoreAgentStatus};
 use agent_core::app::{AppStatus, TranscriptEntry};
 use agent_core::event_aggregator::EventAggregator;
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownSnapshot, ShutdownReason};
+use agent_protocol::events::Event;
+use agent_protocol::methods::SendInputResult;
 use agent_protocol::state::*;
 use agent_types::WorkplaceId;
 use anyhow::{Context, Result};
@@ -29,9 +31,7 @@ pub struct SessionManager {
 struct SessionInner {
     session: RuntimeSession,
     agent_pool: AgentPool,
-    #[allow(dead_code)]
     event_aggregator: EventAggregator,
-    #[allow(dead_code)]
     mailbox: AgentMailbox,
 }
 
@@ -189,6 +189,87 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    /// Send user input to an agent, starting a provider thread.
+    pub async fn send_input(&self, agent_id: &str, text: &str) -> Result<SendInputResult> {
+        let mut inner = self.inner.lock().await;
+        let id = CoreAgentId::new(agent_id);
+        Self::start_provider_for_agent_inner(
+            &mut inner,
+            &id,
+            text,
+            true, // record user prompt in transcript
+        )
+        .await
+    }
+
+    /// Internal helper to start a provider thread for an agent.
+    ///
+    /// `record_user_prompt` controls whether a `TranscriptEntry::User` is
+    /// appended. Set to `false` when the prompt was already recorded by the
+    /// caller (e.g. decision action executor).
+    async fn start_provider_for_agent_inner(
+        inner: &mut tokio::sync::MutexGuard<'_, SessionInner>,
+        agent_id: &CoreAgentId,
+        text: &str,
+        record_user_prompt: bool,
+    ) -> Result<SendInputResult> {
+        let slot = inner
+            .agent_pool
+            .get_slot_by_id(agent_id)
+            .context("agent not found")?;
+
+        let provider_kind = slot
+            .provider_type()
+            .to_provider_kind()
+            .unwrap_or(agent_types::ProviderKind::Mock);
+        let session_handle = slot.session_handle().cloned();
+        let cwd = slot.cwd();
+
+        if slot.has_provider_thread() {
+            anyhow::bail!("agent {} is already busy", agent_id.as_str());
+        }
+
+        let thread_name = format!("agent-{}-provider", agent_id.as_str());
+        let handle = agent_core::start_provider_with_handle(
+            provider_kind,
+            text.to_string(),
+            cwd.clone(),
+            session_handle,
+            thread_name,
+        )
+        .context("failed to start provider thread")?;
+
+        let (event_rx, join_handle) = handle.into_parts();
+
+        let slot = inner
+            .agent_pool
+            .get_slot_mut_by_id(agent_id)
+            .context("agent not found")?;
+        if record_user_prompt {
+            slot.append_transcript(TranscriptEntry::User(text.to_string()));
+        }
+        if let Some(jh) = join_handle {
+            slot.set_thread_handle(jh);
+        }
+        let current_status = slot.status().clone();
+        if current_status.is_idle() {
+            let _ = slot.transition_to(CoreAgentStatus::starting());
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+        } else if current_status.is_active()
+            || current_status.is_blocked()
+            || current_status.is_waiting_for_input()
+        {
+            let _ = slot.transition_to(CoreAgentStatus::responding_now());
+        }
+
+        inner.event_aggregator.add_receiver(agent_id.clone(), event_rx);
+
+        Ok(SendInputResult {
+            accepted: true,
+            item_id: format!("item-{}", uuid::Uuid::new_v4()),
+        })
     }
 
     /// List agents in the pool.
@@ -519,6 +600,395 @@ impl SessionManager {
         }))
     }
 
+    /// Process one tick of the daemon event loop.
+    ///
+    /// Polls provider events from the event aggregator, updates slot state,
+    /// triggers the decision layer when appropriate, and returns protocol
+    /// events that should be broadcast to connected clients.
+    pub async fn tick(&self) -> Result<Vec<Event>> {
+        let mut inner = self.inner.lock().await;
+        let mut pump = crate::event_pump::EventPump::new();
+        let mut broadcast_events = Vec::new();
+
+        // ------------------------------------------------------------------
+        // 1. Poll provider events
+        // ------------------------------------------------------------------
+        let poll_result = inner.event_aggregator.poll_all();
+
+        for agent_event in poll_result.events {
+            match agent_event {
+                agent_core::event_aggregator::AgentEvent::FromProvider {
+                    agent_id,
+                    event,
+                } => {
+                    // Update activity timestamp.
+                    if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&agent_id) {
+                        slot.touch_activity();
+                        if slot.status().is_waiting_for_input() {
+                            let _ = slot
+                                .transition_to(CoreAgentStatus::responding_now());
+                        }
+                    }
+
+                    // Update slot state based on event type.
+                    match &event {
+                        agent_core::ProviderEvent::Finished => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                if slot.status().is_active() {
+                                    let _ = slot
+                                        .transition_to(CoreAgentStatus::idle());
+                                }
+                                slot.clear_provider_thread();
+                            }
+                            inner.event_aggregator.remove_receiver(&agent_id);
+                        }
+                        agent_core::ProviderEvent::Error(error) => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                slot.append_transcript(TranscriptEntry::Error(
+                                    error.clone(),
+                                ));
+                                let _ = slot.transition_to(
+                                    CoreAgentStatus::blocked(error.clone()),
+                                );
+                                slot.clear_provider_thread();
+                            }
+                            inner.event_aggregator.remove_receiver(&agent_id);
+                        }
+                        agent_core::ProviderEvent::AssistantChunk(chunk) => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                slot.append_transcript(
+                                    TranscriptEntry::Assistant(chunk.clone()),
+                                );
+                            }
+                        }
+                        agent_core::ProviderEvent::ThinkingChunk(chunk) => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                slot.append_transcript(
+                                    TranscriptEntry::Thinking(chunk.clone()),
+                                );
+                            }
+                        }
+                        agent_core::ProviderEvent::Status(text) => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                slot.append_transcript(TranscriptEntry::Status(
+                                    text.clone(),
+                                ));
+                            }
+                        }
+                        agent_core::ProviderEvent::ExecCommandStarted {
+                            call_id,
+                            input_preview,
+                            source,
+                        } => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                slot.append_transcript(
+                                    TranscriptEntry::ExecCommand {
+                                        call_id: call_id.clone(),
+                                        source: source.clone(),
+                                        allow_exploring_group: true,
+                                        input_preview: input_preview.clone(),
+                                        output_preview: None,
+                                        status: agent_core::ExecCommandStatus::InProgress,
+                                        exit_code: None,
+                                        duration_ms: None,
+                                    },
+                                );
+                            }
+                        }
+                        agent_core::ProviderEvent::ExecCommandOutputDelta {
+                            call_id: _,
+                            delta,
+                        } => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                // Append to the last ExecCommand entry.
+                                if let Some(
+                                    TranscriptEntry::ExecCommand {
+                                        output_preview, ..
+                                    },
+                                ) = slot.transcript_mut().last_mut()
+                                {
+                                    if let Some(preview) = output_preview {
+                                        preview.push_str(delta);
+                                    } else {
+                                        *output_preview = Some(delta.clone());
+                                    }
+                                }
+                            }
+                        }
+                        agent_core::ProviderEvent::ExecCommandFinished {
+                            call_id: _,
+                            output_preview,
+                            status,
+                            exit_code,
+                            duration_ms: _,
+                            source: _,
+                        } => {
+                            if let Some(slot) =
+                                inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                            {
+                                if let Some(
+                                    TranscriptEntry::ExecCommand {
+                                        output_preview: out,
+                                        status: st,
+                                        exit_code: ec,
+                                        duration_ms: dm,
+                                        ..
+                                    },
+                                ) = slot.transcript_mut().last_mut()
+                                {
+                                    if out.is_none() {
+                                        *out = output_preview.clone();
+                                    }
+                                    *st = *status;
+                                    *ec = *exit_code;
+                                    *dm = None;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // Decision layer integration.
+                    let classify_result =
+                        inner.agent_pool.classify_event(&agent_id, &event);
+                    if classify_result.is_needs_decision() {
+                        let situation = classify_result
+                            .situation()
+                            .map(|s| s.clone_boxed())
+                            .unwrap_or_else(|| {
+                                let components =
+                                    agent_decision::initializer::initialize_decision_layer();
+                                components.situation_registry.build(
+                                    classify_result
+                                        .situation_type()
+                                        .unwrap()
+                                        .clone(),
+                                )
+                            });
+                        let situation_type = classify_result.situation_type().unwrap();
+                        let context = agent_decision::context::DecisionContext::new(
+                            situation.clone_boxed(),
+                            agent_id.as_str(),
+                        );
+                        let request = agent_core::decision_mail::DecisionRequest::new(
+                            agent_id.clone(),
+                            situation_type.clone(),
+                            context,
+                        );
+                        if let Err(e) =
+                            inner.agent_pool.send_decision_request(&agent_id, request)
+                        {
+                            tracing::warn!(
+                                agent_id = %agent_id.as_str(),
+                                error = %e,
+                                "failed to send decision request"
+                            );
+                        }
+                    }
+
+                    // Convert to protocol events and collect for broadcast.
+                    let protocol_events =
+                        pump.process(agent_id.as_str().to_string(), event);
+                    broadcast_events.extend(protocol_events);
+                }
+                _ => {}
+            }
+        }
+
+        // Clean up disconnected channels.
+        for disconnected_id in poll_result.disconnected_channels {
+            if let Some(slot) =
+                inner.agent_pool.get_slot_mut_by_id(&disconnected_id)
+            {
+                slot.clear_provider_thread();
+                if slot.status().is_active() {
+                    let _ = slot.transition_to(CoreAgentStatus::idle());
+                }
+            }
+            inner.event_aggregator.remove_receiver(&disconnected_id);
+        }
+
+        // ------------------------------------------------------------------
+        // 2. Check idle agents and trigger decision layer intervention
+        // ------------------------------------------------------------------
+        const IDLE_DECISION_TRIGGER_SECS: u64 = 60;
+        const IDLE_DECISION_COOLDOWN_SECS: u64 = 300;
+
+        let idle_agents: Vec<CoreAgentId> = inner
+            .agent_pool
+            .slots()
+            .iter()
+            .filter_map(|slot| {
+                if !slot.status().is_idle() {
+                    return None;
+                }
+                let elapsed = slot.last_activity().elapsed().as_secs();
+                let recently_triggered = slot
+                    .last_idle_trigger_at()
+                    .map(|t| t.elapsed().as_secs() < IDLE_DECISION_COOLDOWN_SECS)
+                    .unwrap_or(false);
+                if elapsed >= IDLE_DECISION_TRIGGER_SECS && !recently_triggered {
+                    Some(slot.agent_id().clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for agent_id in idle_agents {
+            // Guard: skip if decision agent is already processing
+            let decision_agent_busy = inner
+                .agent_pool
+                .decision_agent_for(&agent_id)
+                .map(|da| !da.is_idle())
+                .unwrap_or(false);
+            if decision_agent_busy {
+                tracing::debug!(
+                    agent_id = %agent_id.as_str(),
+                    "decision agent busy, skipping idle trigger"
+                );
+                continue;
+            }
+
+            let situation_type = agent_decision::types::SituationType::new("agent_idle");
+            let components = agent_decision::initializer::initialize_decision_layer();
+            let situation = components.situation_registry.build(situation_type.clone());
+            let context = agent_decision::context::DecisionContext::new(
+                situation,
+                agent_id.as_str(),
+            );
+            let request = agent_core::decision_mail::DecisionRequest::new(
+                agent_id.clone(),
+                situation_type,
+                context,
+            );
+
+            if let Err(e) = inner.agent_pool.send_decision_request(&agent_id, request) {
+                tracing::warn!(
+                    agent_id = %agent_id.as_str(),
+                    error = %e,
+                    "failed to send idle decision request"
+                );
+            } else {
+                tracing::info!(
+                    agent_id = %agent_id.as_str(),
+                    "triggered decision layer for idle agent"
+                );
+                // Record trigger timestamp to enforce cooldown
+                if let Some(slot) = inner.agent_pool.get_slot_mut_by_id(&agent_id) {
+                    slot.set_last_idle_trigger_at(std::time::Instant::now());
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 3. Poll decision agents
+        // ------------------------------------------------------------------
+        let decision_responses = inner.agent_pool.poll_decision_agents();
+        for (work_agent_id, response) in decision_responses {
+            if let Some(output) = response.output() {
+                let result =
+                    inner.agent_pool.execute_decision_action(&work_agent_id, output);
+
+                match result {
+                    agent_core::agent_pool::DecisionExecutionResult::CustomInstruction {
+                        instruction,
+                    } => {
+                        // Decision executor already appended the instruction as a
+                        // TranscriptEntry::User, so we must NOT record it again.
+                        let slot_status = inner
+                            .agent_pool
+                            .get_slot_by_id(&work_agent_id)
+                            .map(|s| s.status().label());
+
+                        let is_valid = slot_status.as_deref().map_or(false, |status| {
+                            status == "responding"
+                                || status == "starting"
+                                || status == "idle"
+                                || status.starts_with("blocked:")
+                                || status == "waiting_for_input"
+                        });
+
+                        if is_valid {
+                            if let Err(e) = Self::start_provider_for_agent_inner(
+                                &mut inner,
+                                &work_agent_id,
+                                &instruction,
+                                false, // do not duplicate transcript entry
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    agent_id = %work_agent_id.as_str(),
+                                    error = %e,
+                                    "failed to start provider for custom instruction"
+                                );
+                            } else {
+                                tracing::info!(
+                                    agent_id = %work_agent_id.as_str(),
+                                    instruction = %instruction,
+                                    "started provider for custom instruction"
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                agent_id = %work_agent_id.as_str(),
+                                status = ?slot_status,
+                                "agent not in valid state for custom instruction provider start"
+                            );
+                        }
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::TaskPrepared {
+                        branch,
+                        ..
+                    } => {
+                        tracing::info!(
+                            agent_id = %work_agent_id.as_str(),
+                            branch = %branch,
+                            "task prepared by decision layer"
+                        );
+                    }
+                    agent_core::agent_pool::DecisionExecutionResult::PreparationFailed {
+                        reason,
+                    } => {
+                        tracing::warn!(
+                            agent_id = %work_agent_id.as_str(),
+                            reason = %reason,
+                            "task preparation failed"
+                        );
+                    }
+                    _ => {
+                        // Other results (Executed, Skipped, Cancelled, etc.) do not
+                        // require additional provider thread management.
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 4. Process pending mailbox deliveries
+        // ------------------------------------------------------------------
+        if inner.mailbox.pending_count() > 0 {
+            let _delivered = inner.mailbox.process_pending();
+        }
+
+        Ok(broadcast_events)
+    }
+
     // ---------------------------------------------------------------------------
     // Test-only helpers
     // ---------------------------------------------------------------------------
@@ -566,6 +1036,80 @@ impl SessionManager {
             .iter()
             .find(|s| s.agent_id().as_str() == agent_id)
             .map(|s| s.transcript().to_vec())
+    }
+
+    /// Test helper: spawn a decision agent for a work agent.
+    #[doc(hidden)]
+    pub async fn spawn_decision_agent_for(&self, agent_id: &str) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        inner
+            .agent_pool
+            .spawn_decision_agent_for(&id)
+            .map_err(|e| anyhow::anyhow!("spawn decision agent failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Test helper: check if a decision agent exists for a work agent.
+    #[doc(hidden)]
+    pub async fn decision_agent_exists(&self, agent_id: &str) -> bool {
+        let inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        inner.agent_pool.decision_agent_for(&id).is_some()
+    }
+
+    /// Test helper: send a decision request directly to a decision agent.
+    #[doc(hidden)]
+    pub async fn send_decision_request(
+        &self,
+        agent_id: &str,
+        situation_type: agent_decision::types::SituationType,
+        context: agent_decision::context::DecisionContext,
+    ) -> Result<()> {
+        let inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        let request = agent_core::decision_mail::DecisionRequest::new(id.clone(), situation_type, context);
+        inner
+            .agent_pool
+            .send_decision_request(&id, request)
+            .map_err(|e| anyhow::anyhow!("send decision request failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Test helper: set the last activity timestamp for a slot.
+    #[doc(hidden)]
+    pub async fn set_slot_last_activity(
+        &self,
+        agent_id: &str,
+        instant: std::time::Instant,
+    ) {
+        let mut inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        inner.agent_pool.set_slot_last_activity(&id, instant);
+    }
+
+    /// Test helper: read a decision agent's status label for a work agent.
+    #[doc(hidden)]
+    pub async fn decision_agent_status(&self, agent_id: &str) -> Option<String> {
+        let inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        inner
+            .agent_pool
+            .decision_agent_for(&id)
+            .map(|da| da.status().label())
+    }
+
+    /// Test helper: assign a task to an agent.
+    #[doc(hidden)]
+    pub async fn assign_task(&self, agent_id: &str, task_id: &str) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        let id = agent_types::AgentId::new(agent_id);
+        let task = agent_types::TaskId::new(task_id);
+        inner
+            .agent_pool
+            .assign_task(&id, task)
+            .map_err(|e| anyhow::anyhow!("assign task failed: {e}"))?;
+        Ok(())
     }
 
     /// Test helper: inject a transcript entry directly into an agent's slot.

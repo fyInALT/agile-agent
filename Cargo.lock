@@ -75,6 +75,7 @@ name = "agent-daemon"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-decision",
  "agent-protocol",
  "agent-types",
  "anyhow",

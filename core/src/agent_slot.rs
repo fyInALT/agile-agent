@@ -479,6 +479,11 @@ impl AgentSlot {
         self.last_activity
     }
 
+    /// Set the last activity timestamp (used for testing and snapshot restore)
+    pub fn set_last_activity(&mut self, instant: Instant) {
+        self.last_activity = instant;
+    }
+
     /// Update the last activity timestamp (called when receiving events)
     pub fn touch_activity(&mut self) {
         self.last_activity = Instant::now();

@@ -58,7 +58,7 @@ pub enum ClientType {
     Ide,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SendInputParams {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
