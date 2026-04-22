@@ -8,7 +8,7 @@ use crate::agent_runtime::AgentId;
 use crate::agent_slot::{AgentSlot, AgentSlotStatus};
 use crate::logging;
 use crate::pool::{DecisionExecutionResult, WorktreeCoordinator};
-use agent_decision::{HumanDecisionQueue, HumanDecisionResponse, HumanSelection};
+use agent_decision::{DecisionCommand, HumanDecisionQueue, HumanDecisionResponse, HumanSelection};
 
 /// Decision action executor - executes decision layer outputs
 ///
@@ -17,10 +17,167 @@ use agent_decision::{HumanDecisionQueue, HumanDecisionResponse, HumanSelection};
 pub struct DecisionExecutor;
 
 impl DecisionExecutor {
+    /// Translate a decision output into pure `DecisionCommand` values.
+    ///
+    /// This is a pure function — it does not mutate any state. The returned
+    /// commands must be interpreted and executed by the EventLoop.
+    pub fn translate(
+        work_agent_id: &AgentId,
+        output: &agent_decision::output::DecisionOutput,
+    ) -> Vec<DecisionCommand> {
+        let mut commands = Vec::new();
+
+        for action in &output.actions {
+            let action_type_name = action.action_type().name;
+            let action_type = action_type_name.as_str();
+            let params_str = action.serialize_params();
+            let params: serde_json::Value =
+                serde_json::from_str(&params_str).unwrap_or(serde_json::json!({}));
+
+            let cmd = match action_type {
+                "select_option" => {
+                    let option_id = params["option_id"].as_str().unwrap_or("a").to_string();
+                    DecisionCommand::SelectOption { option_id }
+                }
+                "skip" => DecisionCommand::SkipDecision,
+                "request_human" => DecisionCommand::EscalateToHuman {
+                    reason: "awaiting_human".to_string(),
+                    context: None,
+                },
+                "custom_instruction" => {
+                    let instruction = params["instruction"].as_str().unwrap_or("").to_string();
+                    DecisionCommand::SendCustomInstruction {
+                        prompt: instruction,
+                        target_agent: work_agent_id.as_str().to_string(),
+                    }
+                }
+                "continue" => DecisionCommand::ApproveAndContinue,
+                "reflect" => {
+                    let prompt = params["prompt"]
+                        .as_str()
+                        .unwrap_or("Please verify your work is complete.")
+                        .to_string();
+                    DecisionCommand::Reflect { prompt }
+                }
+                "confirm_completion" => DecisionCommand::ConfirmCompletion,
+                "retry" => {
+                    let prompt = params["prompt"]
+                        .as_str()
+                        .unwrap_or("Please retry the previous action.")
+                        .to_string();
+                    DecisionCommand::SendCustomInstruction {
+                        prompt,
+                        target_agent: work_agent_id.as_str().to_string(),
+                    }
+                }
+                "continue_all_tasks" => {
+                    let instruction = params["instruction"]
+                        .as_str()
+                        .unwrap_or("continue finish all tasks")
+                        .to_string();
+                    DecisionCommand::SendCustomInstruction {
+                        prompt: instruction,
+                        target_agent: work_agent_id.as_str().to_string(),
+                    }
+                }
+                "stop_if_complete" => {
+                    let reason = params["reason"]
+                        .as_str()
+                        .unwrap_or("All tasks complete")
+                        .to_string();
+                    DecisionCommand::StopIfComplete { reason }
+                }
+                "prepare_task_start" => {
+                    let task_id = params["task_id"].as_str().unwrap_or("unknown").to_string();
+                    let task_description = params["task_description"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    DecisionCommand::PrepareTaskStart {
+                        task_id,
+                        task_description,
+                    }
+                }
+                "wake_up" => DecisionCommand::WakeUp,
+                "commit_changes" => {
+                    let message = params["commit_message"].as_str().unwrap_or("").to_string();
+                    let is_wip = params["is_wip"].as_bool().unwrap_or(false);
+                    let worktree_path = params["worktree_path"].as_str().map(String::from);
+                    DecisionCommand::CommitChanges {
+                        message,
+                        is_wip,
+                        worktree_path,
+                    }
+                }
+                "stash_changes" => {
+                    let description = params["description"].as_str().unwrap_or("").to_string();
+                    let include_untracked = params["include_untracked"].as_bool().unwrap_or(true);
+                    let worktree_path = params["worktree_path"].as_str().map(String::from);
+                    DecisionCommand::StashChanges {
+                        description,
+                        include_untracked,
+                        worktree_path,
+                    }
+                }
+                "discard_changes" => {
+                    let worktree_path = params["worktree_path"].as_str().map(String::from);
+                    DecisionCommand::DiscardChanges { worktree_path }
+                }
+                "suggest_commit" => {
+                    let message = params["suggested_message"].as_str().unwrap_or("").to_string();
+                    let mandatory = params["mandatory"].as_bool().unwrap_or(false);
+                    let reason = params["reason"].as_str().unwrap_or("").to_string();
+                    DecisionCommand::SuggestCommit {
+                        message,
+                        mandatory,
+                        reason,
+                    }
+                }
+                "prepare_pr" => {
+                    let title = params["title"].as_str().unwrap_or("").to_string();
+                    let description = params["description"].as_str().unwrap_or("").to_string();
+                    let base_branch = params["base_branch"].as_str().unwrap_or("main").to_string();
+                    let as_draft = params["as_draft"].as_bool().unwrap_or(true);
+                    DecisionCommand::PreparePr {
+                        title,
+                        description,
+                        base_branch,
+                        as_draft,
+                    }
+                }
+                "create_task_branch" => {
+                    let branch_name = params["branch_name"].as_str().unwrap_or("").to_string();
+                    let base_branch = params["base_branch"].as_str().unwrap_or("main").to_string();
+                    let worktree_path = params["worktree_path"].as_str().map(String::from);
+                    DecisionCommand::CreateTaskBranch {
+                        branch_name,
+                        base_branch,
+                        worktree_path,
+                    }
+                }
+                "rebase_to_main" => {
+                    let base_branch = params["base_branch"].as_str().unwrap_or("main").to_string();
+                    DecisionCommand::RebaseToMain { base_branch }
+                }
+                _ => DecisionCommand::Unknown {
+                    action_type: action_type.to_string(),
+                    params: params_str,
+                },
+            };
+            commands.push(cmd);
+        }
+
+        commands
+    }
+
     /// Execute a decision action on a work agent
     ///
     /// Takes decision output and executes the appropriate action on the agent.
     /// Returns execution result indicating what happened.
+    ///
+    /// **Deprecated**: This method performs side effects directly. Prefer using
+    /// `translate()` to get pure `DecisionCommand` values, then interpret them
+    /// through the EventLoop's effect system.
     pub fn execute(
         slots: &mut [AgentSlot],
         human_queue: &mut HumanDecisionQueue,
@@ -665,5 +822,107 @@ mod tests {
 
         // Empty actions result in Cancelled
         assert!(matches!(result, DecisionExecutionResult::Cancelled));
+    }
+
+    // ── translate() tests ───────────────────────────────────────
+
+    #[test]
+    fn translate_empty_actions() {
+        let work_agent_id = AgentId::new("ag-1");
+        let output = agent_decision::output::DecisionOutput::new(vec![], "test reasoning");
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn translate_custom_instruction() {
+        use agent_decision::model::action::CustomInstructionAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = CustomInstructionAction::new("do something");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::SendCustomInstruction { prompt, target_agent }
+            if prompt == "do something" && target_agent == "ag-1"
+        ));
+    }
+
+    #[test]
+    fn translate_continue() {
+        use agent_decision::model::action::ContinueAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = ContinueAction::new("keep going");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], DecisionCommand::ApproveAndContinue));
+    }
+
+    #[test]
+    fn translate_stop_if_complete() {
+        use agent_decision::model::action::StopIfCompleteAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = StopIfCompleteAction::new("all done");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::StopIfComplete { reason } if reason == "all done"
+        ));
+    }
+
+    #[test]
+    fn translate_reflect() {
+        use agent_decision::model::action::ReflectAction;
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let action = ReflectAction::new("verify this");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![action.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            &commands[0],
+            DecisionCommand::Reflect { prompt } if prompt == "verify this"
+        ));
+    }
+
+    #[test]
+    fn translate_multiple_actions() {
+        use agent_decision::model::action::{ContinueAction, RetryAction};
+        use agent_decision::model::action::DecisionAction;
+
+        let work_agent_id = AgentId::new("ag-1");
+        let a1 = ContinueAction::new("go");
+        let a2 = RetryAction::new("retry");
+        let output = agent_decision::output::DecisionOutput::new(
+            vec![a1.clone_boxed(), a2.clone_boxed()],
+            "test reasoning",
+        );
+        let commands = DecisionExecutor::translate(&work_agent_id, &output);
+        assert_eq!(commands.len(), 2);
+        assert!(matches!(&commands[0], DecisionCommand::ApproveAndContinue));
+        assert!(matches!(&commands[1], DecisionCommand::SendCustomInstruction { .. }));
     }
 }

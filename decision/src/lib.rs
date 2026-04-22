@@ -65,6 +65,9 @@ pub mod runtime;
 // Config layer - configuration
 pub mod config;
 
+// Command layer - pure decision commands (read-only interface)
+pub mod command;
+
 // Shared condition expressions (used by multiple layers)
 pub mod condition;
 
@@ -72,6 +75,9 @@ pub mod condition;
 // Backward compatibility re-exports
 // ============================================================================
 // These re-exports maintain the original API for existing code
+
+// Command types (read-only decision output)
+pub use command::DecisionCommand;
 
 // Core types
 pub use core::*;
