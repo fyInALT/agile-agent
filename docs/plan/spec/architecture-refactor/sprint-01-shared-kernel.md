@@ -6,7 +6,7 @@
 - Title: `Shared Kernel Extraction`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-22
 
 ## Background
@@ -27,7 +27,7 @@ Create the `agent-events` shared kernel crate containing unified `DomainEvent` (
 
 **Priority**: P0
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Completed ✅
 
 Create a new crate that will house all event definitions and basic types shared across the system.
 
@@ -53,7 +53,7 @@ Create a new crate that will house all event definitions and basic types shared 
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Completed ✅
 
 Define the single source of truth for all domain events. This enum replaces both `agent/provider::ProviderEvent` and the `ProviderEvent` re-export in `agent-core`.
 
@@ -97,7 +97,7 @@ pub enum DomainEvent {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — `DecisionEvent` conversion is implemented; backward-compat re-export consolidation deferred to cleanup sprint.
 
 Create the decision-layer-focused event subset with automatic conversion from `DomainEvent`. This replaces the manual mapping in `event_converter.rs`.
 
@@ -123,7 +123,7 @@ Create the decision-layer-focused event subset with automatic conversion from `D
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Completed ✅ — `event_converter.rs` deleted; all crates migrated; full workspace tests pass.
 
 Update all crates to depend on `agent-events` instead of defining their own event types. Use type aliases to maintain backward compatibility.
 

@@ -6,7 +6,7 @@
 - Title: `Decision Layer Decoupling`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-22
 
 ## Background
@@ -30,7 +30,7 @@ Make `agent-decision` read-only: it returns `DecisionCommand` instead of executi
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — 21-variant `DecisionCommand` enum with `description()`, `target_agents()`, serde support.
 
 Create a type representing all possible actions the decision layer can recommend, without any execution logic.
 
@@ -57,7 +57,7 @@ Create a type representing all possible actions the decision layer can recommend
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Completed ✅ — `DecisionExecutor::translate()` returns pure `Vec<DecisionCommand>`; legacy `execute()` preserved for backward compatibility.
 
 Change the decision execution pipeline from "execute actions" to "produce commands."
 
@@ -86,7 +86,7 @@ Change the decision execution pipeline from "execute actions" to "produce comman
 
 **Priority**: P0
 **Effort**: 4 points
-**Status**: Backlog
+**Status**: Completed ✅ — `DecisionCommandInterpreter` in `daemon/src/decision_interpreter.rs`. Some variants (`SelectOption`, `PrepareTaskStart`) return `None` (not yet supported in new path).
 
 Create an interpreter in the EventLoop that translates `DecisionCommand` into `RuntimeCommand` effects.
 
@@ -117,7 +117,7 @@ Create an interpreter in the EventLoop that translates `DecisionCommand` into `R
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — `agent-decision` Cargo.toml has no `agent-daemon` or `agent-core` dependencies. Dependency graph documented at `docs/architecture/dependency-graph.md`.
 
 Verify and enforce that `agent-decision` has no write-path dependencies on `agent-daemon` or `agent-core` runtime types.
 

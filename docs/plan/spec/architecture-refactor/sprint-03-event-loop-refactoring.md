@@ -6,7 +6,7 @@
 - Title: `EventLoop Refactoring`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-22
 
 ## Background
@@ -31,7 +31,7 @@ Split `tick()` into 7 explicit phase methods. Introduce `RuntimeCommand` effect 
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — 7 phase methods extracted; `tick()` body under 50 lines.
 
 Extract each logical section of `tick()` into a dedicated method with a clear contract.
 
@@ -61,7 +61,7 @@ Extract each logical section of `tick()` into a dedicated method with a clear co
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — `RuntimeCommand` enum, `RuntimeCommandQueue`, `Worker::apply()` returns `Vec<RuntimeCommand>`.
 
 Create a type representing side effects that `Worker::apply()` can request. This decouples state transitions from I/O.
 
@@ -88,7 +88,7 @@ Create a type representing side effects that `Worker::apply()` can request. This
 
 **Priority**: P0
 **Effort**: 4 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `EffectHandler` trait with `NoopEffectHandler` and `RecordingEffectHandler` implemented. Individual per-variant handler structs (T3.3.1–T3.3.6) not implemented; monolithic trait approach used instead.
 
 Create the bridge between pure `RuntimeCommand` effects and actual I/O/threads.
 
@@ -118,7 +118,7 @@ Create the bridge between pure `RuntimeCommand` effects and actual I/O/threads.
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `AgentSlot` is a thin wrapper (`pub type AgentSlot = WorkerHandle`). `AgentSlotStatus` still used for runtime state; full transition to `WorkerState` pending.
 
 Switch from `AgentSlot` as primary state to `Worker` as primary state. Remove dual-write.
 

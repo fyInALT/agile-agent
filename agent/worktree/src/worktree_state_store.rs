@@ -201,11 +201,11 @@ impl WorktreeStateStore {
                 let content = fs::read_to_string(&path)?;
                 let agent_state: JsonValue = serde_json::from_str(&content)?;
 
-                if let Some(agent_id) = agent_state.get("agent_id").and_then(|v| v.as_str()) {
-                    if let Some(worktree_value) = agent_state.get("worktree") {
-                        let state: WorktreeState = serde_json::from_value(worktree_value.clone())?;
-                        result.push((agent_id.to_string(), state));
-                    }
+                if let Some(agent_id) = agent_state.get("agent_id").and_then(|v| v.as_str())
+                    && let Some(worktree_value) = agent_state.get("worktree")
+                {
+                    let state: WorktreeState = serde_json::from_value(worktree_value.clone())?;
+                    result.push((agent_id.to_string(), state));
                 }
             }
         }

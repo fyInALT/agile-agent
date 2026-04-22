@@ -289,7 +289,7 @@ impl WorktreeManager {
 
         // Check worktree limit
         let current_count = self.list_internal()?.len();
-        if current_count >= self.config.max_worktrees + 1 {
+        if current_count > self.config.max_worktrees {
             // +1 for main worktree
             return Err(WorktreeError::MaxWorktreesReached(
                 self.config.max_worktrees,
@@ -973,7 +973,7 @@ impl WorktreeManager {
         let count_output = String::from_utf8_lossy(&output.stdout);
         let parts: Vec<&str> = count_output.trim().split('\t').collect();
 
-        let ahead = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let ahead = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
         let behind = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
 
         Ok(AheadBehindCount { ahead, behind })

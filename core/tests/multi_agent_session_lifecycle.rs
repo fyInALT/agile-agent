@@ -4,7 +4,7 @@
 
 mod integration_common;
 
-use agent_core::agent_runtime::AgentStatus;
+use agent_core::agent_runtime::WorkerStatus;
 use agent_core::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownReason, ShutdownSnapshot};
 
 use integration_common::TestHarness;
@@ -72,7 +72,7 @@ fn shutdown_snapshot_captures_state() {
                 provider_session_id: None,
                 created_at: String::new(),
                 updated_at: String::new(),
-                status: AgentStatus::Idle,
+                status: WorkerStatus::Idle,
                 role: slot.role(),
             },
             assigned_task_id: slot.assigned_task_id().map(|id| id.as_str().to_string()),
@@ -130,7 +130,7 @@ fn restore_from_snapshot_recreates_agents() {
                 provider_session_id: None,
                 created_at: String::new(),
                 updated_at: String::new(),
-                status: AgentStatus::Idle,
+                status: WorkerStatus::Idle,
                 role: slot.role(),
             },
             assigned_task_id: None,

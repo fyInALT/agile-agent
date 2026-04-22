@@ -107,8 +107,8 @@ The multi-agent foundation provides Scrum-style coordination:
 - `decision/`: `agent-decision` crate — Classifiers, engines, actions, situations, DecisionCommand
 - `kanban/`: `agent-kanban` crate — Trait-based Kanban domain model
 - `llm-provider/`: `agent-llm-provider` crate — OpenAI client with simple/thinking model tiers
-- `agent/runtime-domain/`: `agent-runtime-domain` crate — Pure domain types (WorkerState, TranscriptJournal)
-- `agent/behavior-infra/`: `agent-behavior-infra` crate — Effect system (RuntimeCommand, EffectHandler)
+- `agent/runtime-domain/`: `agent-runtime-domain` crate — Pure domain types (WorkerState, TranscriptJournal, JournalEntry)
+- `agent/behavior-infra/`: `agent-behavior-infra` crate — Effect system (EffectHandler trait, NoopEffectHandler, RecordingEffectHandler)
 - `test-support/`: `agent-test-support` crate — Shared test helpers
 
 ### Documentation
@@ -122,6 +122,7 @@ The multi-agent foundation provides Scrum-style coordination:
 - `docs/plan/spec/kanban/`: Kanban system sprint specs
 - `docs/superpowers/specs/`: Design specs written through superpowers workflow
 - `docs/superpowers/plans/`: Implementation plans written through superpowers workflow
+- `docs/architecture/`: Architecture docs (refactoring-plan-v2.md, dependency-graph.md, new-crate-structure.md)
 - `docs/refactor/`: Refactoring analysis and architectural decision records
 
 ### Scripts

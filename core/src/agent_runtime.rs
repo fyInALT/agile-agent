@@ -6,7 +6,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 // Import and re-export foundation types from agent-types for backward compatibility
-pub use agent_types::{AgentId, WorkplaceId, AgentCodename, AgentStatus};
+pub use agent_types::{AgentId, WorkplaceId, AgentCodename, WorkerStatus};
+// Backward compat: AgentStatus was renamed to WorkerStatus
+pub use agent_types::WorkerStatus as AgentStatus;
 
 use crate::agent_memory::AgentMemory;
 use crate::agent_role::AgentRole;
@@ -129,7 +131,7 @@ impl AgentRuntime {
                 provider_session_id: None,
                 created_at: now.clone(),
                 updated_at: now,
-                status: AgentStatus::Idle,
+                status: WorkerStatus::Idle,
                 role: AgentRole::Developer,
             },
             workplace: workplace.clone(),
@@ -228,7 +230,7 @@ impl AgentRuntime {
     }
 
     pub fn mark_stopped(&mut self) {
-        self.meta.status = AgentStatus::Stopped;
+        self.meta.status = WorkerStatus::Stopped;
         self.meta.updated_at = Utc::now().to_rfc3339();
     }
 
@@ -383,9 +385,9 @@ fn agent_status_from_app(state: &AppState) -> AgentStatus {
     // Note: should_quit is now in SharedWorkplaceState.loop_control, not AppState
     // Agent status is determined by activity, not by quit flag
     if state.status == AppStatus::Responding || state.loop_phase != LoopPhase::Idle {
-        AgentStatus::Running
+        WorkerStatus::Running
     } else {
-        AgentStatus::Idle
+        WorkerStatus::Idle
     }
 }
 
@@ -410,7 +412,7 @@ fn generate_codename(index: usize) -> String {
 mod tests {
     use super::AgentBootstrapKind;
     use super::AgentRuntime;
-    use super::AgentStatus;
+    use super::WorkerStatus;
     use super::ProviderSessionId;
     use super::ProviderType;
     use crate::app::AppState;
@@ -450,7 +452,7 @@ mod tests {
             runtime.meta().provider_session_id,
             Some(ProviderSessionId::new("thr-1"))
         );
-        assert_eq!(runtime.meta().status, AgentStatus::Running);
+        assert_eq!(runtime.meta().status, WorkerStatus::Running);
     }
 
     #[test]
@@ -461,7 +463,7 @@ mod tests {
 
         runtime.mark_stopped();
 
-        assert_eq!(runtime.meta().status, AgentStatus::Stopped);
+        assert_eq!(runtime.meta().status, WorkerStatus::Stopped);
     }
 
     #[test]

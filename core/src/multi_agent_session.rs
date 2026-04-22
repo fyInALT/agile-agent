@@ -89,7 +89,7 @@ impl MultiAgentSession {
         // Create fresh session with one agent
         let workplace_id = workplace.workplace_id().clone();
         let mut session = Self::new(cwd, workplace_id, default_provider, max_agents);
-        if let Err(e) = session.spawn_agent(default_provider) {
+        if let Err(e) = session.spawn_worker(default_provider) {
             return Err(anyhow::anyhow!("Failed to spawn initial agent: {}", e));
         }
 
@@ -241,11 +241,11 @@ impl MultiAgentSession {
                 "current_agents": self.agents.active_count(),
             }),
         );
-        self.agents.spawn_agent(self.default_provider)
+        self.agents.spawn_worker(self.default_provider)
     }
 
     /// Spawn a new agent with a specific provider
-    pub fn spawn_agent(&mut self, provider: ProviderKind) -> Result<AgentId, String> {
+    pub fn spawn_worker(&mut self, provider: ProviderKind) -> Result<AgentId, String> {
         logging::debug_event(
             "session.agent.spawn",
             "spawning agent with specific provider",
@@ -254,7 +254,13 @@ impl MultiAgentSession {
                 "current_agents": self.agents.active_count(),
             }),
         );
-        self.agents.spawn_agent(provider)
+        self.agents.spawn_worker(provider)
+    }
+
+    /// Spawn a new agent (deprecated, use `spawn_worker`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker instead")]
+    pub fn spawn_agent(&mut self, provider: ProviderKind) -> Result<AgentId, String> {
+        self.spawn_worker(provider)
     }
 
     /// Get the focused agent ID
@@ -802,9 +808,9 @@ mod tests {
             ProviderKind::Mock,
             5,
         );
-        session.spawn_agent(ProviderKind::Mock).expect("spawn");
-        session.spawn_agent(ProviderKind::Claude).expect("spawn");
-        session.spawn_agent(ProviderKind::Codex).expect("spawn");
+        session.spawn_worker(ProviderKind::Mock).expect("spawn");
+        session.spawn_worker(ProviderKind::Claude).expect("spawn");
+        session.spawn_worker(ProviderKind::Codex).expect("spawn");
 
         assert_eq!(session.focused_index(), 0);
         session.focus_next();
@@ -823,9 +829,9 @@ mod tests {
             ProviderKind::Mock,
             5,
         );
-        session.spawn_agent(ProviderKind::Mock).expect("spawn");
-        session.spawn_agent(ProviderKind::Claude).expect("spawn");
-        session.spawn_agent(ProviderKind::Codex).expect("spawn");
+        session.spawn_worker(ProviderKind::Mock).expect("spawn");
+        session.spawn_worker(ProviderKind::Claude).expect("spawn");
+        session.spawn_worker(ProviderKind::Codex).expect("spawn");
 
         assert_eq!(session.focused_index(), 0);
         session.focus_previous();
@@ -842,8 +848,8 @@ mod tests {
             ProviderKind::Mock,
             5,
         );
-        session.spawn_agent(ProviderKind::Mock).expect("spawn");
-        session.spawn_agent(ProviderKind::Claude).expect("spawn");
+        session.spawn_worker(ProviderKind::Mock).expect("spawn");
+        session.spawn_worker(ProviderKind::Claude).expect("spawn");
 
         assert!(session.focus_agent(1));
         assert_eq!(session.focused_index(), 1);
@@ -869,7 +875,7 @@ mod tests {
 
     #[test]
     fn restore_from_snapshot_restores_all_agents() {
-        use crate::agent_runtime::{AgentCodename, AgentId, AgentMeta, AgentStatus, ProviderType};
+        use crate::agent_runtime::{AgentCodename, AgentId, AgentMeta, WorkerStatus, ProviderType};
         use crate::shutdown_snapshot::{AgentShutdownSnapshot, ShutdownReason, ShutdownSnapshot};
         use tempfile::TempDir;
 
@@ -885,7 +891,7 @@ mod tests {
                 provider_session_id: None,
                 created_at: "2026-04-14T00:00:00Z".to_string(),
                 updated_at: "2026-04-14T00:00:00Z".to_string(),
-                status: AgentStatus::Idle,
+                status: WorkerStatus::Idle,
                 role: crate::agent_role::AgentRole::Developer,
             },
             assigned_task_id: Some("task-001".to_string()),
@@ -908,7 +914,7 @@ mod tests {
                 provider_session_id: Some(crate::agent_runtime::ProviderSessionId::new("sess-123")),
                 created_at: "2026-04-14T00:00:00Z".to_string(),
                 updated_at: "2026-04-14T00:00:00Z".to_string(),
-                status: AgentStatus::Running,
+                status: WorkerStatus::Running,
                 role: crate::agent_role::AgentRole::Developer,
             },
             assigned_task_id: None,

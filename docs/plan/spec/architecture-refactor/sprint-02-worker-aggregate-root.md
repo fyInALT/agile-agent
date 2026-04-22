@@ -6,7 +6,7 @@
 - Title: `Worker Aggregate Root`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Completed`
 - Created: 2026-04-22
 
 ## Background
@@ -27,7 +27,7 @@ Implement `Worker` aggregate root with `WorkerState` state machine, `apply()` me
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — `WorkerState` with 6 variants + `RespondingSubState` in `agent-runtime-domain`. Note: `AgentSlotStatus` (13-variant) still exists in `agent-core` for backward compatibility.
 
 Replace the implicit state transitions in `AgentSlot` with an explicit enum.
 
@@ -57,7 +57,7 @@ Replace the implicit state transitions in `AgentSlot` with an explicit enum.
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Completed ✅ — `Worker` struct with `apply(event) -> Result<Vec<RuntimeCommand>, WorkerError>` in `agent-core`.
 
 Create the `Worker` struct as the single authority over all mutable state for one agent.
 
@@ -89,7 +89,7 @@ Create the `Worker` struct as the single authority over all mutable state for on
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Completed ✅ — `TranscriptJournal` and `JournalEntry` moved to `agent-runtime-domain`.
 
 Move transcript management out of `Worker` into a dedicated type that can be tested independently.
 
@@ -119,7 +119,7 @@ Move transcript management out of `Worker` into a dedicated type that can be tes
 
 **Priority**: P1
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Completed ✅ — `WorkerHandle` (alias `AgentSlot`) contains `Worker` field; events forwarded to `worker.apply()`.
 
 Keep `AgentSlot` functional while introducing `Worker` alongside it. This allows gradual migration without breaking existing features.
 

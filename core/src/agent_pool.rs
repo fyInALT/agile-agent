@@ -237,7 +237,7 @@ impl WorkerPool {
     /// Spawn a new agent with specified provider type (mock for foundation)
     ///
     /// Returns the new agent's ID on success, or error if pool is full.
-    pub fn spawn_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
+    pub fn spawn_worker(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
         if !self.can_spawn() {
             logging::debug_event(
                 "pool.agent.spawn.failed",
@@ -320,7 +320,7 @@ impl WorkerPool {
     /// Spawn a new agent using a specific provider profile
     ///
     /// The profile defines the CLI type and environment configuration.
-    pub fn spawn_agent_with_profile(
+    pub fn spawn_worker_with_profile(
         &mut self,
         profile_id: &ProfileId,
     ) -> Result<AgentId, crate::provider_profile::ProfileError> {
@@ -394,7 +394,7 @@ impl WorkerPool {
     ///
     /// Creates a new git worktree for the agent and spawns the agent
     /// configured to work in that isolated workspace.
-    pub fn spawn_agent_with_worktree(
+    pub fn spawn_worker_with_worktree(
         &mut self,
         provider_kind: ProviderKind,
         branch_name: Option<String>,
@@ -412,7 +412,7 @@ impl WorkerPool {
     /// Spawn a new agent with worktree and a specific provider profile
     ///
     /// Creates a new git worktree for the agent using the specified profile.
-    pub fn spawn_agent_with_worktree_and_profile(
+    pub fn spawn_worker_with_worktree_and_profile(
         &mut self,
         profile_id: &ProfileId,
         branch_name: Option<String>,
@@ -447,6 +447,43 @@ impl WorkerPool {
         )?;
 
         Ok(agent_id)
+    }
+
+    /// Spawn a new agent with specified provider type (deprecated, use `spawn_worker`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker instead")]
+    pub fn spawn_agent(&mut self, provider_kind: ProviderKind) -> Result<AgentId, String> {
+        self.spawn_worker(provider_kind)
+    }
+
+    /// Spawn a new agent using a specific provider profile (deprecated, use `spawn_worker_with_profile`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker_with_profile instead")]
+    pub fn spawn_agent_with_profile(
+        &mut self,
+        profile_id: &ProfileId,
+    ) -> Result<AgentId, crate::provider_profile::ProfileError> {
+        self.spawn_worker_with_profile(profile_id)
+    }
+
+    /// Spawn a new agent with an isolated worktree workspace (deprecated, use `spawn_worker_with_worktree`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker_with_worktree instead")]
+    pub fn spawn_agent_with_worktree(
+        &mut self,
+        provider_kind: ProviderKind,
+        branch_name: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<AgentId, AgentPoolWorktreeError> {
+        self.spawn_worker_with_worktree(provider_kind, branch_name, task_id)
+    }
+
+    /// Spawn a new agent with worktree and a specific provider profile (deprecated, use `spawn_worker_with_worktree_and_profile`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker_with_worktree_and_profile instead")]
+    pub fn spawn_agent_with_worktree_and_profile(
+        &mut self,
+        profile_id: &ProfileId,
+        branch_name: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<AgentId, AgentPoolWorktreeError> {
+        self.spawn_worker_with_worktree_and_profile(profile_id, branch_name, task_id)
     }
 
     /// Internal helper for spawning agent with worktree (shared logic)

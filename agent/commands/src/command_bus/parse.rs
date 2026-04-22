@@ -125,12 +125,11 @@ fn split_path_and_args(
         return (path, args);
     }
 
-    if let Some(known_paths) = known_paths {
-        if let Some((first, rest)) = tokens.split_first() {
-            if known_paths.contains(&first.as_str()) {
-                return (vec![first.clone()], rest.to_vec());
-            }
-        }
+    if let Some(known_paths) = known_paths
+        && let Some((first, rest)) = tokens.split_first()
+        && known_paths.contains(&first.as_str())
+    {
+        return (vec![first.clone()], rest.to_vec());
     }
 
     match tokens.len() {

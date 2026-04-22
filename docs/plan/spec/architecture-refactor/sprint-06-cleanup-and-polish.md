@@ -6,7 +6,7 @@
 - Title: `Protocol Layer, Cleanup & Polish`
 - Duration: 1 week
 - Priority: P1 (High)
-- Status: `Backlog`
+- Status: `In Progress`
 - Created: 2026-04-22
 
 ## Background
@@ -30,7 +30,7 @@ All deprecated code removed. Protocol format unchanged verified. Performance wit
 
 **Priority**: P0
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — Requires external tooling (protocol version negotiation, ping/pong, message validation). No `ProtocolGateway` exists to harden.
 
 Ensure the protocol layer in `agent-protocol-infra` is robust and well-tested.
 
@@ -59,7 +59,10 @@ Ensure the protocol layer in `agent-protocol-infra` is robust and well-tested.
 
 **Priority**: P0
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `event_converter.rs` deleted. Clippy fixed in `agent-commands`, `agent-storage`, `agent-worktree`. Remaining:
+- Deprecation aliases still exist (`AgentSlot`, `SessionManager`, `AgentPool`, `AgentStatus`)
+- `AgentSlotStatus` still exists as a real enum (not yet replaced by `WorkerState`)
+- `cargo clippy --workspace -- -D warnings` does not pass (pre-existing issues in `agent-decision`, `agent-kanban`, `agent-llm-provider`)
 
 Clean up all backward-compatibility aliases and dead code.
 
@@ -89,7 +92,7 @@ Clean up all backward-compatibility aliases and dead code.
 
 **Priority**: P0
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — Requires running the full system with TUI and capturing protocol snapshots.
 
 Ensure the external protocol (WebSocket, stdio) is unchanged despite internal refactoring.
 
@@ -117,7 +120,7 @@ Ensure the external protocol (WebSocket, stdio) is unchanged despite internal re
 
 **Priority**: P1
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — Requires establishing baseline measurements before refactoring began.
 
 Ensure the refactoring does not degrade performance.
 
@@ -146,7 +149,7 @@ Ensure the refactoring does not degrade performance.
 
 **Priority**: P1
 **Effort**: 1 point
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `AGENTS.md` updated with new crate structure. `docs/architecture/dependency-graph.md` updated with new crates. `docs/architecture/new-crate-structure.md` written. Sprint specs updated with completion status. `README.md` and `refactoring-plan-v2.md` completion status not yet updated.
 
 Update all architecture and API documentation.
 

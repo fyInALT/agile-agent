@@ -42,7 +42,7 @@ impl AgentHandler {
             .and_then(|v| serde_json::from_value(v).ok())
             .ok_or_else(|| anyhow::anyhow!("missing or invalid params"))?;
 
-        match self.session_mgr.spawn_agent(params.provider).await {
+        match self.session_mgr.spawn_worker(params.provider).await {
             Ok(snapshot) => Ok(JsonRpcMessage::Response(JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: req.id,
@@ -181,7 +181,7 @@ mod tests {
         let handler = AgentHandler::new(mgr.clone());
 
         // Spawn an agent first.
-        mgr.spawn_agent(agent_types::ProviderKind::Mock).await.unwrap();
+        mgr.spawn_worker(agent_types::ProviderKind::Mock).await.unwrap();
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),

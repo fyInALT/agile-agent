@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 use agent_types::{AgentId, WorkplaceId};
 
 /// Migration status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationStatus {
     /// No migration needed
+    #[default]
     NotNeeded,
     /// Migration in progress
     InProgress,
@@ -26,12 +27,6 @@ pub enum MigrationStatus {
     Failed,
     /// Rolled back to original
     RolledBack,
-}
-
-impl Default for MigrationStatus {
-    fn default() -> Self {
-        Self::NotNeeded
-    }
 }
 
 /// Migration result
@@ -292,15 +287,16 @@ impl DataMigrator {
         }
 
         // Remove agents directory if empty
-        if agent_dir.exists() {
-            if let Err(e) = fs::remove_dir(&agent_dir) {
-                eprintln!("Failed to remove agent dir: {}", e);
-            }
+        if agent_dir.exists()
+            && let Err(e) = fs::remove_dir(&agent_dir)
+        {
+            eprintln!("Failed to remove agent dir: {}", e);
         }
-        if agents_dir.exists() && fs::read_dir(&agents_dir).map(|d| d.count()).unwrap_or(1) == 0 {
-            if let Err(e) = fs::remove_dir(&agents_dir) {
-                eprintln!("Failed to remove agents dir: {}", e);
-            }
+        if agents_dir.exists()
+            && fs::read_dir(&agents_dir).map(|d| d.count()).unwrap_or(1) == 0
+            && let Err(e) = fs::remove_dir(&agents_dir)
+        {
+            eprintln!("Failed to remove agents dir: {}", e);
         }
     }
 

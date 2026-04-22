@@ -248,7 +248,7 @@ mod tests {
     use crate::agent_runtime::AgentCodename;
     use crate::agent_runtime::AgentId;
     use crate::agent_runtime::AgentMeta;
-    use crate::agent_runtime::AgentStatus;
+    use crate::agent_runtime::WorkerStatus;
     use crate::agent_runtime::ProviderType;
     use crate::agent_runtime::WorkplaceId;
     use crate::agent_state::AgentState;
@@ -266,7 +266,7 @@ mod tests {
             provider_session_id: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
-            status: AgentStatus::Idle,
+            status: WorkerStatus::Idle,
             role: crate::agent_role::AgentRole::Developer,
         }
     }

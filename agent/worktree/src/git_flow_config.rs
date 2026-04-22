@@ -215,7 +215,7 @@ impl TaskType {
     }
     
     /// Parse from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "feature" | "feat" => Some(TaskType::Feature),
             "bugfix" | "fix" | "bug" => Some(TaskType::Bugfix),
@@ -236,7 +236,7 @@ impl std::fmt::Display for TaskType {
 }
 
 /// Task priority classification
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskPriority {
     /// Critical priority
@@ -244,15 +244,10 @@ pub enum TaskPriority {
     /// High priority
     High,
     /// Medium priority (default)
+    #[default]
     Medium,
     /// Low priority
     Low,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Medium
-    }
 }
 
 impl TaskPriority {
@@ -267,7 +262,7 @@ impl TaskPriority {
     }
     
     /// Parse from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "critical" | "urgent" | "p0" => Some(TaskPriority::Critical),
             "high" | "important" | "p1" => Some(TaskPriority::High),
@@ -337,17 +332,17 @@ mod tests {
     
     #[test]
     fn task_type_from_str() {
-        assert_eq!(TaskType::from_str("feature"), Some(TaskType::Feature));
-        assert_eq!(TaskType::from_str("feat"), Some(TaskType::Feature));
-        assert_eq!(TaskType::from_str("fix"), Some(TaskType::Bugfix));
-        assert_eq!(TaskType::from_str("unknown"), None);
+        assert_eq!(TaskType::parse("feature"), Some(TaskType::Feature));
+        assert_eq!(TaskType::parse("feat"), Some(TaskType::Feature));
+        assert_eq!(TaskType::parse("fix"), Some(TaskType::Bugfix));
+        assert_eq!(TaskType::parse("unknown"), None);
     }
     
     #[test]
     fn task_priority_from_str() {
-        assert_eq!(TaskPriority::from_str("critical"), Some(TaskPriority::Critical));
-        assert_eq!(TaskPriority::from_str("p0"), Some(TaskPriority::Critical));
-        assert_eq!(TaskPriority::from_str("unknown"), None);
+        assert_eq!(TaskPriority::parse("critical"), Some(TaskPriority::Critical));
+        assert_eq!(TaskPriority::parse("p0"), Some(TaskPriority::Critical));
+        assert_eq!(TaskPriority::parse("unknown"), None);
     }
     
     #[test]

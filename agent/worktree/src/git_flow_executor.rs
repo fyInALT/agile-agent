@@ -4,7 +4,7 @@
 //! Orchestrates the complete workflow: metadata extraction, baseline sync,
 //! health check, uncommitted handling, and branch setup.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -286,7 +286,7 @@ impl GitFlowExecutor {
     /// Prepare workspace for a new task
     pub fn prepare_for_task(
         &self,
-        worktree_path: &PathBuf,
+        worktree_path: &Path,
         task_id: &str,
         description: &str,
     ) -> Result<PreparationResult, GitFlowError> {
@@ -325,7 +325,7 @@ impl GitFlowExecutor {
         let (branch_name, branch_action) = self.setup_branch(&task_meta, worktree_path)?;
 
         let result = PreparationResult::success(
-            task_meta, branch_name, base_commit, worktree_path.clone(), branch_action,
+            task_meta, branch_name, base_commit, worktree_path.to_path_buf(), branch_action,
         )
         .with_operation(GitOperationLog::new("prepare_for_task", start_time.elapsed().as_millis() as u64, "success"));
 
@@ -342,12 +342,12 @@ impl GitFlowExecutor {
         Ok(result)
     }
 
-    pub fn check_health(&self, worktree_path: &PathBuf) -> Result<WorkspaceHealthReport, GitFlowError> {
+    pub fn check_health(&self, worktree_path: &Path) -> Result<WorkspaceHealthReport, GitFlowError> {
         let mut issues: Vec<HealthIssue> = Vec::new();
         let mut score: u8 = 100;
 
         if !worktree_path.exists() {
-            return Err(GitFlowError::InvalidWorktreePath(worktree_path.clone()));
+            return Err(GitFlowError::InvalidWorktreePath(worktree_path.to_path_buf()));
         }
 
         let has_uncommitted = self.worktree_manager.has_uncommitted_changes(worktree_path)?;
@@ -377,7 +377,7 @@ impl GitFlowExecutor {
         Ok(base_commit)
     }
 
-    fn handle_uncommitted_stash(&self, worktree_path: &PathBuf) -> Result<(), GitFlowError> {
+    fn handle_uncommitted_stash(&self, worktree_path: &Path) -> Result<(), GitFlowError> {
         let message = format!("WIP: auto-stash before task preparation at {}", Utc::now().format("%Y-%m-%d %H:%M"));
         self.worktree_manager.stash_changes(worktree_path, &message)?;
         Ok(())
@@ -386,7 +386,7 @@ impl GitFlowExecutor {
     fn setup_branch(
         &self,
         task_meta: &TaskPreparationMeta,
-        worktree_path: &PathBuf,
+        worktree_path: &Path,
     ) -> Result<(String, BranchAction), GitFlowError> {
         let branch_name = &task_meta.branch_name;
         let branch_exists = self.worktree_manager.branch_exists(branch_name)?;

@@ -5,7 +5,7 @@
 
 use agent_core::agent_mail::AgentMailbox;
 use agent_core::agent_pool::AgentPool;
-use agent_core::agent_runtime::{AgentId as CoreAgentId, AgentMeta, AgentStatus, ProviderType};
+use agent_core::agent_runtime::{AgentId as CoreAgentId, AgentMeta, WorkerStatus, ProviderType};
 use agent_core::agent_slot::{AgentSlot, AgentSlotStatus as CoreAgentStatus};
 use agent_core::app::{AppStatus, TranscriptEntry};
 use agent_core::event_aggregator::EventAggregator;
@@ -134,11 +134,11 @@ impl EventLoop {
     }
 
     /// Spawn a new agent in the pool.
-    pub async fn spawn_agent(&self, provider: agent_types::ProviderKind) -> Result<AgentSnapshot> {
+    pub async fn spawn_worker(&self, provider: agent_types::ProviderKind) -> Result<AgentSnapshot> {
         let mut inner = self.inner.lock().await;
         let agent_id = inner
             .agent_pool
-            .spawn_agent(provider)
+            .spawn_worker(provider)
             .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
 
         // Find the newly created slot.
@@ -150,6 +150,12 @@ impl EventLoop {
             .context("spawned agent not found in pool")?;
 
         Ok(map_agent_slot(slot))
+    }
+
+    /// Spawn a new agent (deprecated, use `spawn_worker`)
+    #[deprecated(since = "0.2.0", note = "Use spawn_worker instead")]
+    pub async fn spawn_agent(&self, provider: agent_types::ProviderKind) -> Result<AgentSnapshot> {
+        self.spawn_worker(provider).await
     }
 
     /// Stop an agent by ID.
@@ -179,9 +185,9 @@ impl EventLoop {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 status: match slot.status() {
-                    CoreAgentStatus::Stopped { .. } => AgentStatus::Stopped,
-                    _ if slot.status().is_active() => AgentStatus::Running,
-                    _ => AgentStatus::Idle,
+                    CoreAgentStatus::Stopped { .. } => WorkerStatus::Stopped,
+                    _ if slot.status().is_active() => WorkerStatus::Running,
+                    _ => WorkerStatus::Idle,
                 },
                 role: slot.role(),
             };
@@ -431,9 +437,9 @@ impl EventLoop {
                     created_at,
                     updated_at: chrono::Utc::now().to_rfc3339(),
                     status: match slot.status() {
-                        CoreAgentStatus::Stopped { .. } => AgentStatus::Stopped,
-                        _ if slot.status().is_active() => AgentStatus::Running,
-                        _ => AgentStatus::Idle,
+                        CoreAgentStatus::Stopped { .. } => WorkerStatus::Stopped,
+                        _ if slot.status().is_active() => WorkerStatus::Running,
+                        _ => WorkerStatus::Idle,
                     },
                     role: slot.role(),
                 };
@@ -528,7 +534,7 @@ impl EventLoop {
                 }
             });
             let status = match meta.status {
-                AgentStatus::Stopped => CoreAgentStatus::stopped("restored from snapshot"),
+                WorkerStatus::Stopped => CoreAgentStatus::stopped("restored from snapshot"),
                 _ => CoreAgentStatus::idle(),
             };
             let assigned_task_id = agent_shutdown

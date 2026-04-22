@@ -6,7 +6,7 @@
 - Title: `Crate Reorganization & Type Renaming`
 - Duration: 1 week
 - Priority: P1 (High)
-- Status: `Backlog`
+- Status: `Partially Completed`
 - Created: 2026-04-22
 
 ## Background
@@ -27,7 +27,7 @@ Create 6 target crates with correct dependency directions. Perform 11 core type 
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `WorkerState`, `TranscriptJournal`, `JournalEntry` moved. `Worker` aggregate root still in `agent-core` (blocked on `RuntimeCommand` location). `AgentRole`, `RuntimeMode` already in `agent-types`. `AgentLaunchBundle` already in `agent-provider`.
 
 Extract pure domain types from `agent-core` into a dedicated crate.
 
@@ -56,7 +56,7 @@ Extract pure domain types from `agent-core` into a dedicated crate.
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — `EffectHandler` trait, `NoopEffectHandler`, `RecordingEffectHandler` moved. `RuntimeCommand` and `RuntimeCommandQueue` currently here (should move to `agent-runtime-domain`). Event loop phase traits and command processing logic still in `agent-daemon`.
 
 Move behavior infrastructure (event loop phases, effect handlers, command processing) out of the daemon.
 
@@ -85,7 +85,7 @@ Move behavior infrastructure (event loop phases, effect handlers, command proces
 
 **Priority**: P1
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — `ProtocolGateway` does not exist in the current codebase. Would require creating it from scratch, which is new design work, not refactoring.
 
 Separate the protocol layer from the daemon.
 
@@ -114,7 +114,7 @@ Separate the protocol layer from the daemon.
 
 **Priority**: P1
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Skipped ⏭️ — `agent-cli` is already a thin wrapper (~200 lines). Extracting further has diminishing returns.
 
 Create the top-level runtime application crate that wires everything together.
 
@@ -143,7 +143,18 @@ Create the top-level runtime application crate that wires everything together.
 
 **Priority**: P1
 **Effort**: 4 points
-**Status**: Backlog
+**Status**: Partially Completed ⚠️ — 7 of 11 renames done:
+- ✅ `AgentSlot` → `WorkerHandle`
+- ✅ `AgentPool` → `WorkerPool`
+- ✅ `SessionManager` → `EventLoop`
+- ✅ `FocusManager` → `WorkerFocusManager`
+- ✅ `WorktreeCoordinator` → `WorkerWorktreeManager`
+- ✅ `ProviderEvent` → `DomainEvent`
+- ✅ `DecisionAction` → `DecisionCommand`
+- ✅ `AgentStatus` → `WorkerStatus`
+- ✅ `spawn_agent()` → `spawn_worker()`
+- ⏳ `DecisionAgentCoordinator` → `WorkerDecisionRouter`
+- ⏳ `ProviderThread` → `WorkerExecutionThread`
 
 Rename types to reflect the "Handwritten Actor" model.
 
