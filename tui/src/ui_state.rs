@@ -16,7 +16,7 @@ use agent_core::{ProviderEvent, ProviderKind};
 use agent_core::runtime_session::RuntimeSession;
 use agent_core::shared_state::SharedWorkplaceState;
 use agent_core::shutdown_snapshot::AgentShutdownSnapshot;
-use agent_core::shutdown_snapshot::ProviderThreadSnapshot;
+use agent_core::shutdown_snapshot::WorkerExecutionThreadSnapshot;
 use agent_core::shutdown_snapshot::ShutdownReason;
 use agent_core::shutdown_snapshot::ShutdownSnapshot;
 use agent_core::ExecCommandStatus;
@@ -1103,7 +1103,7 @@ impl TuiState {
                     };
 
                     let provider_thread_state = if slot.status().is_active() {
-                        Some(ProviderThreadSnapshot::waiting_for_response(
+                        Some(WorkerExecutionThreadSnapshot::waiting_for_response(
                             None,
                             chrono::Utc::now().to_rfc3339(),
                         ))
@@ -1135,7 +1135,7 @@ impl TuiState {
                 AgentShutdownSnapshot::active(
                     self.session.agent_runtime.meta().clone(),
                     self.app().active_task_id.clone(),
-                    ProviderThreadSnapshot::waiting_for_response(
+                    WorkerExecutionThreadSnapshot::waiting_for_response(
                         None,
                         chrono::Utc::now().to_rfc3339(),
                     ),

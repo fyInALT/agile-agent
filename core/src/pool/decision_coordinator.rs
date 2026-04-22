@@ -1,6 +1,6 @@
 //! Decision agent coordinator for managing decision layer state
 //!
-//! Provides DecisionAgentCoordinator struct that manages decision agent
+//! Provides WorkerDecisionRouter struct that manages decision agent
 //! slots, mail senders, and decision layer components.
 
 use std::collections::HashMap;
@@ -35,7 +35,7 @@ pub struct DecisionAgentStats {
 ///
 /// Manages decision agent slots, mail senders, and decision layer components.
 /// Used as a delegate within AgentPool for decision agent state operations.
-pub struct DecisionAgentCoordinator {
+pub struct WorkerDecisionRouter {
     /// Decision agent slots keyed by work agent ID
     agents: HashMap<AgentId, DecisionAgentSlot>,
     /// Decision mail senders keyed by work agent ID
@@ -44,9 +44,9 @@ pub struct DecisionAgentCoordinator {
     components: DecisionLayerComponents,
 }
 
-impl std::fmt::Debug for DecisionAgentCoordinator {
+impl std::fmt::Debug for WorkerDecisionRouter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DecisionAgentCoordinator")
+        f.debug_struct("WorkerDecisionRouter")
             .field("agents_count", &self.agents.len())
             .field("mail_senders_count", &self.mail_senders.len())
             .field("components", &"<DecisionLayerComponents>")
@@ -54,7 +54,7 @@ impl std::fmt::Debug for DecisionAgentCoordinator {
     }
 }
 
-impl DecisionAgentCoordinator {
+impl WorkerDecisionRouter {
     /// Create a new coordinator with initialized decision layer
     pub fn new() -> Self {
         Self {
@@ -240,7 +240,7 @@ impl DecisionAgentCoordinator {
     }
 }
 
-impl Default for DecisionAgentCoordinator {
+impl Default for WorkerDecisionRouter {
     fn default() -> Self {
         Self::new()
     }
@@ -266,14 +266,14 @@ mod tests {
 
     #[test]
     fn coordinator_new_is_empty() {
-        let coord = DecisionAgentCoordinator::new();
+        let coord = WorkerDecisionRouter::new();
         assert_eq!(coord.agent_count(), 0);
         assert!(!coord.has_agent(&AgentId::new("test")));
     }
 
     #[test]
     fn insert_and_get_agent() {
-        let mut coord = DecisionAgentCoordinator::new();
+        let mut coord = WorkerDecisionRouter::new();
         let agent_id = AgentId::new("work-001");
         let agent = make_test_agent("work-001");
 
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn insert_and_get_mail_sender() {
-        let mut coord = DecisionAgentCoordinator::new();
+        let mut coord = WorkerDecisionRouter::new();
         let agent_id = AgentId::new("work-001");
         let mail = DecisionMail::new();
         let (sender, _) = mail.split();
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn remove_agent() {
-        let mut coord = DecisionAgentCoordinator::new();
+        let mut coord = WorkerDecisionRouter::new();
         let agent_id = AgentId::new("work-001");
         let agent = make_test_agent("work-001");
         let mail = DecisionMail::new();
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn stats_empty() {
-        let coord = DecisionAgentCoordinator::new();
+        let coord = WorkerDecisionRouter::new();
         let stats = coord.stats();
         assert_eq!(stats.total_decisions, 0);
         assert_eq!(stats.idle_agents, 0);
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn stats_after_insert() {
-        let mut coord = DecisionAgentCoordinator::new();
+        let mut coord = WorkerDecisionRouter::new();
         coord.insert_agent(AgentId::new("work-001"), make_test_agent("work-001"));
         let stats = coord.stats();
         assert_eq!(stats.idle_agents, 1);
@@ -328,14 +328,14 @@ mod tests {
 
     #[test]
     fn agents_with_pending_decisions_empty_initially() {
-        let coord = DecisionAgentCoordinator::new();
+        let coord = WorkerDecisionRouter::new();
         let pending = coord.agents_with_pending_decisions();
         assert!(pending.is_empty());
     }
 
     #[test]
     fn reset_all_errors_no_effect_on_idle() {
-        let mut coord = DecisionAgentCoordinator::new();
+        let mut coord = WorkerDecisionRouter::new();
         coord.insert_agent(AgentId::new("work-001"), make_test_agent("work-001"));
         coord.reset_all_errors();
         // Should not panic, idle agents stay idle

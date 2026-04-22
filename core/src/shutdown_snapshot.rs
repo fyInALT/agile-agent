@@ -43,7 +43,7 @@ pub struct AgentShutdownSnapshot {
     /// Whether agent had error before shutdown
     pub had_error: bool,
     /// Provider thread state (if running)
-    pub provider_thread_state: Option<ProviderThreadSnapshot>,
+    pub provider_thread_state: Option<WorkerExecutionThreadSnapshot>,
     /// Timestamp when snapshot was captured
     pub captured_at: String,
     /// Agent transcript entries preserved at shutdown
@@ -62,7 +62,7 @@ pub struct AgentShutdownSnapshot {
 
 /// Snapshot of provider thread state
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProviderThreadSnapshot {
+pub struct WorkerExecutionThreadSnapshot {
     /// Current prompt being processed
     pub current_prompt: Option<String>,
     /// Whether waiting for response
@@ -173,7 +173,7 @@ impl AgentShutdownSnapshot {
     pub fn active(
         meta: AgentMeta,
         assigned_task_id: Option<String>,
-        thread_state: ProviderThreadSnapshot,
+        thread_state: WorkerExecutionThreadSnapshot,
     ) -> Self {
         Self {
             meta,
@@ -211,7 +211,7 @@ impl AgentShutdownSnapshot {
     }
 }
 
-impl ProviderThreadSnapshot {
+impl WorkerExecutionThreadSnapshot {
     /// Create snapshot for thread waiting for response
     pub fn waiting_for_response(current_prompt: Option<String>, started_at: String) -> Self {
         Self {
@@ -267,7 +267,7 @@ mod tests {
         let active = AgentShutdownSnapshot::active(
             test_meta("agent_002"),
             Some("task-1".to_string()),
-            super::ProviderThreadSnapshot::waiting_for_response(
+            super::WorkerExecutionThreadSnapshot::waiting_for_response(
                 Some("prompt".to_string()),
                 "2026-04-14T00:00:00Z".to_string(),
             ),
@@ -291,7 +291,7 @@ mod tests {
         let active = AgentShutdownSnapshot::active(
             test_meta("agent_001"),
             None,
-            super::ProviderThreadSnapshot::waiting_for_response(
+            super::WorkerExecutionThreadSnapshot::waiting_for_response(
                 None,
                 "2026-04-14T00:00:00Z".to_string(),
             ),

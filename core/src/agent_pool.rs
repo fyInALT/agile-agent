@@ -21,7 +21,7 @@ pub use crate::pool::{
     AgentBlockedEvent, AgentBlockedNotifier, AgentStatusSnapshot, AgentTaskAssignment,
     BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     DecisionExecutionResult, NoOpAgentBlockedNotifier, TaskQueueSnapshot,
-    BlockedHandler, DecisionAgentCoordinator, DecisionAgentStats, WorktreeCoordinator,
+    BlockedHandler, WorkerDecisionRouter, DecisionAgentStats, WorktreeCoordinator,
     FocusManager, PoolQueries, DecisionExecutor,
     WorktreeRecovery, WorktreeRecoveryReport, AgentPoolWorktreeError,
 
@@ -57,7 +57,7 @@ pub struct WorkerPool {
     /// Blocked handling delegate (manages config, history, notifier)
     blocked_handler: BlockedHandler,
     /// Decision agent coordinator (manages agents, mail senders, components)
-    decision_coordinator: DecisionAgentCoordinator,
+    decision_coordinator: WorkerDecisionRouter,
     /// Worktree coordinator (manages manager, state store, git flow executor)
     worktree_coordinator: WorktreeCoordinator,
     /// Focus manager (manages focused slot index)
@@ -94,7 +94,7 @@ impl WorkerPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_coordinator: DecisionAgentCoordinator::new(),
+            decision_coordinator: WorkerDecisionRouter::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
             focus_manager: FocusManager::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -115,7 +115,7 @@ impl WorkerPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(config.timeout_config.clone()),
             blocked_handler: BlockedHandler::with_config(config),
-            decision_coordinator: DecisionAgentCoordinator::new(),
+            decision_coordinator: WorkerDecisionRouter::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
             focus_manager: FocusManager::new(),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -132,7 +132,7 @@ impl WorkerPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_coordinator: DecisionAgentCoordinator::new(),
+            decision_coordinator: WorkerDecisionRouter::new(),
             worktree_coordinator: WorktreeCoordinator::new(),
             focus_manager: FocusManager::new(),
             cwd,
@@ -161,7 +161,7 @@ impl WorkerPool {
             workplace_id,
             human_queue: HumanDecisionQueue::new(HumanDecisionTimeoutConfig::default()),
             blocked_handler: BlockedHandler::new(),
-            decision_coordinator: DecisionAgentCoordinator::new(),
+            decision_coordinator: WorkerDecisionRouter::new(),
             worktree_coordinator,
             focus_manager: FocusManager::new(),
             cwd: repo_root,

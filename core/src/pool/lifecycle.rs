@@ -12,7 +12,7 @@ use crate::decision_mail::DecisionMail;
 use crate::logging;
 use crate::provider_profile::{ProfileId, get_effective_profile, AgentType as ProfileAgentType};
 use crate::ProviderKind;
-use crate::pool::{DecisionAgentCoordinator, WorktreeCoordinator};
+use crate::pool::{WorkerDecisionRouter, WorktreeCoordinator};
 use crate::{WorktreeCreateOptions, WorktreeError, WorktreeState};
 
 /// Error type for agent pool worktree operations
@@ -75,7 +75,7 @@ impl From<WorktreeError> for LifecycleError {
 ///
 /// This struct provides lifecycle methods that operate on pool state.
 /// It uses the coordinator pattern to delegate to BlockedHandler,
-/// DecisionAgentCoordinator, and WorktreeCoordinator.
+/// WorkerDecisionRouter, and WorktreeCoordinator.
 pub struct AgentLifecycleManager;
 
 impl AgentLifecycleManager {
@@ -88,7 +88,7 @@ impl AgentLifecycleManager {
         next_agent_index: &mut usize,
         focused_slot: &mut usize,
         workplace_id: &WorkplaceId,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         cwd: &PathBuf,
         provider_kind: ProviderKind,
     ) -> Result<AgentId, String> {
@@ -154,7 +154,7 @@ impl AgentLifecycleManager {
         next_agent_index: &mut usize,
         focused_slot: &mut usize,
         workplace_id: &WorkplaceId,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         cwd: &PathBuf,
         profile_store: &crate::provider_profile::ProfileStore,
         profile_id: &ProfileId,
@@ -232,7 +232,7 @@ impl AgentLifecycleManager {
         next_agent_index: &mut usize,
         focused_slot: &mut usize,
         workplace_id: &WorkplaceId,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         worktree_coordinator: &WorktreeCoordinator,
         cwd: &PathBuf,
         provider_kind: ProviderKind,
@@ -423,7 +423,7 @@ impl AgentLifecycleManager {
     /// Loads saved worktree state and verifies/recreates worktree if needed.
     pub fn resume_with_worktree(
         slots: &mut Vec<AgentSlot>,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         worktree_coordinator: &WorktreeCoordinator,
         cwd: &PathBuf,
         agent_id: &AgentId,
@@ -552,7 +552,7 @@ impl AgentLifecycleManager {
     /// Transitions slot to stopped state and stops decision agent.
     pub fn stop_simple(
         slots: &mut Vec<AgentSlot>,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         agent_id: &AgentId,
     ) -> Result<usize, String> {
         let index = slots.iter()
@@ -587,7 +587,7 @@ impl AgentLifecycleManager {
     /// Handles worktree state preservation or cleanup.
     pub fn stop_with_worktree(
         slots: &mut Vec<AgentSlot>,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         worktree_coordinator: &WorktreeCoordinator,
         agent_id: &AgentId,
         cleanup_worktree: bool,
@@ -675,7 +675,7 @@ impl AgentLifecycleManager {
     /// Adjusts focused_slot if necessary.
     pub fn remove_stopped(
         slots: &mut Vec<AgentSlot>,
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         focused_slot: &mut usize,
         agent_id: &AgentId,
     ) -> Result<(), String> {
@@ -736,7 +736,7 @@ impl AgentLifecycleManager {
     /// Spawn decision agent for a work agent
     pub fn spawn_decision_agent(
         slots: &[AgentSlot],
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         cwd: &PathBuf,
         work_agent_id: &AgentId,
     ) -> Result<(), String> {
@@ -790,7 +790,7 @@ impl AgentLifecycleManager {
 
     /// Stop decision agent for a work agent
     pub fn stop_decision_agent(
-        decision_coordinator: &mut DecisionAgentCoordinator,
+        decision_coordinator: &mut WorkerDecisionRouter,
         work_agent_id: &AgentId,
     ) -> Result<(), String> {
         if let Some(mut decision_agent) = decision_coordinator.remove_agent(work_agent_id) {

@@ -225,7 +225,7 @@ impl RuntimeSession {
             AgentShutdownSnapshot::active(
                 self.agent_runtime.meta().clone(),
                 self.app.active_task_id.clone(),
-                crate::shutdown_snapshot::ProviderThreadSnapshot::waiting_for_response(
+                crate::shutdown_snapshot::WorkerExecutionThreadSnapshot::waiting_for_response(
                     None,
                     "2026-04-14T00:00:00Z".to_string(), // placeholder
                 ),

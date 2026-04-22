@@ -57,7 +57,7 @@ pub use agent_toolkit::{
 // Re-export provider types from agent-provider for backward compatibility
 pub use agent_provider::{
     ProviderKind, ProviderEvent, SessionHandle, ProviderCapabilities,
-    provider_capabilities, ProviderThreadHandle,
+    provider_capabilities, WorkerExecutionThreadHandle,
     start_provider, start_provider_with_handle, default_provider,
     mock_provider, probe, llm_caller,
     providers,
@@ -100,7 +100,7 @@ pub use pool::{
     AgentBlockedEvent, AgentBlockedNotifier, NoOpAgentBlockedNotifier,
     BlockedHandler, BlockedHandlingConfig, BlockedHistoryEntry, BlockedTaskPolicy,
     AgentStatusSnapshot, AgentTaskAssignment, TaskQueueSnapshot,
-    DecisionExecutionResult, DecisionAgentCoordinator, DecisionAgentStats,
+    DecisionExecutionResult, WorkerDecisionRouter, DecisionAgentStats,
     WorktreeCoordinator, AgentLifecycleManager, LifecycleError,
     TaskAssignmentCoordinator, AssignmentError,
     FocusManager, FocusError,
@@ -292,9 +292,9 @@ mod backward_compatibility_tests {
         let policy = BlockedTaskPolicy::default();
         assert_eq!(policy, BlockedTaskPolicy::ReassignIfPossible, "BlockedTaskPolicy default should be ReassignIfPossible");
 
-        // DecisionAgentCoordinator - can be created
-        let coord = DecisionAgentCoordinator::new();
-        assert_eq!(coord.agent_count(), 0, "DecisionAgentCoordinator::new should have zero agents");
+        // WorkerDecisionRouter - can be created
+        let coord = WorkerDecisionRouter::new();
+        assert_eq!(coord.agent_count(), 0, "WorkerDecisionRouter::new should have zero agents");
 
         // DecisionAgentStats - can be created and fields accessed
         let stats = DecisionAgentStats::default();
@@ -324,7 +324,7 @@ mod backward_compatibility_tests {
         handler.history().len()
     }
 
-    fn _accept_decision_coordinator(coord: DecisionAgentCoordinator) -> usize {
+    fn _accept_decision_coordinator(coord: WorkerDecisionRouter) -> usize {
         coord.agent_count()
     }
 
@@ -343,10 +343,10 @@ mod backward_compatibility_tests {
         let count = _accept_blocked_handler(handler);
         assert_eq!(count, 1, "BlockedHandler should record one entry");
 
-        // DecisionAgentCoordinator - verify function returns count
-        let coord = DecisionAgentCoordinator::new();
+        // WorkerDecisionRouter - verify function returns count
+        let coord = WorkerDecisionRouter::new();
         let count = _accept_decision_coordinator(coord);
-        assert_eq!(count, 0, "DecisionAgentCoordinator should have zero agents");
+        assert_eq!(count, 0, "WorkerDecisionRouter should have zero agents");
     }
 
     // Test lifecycle types are accessible AND functional from core

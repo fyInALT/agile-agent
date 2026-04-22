@@ -1,4 +1,4 @@
-//! ProviderThreadHandle for managing provider thread lifecycle
+//! WorkerExecutionThreadHandle for managing provider thread lifecycle
 //!
 //! Provides controlled thread spawning, monitoring, and graceful shutdown.
 //!
@@ -60,7 +60,7 @@
 //!
 //! ## Implementation Notes
 //!
-//! - `ProviderThreadHandle` holds the RECEIVER (event_rx), not a sender
+//! - `WorkerExecutionThreadHandle` holds the RECEIVER (event_rx), not a sender
 //! - The thread owns a cloned SENDER for sending events
 //! - Dropping the keepalive sender signals thread shutdown via channel disconnect
 //! - Thread should detect recv errors and exit cleanly
@@ -79,7 +79,7 @@ use crate::provider::{ProviderEvent, ProviderKind, SessionHandle};
 /// - Named thread for debugging
 /// - Event receiver for collecting provider events
 /// - Graceful shutdown with timeout
-pub struct ProviderThreadHandle {
+pub struct WorkerExecutionThreadHandle {
     /// Thread join handle
     handle: Option<JoinHandle<()>>,
     /// Receiver for provider events
@@ -105,7 +105,7 @@ pub enum ThreadStopResult {
     AlreadyStopped,
 }
 
-impl ProviderThreadHandle {
+impl WorkerExecutionThreadHandle {
     /// Create a new thread handle with event receiver
     ///
     /// This is typically called after spawning a thread that sends events.
@@ -283,14 +283,14 @@ fn extract_panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Builder for spawning provider threads
-pub struct ProviderThreadBuilder {
+pub struct WorkerExecutionThreadBuilder {
     /// Thread name
     name: String,
     /// Stack size (optional)
     stack_size: Option<usize>,
 }
 
-impl ProviderThreadBuilder {
+impl WorkerExecutionThreadBuilder {
     /// Create a new builder with thread name
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -309,7 +309,7 @@ impl ProviderThreadBuilder {
     ///
     /// Returns the handle for lifecycle management.
     /// Note: The spawned function should create its own channel for events.
-    pub fn spawn<F>(self, f: F) -> std::io::Result<ProviderThreadHandle>
+    pub fn spawn<F>(self, f: F) -> std::io::Result<WorkerExecutionThreadHandle>
     where
         F: FnOnce() + Send + 'static,
     {
@@ -323,7 +323,7 @@ impl ProviderThreadBuilder {
 
         let handle = builder.spawn(f)?;
 
-        Ok(ProviderThreadHandle::new(
+        Ok(WorkerExecutionThreadHandle::new(
             handle,
             event_rx,
             keepalive_tx,
@@ -342,7 +342,7 @@ pub fn start_provider_threaded(
     cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     thread_name: String,
-) -> std::io::Result<ProviderThreadHandle> {
+) -> std::io::Result<WorkerExecutionThreadHandle> {
     let (keepalive_tx, event_rx) = channel();
     let thread_event_tx = keepalive_tx.clone();
     let provider_label = provider.label();
@@ -361,7 +361,7 @@ pub fn start_provider_threaded(
         run_provider_in_thread(provider, prompt, cwd, session_handle, thread_event_tx);
     })?;
 
-    Ok(ProviderThreadHandle::new(
+    Ok(WorkerExecutionThreadHandle::new(
         handle,
         event_rx,
         keepalive_tx,
@@ -402,7 +402,7 @@ fn run_provider_in_thread(
 pub fn start_mock_provider_threaded(
     prompt: String,
     thread_name: String,
-) -> std::io::Result<ProviderThreadHandle> {
+) -> std::io::Result<WorkerExecutionThreadHandle> {
     let (keepalive_tx, event_rx) = channel();
     let thread_event_tx = keepalive_tx.clone();
 
@@ -410,7 +410,7 @@ pub fn start_mock_provider_threaded(
         run_mock_provider(prompt, thread_event_tx);
     })?;
 
-    Ok(ProviderThreadHandle::new(
+    Ok(WorkerExecutionThreadHandle::new(
         handle,
         event_rx,
         keepalive_tx,
@@ -445,7 +445,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    fn make_handle_with_thread() -> (ProviderThreadHandle, Arc<AtomicBool>) {
+    fn make_handle_with_thread() -> (WorkerExecutionThreadHandle, Arc<AtomicBool>) {
         let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
@@ -460,12 +460,12 @@ mod tests {
             .unwrap();
 
         (
-            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "test-thread".to_string()),
+            WorkerExecutionThreadHandle::new(handle, event_rx, keepalive_tx, "test-thread".to_string()),
             running,
         )
     }
 
-    fn make_quick_thread() -> ProviderThreadHandle {
+    fn make_quick_thread() -> WorkerExecutionThreadHandle {
         let (keepalive_tx, event_rx) = std::sync::mpsc::channel();
 
         let handle = Builder::new()
@@ -475,7 +475,7 @@ mod tests {
             })
             .unwrap();
 
-        ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string())
+        WorkerExecutionThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string())
     }
 
     #[test]
@@ -522,13 +522,13 @@ mod tests {
 
     #[test]
     fn builder_new_creates_named_builder() {
-        let builder = ProviderThreadBuilder::new("agent-thread");
+        let builder = WorkerExecutionThreadBuilder::new("agent-thread");
         assert_eq!(builder.name, "agent-thread");
     }
 
     #[test]
     fn builder_stack_size() {
-        let builder = ProviderThreadBuilder::new("test").stack_size(1024 * 1024);
+        let builder = WorkerExecutionThreadBuilder::new("test").stack_size(1024 * 1024);
         assert_eq!(builder.stack_size, Some(1024 * 1024));
     }
 
@@ -689,7 +689,7 @@ mod tests {
         );
     }
 
-    /// Test: ProviderThreadHandle does not expose mutable references to shared state
+    /// Test: WorkerExecutionThreadHandle does not expose mutable references to shared state
     #[test]
     fn handle_has_no_shared_state_accessors() {
         let handle =
@@ -746,7 +746,7 @@ mod tests {
     /// Test: Channel is the only cross-thread communication
     #[test]
     fn channel_is_only_cross_thread_communication() {
-        // Verify that ProviderThreadHandle doesn't hold any mutable reference
+        // Verify that WorkerExecutionThreadHandle doesn't hold any mutable reference
         // to shared state - only the channel receiver
         let handle =
             start_mock_provider_threaded("test".to_string(), "comm-test".to_string()).unwrap();
@@ -811,7 +811,7 @@ mod tests {
             .unwrap();
 
         let mut thread_handle =
-            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string());
+            WorkerExecutionThreadHandle::new(handle, event_rx, keepalive_tx, "quick-thread".to_string());
 
         // Stop with blocking join (timeout ignored)
         let result = thread_handle.stop(Duration::from_millis(1000));
@@ -833,7 +833,7 @@ mod tests {
             .unwrap();
 
         let mut thread_handle =
-            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "panic-thread".to_string());
+            WorkerExecutionThreadHandle::new(handle, event_rx, keepalive_tx, "panic-thread".to_string());
 
         // Give thread time to panic
         std::thread::sleep(Duration::from_millis(50));
@@ -889,7 +889,7 @@ mod tests {
             .unwrap();
 
         let mut thread_handle =
-            ProviderThreadHandle::new(handle, event_rx, keepalive_tx, "abandon-test".to_string());
+            WorkerExecutionThreadHandle::new(handle, event_rx, keepalive_tx, "abandon-test".to_string());
 
         // Abandon should return immediately
         let start = Instant::now();

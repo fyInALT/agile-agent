@@ -12,7 +12,7 @@ use crate::decision_agent_slot::DecisionAgentSlot;
 use crate::decision_mail::DecisionMail;
 use crate::llm_caller::ProviderLLMCaller;
 use crate::logging;
-use crate::pool::DecisionAgentCoordinator;
+use crate::pool::WorkerDecisionRouter;
 use crate::provider_profile::ProfileId;
 use crate::ProviderKind;
 
@@ -22,7 +22,7 @@ use crate::ProviderKind;
 /// The decision agent uses the same provider as the work agent.
 pub fn spawn_decision_agent_for(
     slots: &[AgentSlot],
-    decision_coordinator: &mut DecisionAgentCoordinator,
+    decision_coordinator: &mut WorkerDecisionRouter,
     cwd: &PathBuf,
     work_agent_id: &AgentId,
 ) -> Result<(), String> {
@@ -50,7 +50,7 @@ pub fn spawn_decision_agent_for(
 /// decision layer LLM backend configuration.
 pub fn spawn_decision_agent_with_profile_for(
     slots: &[AgentSlot],
-    decision_coordinator: &mut DecisionAgentCoordinator,
+    decision_coordinator: &mut WorkerDecisionRouter,
     cwd: &PathBuf,
     work_agent_id: &AgentId,
     profile_id: Option<&ProfileId>,
@@ -81,7 +81,7 @@ pub fn spawn_decision_agent_with_profile_for(
 
 /// Internal helper to spawn decision agent with provider kind and optional profile
 fn spawn_with_provider(
-    decision_coordinator: &mut DecisionAgentCoordinator,
+    decision_coordinator: &mut WorkerDecisionRouter,
     cwd: &PathBuf,
     work_agent_id: &AgentId,
     provider_kind: ProviderKind,
@@ -128,7 +128,7 @@ fn spawn_with_provider(
 
 /// Stop the decision agent for a work agent
 pub fn stop_decision_agent_for(
-    decision_coordinator: &mut DecisionAgentCoordinator,
+    decision_coordinator: &mut WorkerDecisionRouter,
     work_agent_id: &AgentId,
 ) -> Result<(), String> {
     if let Some(mut decision_agent) = decision_coordinator.remove_agent(work_agent_id) {

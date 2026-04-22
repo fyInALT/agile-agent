@@ -6,7 +6,7 @@
 - Title: `EventLoop Refactoring`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Completed`
+- Status: `Partially Completed`
 - Created: 2026-04-22
 
 ## Background

@@ -30,8 +30,10 @@ uuid = { workspace = true }
 
 agent-protocol = { path = "../protocol" }
 agent-types = { path = "../types" }
+agent-events = { path = "../events" }
 agent-core = { path = "../../core" }
 agent-decision = { path = "../../decision" }
+agent-behavior-infra = { path = "../behavior-infra" }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

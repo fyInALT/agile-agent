@@ -7,7 +7,7 @@
 //! - queries: PoolQueries for read-only query operations
 //! - decision_executor: DecisionExecutor for executing decision layer outputs
 //! - blocked_handler: BlockedHandler for handling blocked agents
-//! - decision_coordinator: DecisionAgentCoordinator for decision layer state
+//! - decision_coordinator: WorkerDecisionRouter for decision layer state
 //! - worktree_coordinator: WorktreeCoordinator for worktree management
 //! - worktree_recovery: WorktreeRecovery for orphaned/idle worktree cleanup
 //! - event_converter: Event conversion utilities for decision layer
@@ -32,7 +32,7 @@ pub mod worktree_recovery;
 
 // Re-export main types for convenience
 pub use blocked_handler::{BlockedHandler, AgentBlockedNotifier, AgentBlockedEvent, NoOpAgentBlockedNotifier};
-pub use decision_coordinator::{DecisionAgentCoordinator, DecisionAgentStats};
+pub use decision_coordinator::{WorkerDecisionRouter, DecisionAgentStats};
 pub use decision_executor::DecisionExecutor;
 pub use decision_spawner::{spawn_decision_agent_for, spawn_decision_agent_with_profile_for, stop_decision_agent_for};
 

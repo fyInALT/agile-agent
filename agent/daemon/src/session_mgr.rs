@@ -1116,6 +1116,14 @@ impl EventLoop {
         self
     }
 
+    /// Install the daemon's composite effect handler.
+    ///
+    /// This replaces the default `NoopEffectHandler` with a `CompositeEffectHandler`
+    /// backed by per-variant handlers that have access to `SessionInner`.
+    pub fn install_daemon_effect_handler(&mut self) {
+        self.effect_handler = Arc::new(DaemonEffectHandler::new(self.inner.clone()));
+    }
+
     // ---------------------------------------------------------------------------
     // Test-only helpers
     // ---------------------------------------------------------------------------
@@ -1724,3 +1732,99 @@ mod tests {
 /// Backward compatibility alias — use `EventLoop` in new code.
 pub type SessionManager = EventLoop;
 
+
+// ---------------------------------------------------------------------------
+// DaemonEffectHandler — per-variant effect handlers with SessionInner access
+// ---------------------------------------------------------------------------
+
+use agent_behavior_infra::{
+    CompositeEffectHandler, NotifyUserHandler, RequestDecisionHandler,
+    SendToProviderHandler, SpawnProviderHandler, TerminateHandler, UpdateWorktreeHandler,
+};
+
+struct DaemonEffectHandler {
+    inner: Arc<Mutex<SessionInner>>,
+}
+
+impl DaemonEffectHandler {
+    fn new(inner: Arc<Mutex<SessionInner>>) -> CompositeEffectHandler {
+        let daemon = Arc::new(Self { inner });
+        CompositeEffectHandler::new(
+            Box::new(DaemonSpawnProviderHandler(daemon.clone())),
+            Box::new(DaemonSendToProviderHandler(daemon.clone())),
+            Box::new(DaemonRequestDecisionHandler(daemon.clone())),
+            Box::new(DaemonNotifyUserHandler(daemon.clone())),
+            Box::new(DaemonUpdateWorktreeHandler(daemon.clone())),
+            Box::new(DaemonTerminateHandler(daemon.clone())),
+        )
+    }
+}
+
+macro_rules! daemon_handler {
+    ($name:ident, $trait:ident, $fn_sig:tt, $body:block) => {
+        struct $name(Arc<DaemonEffectHandler>);
+        impl $trait for $name {
+            fn execute $fn_sig -> Result<(), agent_behavior_infra::EffectError> $body
+        }
+    };
+}
+
+daemon_handler!(
+    DaemonSpawnProviderHandler,
+    SpawnProviderHandler,
+    (&self, _agent_id: &agent_types::AgentId, _prompt: &str),
+    {
+        // TODO: Implement provider thread spawning via SessionInner
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonSendToProviderHandler,
+    SendToProviderHandler,
+    (&self, _agent_id: &agent_types::AgentId, _event: &agent_events::DomainEvent),
+    {
+        // TODO: Implement event sending to provider channel
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonRequestDecisionHandler,
+    RequestDecisionHandler,
+    (&self, _agent_id: &agent_types::AgentId, _situation_type: &str),
+    {
+        // TODO: Implement decision request routing
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonNotifyUserHandler,
+    NotifyUserHandler,
+    (&self, _agent_id: &agent_types::AgentId, _message: &str),
+    {
+        // TODO: Implement user notification via event aggregator
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonUpdateWorktreeHandler,
+    UpdateWorktreeHandler,
+    (&self, _agent_id: &agent_types::AgentId, _path: &std::path::Path, _branch: &str),
+    {
+        // TODO: Implement worktree update via worktree coordinator
+        Ok(())
+    }
+);
+
+daemon_handler!(
+    DaemonTerminateHandler,
+    TerminateHandler,
+    (&self, _agent_id: &agent_types::AgentId, _reason: &str),
+    {
+        // TODO: Implement graceful agent termination
+        Ok(())
+    }
+);

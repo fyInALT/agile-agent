@@ -12,7 +12,7 @@ use crate::launch_config::context::ProviderLaunchContext;
 use crate::logging;
 use crate::mock_provider;
 use crate::probe;
-use crate::provider_thread::ProviderThreadHandle;
+use crate::provider_thread::WorkerExecutionThreadHandle;
 // Re-export SessionHandle from shared event kernel
 pub use agent_events::SessionHandle;
 // Tool call types from agent-toolkit
@@ -115,7 +115,7 @@ pub fn start_provider_with_handle_and_context(
     context: ProviderLaunchContext,
     prompt: String,
     thread_name: String,
-) -> Result<ProviderThreadHandle> {
+) -> Result<WorkerExecutionThreadHandle> {
     let (keepalive_tx, event_rx) = channel();
     let thread_event_tx = keepalive_tx.clone();
 
@@ -135,7 +135,7 @@ pub fn start_provider_with_handle_and_context(
         run_provider_internal_with_context(context, prompt, thread_event_tx);
     })?;
 
-    Ok(ProviderThreadHandle::new(
+    Ok(WorkerExecutionThreadHandle::new(
         handle,
         event_rx,
         keepalive_tx,
@@ -184,7 +184,7 @@ fn run_provider_internal_with_context(
 
 /// Start a provider with full thread lifecycle management
 ///
-/// Returns a ProviderThreadHandle that includes:
+/// Returns a WorkerExecutionThreadHandle that includes:
 /// - JoinHandle for thread lifecycle
 /// - Event receiver for collecting provider events
 /// - Graceful shutdown capability
@@ -196,7 +196,7 @@ pub fn start_provider_with_handle(
     cwd: PathBuf,
     session_handle: Option<SessionHandle>,
     thread_name: String,
-) -> Result<ProviderThreadHandle> {
+) -> Result<WorkerExecutionThreadHandle> {
     let (keepalive_tx, event_rx) = channel();
     let thread_event_tx = keepalive_tx.clone();
 
@@ -215,7 +215,7 @@ pub fn start_provider_with_handle(
         run_provider_internal(provider, prompt, cwd, session_handle, thread_event_tx);
     })?;
 
-    Ok(ProviderThreadHandle::new(
+    Ok(WorkerExecutionThreadHandle::new(
         handle,
         event_rx,
         keepalive_tx,
