@@ -56,6 +56,41 @@ use agent_decision::provider::ProviderKind as DecisionProviderKind;
 use agent_decision::TieredDecisionEngine;
 use agent_decision::TieredEngineConfig;
 
+/// Compute tier string from situation type name
+///
+/// Mirrors the logic in DecisionTier::from_situation() for display purposes.
+fn compute_tier_from_situation(situation_type: &str, requires_human: bool) -> String {
+    if requires_human {
+        return "Critical".to_string();
+    }
+
+    // Check for rate limit errors (use Simple to avoid deadlock)
+    if situation_type == "error" {
+        // Note: We can't check for rate limit here without more context
+        // Default to Complex for errors
+        return "Complex".to_string();
+    }
+
+    if situation_type == "partial_completion" {
+        return "Complex".to_string();
+    }
+
+    if situation_type == "claims_completion" {
+        return "Medium".to_string();
+    }
+
+    if situation_type == "waiting_for_choice" || situation_type == "agent_idle" || situation_type == "rate_limit_recovery" {
+        return "Simple".to_string();
+    }
+
+    if situation_type == "task_starting" {
+        return "High".to_string();
+    }
+
+    // Default
+    "Medium".to_string()
+}
+
 /// Status of a decision agent slot
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecisionAgentStatus {
@@ -407,7 +442,9 @@ impl DecisionAgentSlot {
         );
 
         // Make decision using engine - pass context directly (not cloned)
-        // First, inject current reflection_round into context for proper tracking
+        // First, get requires_human before context is moved
+        let requires_human = request.context.trigger_situation.requires_human();
+        // Inject current reflection_round into context for proper tracking
         let context_with_reflection = request.context.with_reflection_round(self.reflection_round);
         let result = self.engine.decide(context_with_reflection, &self.action_registry);
 
@@ -445,11 +482,16 @@ impl DecisionAgentSlot {
                 );
 
                 // Send success response with decision details for display
+                // Clone reasoning first, then move output to avoid double-cloning
+                let reasoning = output.reasoning.clone();
+                let tier = compute_tier_from_situation(&request.situation_type.name, requires_human);
                 let response = DecisionResponse::success_with_details(
                     request.work_agent_id.clone(),
-                    output.clone(),
+                    output,
+                    request.situation_type.clone(),
+                    tier,
                     Some(decision_prompt),
-                    Some(output.reasoning.clone()),
+                    Some(reasoning),
                 );
 
                 if let Err(e) = self.mail_receiver.send_response(response.clone()) {
@@ -579,6 +621,8 @@ impl DecisionAgentSlot {
         let reflection_round = self.reflection_round;
         let pending_reflection = self.pending_reflection_round.clone();
         let pending_fallback = self.pending_fallback_response.clone();
+        let situation_type = request.situation_type.clone();
+        let requires_human = request.context.trigger_situation.requires_human();
 
         // Set status to thinking
         self.status = DecisionAgentStatus::thinking_now();
@@ -654,11 +698,16 @@ impl DecisionAgentSlot {
                             "reflection_round": updated_reflection,
                         }),
                     );
+                    // Clone reasoning first, then move output to avoid double-cloning
+                    let reasoning = output.reasoning.clone();
+                    let tier = compute_tier_from_situation(&situation_type.name, requires_human);
                     DecisionResponse::success_with_details(
                         work_agent_id.clone(),
-                        output.clone(),
+                        output,
+                        situation_type,
+                        tier,
                         Some(decision_prompt),
-                        Some(output.reasoning.clone()),
+                        Some(reasoning),
                     )
                 }
                 Err(e) => {

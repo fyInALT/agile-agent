@@ -77,6 +77,10 @@ impl DecisionRequest {
 pub struct DecisionResponse {
     /// The work agent ID that requested the decision
     pub work_agent_id: AgentId,
+    /// The situation type that triggered this decision
+    pub situation_type: Option<SituationType>,
+    /// The decision tier used (Simple/Medium/Complex/Critical)
+    pub tier: Option<String>,
     /// The decision output (if successful)
     pub output: Option<DecisionOutput>,
     /// Error message (if decision failed)
@@ -91,6 +95,8 @@ impl std::fmt::Debug for DecisionResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DecisionResponse")
             .field("work_agent_id", &self.work_agent_id)
+            .field("situation_type", &self.situation_type)
+            .field("tier", &self.tier)
             .field("output", &self.output.as_ref().map(|_| "<DecisionOutput>"))
             .field("error", &self.error)
             .field("decision_prompt", &self.decision_prompt.as_ref().map(|p| if p.len() > 50 { &p[..50] } else { p }))
@@ -103,6 +109,8 @@ impl Clone for DecisionResponse {
     fn clone(&self) -> Self {
         Self {
             work_agent_id: self.work_agent_id.clone(),
+            situation_type: self.situation_type.clone(),
+            tier: self.tier.clone(),
             output: self.output.clone(),
             error: self.error.clone(),
             decision_prompt: self.decision_prompt.clone(),
@@ -116,6 +124,8 @@ impl DecisionResponse {
     pub fn success(work_agent_id: AgentId, output: DecisionOutput) -> Self {
         Self {
             work_agent_id,
+            situation_type: None,
+            tier: None,
             output: Some(output),
             error: None,
             decision_prompt: None,
@@ -123,15 +133,19 @@ impl DecisionResponse {
         }
     }
 
-    /// Create a successful decision response with prompt and thinking
+    /// Create a successful decision response with full details
     pub fn success_with_details(
         work_agent_id: AgentId,
         output: DecisionOutput,
+        situation_type: SituationType,
+        tier: String,
         decision_prompt: Option<String>,
         thinking: Option<String>,
     ) -> Self {
         Self {
             work_agent_id,
+            situation_type: Some(situation_type),
+            tier: Some(tier),
             output: Some(output),
             error: None,
             decision_prompt,
@@ -143,6 +157,8 @@ impl DecisionResponse {
     pub fn error(work_agent_id: AgentId, error_message: String) -> Self {
         Self {
             work_agent_id,
+            situation_type: None,
+            tier: None,
             output: None,
             error: Some(error_message),
             decision_prompt: None,
@@ -178,6 +194,16 @@ impl DecisionResponse {
     /// Get the thinking process if available
     pub fn thinking(&self) -> Option<&String> {
         self.thinking.as_ref()
+    }
+
+    /// Get the situation type if available
+    pub fn situation_type(&self) -> Option<&SituationType> {
+        self.situation_type.as_ref()
+    }
+
+    /// Get the tier if available
+    pub fn tier(&self) -> Option<&String> {
+        self.tier.as_ref()
     }
 }
 

@@ -211,11 +211,15 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                                 // Extract decision output info for transcript display
                                 let output_info = DecisionOutputInfo {
-                                    situation_type: "auto_detected".to_string(), // TODO: get from request
+                                    situation_type: response.situation_type()
+                                        .map(|s| s.name.clone())
+                                        .unwrap_or_else(|| "unknown".to_string()),
                                     action_type: action_name.clone(),
                                     reasoning: output.reasoning.clone(),
                                     confidence: output.confidence,
-                                    tier: "auto".to_string(), // TODO: get from engine
+                                    tier: response.tier()
+                                        .cloned()
+                                        .unwrap_or_else(|| "auto".to_string()),
                                     decision_prompt: response.decision_prompt().cloned(),
                                     thinking: response.thinking().cloned(),
                                 };
