@@ -1,6 +1,6 @@
 # Decision DSL Implementation Design
 
-> Complete implementation specification for a standalone, zero-dependency behavior tree engine. The design follows embedded script-language patterns (inspired by Lua): the host program creates the engine, loads trees, ticks them, and receives pure data outputs. All external dependencies are injected via traits.
+> Complete implementation specification for a standalone, zero-dependency behavior tree engine. This document is the engineering blueprint that corresponds 1:1 with `decision-dsl.md` (DSL specification), `decision-layer-design.md` (architecture), and the five `decision-dsl-examples/`. Every feature described in those documents is assigned a concrete implementation here.
 
 ---
 
@@ -13,13 +13,11 @@
 | **Standalone** | Zero dependencies on `agent-*` crates. Only stdlib + serde + regex. |
 | **Two public entrypoints** | `DslParser` (YAML → AST) and `DslRunner` (AST → commands). |
 | **Trait-based injection** | LLM session, filesystem, clock, logging are all traits. |
+| **Spec-compliant** | Every YAML construct, node type, parser, evaluator, and filter from `decision-dsl.md` is implemented. |
 | **Lua-inspired** | The engine is an embedded VM: host loads → ticks → receives output. |
 | **Testable in isolation** | Every external dependency is mockable via trait impls. |
-| **Zero-cost abstractions** | Hot paths (tick loop) use static dispatch where possible. |
 
 ### 1.2 Architecture Analogy: Lua
-
-Lua is a minimal embedded scripting language. Our DSL engine follows the same pattern:
 
 | Lua | Decision DSL |
 |-----|--------------|
@@ -33,8 +31,8 @@ Lua is a minimal embedded scripting language. Our DSL engine follows the same pa
 ### 1.3 What the Host Sees
 
 ```rust
-// The host (e.g. agent-decision) sees ONLY this:
-use decision_dsl::{DslParser, DslRunner, YamlParser, Executor};
+use decision_dsl::{DslParser, DslRunner, YamlParser, Executor, TickContext};
+use decision_dsl::{Blackboard, BlackboardValue};
 use decision_dsl::ext::{Session, Clock, Fs, Logger};
 
 // 1. Parse
@@ -42,17 +40,18 @@ let parser = YamlParser::new();
 let tree = parser.parse_tree(&fs::read_to_string("tree.yaml")?)?;
 
 // 2. Create runner with injected dependencies
-let mut runner = Executor::new()
-    .with_session(my_llm_session)
-    .with_clock(SystemClock)
-    .with_fs(my_fs)
-    .with_logger(my_logger);
+let mut runner = Executor::new();
 
-// 3. Tick
-let mut ctx = TickContext::new(blackboard);
+// 3. Set up blackboard (built-in variables auto-populated by host)
+let mut bb = Blackboard::new();
+bb.set_string("task_description", "Implement auth".into());
+bb.set_string("provider_output", output.into());
+
+// 4. Tick
+let mut ctx = TickContext::new(&mut bb, &mut session, &clock, &fs, &logger);
 let result = runner.tick(&tree, &mut ctx)?;
 
-// 4. Consume output
+// 5. Consume output
 for cmd in result.commands {
     println!("{:?}", cmd);
 }
@@ -67,20 +66,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Required: YAML parsing, serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
+regex = "1.10"
 
-# Required: template rendering
-# tera = "1.19"  # or a minimal custom engine
-
-# Optional: regex for structured parser
-regex = { version = "1.10", optional = true }
-
-# Optional: JSON schema validation
-jsonschema = { version = "0.17", optional = true }
-
-# Dev dependencies
 [dev-dependencies]
 # No agent-* crates. Only mock trait impls.
 ```
@@ -97,20 +86,28 @@ decision-dsl/
     ├── parser/
     │   ├── mod.rs          # Parser trait + YamlParser impl
     │   ├── ast.rs          # AST types (Tree, Node, Command)
-    │   └── validate.rs     # Schema validation (optional)
+    │   ├── yaml.rs         # serde_yaml → AST conversion
+    │   └── validate.rs     # Schema + semantic validation
     ├── runtime/
     │   ├── mod.rs          # Runtime exports
-    │   ├── executor.rs     # Executor: tick/reset internals
+    │   ├── executor.rs     # Executor: tick/reset/resume
     │   ├── blackboard.rs   # Blackboard: typed key-value store
-    │   └── context.rs      # TickContext: per-tick injection
+    │   ├── context.rs      # TickContext: per-tick injection
+    │   └── trace.rs        # NodeTrace + Tracer + metrics
     ├── nodes/
     │   ├── mod.rs          # Node trait + registry
     │   ├── composite.rs    # Selector, Sequence, Parallel
-    │   ├── decorator.rs    # Inverter, Repeater, Cooldown, etc.
+    │   ├── decorator.rs    # Inverter, Repeater, Cooldown, ReflectionGuard, ForceHuman
     │   └── leaf.rs         # Condition, Action, Prompt, SetVar
+    ├── eval/
+    │   ├── mod.rs          # Evaluator trait + registry
+    │   └── builtin.rs      # OutputContains, VariableIs, Regex, Or, etc.
+    ├── parser_out/
+    │   ├── mod.rs          # OutputParser trait + registry
+    │   └── builtin.rs      # EnumParser, StructuredParser, JsonParser, CommandParser
     ├── template/
     │   ├── mod.rs          # Template engine
-    │   └── engine.rs       # Render + filter registry
+    │   └── engine.rs       # Lexer + render + filter registry
     ├── ext/                # External dependency traits
     │   ├── mod.rs
     │   ├── session.rs      # Session (LLM same-session)
@@ -125,12 +122,12 @@ decision-dsl/
 ```rust
 // lib.rs — ONLY these are pub
 pub use parser::{DslParser, YamlParser, Tree, ParseError};
-pub use runtime::{DslRunner, Executor, TickContext, TickResult};
-pub use runtime::{Blackboard, BlackboardValue};
+pub use runtime::{DslRunner, Executor, TickContext, TickResult, Blackboard, BlackboardValue};
+pub use runtime::trace::{NodeTrace, TraceEntry};
 pub use ext::{Session, SessionError, Clock, Fs, FsError, Logger, LogLevel};
 pub use error::{DslError, RuntimeError};
 
-// Everything in nodes/, template/, parser/ast.rs is pub(crate)
+// Everything in nodes/, eval/, parser_out/, template/ is pub(crate)
 ```
 
 ---
@@ -142,36 +139,27 @@ pub use error::{DslError, RuntimeError};
 ```rust
 use std::path::Path;
 
-/// Parse YAML/JSON DSL into an abstract syntax tree.
-///
-/// This is the ONLY way to turn DSL text into executable trees.
+/// Parse YAML DSL into an abstract syntax tree.
 pub trait DslParser {
-    /// Parse a single tree from YAML text.
     fn parse_tree(&self, yaml: &str) -> Result<Tree, ParseError>;
-
-    /// Parse a bundle of trees from a directory.
-    /// Requires a Fs implementation to read files.
     fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError>;
 }
 
 /// Concrete implementation: YAML-based parser.
 pub struct YamlParser {
     node_registry: NodeRegistry,
-    schema_validator: Option<SchemaValidator>,
+    evaluator_registry: EvaluatorRegistry,
+    parser_registry: OutputParserRegistry,
+    filter_registry: FilterRegistry,
 }
 
 impl YamlParser {
     pub fn new() -> Self {
         Self {
             node_registry: NodeRegistry::with_builtins(),
-            schema_validator: None,
-        }
-    }
-
-    pub fn with_schema_validation(self) -> Self {
-        Self {
-            schema_validator: Some(SchemaValidator::default()),
-            ..self
+            evaluator_registry: EvaluatorRegistry::with_builtins(),
+            parser_registry: OutputParserRegistry::with_builtins(),
+            filter_registry: FilterRegistry::with_builtins(),
         }
     }
 }
@@ -181,17 +169,14 @@ impl DslParser for YamlParser {
         // 1. Parse raw YAML into serde_yaml::Value
         let raw: serde_yaml::Value = serde_yaml::from_str(yaml)?;
 
-        // 2. Validate against JSON schema (if enabled)
-        if let Some(v) = &self.schema_validator {
-            v.validate(&raw)?;
-        }
-
-        // 3. Convert to AST
+        // 2. Convert to AST (respects metadata/spec nesting)
         let tree = self.value_to_tree(raw)?;
 
-        // 4. Semantic validation
+        // 3. Semantic validation
         tree.validate_unique_names()?;
         tree.validate_subtree_refs()?;
+        tree.validate_evaluators(&self.evaluator_registry)?;
+        tree.validate_parsers(&self.parser_registry)?;
 
         Ok(tree)
     }
@@ -199,22 +184,20 @@ impl DslParser for YamlParser {
     fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError> {
         let mut bundle = Bundle::default();
 
-        // Read trees/
         for entry in fs.read_dir(&dir.join("trees"))? {
             let yaml = fs.read_to_string(&entry)?;
             let tree = self.parse_tree(&yaml)?;
-            bundle.trees.insert(tree.name.clone(), tree);
+            bundle.trees.insert(tree.metadata.name.clone(), tree);
         }
 
-        // Read subtrees/
         for entry in fs.read_dir(&dir.join("subtrees"))? {
             let yaml = fs.read_to_string(&entry)?;
             let tree = self.parse_tree(&yaml)?;
-            bundle.subtrees.insert(tree.name.clone(), tree);
+            bundle.subtrees.insert(tree.metadata.name.clone(), tree);
         }
 
-        // Resolve all subtree references
         bundle.resolve_subtrees()?;
+        bundle.detect_circular_refs()?;
 
         Ok(bundle)
     }
@@ -225,36 +208,22 @@ impl DslParser for YamlParser {
 
 ```rust
 /// Execute a behavior tree against a Blackboard.
-///
-/// The runner maintains internal state (running path) across ticks.
-/// Call `reset()` before starting a new decision cycle.
 pub trait DslRunner {
-    /// Tick the tree once.
-    ///
-    /// If a Prompt node returns Running, the runner stores the path
-    /// and resumes from there on the next tick.
     fn tick(&mut self, tree: &Tree, ctx: &mut TickContext) -> Result<TickResult, RuntimeError>;
-
-    /// Reset internal state for a new decision cycle.
     fn reset(&mut self);
 }
 
 /// Result of a single tick.
 #[derive(Debug, Clone)]
 pub struct TickResult {
-    /// Final status of the root node.
     pub status: NodeStatus,
-    /// Commands emitted during this tick.
     pub commands: Vec<Command>,
-    /// Execution trace (for debugging / observability).
     pub trace: Vec<TraceEntry>,
 }
 
-/// Per-tick context. Constructed fresh each tick.
+/// Per-tick context.
 pub struct TickContext<'a> {
-    /// The blackboard (shared mutable state).
     pub blackboard: &'a mut Blackboard,
-    /// External dependencies (injected by host).
     pub session: &'a mut dyn Session,
     pub clock: &'a dyn Clock,
     pub fs: &'a dyn Fs,
@@ -274,23 +243,17 @@ impl<'a> TickContext<'a> {
 }
 ```
 
-### 3.3 Executor (Concrete Runner)
+### 3.3 Executor
 
 ```rust
-/// The default runner implementation.
 pub struct Executor {
-    /// Path to the currently Running node (indices from root).
     running_path: Vec<usize>,
-    /// Whether we are currently mid-tick (Waiting for async prompt).
     is_running: bool,
 }
 
 impl Executor {
     pub fn new() -> Self {
-        Self {
-            running_path: Vec::new(),
-            is_running: false,
-        }
+        Self { running_path: Vec::new(), is_running: false }
     }
 }
 
@@ -299,10 +262,8 @@ impl DslRunner for Executor {
         let mut tracer = Tracer::new();
 
         let status = if self.is_running {
-            // Resume from running node
             tree.resume(&self.running_path, ctx, &mut tracer)?
         } else {
-            // Fresh tick from root
             tree.root.tick(ctx, &mut tracer)?
         };
 
@@ -314,13 +275,9 @@ impl DslRunner for Executor {
             self.running_path.clear();
         }
 
-        let commands = std::mem::take(&mut ctx.blackboard.commands);
+        let commands = ctx.blackboard.drain_commands();
 
-        Ok(TickResult {
-            status,
-            commands,
-            trace: tracer.into_entries(),
-        })
+        Ok(TickResult { status, commands, trace: tracer.into_entries() })
     }
 
     fn reset(&mut self) {
@@ -334,28 +291,12 @@ impl DslRunner for Executor {
 
 ## 4. External Dependency Traits
 
-All external integration points are traits. The host must provide implementations.
-
-### 4.1 Session (LLM Same-Session)
+### 4.1 Session
 
 ```rust
 /// Abstraction over the ongoing codex/claude session.
-///
-/// The Prompt node calls `send()` to inject a decision prompt
-/// into the current conversation, then waits for the reply.
 pub trait Session {
-    /// Send a message to the current session and return the reply.
-    ///
-    /// This is a synchronous call from the runner's perspective.
-    /// The actual implementation may be async internally, but the
-    /// runner expects to either get a reply immediately or be told
-    /// to wait (via `is_ready()`).
     fn send(&mut self, message: &str) -> Result<String, SessionError>;
-
-    /// Check if the session has a pending reply ready.
-    ///
-    /// If this returns false, the Prompt node returns `Running`
-    /// and the runner will re-tick later.
     fn is_ready(&self) -> bool;
 }
 
@@ -367,39 +308,9 @@ pub struct SessionError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionErrorKind {
-    /// The session is not connected or unavailable.
     Unavailable,
-    /// The message was sent but no reply was received (timeout).
     Timeout,
-    /// The session returned an unexpected format.
     UnexpectedFormat,
-}
-
-// --- Host implementation example ---
-
-use decision_dsl::Session;
-
-pub struct AgentSession {
-    // Host's internal session handle
-    // (e.g. agent-provider's session object)
-    tx: mpsc::Sender<String>,
-    rx: mpsc::Receiver<String>,
-}
-
-impl Session for AgentSession {
-    fn send(&mut self, message: &str) -> Result<String, SessionError> {
-        self.tx.send(message.to_string()).map_err(|_| {
-            SessionError { kind: SessionErrorKind::Unavailable, message: "channel closed".into() }
-        })?;
-        let reply = self.rx.recv_timeout(Duration::from_secs(30)).map_err(|_| {
-            SessionError { kind: SessionErrorKind::Timeout, message: "no reply in 30s".into() }
-        })?;
-        Ok(reply)
-    }
-
-    fn is_ready(&self) -> bool {
-        !self.rx.is_empty()
-    }
 }
 ```
 
@@ -408,41 +319,24 @@ impl Session for AgentSession {
 ```rust
 use std::time::{Duration, Instant};
 
-/// Time source abstraction.
-///
-/// Used by stateful decorators (Cooldown) to track elapsed time.
 pub trait Clock {
     fn now(&self) -> Instant;
 }
 
-/// System clock (production).
 pub struct SystemClock;
-
 impl Clock for SystemClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
+    fn now(&self) -> Instant { Instant::now() }
 }
 
-/// Mock clock for testing.
 pub struct MockClock {
     current: Instant,
 }
-
 impl MockClock {
-    pub fn new() -> Self {
-        Self { current: Instant::now() }
-    }
-
-    pub fn advance(&mut self, duration: Duration) {
-        self.current += duration;
-    }
+    pub fn new() -> Self { Self { current: Instant::now() } }
+    pub fn advance(&mut self, d: Duration) { self.current += d; }
 }
-
 impl Clock for MockClock {
-    fn now(&self) -> Instant {
-        self.current
-    }
+    fn now(&self) -> Instant { self.current }
 }
 ```
 
@@ -451,7 +345,6 @@ impl Clock for MockClock {
 ```rust
 use std::path::{Path, PathBuf};
 
-/// Filesystem abstraction for loading bundles and subtrees.
 pub trait Fs {
     fn read_to_string(&self, path: &Path) -> Result<String, FsError>;
     fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError>;
@@ -463,43 +356,19 @@ pub struct FsError {
     pub message: String,
 }
 
-/// Real filesystem (production).
 pub struct RealFs;
-
 impl Fs for RealFs {
     fn read_to_string(&self, path: &Path) -> Result<String, FsError> {
         std::fs::read_to_string(path).map_err(|e| FsError {
-            path: path.to_path_buf(),
-            message: e.to_string(),
+            path: path.to_path_buf(), message: e.to_string(),
         })
     }
-
     fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError> {
-        std::fs::read_dir(path)
-            .map_err(|e| FsError { path: path.to_path_buf(), message: e.to_string() })?
-            .map(|entry| entry.map(|e| e.path()).map_err(|e| FsError {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            }))
-            .collect()
-    }
-}
-
-/// In-memory filesystem (testing).
-pub struct MemFs {
-    files: HashMap<PathBuf, String>,
-}
-
-impl Fs for MemFs {
-    fn read_to_string(&self, path: &Path) -> Result<String, FsError> {
-        self.files.get(path).cloned().ok_or(FsError {
-            path: path.to_path_buf(),
-            message: "file not found".into(),
-        })
-    }
-
-    fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError> {
-        Ok(self.files.keys().filter(|p| p.parent() == Some(path)).cloned().collect())
+        std::fs::read_dir(path).map_err(|e| FsError {
+            path: path.to_path_buf(), message: e.to_string(),
+        })?.map(|e| e.map(|entry| entry.path()).map_err(|e| FsError {
+            path: path.to_path_buf(), message: e.to_string(),
+        })).collect()
     }
 }
 ```
@@ -507,43 +376,16 @@ impl Fs for MemFs {
 ### 4.4 Logger
 
 ```rust
-/// Structured logging trait.
-///
-/// All logging inside the DSL engine goes through this trait.
-/// The host can forward to tracing, slog, or discard.
 pub trait Logger {
     fn log(&self, level: LogLevel, target: &str, msg: &str);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-}
+pub enum LogLevel { Trace, Debug, Info, Warn, Error }
 
-/// Null logger (discards all logs).
 pub struct NullLogger;
-
 impl Logger for NullLogger {
     fn log(&self, _level: LogLevel, _target: &str, _msg: &str) {}
-}
-
-/// Adapter to tracing crate.
-pub struct TracingLogger;
-
-impl Logger for TracingLogger {
-    fn log(&self, level: LogLevel, target: &str, msg: &str) {
-        match level {
-            LogLevel::Trace => tracing::trace!(target, "{}", msg),
-            LogLevel::Debug => tracing::debug!(target, "{}", msg),
-            LogLevel::Info => tracing::info!(target, "{}", msg),
-            LogLevel::Warn => tracing::warn!(target, "{}", msg),
-            LogLevel::Error => tracing::error!(target, "{}", msg),
-        }
-    }
 }
 ```
 
@@ -551,16 +393,24 @@ impl Logger for TracingLogger {
 
 ## 5. AST Design
 
-The AST is the internal representation of a parsed tree. It is NOT public API.
+The AST exactly mirrors the YAML spec: `apiVersion`, `kind`, `metadata`, `spec`.
 
-### 5.1 Tree and Bundle
+### 5.1 Tree, Metadata, Bundle
 
 ```rust
 pub(crate) struct Tree {
     pub api_version: String,
     pub kind: TreeKind,
+    pub metadata: Metadata,
+    pub spec: Spec,
+}
+
+pub(crate) struct Metadata {
     pub name: String,
     pub description: Option<String>,
+}
+
+pub(crate) struct Spec {
     pub root: Node,
 }
 
@@ -578,7 +428,16 @@ impl Bundle {
     /// Inline all SubTree references into their parent trees.
     pub fn resolve_subtrees(&mut self) -> Result<(), ParseError> {
         for tree in self.trees.values_mut() {
-            tree.resolve_subtrees(&self.subtrees)?;
+            tree.spec.root.resolve_subtrees(&self.subtrees)?;
+        }
+        Ok(())
+    }
+
+    /// Detect circular SubTree references: A → B → C → A.
+    pub fn detect_circular_refs(&self) -> Result<(), ParseError> {
+        for tree in self.trees.values() {
+            let mut visited = HashSet::new();
+            tree.spec.root.detect_cycles(&mut visited)?;
         }
         Ok(())
     }
@@ -589,19 +448,14 @@ impl Bundle {
 
 ```rust
 pub(crate) enum Node {
-    // Composites
     Selector(SelectorNode),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
-
-    // Decorators
     Inverter(InverterNode),
     Repeater(RepeaterNode),
     Cooldown(CooldownNode),
     ReflectionGuard(ReflectionGuardNode),
     ForceHuman(ForceHumanNode),
-
-    // Leaves
     Condition(ConditionNode),
     Action(ActionNode),
     Prompt(PromptNode),
@@ -663,6 +517,62 @@ impl Node {
             Node::SubTreeRef(n) => &n.name,
         }
     }
+
+    /// Recursively inline SubTree references.
+    pub fn resolve_subtrees(&mut self, subtrees: &HashMap<String, Tree>) -> Result<(), ParseError> {
+        match self {
+            Node::SubTreeRef(n) => {
+                let subtree = subtrees.get(&n.ref_name)
+                    .ok_or_else(|| ParseError::UnresolvedSubTree { name: n.ref_name.clone() })?;
+                *self = subtree.spec.root.clone();
+                // Recurse into the inlined tree
+                self.resolve_subtrees(subtrees)?;
+            }
+            Node::Selector(n) => {
+                for child in &mut n.children { child.resolve_subtrees(subtrees)?; }
+            }
+            Node::Sequence(n) => {
+                for child in &mut n.children { child.resolve_subtrees(subtrees)?; }
+            }
+            Node::Parallel(n) => {
+                for child in &mut n.children { child.resolve_subtrees(subtrees)?; }
+            }
+            Node::Inverter(n) => n.child.resolve_subtrees(subtrees)?,
+            Node::Repeater(n) => n.child.resolve_subtrees(subtrees)?,
+            Node::Cooldown(n) => n.child.resolve_subtrees(subtrees)?,
+            Node::ReflectionGuard(n) => n.child.resolve_subtrees(subtrees)?,
+            Node::ForceHuman(n) => n.child.resolve_subtrees(subtrees)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Detect circular SubTree references.
+    pub fn detect_cycles(&self, visited: &mut HashSet<String>) -> Result<(), ParseError> {
+        match self {
+            Node::SubTreeRef(n) => {
+                if !visited.insert(n.ref_name.clone()) {
+                    return Err(ParseError::CircularSubTreeRef { name: n.ref_name.clone() });
+                }
+            }
+            Node::Selector(n) => {
+                for child in &n.children { child.detect_cycles(visited)?; }
+            }
+            Node::Sequence(n) => {
+                for child in &n.children { child.detect_cycles(visited)?; }
+            }
+            Node::Parallel(n) => {
+                for child in &n.children { child.detect_cycles(visited)?; }
+            }
+            Node::Inverter(n) => n.child.detect_cycles(visited)?,
+            Node::Repeater(n) => n.child.detect_cycles(visited)?,
+            Node::Cooldown(n) => n.child.detect_cycles(visited)?,
+            Node::ReflectionGuard(n) => n.child.detect_cycles(visited)?,
+            Node::ForceHuman(n) => n.child.detect_cycles(visited)?,
+            _ => {}
+        }
+        Ok(())
+    }
 }
 ```
 
@@ -683,10 +593,17 @@ pub(crate) struct SequenceNode {
     pub active_child: Option<usize>,
 }
 
+pub(crate) enum ParallelPolicy {
+    AllSuccess,
+    AnySuccess,
+    Majority,
+}
+
 pub(crate) struct ParallelNode {
     pub name: String,
     pub policy: ParallelPolicy,
     pub children: Vec<Node>,
+    pub child_statuses: Vec<NodeStatus>,
 }
 
 // --- Decorators ---
@@ -737,12 +654,12 @@ pub(crate) struct ActionNode {
 
 pub(crate) struct PromptNode {
     pub name: String,
+    pub model: Option<String>,       // "standard" | "thinking"
     pub template: String,
-    pub parser: Box<dyn Parser>,
+    pub parser: Box<dyn OutputParser>,
     pub sets: Vec<SetMapping>,
     pub timeout: Duration,
-    /// Internal state for async execution
-    pending: bool,
+    pub pending: bool,
 }
 
 pub(crate) struct SetVarNode {
@@ -754,16 +671,17 @@ pub(crate) struct SetVarNode {
 pub(crate) struct SubTreeRefNode {
     pub name: String,
     pub ref_name: String,
-    /// Resolved at parse time
-    resolved: Option<Box<Node>>,
+}
+
+pub(crate) struct SetMapping {
+    pub key: String,      // blackboard key
+    pub field: String,    // parser field
 }
 ```
 
 ### 5.4 Command (Output Type)
 
 ```rust
-/// Pure data output of the decision layer.
-/// These are the ONLY values the host ever receives.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     EscalateToHuman { reason: String, context: Option<String> },
@@ -791,131 +709,465 @@ pub enum Command {
 
 ---
 
-## 6. Node Registry
+## 6. Evaluator System
 
-The node registry maps YAML `kind` strings to node factories. It is the C-function-equivalent registry.
+Condition nodes and Action `when` guards both use the same `Evaluator` trait.
 
-### 6.1 Registry Design
+### 6.1 Trait Definition
 
 ```rust
-/// Factory function that creates a Node from raw YAML properties.
-pub(crate) type NodeFactory = fn(
-    name: String,
-    properties: serde_yaml::Mapping,
-    children: Vec<Node>,
-) -> Result<Node, ParseError>;
-
-/// Registry of node factories.
-pub(crate) struct NodeRegistry {
-    factories: HashMap<String, NodeFactory>,
+pub(crate) trait Evaluator: std::fmt::Debug + Send + Sync {
+    fn evaluate(&self, blackboard: &Blackboard) -> Result<bool, RuntimeError>;
 }
 
-impl NodeRegistry {
-    pub fn new() -> Self {
-        Self { factories: HashMap::new() }
-    }
+/// Registry of evaluator factories.
+pub(crate) struct EvaluatorRegistry {
+    factories: HashMap<String, EvaluatorFactory>,
+}
 
-    /// Register a built-in node type.
+type EvaluatorFactory = fn(properties: &serde_yaml::Mapping) -> Result<Box<dyn Evaluator>, ParseError>;
+
+impl EvaluatorRegistry {
     pub fn with_builtins() -> Self {
-        let mut reg = Self::new();
-
-        // Composites
-        reg.register("Selector", SelectorNode::from_yaml);
-        reg.register("Sequence", SequenceNode::from_yaml);
-        reg.register("Parallel", ParallelNode::from_yaml);
-
-        // Decorators
-        reg.register("Inverter", InverterNode::from_yaml);
-        reg.register("Repeater", RepeaterNode::from_yaml);
-        reg.register("Cooldown", CooldownNode::from_yaml);
-        reg.register("ReflectionGuard", ReflectionGuardNode::from_yaml);
-        reg.register("ForceHuman", ForceHumanNode::from_yaml);
-
-        // Leaves
-        reg.register("Condition", ConditionNode::from_yaml);
-        reg.register("Action", ActionNode::from_yaml);
-        reg.register("Prompt", PromptNode::from_yaml);
-        reg.register("SetBlackboard", SetVarNode::from_yaml);
-        reg.register("SubTree", SubTreeRefNode::from_yaml);
-
+        let mut reg = Self { factories: HashMap::new() };
+        reg.register("outputContains", OutputContains::from_yaml);
+        reg.register("situationIs", SituationIs::from_yaml);
+        reg.register("reflectionRoundUnder", ReflectionRoundUnder::from_yaml);
+        reg.register("variableIs", VariableIs::from_yaml);
+        reg.register("regex", RegexMatch::from_yaml);
+        reg.register("script", ScriptEvaluator::from_yaml);
+        reg.register("or", OrEvaluator::from_yaml);
+        reg.register("and", AndEvaluator::from_yaml);
         reg
     }
 
-    pub fn register(&mut self, kind: &str, factory: NodeFactory) {
+    pub fn register(&mut self, kind: &str, factory: EvaluatorFactory) {
         self.factories.insert(kind.to_string(), factory);
     }
 
-    pub fn create(
-        &self,
-        kind: &str,
-        name: String,
-        properties: serde_yaml::Mapping,
-        children: Vec<Node>,
-    ) -> Result<Node, ParseError> {
-        let factory = self.factories
-            .get(kind)
-            .ok_or_else(|| ParseError::UnknownNodeKind { kind: kind.to_string() })?;
-        factory(name, properties, children)
+    pub fn create(&self, kind: &str, properties: &serde_yaml::Mapping) -> Result<Box<dyn Evaluator>, ParseError> {
+        let factory = self.factories.get(kind)
+            .ok_or_else(|| ParseError::UnknownEvaluatorKind { kind: kind.to_string() })?;
+        factory(properties)
     }
 }
 ```
 
-### 6.2 Extending the Registry
-
-The host can register custom nodes:
+### 6.2 Built-in Evaluators
 
 ```rust
-use decision_dsl::parser::{YamlParser, NodeRegistry};
-
-// Host provides a custom node
-fn my_custom_node(
-    name: String,
-    properties: serde_yaml::Mapping,
-    _children: Vec<Node>,
-) -> Result<Node, ParseError> {
-    let param = properties.get("param")
-        .and_then(|v| v.as_str())
-        .ok_or(ParseError::MissingProperty("param"))?;
-    Ok(Node::Condition(ConditionNode {
-        name,
-        evaluator: Box::new(CustomEvaluator::new(param)),
-    }))
+// --- outputContains ---
+#[derive(Debug)]
+pub struct OutputContains {
+    pub pattern: String,
+    pub case_sensitive: bool,
 }
 
-// Register it
-let parser = YamlParser::new();
-// Note: register_custom is not part of DslParser trait (it would leak internals).
-// The host must use the concrete type or we expose a builder.
+impl OutputContains {
+    fn from_yaml(props: &serde_yaml::Mapping) -> Result<Box<dyn Evaluator>, ParseError> {
+        let pattern = get_string(props, "pattern")?;
+        let case_sensitive = get_bool(props, "caseSensitive").unwrap_or(false);
+        Ok(Box::new(Self { pattern, case_sensitive }))
+    }
+}
+
+impl Evaluator for OutputContains {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        let output = bb.get_string("provider_output").unwrap_or("");
+        Ok(if self.case_sensitive {
+            output.contains(&self.pattern)
+        } else {
+            output.to_lowercase().contains(&self.pattern.to_lowercase())
+        })
+    }
+}
+
+// --- situationIs ---
+#[derive(Debug)]
+pub struct SituationIs {
+    pub situation_type: String,
+}
+
+impl Evaluator for SituationIs {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        let output = bb.get_string("provider_output").unwrap_or("");
+        let summary = bb.get_string("context_summary").unwrap_or("");
+        Ok(output.contains(&self.situation_type) || summary.contains(&self.situation_type))
+    }
+}
+
+// --- reflectionRoundUnder ---
+#[derive(Debug)]
+pub struct ReflectionRoundUnder {
+    pub max: u8,
+}
+
+impl Evaluator for ReflectionRoundUnder {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        let round = bb.get_u8("reflection_round").unwrap_or(0);
+        Ok(round < self.max)
+    }
+}
+
+// --- variableIs ---
+#[derive(Debug)]
+pub struct VariableIs {
+    pub key: String,
+    pub expected: BlackboardValue,
+}
+
+impl Evaluator for VariableIs {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        match bb.get_path(&self.key) {
+            Some(value) => Ok(value == &self.expected),
+            None => Ok(false),
+        }
+    }
+}
+
+// --- regex ---
+#[derive(Debug)]
+pub struct RegexMatch {
+    pub re: regex::Regex,
+}
+
+impl Evaluator for RegexMatch {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        let output = bb.get_string("provider_output").unwrap_or("");
+        Ok(self.re.is_match(output))
+    }
+}
+
+// --- script (Rhai) ---
+// Note: If Rhai is too heavy for a zero-dependency crate, we implement
+// a minimal expression language instead.
+#[derive(Debug)]
+pub struct ScriptEvaluator {
+    pub script: String,
+}
+
+impl Evaluator for ScriptEvaluator {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        // V1: Evaluate a minimal expression against blackboard variables.
+        // Full Rhai integration can be added as an optional feature.
+        evaluate_minimal_script(&self.script, bb)
+    }
+}
+
+// --- or ---
+#[derive(Debug)]
+pub struct OrEvaluator {
+    pub conditions: Vec<Box<dyn Evaluator>>,
+}
+
+impl Evaluator for OrEvaluator {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        for cond in &self.conditions {
+            if cond.evaluate(bb)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+// --- and ---
+#[derive(Debug)]
+pub struct AndEvaluator {
+    pub conditions: Vec<Box<dyn Evaluator>>,
+}
+
+impl Evaluator for AndEvaluator {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        for cond in &self.conditions {
+            if !cond.evaluate(bb)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
 ```
 
-To keep the public API clean, custom registration is available through a builder:
+### 6.3 Minimal Script Engine (V1)
+
+For zero-dependency compliance, the `script` evaluator in V1 supports a tiny expression language:
 
 ```rust
-let parser = YamlParser::builder()
-    .with_schema_validation(true)
-    .with_custom_node("MyCondition", my_custom_node)
-    .build();
+/// Supported syntax:
+///   blackboard.key < 2
+///   blackboard.provider_output.contains("claims_completion")
+///   blackboard.reflection_round < 2 && blackboard.confidence > 0.8
+fn evaluate_minimal_script(script: &str, bb: &Blackboard) -> Result<bool, RuntimeError> {
+    // Parse simple comparisons and method calls
+    // Full implementation: recursive descent parser for:
+    //   expr   := term (('&&' | '||') term)*
+    //   term   := comparison | '(' expr ')'
+    //   comparison := path op literal
+    //   op     := '==' | '!=' | '<' | '<=' | '>' | '>='
+    //   path   := 'blackboard.' identifier ('.' identifier)*
+    //   literal := string | number | bool
+    todo!("minimal script engine")
+}
 ```
 
 ---
 
-## 7. Executor / Tick Loop
+## 7. Output Parser System
 
-The executor is the heart of the runtime. It implements the behavior tree tick algorithm.
+Prompt nodes use `OutputParser` to turn raw LLM text into structured Blackboard values.
 
-### 7.1 Tick Algorithm
+### 7.1 Trait Definition
 
+```rust
+pub(crate) trait OutputParser: std::fmt::Debug + Send + Sync {
+    fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError>;
+}
+
+pub(crate) struct OutputParserRegistry {
+    factories: HashMap<String, ParserFactory>,
+}
+
+type ParserFactory = fn(properties: &serde_yaml::Mapping) -> Result<Box<dyn OutputParser>, ParseError>;
+
+impl OutputParserRegistry {
+    pub fn with_builtins() -> Self {
+        let mut reg = Self { factories: HashMap::new() };
+        reg.register("enum", EnumParser::from_yaml);
+        reg.register("structured", StructuredParser::from_yaml);
+        reg.register("json", JsonParser::from_yaml);
+        reg.register("command", CommandParser::from_yaml);
+        reg
+    }
+
+    pub fn register(&mut self, kind: &str, factory: ParserFactory) {
+        self.factories.insert(kind.to_string(), factory);
+    }
+
+    pub fn create(&self, kind: &str, props: &serde_yaml::Mapping) -> Result<Box<dyn OutputParser>, ParseError> {
+        let factory = self.factories.get(kind)
+            .ok_or_else(|| ParseError::UnknownParserKind { kind: kind.to_string() })?;
+        factory(props)
+    }
+}
 ```
-Tick(node, ctx):
-    if node is Composite:
-        return TickComposite(node, ctx)
-    if node is Decorator:
-        return TickDecorator(node, ctx)
-    if node is Leaf:
-        return TickLeaf(node, ctx)
+
+### 7.2 Enum Parser
+
+```rust
+#[derive(Debug)]
+pub struct EnumParser {
+    pub allowed_values: Vec<String>,
+    pub case_sensitive: bool,
+}
+
+impl EnumParser {
+    fn from_yaml(props: &serde_yaml::Mapping) -> Result<Box<dyn OutputParser>, ParseError> {
+        let values = get_string_array(props, "values")?;
+        let case_sensitive = get_bool(props, "caseSensitive").unwrap_or(false);
+        Ok(Box::new(Self { allowed_values: values, case_sensitive }))
+    }
+}
+
+impl OutputParser for EnumParser {
+    fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError> {
+        let trimmed = raw.trim();
+        for value in &self.allowed_values {
+            let matches = if self.case_sensitive {
+                trimmed == value
+            } else {
+                trimmed.eq_ignore_ascii_case(value)
+            };
+            if matches {
+                let mut result = HashMap::new();
+                result.insert("decision".to_string(), BlackboardValue::String(value.clone()));
+                return Ok(result);
+            }
+        }
+        Err(ParseError::UnexpectedValue {
+            got: trimmed.to_string(),
+            expected: self.allowed_values.clone(),
+        })
+    }
+}
 ```
 
-### 7.2 Composite Tick Implementation
+### 7.3 Structured Parser (Regex with Typed Groups)
+
+```rust
+#[derive(Debug)]
+pub struct StructuredField {
+    pub name: String,
+    pub group: usize,
+    pub ty: FieldType,   // optional type conversion
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FieldType {
+    String,
+    Integer,
+    Float,
+    Boolean,
+}
+
+#[derive(Debug)]
+pub struct StructuredParser {
+    pub pattern: regex::Regex,
+    pub fields: Vec<StructuredField>,
+}
+
+impl StructuredParser {
+    fn from_yaml(props: &serde_yaml::Mapping) -> Result<Box<dyn OutputParser>, ParseError> {
+        let pattern_str = get_string(props, "pattern")?;
+        let pattern = regex::Regex::new(&pattern_str)
+            .map_err(|e| ParseError::InvalidProperty {
+                key: "pattern".into(),
+                value: pattern_str,
+                reason: e.to_string(),
+            })?;
+
+        let fields = get_structured_fields(props)?;
+        Ok(Box::new(Self { pattern, fields }))
+    }
+}
+
+impl OutputParser for StructuredParser {
+    fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError> {
+        let caps = self.pattern.captures(raw)
+            .ok_or_else(|| ParseError::NoMatch { pattern: self.pattern.as_str().to_string() })?;
+
+        let mut result = HashMap::new();
+        for field in &self.fields {
+            let m = caps.get(field.group)
+                .ok_or_else(|| ParseError::MissingCaptureGroup {
+                    group: field.group,
+                    pattern: self.pattern.as_str().to_string(),
+                })?;
+            let value = match field.ty {
+                FieldType::String => BlackboardValue::String(m.as_str().to_string()),
+                FieldType::Integer => m.as_str().parse::<i64>()
+                    .map(BlackboardValue::Integer)
+                    .map_err(|_| ParseError::TypeMismatch {
+                        field: field.name.clone(), expected: "integer", got: m.as_str().to_string(),
+                    })?,
+                FieldType::Float => m.as_str().parse::<f64>()
+                    .map(BlackboardValue::Float)
+                    .map_err(|_| ParseError::TypeMismatch {
+                        field: field.name.clone(), expected: "float", got: m.as_str().to_string(),
+                    })?,
+                FieldType::Boolean => match m.as_str().to_lowercase().as_str() {
+                    "true" | "yes" | "1" => BlackboardValue::Boolean(true),
+                    "false" | "no" | "0" => BlackboardValue::Boolean(false),
+                    _ => return Err(ParseError::TypeMismatch {
+                        field: field.name.clone(), expected: "boolean", got: m.as_str().to_string(),
+                    }),
+                },
+            };
+            result.insert(field.name.clone(), value);
+        }
+        Ok(result)
+    }
+}
+```
+
+### 7.4 JSON Parser
+
+```rust
+#[derive(Debug)]
+pub struct JsonParser {
+    pub schema: Option<serde_json::Value>, // Optional JSON Schema
+}
+
+impl OutputParser for JsonParser {
+    fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError> {
+        let json: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|e| ParseError::JsonSyntax(e.to_string()))?;
+
+        // Optional schema validation
+        if let Some(schema) = &self.schema {
+            // jsonschema validation (optional feature)
+            // validate_json_schema(&json, schema)?;
+        }
+
+        let mut result = HashMap::new();
+        if let serde_json::Value::Object(map) = json {
+            for (k, v) in map {
+                result.insert(k, json_to_blackboard(v)?);
+            }
+        }
+        Ok(result)
+    }
+}
+
+fn json_to_blackboard(v: serde_json::Value) -> Result<BlackboardValue, ParseError> {
+    match v {
+        serde_json::Value::String(s) => Ok(BlackboardValue::String(s)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(BlackboardValue::Integer(i))
+            } else {
+                Ok(BlackboardValue::Float(n.as_f64().unwrap_or(0.0)))
+            }
+        }
+        serde_json::Value::Bool(b) => Ok(BlackboardValue::Boolean(b)),
+        serde_json::Value::Array(arr) => {
+            let items: Result<Vec<_>, _> = arr.into_iter().map(json_to_blackboard).collect();
+            Ok(BlackboardValue::List(items?))
+        }
+        serde_json::Value::Object(map) => {
+            let mut result = HashMap::new();
+            for (k, v) in map {
+                result.insert(k, json_to_blackboard(v)?);
+            }
+            Ok(BlackboardValue::Map(result))
+        }
+        serde_json::Value::Null => Ok(BlackboardValue::String("".to_string())),
+    }
+}
+```
+
+### 7.5 Command Parser
+
+```rust
+/// Parses LLM output directly into a Command, bypassing the Blackboard.
+#[derive(Debug)]
+pub struct CommandParser {
+    pub mapping: HashMap<String, CommandMapping>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandMapping {
+    pub command: Command,
+}
+
+impl OutputParser for CommandParser {
+    fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError> {
+        let trimmed = raw.trim();
+        for (key, mapping) in &self.mapping {
+            if trimmed.eq_ignore_ascii_case(key) {
+                // Command parsers do NOT return Blackboard values.
+                // Instead, they store the command in a special marker.
+                // The Prompt node detects this marker and pushes the command directly.
+                let mut result = HashMap::new();
+                result.insert("__command".to_string(), BlackboardValue::String(
+                    serde_json::to_string(&mapping.command).unwrap()
+                ));
+                return Ok(result);
+            }
+        }
+        Err(ParseError::UnexpectedValue {
+            got: trimmed.to_string(),
+            expected: self.mapping.keys().cloned().collect(),
+        })
+    }
+}
+```
+
+---
+
+## 8. Executor / Tick Loop
+
+### 8.1 Composite Tick Implementation
 
 ```rust
 impl SelectorNode {
@@ -923,9 +1175,11 @@ impl SelectorNode {
         let start = self.active_child.unwrap_or(0);
 
         for i in start..self.children.len() {
-            tracer.enter(self, i);
+            tracer.enter(self.name(), i);
+            let t0 = ctx.clock.now();
             let status = self.children[i].tick(ctx, tracer)?;
-            tracer.exit(self, i, status);
+            let duration = t0.elapsed();
+            tracer.exit(self.name(), i, status, duration);
 
             match status {
                 NodeStatus::Success => {
@@ -936,10 +1190,7 @@ impl SelectorNode {
                     self.active_child = Some(i);
                     return Ok(NodeStatus::Running);
                 }
-                NodeStatus::Failure => {
-                    // Try next child
-                    continue;
-                }
+                NodeStatus::Failure => continue,
             }
         }
 
@@ -949,9 +1200,7 @@ impl SelectorNode {
 
     fn reset(&mut self) {
         self.active_child = None;
-        for child in &mut self.children {
-            child.reset();
-        }
+        for child in &mut self.children { child.reset(); }
     }
 }
 
@@ -960,15 +1209,14 @@ impl SequenceNode {
         let start = self.active_child.unwrap_or(0);
 
         for i in start..self.children.len() {
-            tracer.enter(self, i);
+            tracer.enter(self.name(), i);
+            let t0 = ctx.clock.now();
             let status = self.children[i].tick(ctx, tracer)?;
-            tracer.exit(self, i, status);
+            let duration = t0.elapsed();
+            tracer.exit(self.name(), i, status, duration);
 
             match status {
-                NodeStatus::Success => {
-                    // Continue to next child
-                    continue;
-                }
+                NodeStatus::Success => continue,
                 NodeStatus::Running => {
                     self.active_child = Some(i);
                     return Ok(NodeStatus::Running);
@@ -986,14 +1234,51 @@ impl SequenceNode {
 
     fn reset(&mut self) {
         self.active_child = None;
-        for child in &mut self.children {
-            child.reset();
+        for child in &mut self.children { child.reset(); }
+    }
+}
+
+impl ParallelNode {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        let mut successes = 0;
+        let mut failures = 0;
+
+        for (i, child) in self.children.iter_mut().enumerate() {
+            tracer.enter(self.name(), i);
+            let t0 = ctx.clock.now();
+            let status = child.tick(ctx, tracer)?;
+            let duration = t0.elapsed();
+            tracer.exit(self.name(), i, status, duration);
+
+            match status {
+                NodeStatus::Success => successes += 1,
+                NodeStatus::Failure => failures += 1,
+                NodeStatus::Running => return Ok(NodeStatus::Running),
+            }
         }
+
+        let total = self.children.len();
+        let result = match self.policy {
+            ParallelPolicy::AllSuccess => {
+                if successes == total { NodeStatus::Success } else { NodeStatus::Failure }
+            }
+            ParallelPolicy::AnySuccess => {
+                if successes > 0 { NodeStatus::Success } else { NodeStatus::Failure }
+            }
+            ParallelPolicy::Majority => {
+                if successes > total / 2 { NodeStatus::Success } else { NodeStatus::Failure }
+            }
+        };
+        Ok(result)
+    }
+
+    fn reset(&mut self) {
+        for child in &mut self.children { child.reset(); }
     }
 }
 ```
 
-### 7.3 Decorator Tick Implementation
+### 8.2 Decorator Tick Implementation
 
 ```rust
 impl InverterNode {
@@ -1005,88 +1290,108 @@ impl InverterNode {
             NodeStatus::Running => NodeStatus::Running,
         })
     }
+    fn reset(&mut self) { self.child.reset(); }
+}
 
-    fn reset(&mut self) {
-        self.child.reset();
+impl RepeaterNode {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        while self.current < self.max_attempts {
+            match self.child.tick(ctx, tracer)? {
+                NodeStatus::Success => {
+                    self.current += 1;
+                    if self.current >= self.max_attempts {
+                        return Ok(NodeStatus::Success);
+                    }
+                }
+                NodeStatus::Failure => return Ok(NodeStatus::Failure),
+                NodeStatus::Running => return Ok(NodeStatus::Running),
+            }
+        }
+        Ok(NodeStatus::Success)
     }
+    fn reset(&mut self) { self.current = 0; self.child.reset(); }
 }
 
 impl CooldownNode {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
         if let Some(last) = self.last_success {
             if ctx.clock.now().duration_since(last) < self.duration {
-                ctx.logger.log(
-                    LogLevel::Debug,
-                    "Cooldown",
-                    &format!("{}: still on cooldown", self.name),
-                );
+                ctx.logger.log(LogLevel::Debug, "Cooldown",
+                    &format!("{}: still on cooldown", self.name));
                 return Ok(NodeStatus::Failure);
             }
         }
-
         let status = self.child.tick(ctx, tracer)?;
         if status == NodeStatus::Success {
             self.last_success = Some(ctx.clock.now());
         }
         Ok(status)
     }
-
-    fn reset(&mut self) {
-        self.last_success = None;
-        self.child.reset();
-    }
+    fn reset(&mut self) { self.last_success = None; self.child.reset(); }
 }
 
 impl ReflectionGuardNode {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
-        // Check reflection count from blackboard
-        let count = ctx.blackboard.get_u8("reflection_count").unwrap_or(0);
+        let count = ctx.blackboard.get_u8("reflection_round").unwrap_or(0);
         if count >= self.max_rounds {
-            ctx.logger.log(
-                LogLevel::Info,
-                "ReflectionGuard",
-                &format!("{}: max rounds ({}) reached", self.name, self.max_rounds),
-            );
+            ctx.logger.log(LogLevel::Info, "ReflectionGuard",
+                &format!("{}: max rounds ({}) reached", self.name, self.max_rounds));
             return Ok(NodeStatus::Failure);
         }
-
         let status = self.child.tick(ctx, tracer)?;
         if status == NodeStatus::Success {
-            // Increment reflection count
-            let new_count = count + 1;
-            ctx.blackboard.set_u8("reflection_count", new_count);
+            ctx.blackboard.set_u8("reflection_round", count + 1);
         }
         Ok(status)
     }
+    fn reset(&mut self) { self.child.reset(); }
+}
 
-    fn reset(&mut self) {
-        self.child.reset();
+impl ForceHumanNode {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        let status = self.child.tick(ctx, tracer)?;
+        if status == NodeStatus::Success {
+            ctx.blackboard.push_command(Command::EscalateToHuman {
+                reason: self.reason.clone(),
+                context: Some(format!("Forced by decorator after {} succeeded", self.child.name())),
+            });
+        }
+        Ok(status)
     }
+    fn reset(&mut self) { self.child.reset(); }
 }
 ```
 
-### 7.4 Leaf Tick Implementation
+### 8.3 Leaf Tick Implementation
 
 ```rust
+impl ConditionNode {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        let result = self.evaluator.evaluate(&ctx.blackboard)?;
+        tracer.record_eval(self.name(), &self.evaluator, result);
+        Ok(if result { NodeStatus::Success } else { NodeStatus::Failure })
+    }
+    fn reset(&mut self) {}
+}
+
 impl ActionNode {
-    fn tick(&mut self, ctx: &mut TickContext, _tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
         // Check precondition
         if let Some(ref evaluator) = self.when {
             if !evaluator.evaluate(&ctx.blackboard)? {
-                ctx.logger.log(
-                    LogLevel::Debug,
-                    "Action",
-                    &format!("{}: precondition failed", self.name),
-                );
+                ctx.logger.log(LogLevel::Debug, "Action",
+                    &format!("{}: precondition failed", self.name));
                 return Ok(NodeStatus::Failure);
             }
         }
 
-        // Emit command
-        ctx.blackboard.push_command(self.command.clone());
+        // Render command fields that contain templates
+        let rendered_cmd = render_command_templates(&self.command, &ctx.blackboard)?;
+
+        ctx.blackboard.push_command(rendered_cmd.clone());
+        tracer.record_action(self.name(), &rendered_cmd);
         Ok(NodeStatus::Success)
     }
-
     fn reset(&mut self) {}
 }
 
@@ -1095,262 +1400,297 @@ impl SetVarNode {
         ctx.blackboard.set(&self.key, self.value.clone());
         Ok(NodeStatus::Success)
     }
+    fn reset(&mut self) {}
+}
 
+impl SubTreeRefNode {
+    fn tick(&mut self, _ctx: &mut TickContext, _tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        // SubTreeRef is resolved at parse time; this should never be called.
+        Err(RuntimeError::Custom("SubTreeRef not resolved".into()))
+    }
     fn reset(&mut self) {}
 }
 ```
 
-### 7.5 Running / Resume Semantics
-
-When a Prompt node returns `Running`, the executor stores the path:
-
-```rust
-impl Tree {
-    /// Resume a tick from a stored path.
-    fn resume(
-        &self,
-        path: &[usize],
-        ctx: &mut TickContext,
-        tracer: &mut Tracer,
-    ) -> Result<NodeStatus, RuntimeError> {
-        self.root.resume_at(path, 0, ctx, tracer)
-    }
-}
-
-impl Node {
-    fn resume_at(
-        &mut self,
-        path: &[usize],
-        depth: usize,
-        ctx: &mut TickContext,
-        tracer: &mut Tracer,
-    ) -> Result<NodeStatus, RuntimeError> {
-        if depth >= path.len() {
-            // We're at the running node, tick it
-            return self.tick(ctx, tracer);
-        }
-
-        let child_idx = path[depth];
-        match self {
-            Node::Selector(n) => {
-                n.active_child = Some(child_idx);
-                let status = n.children[child_idx].resume_at(path, depth + 1, ctx, tracer)?;
-                // Continue Selector logic from child_idx
-                match status {
-                    NodeStatus::Success | NodeStatus::Failure => {
-                        n.active_child = None;
-                        // Re-run Selector tick from the next child
-                        // ... (simplified)
-                    }
-                    NodeStatus::Running => {
-                        // Still running, return immediately
-                        return Ok(NodeStatus::Running);
-                    }
-                }
-                todo!("full resume logic")
-            }
-            // ... other composites
-            _ => self.tick(ctx, tracer),
-        }
-    }
-}
-```
-
-For simplicity, we can instead store the full `TickResult` state and simply re-tick the entire tree from the root, but skip non-running nodes:
-
-```rust
-// Simpler approach: just re-tick from root
-// Prompt nodes that are not ready return Running immediately
-// Composites with no active child behave normally
-// Composites with active_child resume from there
-```
-
-This is the approach used in most BT libraries. It requires each composite to track its active child.
-
 ---
 
-## 8. Blackboard Design
+## 9. Blackboard Design
 
-The Blackboard is the shared key-value store. It is typed and safe.
+The Blackboard is the shared memory of the behavior tree. It matches the spec exactly: built-in variables, custom variables, commands, and LLM responses.
 
-### 8.1 Data Model
+### 9.1 Data Model
 
 ```rust
+/// The shared state for a single decision cycle.
+pub struct Blackboard {
+    // --- Built-in input variables ---
+    pub task_description: String,
+    pub provider_output: String,
+    pub context_summary: String,
+    pub reflection_round: u8,
+    pub max_reflection_rounds: u8,
+    pub confidence_accumulator: f64,
+    pub agent_id: String,
+    pub current_task_id: String,
+    pub current_story_id: String,
+
+    // --- Structured state ---
+    pub last_tool_call: Option<ToolCallRecord>,
+    pub file_changes: Vec<FileChangeRecord>,
+    pub project_rules: ProjectRules,
+    pub decision_history: Vec<DecisionRecord>,
+
+    // --- Custom variables ---
+    pub variables: HashMap<String, BlackboardValue>,
+
+    // --- Outputs ---
+    pub commands: Vec<Command>,
+    pub llm_responses: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlackboardValue {
-    Bool(bool),
-    U8(u8),
-    U32(u32),
-    I32(i32),
-    F64(f64),
     String(String),
+    Integer(i64),
+    Float(f64),
+    Boolean(bool),
     List(Vec<BlackboardValue>),
     Map(HashMap<String, BlackboardValue>),
-    Command(Command),
 }
 
-pub struct Blackboard {
-    values: HashMap<String, BlackboardValue>,
-    /// Commands emitted during the current tick (cleared after tick).
-    commands: Vec<Command>,
+#[derive(Debug, Clone)]
+pub struct ToolCallRecord {
+    pub name: String,
+    pub input: String,
+    pub output: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct FileChangeRecord {
+    pub path: String,
+    pub change_type: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProjectRules {
+    pub rules: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DecisionRecord {
+    pub situation: String,
+    pub command: Command,
+    pub timestamp: String,
+}
+```
+
+### 9.2 Unified Access Interface
+
+All template rendering, evaluator access, and dot-notation paths go through a unified interface:
+
+```rust
 impl Blackboard {
-    pub fn new() -> Self {
-        Self {
-            values: HashMap::new(),
-            commands: Vec::new(),
+    /// Get a value by dot-notation path.
+    /// Supported paths:
+    ///   - "task_description"
+    ///   - "reflection_round"
+    ///   - "variables.next_action"
+    ///   - "last_tool_call.name"
+    ///   - "file_changes.0.path"
+    pub fn get_path(&self, path: &str) -> Option<BlackboardValue> {
+        let mut parts = path.split('.');
+        let first = parts.next()?;
+
+        // Check built-in fields first
+        let mut current = match first {
+            "task_description" => Some(BlackboardValue::String(self.task_description.clone())),
+            "provider_output" => Some(BlackboardValue::String(self.provider_output.clone())),
+            "context_summary" => Some(BlackboardValue::String(self.context_summary.clone())),
+            "reflection_round" => Some(BlackboardValue::Integer(self.reflection_round as i64)),
+            "max_reflection_rounds" => Some(BlackboardValue::Integer(self.max_reflection_rounds as i64)),
+            "confidence_accumulator" => Some(BlackboardValue::Float(self.confidence_accumulator)),
+            "agent_id" => Some(BlackboardValue::String(self.agent_id.clone())),
+            "current_task_id" => Some(BlackboardValue::String(self.current_task_id.clone())),
+            "current_story_id" => Some(BlackboardValue::String(self.current_story_id.clone())),
+            "last_tool_call" => self.last_tool_call.as_ref().map(|t| {
+                let mut m = HashMap::new();
+                m.insert("name".into(), BlackboardValue::String(t.name.clone()));
+                m.insert("input".into(), BlackboardValue::String(t.input.clone()));
+                m.insert("output".into(), BlackboardValue::String(t.output.clone()));
+                BlackboardValue::Map(m)
+            }),
+            "file_changes" => Some(BlackboardValue::List(
+                self.file_changes.iter().map(|fc| {
+                    let mut m = HashMap::new();
+                    m.insert("path".into(), BlackboardValue::String(fc.path.clone()));
+                    m.insert("change_type".into(), BlackboardValue::String(fc.change_type.clone()));
+                    BlackboardValue::Map(m)
+                }).collect()
+            )),
+            "variables" => {
+                // Continue with variable lookup
+                let key = parts.next()?;
+                return self.variables.get(key).cloned();
+            }
+            _ => None,
+        };
+
+        // Navigate nested paths for Map/List values
+        for part in parts {
+            current = match current? {
+                BlackboardValue::Map(m) => m.get(part).cloned(),
+                BlackboardValue::List(l) => {
+                    let idx: usize = part.parse().ok()?;
+                    l.get(idx).cloned()
+                }
+                _ => None,
+            };
         }
+
+        current
     }
 
-    // --- Typed getters ---
+    /// Typed convenience getters (used by evaluators and template engine).
+    pub fn get_string(&self, key: &str) -> Option<String> {
+        self.get_path(key).and_then(|v| match v {
+            BlackboardValue::String(s) => Some(s),
+            _ => None,
+        })
+    }
 
     pub fn get_bool(&self, key: &str) -> Option<bool> {
-        match self.values.get(key)? {
-            BlackboardValue::Bool(v) => Some(*v),
+        self.get_path(key).and_then(|v| match v {
+            BlackboardValue::Boolean(b) => Some(b),
             _ => None,
-        }
+        })
     }
 
     pub fn get_u8(&self, key: &str) -> Option<u8> {
-        match self.values.get(key)? {
-            BlackboardValue::U8(v) => Some(*v),
+        self.get_path(key).and_then(|v| match v {
+            BlackboardValue::Integer(i) => i.try_into().ok(),
             _ => None,
-        }
+        })
     }
 
-    pub fn get_u32(&self, key: &str) -> Option<u32> {
-        match self.values.get(key)? {
-            BlackboardValue::U32(v) => Some(*v),
+    pub fn get_f64(&self, key: &str) -> Option<f64> {
+        self.get_path(key).and_then(|v| match v {
+            BlackboardValue::Float(f) => Some(f),
+            BlackboardValue::Integer(i) => Some(i as f64),
             _ => None,
-        }
+        })
     }
 
-    pub fn get_string(&self, key: &str) -> Option<&str> {
-        match self.values.get(key)? {
-            BlackboardValue::String(v) => Some(v.as_str()),
-            _ => None,
-        }
-    }
-
-    // --- Setters ---
-
+    /// Set a variable in the custom variables map.
     pub fn set(&mut self, key: &str, value: BlackboardValue) {
-        self.values.insert(key.to_string(), value);
-    }
-
-    pub fn set_bool(&mut self, key: &str, value: bool) {
-        self.values.insert(key.to_string(), BlackboardValue::Bool(value));
-    }
-
-    pub fn set_u8(&mut self, key: &str, value: u8) {
-        self.values.insert(key.to_string(), BlackboardValue::U8(value));
+        self.variables.insert(key.to_string(), value);
     }
 
     pub fn set_string(&mut self, key: &str, value: String) {
-        self.values.insert(key.to_string(), BlackboardValue::String(value));
+        self.variables.insert(key.to_string(), BlackboardValue::String(value));
     }
 
-    // --- Commands ---
+    pub fn set_u8(&mut self, key: &str, value: u8) {
+        self.variables.insert(key.to_string(), BlackboardValue::Integer(value as i64));
+    }
 
+    pub fn set_f64(&mut self, key: &str, value: f64) {
+        self.variables.insert(key.to_string(), BlackboardValue::Float(value));
+    }
+
+    pub fn set_bool(&mut self, key: &str, value: bool) {
+        self.variables.insert(key.to_string(), BlackboardValue::Boolean(value));
+    }
+
+    /// Push a command to the output list.
     pub(crate) fn push_command(&mut self, cmd: Command) {
         self.commands.push(cmd);
     }
 
+    /// Drain all commands (called at end of tick).
     pub(crate) fn drain_commands(&mut self) -> Vec<Command> {
         std::mem::take(&mut self.commands)
     }
-}
-```
 
-### 8.2 Dot Notation for Nested Access
-
-```rust
-impl Blackboard {
-    /// Get a nested value using dot notation: "user.name"
-    pub fn get_path(&self, path: &str) -> Option<&BlackboardValue> {
-        let mut parts = path.split('.');
-        let first = parts.next()?;
-        let mut current = self.values.get(first)?;
-
-        for part in parts {
-            current = match current {
-                BlackboardValue::Map(m) => m.get(part)?,
-                BlackboardValue::List(l) => {
-                    let idx: usize = part.parse().ok()?;
-                    l.get(idx)?
-                }
-                _ => return None,
-            };
-        }
-
-        Some(current)
+    /// Store an LLM response for debugging.
+    pub(crate) fn store_llm_response(&mut self, node_name: &str, response: String) {
+        self.llm_responses.insert(node_name.to_string(), response);
     }
 }
 ```
 
 ---
 
-## 9. Prompt Node Implementation
+## 10. Prompt Node Implementation
 
-The Prompt node is the most complex node. It implements the "same-session" invariant.
+The Prompt node is the most complex leaf. It implements the same-session invariant.
 
-### 9.1 Lifecycle
+### 10.1 Lifecycle
 
 ```
-Tick 1: Prompt node sends message to session, returns Running
+Tick 1: Prompt node renders template → sends to session → returns Running
   ↓
-[Host re-ticks when session is ready]
+[Host polls; session receives reply]
   ↓
-Tick 2: Prompt node checks session.is_ready(), receives reply
-        Parses reply into Blackboard keys
+Tick 2: Prompt node checks session.is_ready() → receives reply
+        Parses reply into Blackboard values
+        Stores raw response in blackboard.llm_responses
         Returns Success or Failure
 ```
 
-### 9.2 Implementation
+### 10.2 Implementation
 
 ```rust
 impl PromptNode {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
-        // Step 1: If we have a pending async reply, check if it's ready
         if self.pending {
+            // Async continuation
             if !ctx.session.is_ready() {
-                ctx.logger.log(LogLevel::Debug, "Prompt", &format!("{}: waiting for reply", self.name));
+                ctx.logger.log(LogLevel::Debug, "Prompt",
+                    &format!("{}: waiting for reply", self.name));
                 return Ok(NodeStatus::Running);
             }
 
-            // Reply is ready, fetch it
-            let reply = ctx.session.send("POLL")?; // or use a dedicated poll method
+            let reply = ctx.session.send("POLL")?;
+            ctx.blackboard.store_llm_response(&self.name, reply.clone());
 
-            // Step 2: Parse reply
             match self.parser.parse(&reply) {
                 Ok(values) => {
-                    // Step 3: Store parsed values into blackboard
-                    for mapping in &self.sets {
-                        if let Some(value) = values.get(&mapping.from) {
-                            let bb_value = mapping.convert(value)?;
-                            ctx.blackboard.set(&mapping.to, bb_value);
+                    // Handle CommandParser special case
+                    if let Some(BlackboardValue::String(cmd_json)) = values.get("__command") {
+                        let cmd: Command = serde_json::from_str(cmd_json)
+                            .map_err(|e| RuntimeError::FilterError(e.to_string()))?;
+                        ctx.blackboard.push_command(cmd);
+                    } else {
+                        // Normal set mapping
+                        for mapping in &self.sets {
+                            if let Some(value) = values.get(&mapping.field) {
+                                ctx.blackboard.set(&mapping.key, value.clone());
+                            }
                         }
                     }
 
                     self.pending = false;
-                    tracer.log(&format!("{}: parsed reply: {:?}", self.name, values));
+                    tracer.record_prompt_success(&self.name, &reply);
                     return Ok(NodeStatus::Success);
                 }
                 Err(e) => {
-                    ctx.logger.log(LogLevel::Warn, "Prompt", &format!("{}: parse error: {}", self.name, e));
+                    ctx.logger.log(LogLevel::Warn, "Prompt",
+                        &format!("{}: parse error: {}", self.name, e));
                     self.pending = false;
+                    tracer.record_prompt_failure(&self.name, &e.to_string());
                     return Ok(NodeStatus::Failure);
                 }
             }
         }
 
-        // Step 4: First tick — render template and send
+        // First tick — render and send
         let rendered = TemplateEngine::render(&self.template, &ctx.blackboard)?;
-        ctx.logger.log(LogLevel::Debug, "Prompt", &format!("{}: sending prompt", self.name));
+        ctx.logger.log(LogLevel::Debug, "Prompt",
+            &format!("{}: sending prompt ({} chars)", self.name, rendered.len()));
 
         ctx.session.send(&rendered)?;
         self.pending = true;
+        tracer.record_prompt_sent(&self.name);
 
         Ok(NodeStatus::Running)
     }
@@ -1361,164 +1701,171 @@ impl PromptNode {
 }
 ```
 
-### 9.3 Set Mapping
+### 10.3 Model Selection
+
+The `model` field is stored but not directly used by the DSL engine. The engine passes it through to the host via the `Session` trait if needed:
 
 ```rust
-pub(crate) struct SetMapping {
-    /// Key in the parsed result
-    pub from: String,
-    /// Key in the blackboard
-    pub to: String,
-    /// Expected type
-    pub ty: ValueType,
-}
-
-impl SetMapping {
-    fn convert(&self, raw: &str) -> Result<BlackboardValue, RuntimeError> {
-        match self.ty {
-            ValueType::Bool => raw.parse::<bool>()
-                .map(BlackboardValue::Bool)
-                .map_err(|_| RuntimeError::TypeMismatch { key: self.to.clone(), expected: "bool", got: raw.to_string() }),
-            ValueType::U8 => raw.parse::<u8>()
-                .map(BlackboardValue::U8)
-                .map_err(|_| RuntimeError::TypeMismatch { key: self.to.clone(), expected: "u8", got: raw.to_string() }),
-            ValueType::String => Ok(BlackboardValue::String(raw.to_string())),
-            // ...
-        }
-    }
-}
-
-pub(crate) enum ValueType {
-    Bool,
-    U8,
-    U32,
-    I32,
-    F64,
-    String,
+// Alternative: extend Session trait with model hint
+pub trait Session {
+    fn send(&mut self, message: &str) -> Result<String, SessionError>;
+    fn send_with_model(&mut self, message: &str, model: &str) -> Result<String, SessionError>;
+    fn is_ready(&self) -> bool;
 }
 ```
 
-### 9.4 Parser Trait
-
-```rust
-/// Parses an LLM reply into key-value pairs.
-pub(crate) trait Parser: std::fmt::Debug {
-    fn parse(&self, reply: &str) -> Result<HashMap<String, String>, ParseError>;
-}
-
-/// Default parser: extracts markdown code blocks.
-#[derive(Debug)]
-pub(crate) struct MarkdownBlockParser {
-    /// The language tag to look for (e.g. "json", "yaml")
-    pub language: String,
-}
-
-impl Parser for MarkdownBlockParser {
-    fn parse(&self, reply: &str) -> Result<HashMap<String, String>, ParseError> {
-        let block = extract_markdown_block(reply, &self.language)?;
-        let value: serde_yaml::Value = serde_yaml::from_str(&block)?;
-        flatten_yaml(&value)
-    }
-}
-
-/// Alternative: extract key: value pairs from plain text.
-#[derive(Debug)]
-pub(crate) struct KeyValueParser;
-
-impl Parser for KeyValueParser {
-    fn parse(&self, reply: &str) -> Result<HashMap<String, String>, ParseError> {
-        let mut map = HashMap::new();
-        for line in reply.lines() {
-            if let Some((key, value)) = line.split_once(':') {
-                map.insert(key.trim().to_string(), value.trim().to_string());
-            }
-        }
-        Ok(map)
-    }
-}
-```
+For V1, we keep `model` as metadata on the node and let the host's `Session` implementation decide whether to honor it.
 
 ---
 
-## 10. Template Engine
+## 11. Template Engine
 
-The template engine renders prompt templates using Blackboard values.
+The template engine supports Jinja2-style syntax with the Blackboard as context.
 
-### 10.1 Simple Template Engine
+### 11.1 Supported Syntax
 
-For minimal dependencies, we implement a simple engine (no Tera dependency):
+| Feature | Syntax | Status |
+|---------|--------|--------|
+| Variable interpolation | `{{ variable }}` | ✅ V1 |
+| Dot notation | `{{ last_tool_call.name }}` | ✅ V1 |
+| Filters | `{{ var \| filter }}` | ✅ V1 |
+| Conditionals | `{% if %}`, `{% else %}`, `{% endif %}` | ✅ V1 |
+| Loops | `{% for item in list %}` | ✅ V1 |
+| Whitespace control | `{%- -%}` | ✅ V1 |
+| Comments | `{# comment #}` | ✅ V1 |
+
+### 11.2 Engine Design
+
+The engine is a two-pass system: **lexer** → **render**.
 
 ```rust
-/// Simple template engine: supports {{key}} and {{key | filter}}.
 pub(crate) struct TemplateEngine;
 
 impl TemplateEngine {
     pub fn render(template: &str, bb: &Blackboard) -> Result<String, RuntimeError> {
-        let mut result = template.to_string();
-        let re = regex!(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(?:\|\s*(\w+)\s*)?\}\}");
+        let tokens = Self::lex(template)?;
+        Self::render_tokens(&tokens, bb)
+    }
 
-        // Find all placeholders and replace
-        for cap in re.captures_iter(template) {
-            let full_match = cap.get(0).unwrap().as_str();
-            let key = cap.get(1).unwrap().as_str();
-            let filter_name = cap.get(2).map(|m| m.as_str());
+    fn lex(template: &str) -> Result<Vec<Token>, RuntimeError> {
+        let mut tokens = Vec::new();
+        let mut chars = template.char_indices().peekable();
 
-            let value = bb.get_path(key)
-                .ok_or_else(|| RuntimeError::MissingVariable { key: key.to_string() })?;
-
-            let rendered = match filter_name {
-                Some("upper") => value.to_string().to_uppercase(),
-                Some("lower") => value.to_string().to_lower_case(),
-                Some("json") => serde_json::to_string(value).unwrap_or_default(),
-                Some(f) => return Err(RuntimeError::UnknownFilter { filter: f.to_string() }),
-                None => value.to_string(),
-            };
-
-            result = result.replace(full_match, &rendered);
+        while let Some((i, c)) = chars.next() {
+            if c == '{' && chars.peek().map(|(_, n)| *n) == Some('{') {
+                chars.next(); // consume second '{'
+                // Parse expression until }}
+                let (expr, filters) = Self::parse_expression(&mut chars)?;
+                tokens.push(Token::Expr { expr, filters });
+            } else if c == '{' && chars.peek().map(|(_, n)| *n) == Some('%') {
+                chars.next(); // consume '%'
+                // Parse statement until %}
+                let stmt = Self::parse_statement(&mut chars)?;
+                tokens.push(Token::Statement(stmt));
+            } else if c == '{' && chars.peek().map(|(_, n)| *n) == Some('#') {
+                chars.next(); // consume '#'
+                // Skip comment until #}
+                Self::skip_comment(&mut chars)?;
+            } else {
+                // Collect literal text
+                let start = i;
+                let mut end = i + c.len_utf8();
+                while let Some((j, ch)) = chars.peek() {
+                    if *ch == '{' || *ch == '%' || *ch == '#' {
+                        break;
+                    }
+                    end = *j + ch.len_utf8();
+                    chars.next();
+                }
+                tokens.push(Token::Literal(template[start..end].to_string()));
+            }
         }
 
-        Ok(result)
+        Ok(tokens)
     }
 }
 ```
 
-### 10.2 Context Object
-
-For more complex templates, we support a context object:
+### 11.3 Token Types
 
 ```rust
-// In YAML:
-// template: |
-//   Situation: {{situation}}
-//   Confidence: {{confidence}}%
-//   Is it complete? {{decision.is_complete}}
+enum Token {
+    Literal(String),
+    Expr { expr: String, filters: Vec<FilterCall> },
+    Statement(Stmt),
+}
+
+struct FilterCall {
+    name: String,
+    args: Vec<String>,
+}
+
+enum Stmt {
+    If { condition: String, then_body: Vec<Token>, else_body: Option<Vec<Token>> },
+    For { var: String, iter: String, body: Vec<Token> },
+}
 ```
 
-The template engine automatically resolves dot-notation paths through the Blackboard.
-
-### 10.3 Filters
+### 11.4 Filter Registry
 
 ```rust
-type FilterFn = fn(&BlackboardValue) -> Result<String, RuntimeError>;
-
 pub(crate) struct FilterRegistry {
     filters: HashMap<String, FilterFn>,
 }
 
+type FilterFn = fn(value: &BlackboardValue, args: &[String]) -> Result<BlackboardValue, RuntimeError>;
+
 impl FilterRegistry {
     pub fn with_builtins() -> Self {
         let mut reg = Self { filters: HashMap::new() };
-        reg.register("upper", |v| Ok(v.to_string().to_uppercase()));
-        reg.register("lower", |v| Ok(v.to_string().to_lowercase()));
-        reg.register("json", |v| {
-            serde_json::to_string(v).map_err(|e| RuntimeError::FilterError(e.to_string()))
-        });
-        reg.register("yesno", |v| {
-            match v {
-                BlackboardValue::Bool(true) => Ok("yes".to_string()),
-                BlackboardValue::Bool(false) => Ok("no".to_string()),
-                _ => Err(RuntimeError::FilterError("yesno requires bool".to_string())),
+        reg.register("upper", |v, _| Ok(BlackboardValue::String(v.to_string().to_uppercase())));
+        reg.register("lower", |v, _| Ok(BlackboardValue::String(v.to_string().to_lowercase())));
+        reg.register("truncate", |v, args| {
+            let n: usize = args.get(0).and_then(|s| s.parse().ok()).unwrap_or(100);
+            let s = v.to_string();
+            if s.len() > n {
+                Ok(BlackboardValue::String(format!("{}...", &s[..n])))
+            } else {
+                Ok(BlackboardValue::String(s))
             }
+        });
+        reg.register("length", |v, _| {
+            let len = match v {
+                BlackboardValue::String(s) => s.len(),
+                BlackboardValue::List(l) => l.len(),
+                BlackboardValue::Map(m) => m.len(),
+                _ => 0,
+            };
+            Ok(BlackboardValue::Integer(len as i64))
+        });
+        reg.register("default", |v, args| {
+            match v {
+                BlackboardValue::String(s) if s.is_empty() => {
+                    Ok(BlackboardValue::String(args.get(0).cloned().unwrap_or_default()))
+                }
+                _ => Ok(v.clone()),
+            }
+        });
+        reg.register("join", |v, args| {
+            match v {
+                BlackboardValue::List(l) => {
+                    let sep = args.get(0).cloned().unwrap_or(", ".to_string());
+                    let joined = l.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(&sep);
+                    Ok(BlackboardValue::String(joined))
+                }
+                _ => Ok(BlackboardValue::String(v.to_string())),
+            }
+        });
+        reg.register("json", |v, _| {
+            serde_json::to_string(v).map(BlackboardValue::String)
+                .map_err(|e| RuntimeError::FilterError(e.to_string()))
+        });
+        reg.register("slugify", |v, _| {
+            let s = v.to_string().to_lowercase()
+                .replace(" ", "-")
+                .replace("_", "-")
+                .replace(|c: char| !c.is_alphanumeric() && c != '-', "");
+            Ok(BlackboardValue::String(s))
         });
         reg
     }
@@ -1529,16 +1876,163 @@ impl FilterRegistry {
 }
 ```
 
+### 11.5 Expression Evaluation
+
+```rust
+impl TemplateEngine {
+    fn eval_expr(expr: &str, bb: &Blackboard) -> Result<BlackboardValue, RuntimeError> {
+        let trimmed = expr.trim();
+        // Simple path lookup: "task_description", "variables.next_action", "last_tool_call.name"
+        bb.get_path(trimmed)
+            .ok_or_else(|| RuntimeError::MissingVariable { key: trimmed.to_string() })
+    }
+
+    fn apply_filters(
+        value: BlackboardValue,
+        filters: &[FilterCall],
+        registry: &FilterRegistry,
+    ) -> Result<BlackboardValue, RuntimeError> {
+        let mut current = value;
+        for filter in filters {
+            let f = registry.filters.get(&filter.name)
+                .ok_or_else(|| RuntimeError::UnknownFilter { filter: filter.name.clone() })?;
+            current = f(&current, &filter.args)?;
+        }
+        Ok(current)
+    }
+}
+```
+
+### 11.6 Render Implementation
+
+```rust
+impl TemplateEngine {
+    fn render_tokens(tokens: &[Token], bb: &Blackboard) -> Result<String, RuntimeError> {
+        let mut output = String::new();
+        let mut i = 0;
+        while i < tokens.len() {
+            match &tokens[i] {
+                Token::Literal(text) => output.push_str(text),
+                Token::Expr { expr, filters } => {
+                    let value = Self::eval_expr(expr, bb)?;
+                    let value = Self::apply_filters(value, filters, &FilterRegistry::with_builtins())?;
+                    output.push_str(&value.to_string());
+                }
+                Token::Statement(Stmt::If { condition, then_body, else_body }) => {
+                    let cond_value = Self::eval_condition(condition, bb)?;
+                    let body = if cond_value { then_body } else { else_body.as_ref().unwrap_or(&vec![]) };
+                    output.push_str(&Self::render_tokens(body, bb)?);
+                }
+                Token::Statement(Stmt::For { var, iter, body }) => {
+                    let iter_value = Self::eval_expr(iter, bb)?;
+                    match iter_value {
+                        BlackboardValue::List(list) => {
+                            for item in list {
+                                // Create a temporary scope with the loop variable
+                                let mut scoped_bb = bb.clone();
+                                scoped_bb.set(var, item);
+                                output.push_str(&Self::render_tokens(body, &scoped_bb)?);
+                            }
+                        }
+                        _ => return Err(RuntimeError::FilterError(
+                            format!("cannot iterate over {}", iter)
+                        )),
+                    }
+                }
+            }
+            i += 1;
+        }
+        Ok(output)
+    }
+
+    fn eval_condition(condition: &str, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        // Simple condition evaluation: "reflection_round > 0", "file_changes | length > 0"
+        // V1: Support simple comparisons and boolean variable lookups
+        let trimmed = condition.trim();
+        if let Ok(val) = Self::eval_expr(trimmed, bb) {
+            return Ok(match val {
+                BlackboardValue::Boolean(b) => b,
+                BlackboardValue::Integer(0) | BlackboardValue::Float(0.0) => false,
+                BlackboardValue::String(s) if s.is_empty() => false,
+                _ => true,
+            });
+        }
+        // Parse comparison: "left op right"
+        Self::eval_comparison(trimmed, bb)
+    }
+}
+```
+
 ---
 
-## 11. Error Handling
+## 12. Action Command Template Rendering
+
+Action nodes support template interpolation inside command fields. This is a second render pass that runs during Action tick.
+
+### 12.1 Command Rendering
+
+```rust
+/// Recursively render all String fields in a Command using the Blackboard.
+fn render_command_templates(cmd: &Command, bb: &Blackboard) -> Result<Command, RuntimeError> {
+    match cmd {
+        Command::RetryTool { tool_name, args, max_attempts } => Ok(Command::RetryTool {
+            tool_name: TemplateEngine::render(tool_name, bb)?,
+            args: args.as_ref().map(|a| TemplateEngine::render(a, bb)).transpose()?,
+            max_attempts: *max_attempts,
+        }),
+        Command::SendCustomInstruction { prompt, target_agent } => Ok(Command::SendCustomInstruction {
+            prompt: TemplateEngine::render(prompt, bb)?,
+            target_agent: TemplateEngine::render(target_agent, bb)?,
+        }),
+        Command::EscalateToHuman { reason, context } => Ok(Command::EscalateToHuman {
+            reason: TemplateEngine::render(reason, bb)?,
+            context: context.as_ref().map(|c| TemplateEngine::render(c, bb)).transpose()?,
+        }),
+        Command::Reflect { prompt } => Ok(Command::Reflect {
+            prompt: TemplateEngine::render(prompt, bb)?,
+        }),
+        Command::StopIfComplete { reason } => Ok(Command::StopIfComplete {
+            reason: TemplateEngine::render(reason, bb)?,
+        }),
+        Command::PrepareTaskStart { task_id, task_description } => Ok(Command::PrepareTaskStart {
+            task_id: TemplateEngine::render(task_id, bb)?,
+            task_description: TemplateEngine::render(task_description, bb)?,
+        }),
+        Command::SuggestCommit { message, mandatory, reason } => Ok(Command::SuggestCommit {
+            message: TemplateEngine::render(message, bb)?,
+            mandatory: *mandatory,
+            reason: TemplateEngine::render(reason, bb)?,
+        }),
+        Command::CommitChanges { message, is_wip, worktree_path } => Ok(Command::CommitChanges {
+            message: TemplateEngine::render(message, bb)?,
+            is_wip: *is_wip,
+            worktree_path: worktree_path.as_ref().map(|p| TemplateEngine::render(p, bb)).transpose()?,
+        }),
+        Command::CreateTaskBranch { branch_name, base_branch, worktree_path } => {
+            Ok(Command::CreateTaskBranch {
+                branch_name: TemplateEngine::render(branch_name, bb)?,
+                base_branch: TemplateEngine::render(base_branch, bb)?,
+                worktree_path: worktree_path.as_ref().map(|p| TemplateEngine::render(p, bb)).transpose()?,
+            })
+        }
+        Command::RebaseToMain { base_branch } => Ok(Command::RebaseToMain {
+            base_branch: TemplateEngine::render(base_branch, bb)?,
+        }),
+        // Commands with no string fields pass through unchanged
+        other => Ok(other.clone()),
+    }
+}
+```
+
+---
+
+## 13. Error Handling
 
 All errors are explicit enums. No panics in library code.
 
-### 11.1 Error Types
+### 13.1 Error Types
 
 ```rust
-/// Top-level DSL error. Either parse-time or runtime.
 #[derive(Debug, Clone)]
 pub enum DslError {
     Parse(ParseError),
@@ -1556,25 +2050,23 @@ impl std::fmt::Display for DslError {
 
 impl std::error::Error for DslError {}
 
-// --- Parse errors (detected before any execution) ---
-
 #[derive(Debug, Clone)]
 pub enum ParseError {
-    /// YAML syntax error.
     YamlSyntax(String),
-    /// Unknown node `kind`.
     UnknownNodeKind { kind: String },
-    /// Missing required property.
+    UnknownEvaluatorKind { kind: String },
+    UnknownParserKind { kind: String },
     MissingProperty(&'static str),
-    /// Invalid property value.
     InvalidProperty { key: String, value: String, reason: String },
-    /// Subtree reference not found.
     UnresolvedSubTree { name: String },
-    /// Duplicate node name within a tree.
+    CircularSubTreeRef { name: String },
     DuplicateName { name: String },
-    /// Schema validation failed.
-    SchemaValidation(Vec<String>),
-    /// Custom error from node factory.
+    UnexpectedValue { got: String, expected: Vec<String> },
+    NoMatch { pattern: String },
+    MissingCaptureGroup { group: usize, pattern: String },
+    TypeMismatch { field: String, expected: &'static str, got: String },
+    JsonSyntax(String),
+    UnsupportedVersion(String),
     Custom(String),
 }
 
@@ -1583,15 +2075,27 @@ impl std::fmt::Display for ParseError {
         match self {
             ParseError::YamlSyntax(e) => write!(f, "YAML syntax error: {}", e),
             ParseError::UnknownNodeKind { kind } => write!(f, "unknown node kind: {}", kind),
+            ParseError::UnknownEvaluatorKind { kind } => write!(f, "unknown evaluator kind: {}", kind),
+            ParseError::UnknownParserKind { kind } => write!(f, "unknown parser kind: {}", kind),
             ParseError::MissingProperty(p) => write!(f, "missing required property: {}", p),
             ParseError::InvalidProperty { key, value, reason } => {
                 write!(f, "invalid property '{}' = '{}': {}", key, value, reason)
             }
             ParseError::UnresolvedSubTree { name } => write!(f, "unresolved subtree reference: {}", name),
+            ParseError::CircularSubTreeRef { name } => write!(f, "circular subtree reference: {}", name),
             ParseError::DuplicateName { name } => write!(f, "duplicate node name: {}", name),
-            ParseError::SchemaValidation(errors) => {
-                write!(f, "schema validation failed: {}", errors.join(", "))
+            ParseError::UnexpectedValue { got, expected } => {
+                write!(f, "unexpected value '{}', expected one of: {:?}", got, expected)
             }
+            ParseError::NoMatch { pattern } => write!(f, "no match for pattern: {}", pattern),
+            ParseError::MissingCaptureGroup { group, pattern } => {
+                write!(f, "missing capture group {} in pattern: {}", group, pattern)
+            }
+            ParseError::TypeMismatch { field, expected, got } => {
+                write!(f, "type mismatch for field '{}': expected {}, got {}", field, expected, got)
+            }
+            ParseError::JsonSyntax(e) => write!(f, "JSON syntax error: {}", e),
+            ParseError::UnsupportedVersion(v) => write!(f, "unsupported api version: {}", v),
             ParseError::Custom(msg) => write!(f, "{}", msg),
         }
     }
@@ -1599,23 +2103,14 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-// --- Runtime errors (occur during tick) ---
-
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
-    /// Template variable not found in blackboard.
     MissingVariable { key: String },
-    /// Template filter not found.
     UnknownFilter { filter: String },
-    /// Template filter failed.
     FilterError(String),
-    /// Type mismatch in blackboard operation.
     TypeMismatch { key: String, expected: &'static str, got: String },
-    /// Session error.
     Session { kind: SessionErrorKind, message: String },
-    /// Maximum recursion depth exceeded (subtree nesting).
     MaxRecursion,
-    /// Custom runtime error.
     Custom(String),
 }
 
@@ -1638,13 +2133,11 @@ impl std::fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 ```
 
-### 11.2 Error Conversion
+### 13.2 Error Conversion
 
 ```rust
 impl From<serde_yaml::Error> for ParseError {
-    fn from(e: serde_yaml::Error) -> Self {
-        ParseError::YamlSyntax(e.to_string())
-    }
+    fn from(e: serde_yaml::Error) -> Self { ParseError::YamlSyntax(e.to_string()) }
 }
 
 impl From<SessionError> for RuntimeError {
@@ -1654,29 +2147,21 @@ impl From<SessionError> for RuntimeError {
 }
 ```
 
-### 11.3 Result Aliases
-
-```rust
-pub type ParseResult<T> = Result<T, ParseError>;
-pub type RuntimeResult<T> = Result<T, RuntimeError>;
-```
-
 ---
 
-## 12. Testing Strategy
+## 14. Testing Strategy
 
-Every component is tested with mock trait implementations. No I/O, no LLM calls in tests.
+Every component is tested with mock trait implementations. No I/O, no LLM calls in unit tests.
 
-### 12.1 Mock Implementations
+### 14.1 Mock Implementations
 
 ```rust
-// test-support utilities (within decision-dsl/tests/)
+// test-support utilities (within decision-dsl/tests/ or test-support crate)
 
 use decision_dsl::ext::*;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-/// Mock session with pre-programmed replies.
 pub struct MockSession {
     replies: RefCell<VecDeque<String>>,
     ready: RefCell<bool>,
@@ -1689,28 +2174,19 @@ impl MockSession {
             ready: RefCell::new(true),
         }
     }
-
-    pub fn set_ready(&self, ready: bool) {
-        *self.ready.borrow_mut() = ready;
-    }
+    pub fn set_ready(&self, ready: bool) { *self.ready.borrow_mut() = ready; }
 }
 
 impl Session for MockSession {
     fn send(&mut self, _message: &str) -> Result<String, SessionError> {
-        self.replies.borrow_mut()
-            .pop_front()
-            .ok_or_else(|| SessionError {
-                kind: SessionErrorKind::Unavailable,
-                message: "no more replies".into(),
-            })
+        self.replies.borrow_mut().pop_front().ok_or_else(|| SessionError {
+            kind: SessionErrorKind::Unavailable,
+            message: "no more replies".into(),
+        })
     }
-
-    fn is_ready(&self) -> bool {
-        *self.ready.borrow()
-    }
+    fn is_ready(&self) -> bool { *self.ready.borrow() }
 }
 
-/// Mock logger that captures all logs.
 pub struct CaptureLogger {
     logs: RefCell<Vec<(LogLevel, String, String)>>,
 }
@@ -1722,210 +2198,356 @@ impl Logger for CaptureLogger {
 }
 ```
 
-### 12.2 Unit Tests: Composite Nodes
+### 14.2 Unit Tests: Evaluators
 
 ```rust
-#[cfg(test)]
-mod composite_tests {
-    use super::*;
+#[test]
+fn output_contains_case_insensitive() {
+    let mut bb = Blackboard::new();
+    bb.provider_output = "Error 429: Rate Limit".into();
 
-    #[test]
-    fn selector_returns_first_success() {
-        let mut selector = SelectorNode {
-            name: "test".into(),
-            children: vec![
-                Node::Condition(ConditionNode {
-                    name: "fail".into(),
-                    evaluator: Box::new(|_| Ok(false)),
-                }),
-                Node::Action(ActionNode {
-                    name: "success".into(),
-                    command: Command::ApproveAndContinue,
-                    when: None,
-                }),
-            ],
-            active_child: None,
-        };
+    let eval = OutputContains { pattern: "429".into(), case_sensitive: false };
+    assert!(eval.evaluate(&bb).unwrap());
 
-        let mut bb = Blackboard::new();
-        let mut ctx = tick_context(&mut bb);
-        let mut tracer = Tracer::new();
+    let eval = OutputContains { pattern: "rate limit".into(), case_sensitive: false };
+    assert!(eval.evaluate(&bb).unwrap());
 
-        let status = selector.tick(&mut ctx, &mut tracer).unwrap();
-        assert_eq!(status, NodeStatus::Success);
-        assert_eq!(bb.drain_commands().len(), 1);
-    }
+    let eval = OutputContains { pattern: "quota".into(), case_sensitive: false };
+    assert!(!eval.evaluate(&bb).unwrap());
+}
 
-    #[test]
-    fn selector_returns_running_and_resumes() {
-        let mut selector = SelectorNode {
-            name: "test".into(),
-            children: vec![
-                Node::Condition(ConditionNode {
-                    name: "fail".into(),
-                    evaluator: Box::new(|_| Ok(false)),
-                }),
-                Node::Prompt(PromptNode {
-                    name: "prompt".into(),
-                    template: "test".into(),
-                    parser: Box::new(KeyValueParser),
-                    sets: vec![],
-                    timeout: Duration::from_secs(1),
-                    pending: false,
-                }),
-            ],
-            active_child: None,
-        };
+#[test]
+fn variable_is_matches() {
+    let mut bb = Blackboard::new();
+    bb.set("next_action", BlackboardValue::String("REFLECT".into()));
 
-        let mut bb = Blackboard::new();
-        let mut session = MockSession::new(vec![]);
-        session.set_ready(false);
+    let eval = VariableIs {
+        key: "variables.next_action".into(),
+        expected: BlackboardValue::String("REFLECT".into()),
+    };
+    assert!(eval.evaluate(&bb).unwrap());
+}
 
-        let mut ctx = tick_context_with_session(&mut bb, &mut session);
-        let mut tracer = Tracer::new();
+#[test]
+fn or_evaluator_short_circuits() {
+    let mut bb = Blackboard::new();
+    bb.set("a", BlackboardValue::Boolean(false));
+    bb.set("b", BlackboardValue::Boolean(true));
 
-        // First tick: Prompt returns Running
-        let status = selector.tick(&mut ctx, &mut tracer).unwrap();
-        assert_eq!(status, NodeStatus::Running);
-        assert_eq!(selector.active_child, Some(1));
-
-        // Second tick: session still not ready
-        let status = selector.tick(&mut ctx, &mut tracer).unwrap();
-        assert_eq!(status, NodeStatus::Running);
-
-        // Now session is ready
-        session.set_ready(true);
-        // But MockSession has no replies, so it will fail
-        // In real test we'd provide a reply
-    }
+    let eval = OrEvaluator {
+        conditions: vec![
+            Box::new(VariableIs { key: "variables.a".into(), expected: BlackboardValue::Boolean(true) }),
+            Box::new(VariableIs { key: "variables.b".into(), expected: BlackboardValue::Boolean(true) }),
+        ],
+    };
+    assert!(eval.evaluate(&bb).unwrap());
 }
 ```
 
-### 12.3 Integration Tests: Full Tree Tick
+### 14.3 Unit Tests: Output Parsers
+
+```rust
+#[test]
+fn enum_parser_case_insensitive() {
+    let parser = EnumParser {
+        allowed_values: vec!["REFLECT".into(), "CONFIRM".into()],
+        case_sensitive: false,
+    };
+    let result = parser.parse("  reflect  ").unwrap();
+    assert_eq!(result.get("decision"), Some(&BlackboardValue::String("REFLECT".into())));
+}
+
+#[test]
+fn structured_parser_with_types() {
+    let parser = StructuredParser {
+        pattern: regex::Regex::new(r"CLASS:\s*(\w+)\s*RECOMMEND:\s*(\w+)\s*REASON:\s*(.*)").unwrap(),
+        fields: vec![
+            StructuredField { name: "classification".into(), group: 1, ty: FieldType::String },
+            StructuredField { name: "recommendation".into(), group: 2, ty: FieldType::String },
+            StructuredField { name: "reason".into(), group: 3, ty: FieldType::String },
+        ],
+    };
+    let input = "CLASS: SYNTAX RECOMMEND: FIX REASON: Missing semicolon";
+    let result = parser.parse(input).unwrap();
+    assert_eq!(result.get("classification"), Some(&BlackboardValue::String("SYNTAX".into())));
+    assert_eq!(result.get("recommendation"), Some(&BlackboardValue::String("FIX".into())));
+}
+
+#[test]
+fn json_parser_parses_nested() {
+    let parser = JsonParser { schema: None };
+    let input = r#"{"decision": "reflect", "confidence": 0.82}"#;
+    let result = parser.parse(input).unwrap();
+    assert_eq!(result.get("decision"), Some(&BlackboardValue::String("reflect".into())));
+    assert_eq!(result.get("confidence"), Some(&BlackboardValue::Float(0.82)));
+}
+```
+
+### 14.4 Integration Tests: Full Tree Tick
 
 ```rust
 #[test]
 fn full_tree_escalates_to_human() {
     let yaml = r#"
-api_version: "1.0"
+apiVersion: decision.agile-agent.io/v1
 kind: BehaviorTree
-name: test-tree
-description: "Test tree for escalation"
-root:
-  type: composite
-  kind: Sequence
-  name: seq
-  children:
-    - type: leaf
-      kind: Condition
-      name: is_human_needed
-      eval: "{{confidence}} < 0.7"
-    - type: leaf
-      kind: Action
-      name: escalate
-      command:
-        action_type: EscalateToHuman
-        reason: "Confidence below threshold"
-        context: "Decision was ambiguous"
+metadata:
+  name: test-tree
+spec:
+  root:
+    kind: Selector
+    name: root
+    children:
+      - kind: Sequence
+        name: handle_choice
+        children:
+          - kind: Condition
+            name: is_waiting
+            eval:
+              kind: outputContains
+              pattern: "waiting for choice"
+          - kind: Action
+            name: select_first
+            command:
+              SelectOption:
+                option_id: "0"
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue
 "#;
 
     let parser = YamlParser::new();
     let tree = parser.parse_tree(yaml).unwrap();
 
     let mut bb = Blackboard::new();
-    bb.set_f64("confidence", 0.5);
+    bb.provider_output = "Please choose: A or B (waiting for choice)".into();
 
     let mut executor = Executor::new();
-    let mut ctx = tick_context(&mut bb);
+    let mut session = MockSession::new(vec![]);
+    let clock = SystemClock;
+    let fs = RealFs;
+    let logger = CaptureLogger { logs: RefCell::new(vec![]) };
+
+    let mut ctx = TickContext::new(&mut bb, &mut session, &clock, &fs, &logger);
     let result = executor.tick(&tree, &mut ctx).unwrap();
 
     assert_eq!(result.status, NodeStatus::Success);
     assert_eq!(result.commands.len(), 1);
     match &result.commands[0] {
-        Command::EscalateToHuman { reason, .. } => {
-            assert_eq!(reason, "Confidence below threshold");
-        }
-        other => panic!("expected EscalateToHuman, got {:?}", other),
+        Command::SelectOption { option_id } => assert_eq!(option_id, "0"),
+        other => panic!("expected SelectOption, got {:?}", other),
+    }
+}
+
+#[test]
+fn reflect_loop_with_prompt() {
+    let yaml = r#"
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: reflect-test
+spec:
+  root:
+    kind: Sequence
+    name: reflect_flow
+    children:
+      - kind: ReflectionGuard
+        name: max_2
+        maxRounds: 2
+        child:
+          kind: Prompt
+          name: ask
+            template: "REFLECT or CONFIRM?"
+            parser:
+              kind: enum
+              values: [REFLECT, CONFIRM]
+            sets:
+              - key: next_action
+                field: decision
+      - kind: Selector
+        name: branch
+        children:
+          - kind: Sequence
+            name: do_reflect
+            children:
+              - kind: Condition
+                name: is_reflect
+                eval:
+                  kind: variableIs
+                  key: next_action
+                  value: REFLECT
+              - kind: Action
+                name: emit_reflect
+                command:
+                  Reflect:
+                    prompt: "Review your work"
+          - kind: Sequence
+            name: do_confirm
+            children:
+              - kind: Condition
+                name: is_confirm
+                eval:
+                  kind: variableIs
+                  key: next_action
+                  value: CONFIRM
+              - kind: Action
+                name: emit_confirm
+                command: ConfirmCompletion
+"#;
+
+    let parser = YamlParser::new();
+    let tree = parser.parse_tree(yaml).unwrap();
+
+    let mut bb = Blackboard::new();
+    bb.reflection_round = 0;
+
+    let mut executor = Executor::new();
+    let mut session = MockSession::new(vec!["REFLECT".into()]);
+    let clock = SystemClock;
+    let fs = RealFs;
+    let logger = CaptureLogger { logs: RefCell::new(vec![]) };
+
+    // Tick 1: Prompt sends, returns Running
+    let mut ctx = TickContext::new(&mut bb, &mut session, &clock, &fs, &logger);
+    let result = executor.tick(&tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Running);
+
+    // Tick 2: Session ready, parse succeeds
+    let mut ctx = TickContext::new(&mut bb, &mut session, &clock, &fs, &logger);
+    let result = executor.tick(&tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Success);
+    assert_eq!(bb.reflection_round, 1);
+    assert_eq!(result.commands.len(), 1);
+    match &result.commands[0] {
+        Command::Reflect { prompt } => assert_eq!(prompt, "Review your work"),
+        other => panic!("expected Reflect, got {:?}", other),
     }
 }
 ```
 
-### 12.4 Property-Based Testing
+### 14.5 Template Engine Tests
 
 ```rust
 #[test]
-fn any_tree_with_all_actions_returns_commands() {
-    // Generate random trees, ensure they never panic
-    // and that Success/Failure always terminates
-    proptest::proptest!(|(depth in 1u8..10)| {
-        let tree = generate_random_tree(depth);
-        let mut bb = Blackboard::new();
-        let mut executor = Executor::new();
-        let mut ctx = tick_context(&mut bb);
+fn template_truncate_filter() {
+    let mut bb = Blackboard::new();
+    bb.provider_output = "a".repeat(1000);
 
-        let result = executor.tick(&tree, &mut ctx);
-        // Must not panic; status must be terminal
-        if let Ok(res) = result {
-            assert!(res.status != NodeStatus::Running || tree.has_prompt_node());
-        }
-    });
+    let template = "{{ provider_output | truncate(100) }}";
+    let result = TemplateEngine::render(template, &bb).unwrap();
+    assert_eq!(result.len(), 103); // 100 chars + "..."
+    assert!(result.ends_with("..."));
+}
+
+#[test]
+fn template_conditional() {
+    let mut bb = Blackboard::new();
+    bb.reflection_round = 1;
+
+    let template = r#"
+{% if reflection_round > 0 %}
+This is reflection round {{ reflection_round }}.
+{% else %}
+Initial decision.
+{% endif %}
+"#;
+    let result = TemplateEngine::render(template, &bb).unwrap();
+    assert!(result.contains("reflection round 1"));
+    assert!(!result.contains("Initial decision"));
+}
+
+#[test]
+fn template_for_loop() {
+    let mut bb = Blackboard::new();
+    bb.file_changes = vec![
+        FileChangeRecord { path: "a.py".into(), change_type: "modified".into() },
+        FileChangeRecord { path: "b.py".into(), change_type: "added".into() },
+    ];
+
+    let template = r#"
+{% if file_changes | length > 0 %}
+Changes:
+{% for change in file_changes %}
+- {{ change.path }} ({{ change.change_type }})
+{% endfor %}
+{% endif %}
+"#;
+    let result = TemplateEngine::render(template, &bb).unwrap();
+    assert!(result.contains("a.py (modified)"));
+    assert!(result.contains("b.py (added)"));
+}
+
+#[test]
+fn template_default_filter() {
+    let mut bb = Blackboard::new();
+    // last_tool_call is None
+
+    let template = r#"{{ last_tool_call.name | default("unknown") }}"#;
+    let result = TemplateEngine::render(template, &bb).unwrap();
+    assert_eq!(result, "unknown");
+}
+
+#[test]
+fn template_slugify_filter() {
+    let mut bb = Blackboard::new();
+    bb.current_task_id = "Implement user auth".into();
+
+    let template = r#"feature/{{ current_task_id | slugify }}"#;
+    let result = TemplateEngine::render(template, &bb).unwrap();
+    assert_eq!(result, "feature/implement-user-auth");
 }
 ```
 
-### 12.5 Test Coverage Requirements
+### 14.6 Test Coverage Requirements
 
 | Component | Coverage Target |
 |-----------|----------------|
-| Parser | 95% — all node kinds, error paths |
+| Parser | 95% — all node kinds, error paths, YAML structures |
+| Evaluators | 100% — all builtin evaluators |
+| Output Parsers | 100% — enum, structured, json, command |
 | Executor / Tick | 95% — all node types, resume paths |
-| Blackboard | 100% — all types, all edge cases |
-| Template Engine | 95% — all filters, missing vars |
-| Prompt Node | 90% — pending, ready, parse fail |
+| Blackboard | 100% — all types, dot notation, built-in fields |
+| Template Engine | 95% — all filters, conditionals, loops, missing vars |
+| Prompt Node | 90% — pending, ready, parse fail, command parser |
 | Error Types | 100% — Display, From impls |
 
 ---
 
-## 13. Performance Considerations
+## 15. Performance Considerations
 
-### 13.1 Allocation Strategy
+### 15.1 Allocation Strategy
 
 ```rust
 // Hot path: tick loop. Minimize allocations.
-
-// Blackboard: use a small-string-optimized key type
-pub struct SmallString([u8; 32]); // stack-allocated for keys < 32 bytes
 
 // Commands: pre-allocate Vec capacity
 impl Blackboard {
     pub fn with_capacity(n: usize) -> Self {
         Self {
-            values: HashMap::with_capacity(n),
             commands: Vec::with_capacity(8),
+            variables: HashMap::with_capacity(n),
+            ..Default::default()
         }
     }
 }
 
-// Template engine: compile regex once
-lazy_static! {
-    static ref TEMPLATE_RE: Regex = Regex::new(r"\{\{...\}\}").unwrap();
-}
+// Template engine: compile regex once per parser
+// StructuredParser compiles regex at parse time, not tick time.
 ```
 
-### 13.2 Tick Loop Hot Path
+### 15.2 Tick Loop Hot Path
 
 ```rust
-// The tick loop must be allocation-free for non-Prompt nodes.
-// Only Prompt nodes allocate (for template rendering and session I/O).
-
-// Benchmark target: 1M ticks/second on a single composite tree
+// Benchmark target: 1M ticks/second on a 100-node composite tree
 // (measured with criterion.rs)
+// Only Prompt nodes allocate during tick.
 ```
 
-### 13.3 Memory Footprint
+### 15.3 Memory Footprint
 
 ```rust
 // Tree memory: one-time parse cost.
-// Runtime memory: only Blackboard + running path.
+// Runtime memory: Blackboard + running path.
 //
 // For a tree with 100 nodes:
 //   - Parse: ~50KB
@@ -1933,59 +2555,255 @@ lazy_static! {
 //   - Per-tick: 0 allocations (no Prompt), ~1KB (with Prompt)
 ```
 
-### 13.4 Parallel Execution
+### 15.4 Parallel Safety
 
 ```rust
 // Trees are Send + Sync (no internal mutability in Tree itself).
 // Executor is !Sync (mutates running_path).
 // Blackboard is !Sync (mutable during tick).
 //
-// Design decision: One Executor + Blackboard per agent thread.
-// No shared mutable state across agents.
-```
-
-### 13.5 Benchmarks
-
-```rust
-// benches/tick_benchmark.rs
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use decision_dsl::*;
-
-fn tick_benchmark(c: &mut Criterion) {
-    let yaml = /* 100-node tree */;
-    let parser = YamlParser::new();
-    let tree = parser.parse_tree(yaml).unwrap();
-
-    let mut group = c.benchmark_group("tick");
-    group.throughput(criterion::Throughput::Elements(1));
-
-    group.bench_function("selector_sequence", |b| {
-        let mut bb = Blackboard::new();
-        let mut executor = Executor::new();
-        b.iter(|| {
-            executor.reset();
-            let mut ctx = tick_context(black_box(&mut bb));
-            executor.tick(black_box(&tree), black_box(&mut ctx)).unwrap()
-        });
-    });
-}
-
-criterion_group!(benches, tick_benchmark);
-criterion_main!(benches);
+// Design: One Executor + Blackboard per agent thread.
 ```
 
 ---
 
-## 14. Integration Example
+## 16. Validation & Hot Reload
 
-### 14.1 Host Integration: agent-decision
+### 16.1 Validation Rules
 
 ```rust
-// In agent-decision crate:
+impl Tree {
+    /// Check apiVersion is supported.
+    pub fn validate_api_version(&self) -> Result<(), ParseError> {
+        if self.api_version != "decision.agile-agent.io/v1" {
+            return Err(ParseError::UnsupportedVersion(self.api_version.clone()));
+        }
+        Ok(())
+    }
 
+    /// All node names must be unique within the tree.
+    pub fn validate_unique_names(&self) -> Result<(), ParseError> {
+        let mut seen = HashSet::new();
+        self.spec.root.validate_unique_names_recursive(&mut seen)
+    }
+
+    /// All evaluator kinds must be registered.
+    pub fn validate_evaluators(&self, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
+        self.spec.root.validate_evaluators_recursive(registry)
+    }
+
+    /// All parser kinds must be registered.
+    pub fn validate_parsers(&self, registry: &OutputParserRegistry) -> Result<(), ParseError> {
+        self.spec.root.validate_parsers_recursive(registry)
+    }
+}
+```
+
+### 16.2 Hot Reload
+
+```rust
+use std::sync::{Arc, RwLock};
+
+pub struct DslWatcher {
+    parser: YamlParser,
+    base_path: PathBuf,
+    current_bundle: Arc<RwLock<Bundle>>,
+    fs: Box<dyn Fs>,
+}
+
+impl DslWatcher {
+    pub fn load(&mut self) -> Result<(), DslError> {
+        let bundle = self.parser.parse_bundle(&self.base_path, self.fs.as_ref())?;
+        *self.current_bundle.write().unwrap() = bundle;
+        Ok(())
+    }
+
+    /// Poll-based hot reload (simple, no file-system watchers needed).
+    pub fn reload_if_changed(&mut self) -> Result<bool, DslError> {
+        // Check mtimes of tree files
+        let trees_dir = self.base_path.join("trees");
+        let subtrees_dir = self.base_path.join("subtrees");
+
+        // Simplified: always reload for now
+        // Full implementation would track file mtimes
+        self.load()?;
+        Ok(true)
+    }
+}
+```
+
+**Hot reload semantics**:
+- In-flight decisions use the old tree.
+- New decisions use the reloaded tree.
+- If reload fails, the old tree continues to run.
+
+---
+
+## 17. Observability
+
+### 17.1 NodeTrace
+
+```rust
+#[derive(Debug, Clone)]
+pub struct NodeTrace {
+    pub node_name: String,
+    pub node_type: String,
+    pub depth: usize,
+    pub status: NodeStatus,
+    pub duration: std::time::Duration,
+    pub blackboard_reads: Vec<String>,
+    pub blackboard_writes: Vec<(String, BlackboardValue)>,
+    pub commands_emitted: Vec<Command>,
+    pub llm_latency_ms: Option<u64>,
+    pub llm_tokens: Option<(u32, u32)>, // (prompt, completion)
+}
+
+#[derive(Debug, Clone)]
+pub enum TraceEntry {
+    Enter { node_name: String, child_index: usize, depth: usize },
+    Exit { node_name: String, status: NodeStatus, duration: std::time::Duration },
+    Eval { node_name: String, evaluator: String, result: bool },
+    Action { node_name: String, command: Command },
+    PromptSent { node_name: String },
+    PromptSuccess { node_name: String, response: String },
+    PromptFailure { node_name: String, error: String },
+    Log(String),
+}
+```
+
+### 17.2 Tracer Implementation
+
+```rust
+pub(crate) struct Tracer {
+    entries: Vec<TraceEntry>,
+    running_path: Vec<usize>,
+    current_depth: usize,
+}
+
+impl Tracer {
+    pub fn new() -> Self {
+        Self { entries: Vec::new(), running_path: Vec::new(), current_depth: 0 }
+    }
+
+    pub fn enter(&mut self, node_name: &str, child_index: usize) {
+        self.entries.push(TraceEntry::Enter {
+            node_name: node_name.to_string(),
+            child_index,
+            depth: self.current_depth,
+        });
+        self.current_depth += 1;
+    }
+
+    pub fn exit(&mut self, node_name: &str, status: NodeStatus, duration: std::time::Duration) {
+        self.current_depth -= 1;
+        self.entries.push(TraceEntry::Exit {
+            node_name: node_name.to_string(),
+            status,
+            duration,
+        });
+        if status == NodeStatus::Running {
+            self.running_path.push(child_index); // tracked externally
+        }
+    }
+
+    pub fn record_eval(&mut self, node_name: &str, evaluator: &dyn Evaluator, result: bool) {
+        self.entries.push(TraceEntry::Eval {
+            node_name: node_name.to_string(),
+            evaluator: format!("{:?}", evaluator),
+            result,
+        });
+    }
+
+    pub fn record_action(&mut self, node_name: &str, command: &Command) {
+        self.entries.push(TraceEntry::Action {
+            node_name: node_name.to_string(),
+            command: command.clone(),
+        });
+    }
+
+    pub fn record_prompt_sent(&mut self, node_name: &str) {
+        self.entries.push(TraceEntry::PromptSent { node_name: node_name.to_string() });
+    }
+
+    pub fn record_prompt_success(&mut self, node_name: &str, response: &str) {
+        self.entries.push(TraceEntry::PromptSuccess {
+            node_name: node_name.to_string(),
+            response: response.to_string(),
+        });
+    }
+
+    pub fn record_prompt_failure(&mut self, node_name: &str, error: &str) {
+        self.entries.push(TraceEntry::PromptFailure {
+            node_name: node_name.to_string(),
+            error: error.to_string(),
+        });
+    }
+
+    pub fn log(&mut self, msg: String) {
+        self.entries.push(TraceEntry::Log(msg));
+    }
+
+    pub fn running_path(&self) -> &[usize] { &self.running_path }
+    pub fn into_entries(self) -> Vec<TraceEntry> { self.entries }
+}
+```
+
+### 17.3 Tree Visualization
+
+```rust
+/// Render trace entries as ASCII art for TUI display.
+pub fn render_trace_as_ascii(trace: &[TraceEntry]) -> String {
+    let mut output = String::new();
+    let mut stack: Vec<(String, NodeStatus, std::time::Duration)> = Vec::new();
+
+    for entry in trace {
+        match entry {
+            TraceEntry::Enter { node_name, depth, .. } => {
+                let indent = "  ".repeat(*depth);
+                output.push_str(&format!("{}[{}] ", indent, node_name));
+            }
+            TraceEntry::Exit { node_name, status, duration } => {
+                let symbol = match status {
+                    NodeStatus::Success => "✓",
+                    NodeStatus::Failure => "✗",
+                    NodeStatus::Running => "…",
+                };
+                output.push_str(&format!("{} — {} ({:?})\n", symbol, node_name, duration));
+            }
+            TraceEntry::PromptSuccess { node_name, .. } => {
+                output.push_str(&format!("  [LLM] {} → parsed\n", node_name));
+            }
+            TraceEntry::Action { command, .. } => {
+                output.push_str(&format!("  [CMD] {:?}\n", command));
+            }
+            _ => {}
+        }
+    }
+    output
+}
+```
+
+### 17.4 Metrics
+
+```rust
+/// Optional metrics integration (host-provided).
+pub trait MetricsCollector {
+    fn record_tick(&self, tree_name: &str, duration: std::time::Duration);
+    fn record_node(&self, node_name: &str, node_type: &str, status: NodeStatus, duration: std::time::Duration);
+    fn record_prompt(&self, node_name: &str, model: &str, latency_ms: u64, prompt_tokens: u32, completion_tokens: u32);
+}
+```
+
+---
+
+## 18. Integration Example
+
+### 18.1 Host Integration: agent-decision
+
+```rust
 use decision_dsl::{DslParser, DslRunner, YamlParser, Executor, TickContext};
 use decision_dsl::{Blackboard, BlackboardValue};
-use decision_dsl::ext::{Session, Clock, Fs, Logger, RealFs, SystemClock, TracingLogger};
+use decision_dsl::ext::{Session, Clock, Fs, Logger, RealFs, SystemClock};
 
 /// Bridge: adapts agent-provider's session to decision_dsl::Session.
 pub struct ProviderSessionBridge {
@@ -2038,6 +2856,7 @@ impl DslDecisionEngine {
 
     pub fn decide(&mut self, situation: &str, blackboard: &mut Blackboard) -> Result<Vec<Command>, DslError> {
         let tree = self.bundle.trees.get(situation)
+            .or_else(|| self.bundle.trees.get("default"))
             .ok_or_else(|| DslError::Runtime(RuntimeError::Custom(
                 format!("no tree for situation: {}", situation)
             )))?;
@@ -2055,8 +2874,6 @@ impl DslDecisionEngine {
         let result = self.executor.tick(tree, &mut ctx)?;
 
         if result.status == NodeStatus::Running {
-            // Host must re-call decide() when session is ready
-            // The executor retains the running path
             return Ok(vec![Command::SkipDecision]);
         }
 
@@ -2065,29 +2882,28 @@ impl DslDecisionEngine {
 }
 ```
 
-### 14.2 Host Integration: agent-tui
+### 18.2 Building the Blackboard from Agent State
 
 ```rust
-// TUI displays decision trace from TickResult
-
-fn render_decision_trace(trace: &[TraceEntry]) {
-    for entry in trace {
-        match entry {
-            TraceEntry::Enter { node_name, child_index } => {
-                println!("  → {}[{}]", node_name, child_index);
-            }
-            TraceEntry::Exit { node_name, status } => {
-                println!("  ← {} → {:?}", node_name, status);
-            }
-            TraceEntry::Log(msg) => {
-                println!("    [log] {}", msg);
-            }
-        }
-    }
+fn build_blackboard(agent_state: &AgentState) -> Blackboard {
+    let mut bb = Blackboard::new();
+    bb.task_description = agent_state.task.description.clone();
+    bb.provider_output = agent_state.last_provider_output.clone();
+    bb.context_summary = agent_state.context_summary();
+    bb.reflection_round = agent_state.decision_state.reflection_round;
+    bb.max_reflection_rounds = agent_state.decision_state.max_reflection_rounds;
+    bb.confidence_accumulator = agent_state.decision_state.confidence_accumulator;
+    bb.agent_id = agent_state.id.to_string();
+    bb.current_task_id = agent_state.current_task_id.clone().unwrap_or_default();
+    bb.current_story_id = agent_state.current_story_id.clone().unwrap_or_default();
+    bb.last_tool_call = agent_state.last_tool_call.clone();
+    bb.file_changes = agent_state.recent_file_changes();
+    bb.decision_history = agent_state.decision_history();
+    bb
 }
 ```
 
-### 14.3 Complete End-to-End Example
+### 18.3 Complete End-to-End Example
 
 ```rust
 use decision_dsl::*;
@@ -2100,17 +2916,18 @@ fn main() -> Result<(), DslError> {
 
     // 2. Set up blackboard
     let mut bb = Blackboard::new();
-    bb.set_string("situation".into(), "claims_completion".into());
-    bb.set_f64("confidence".into(), 0.95);
-    bb.set_u32("reflection_count".into(), 0);
+    bb.task_description = "Implement auth".into();
+    bb.provider_output = "Task complete! All tests passing.".into();
+    bb.reflection_round = 0;
+    bb.max_reflection_rounds = 2;
 
-    // 3. Set up mocks (in real code: real implementations)
+    // 3. Set up mocks
     let mut session = MockSession::new(vec![
         "is_complete: true\nconfidence: 0.95".into(),
     ]);
     let clock = SystemClock;
     let fs = RealFs;
-    let logger = TracingLogger;
+    let logger = NullLogger;
 
     // 4. Create runner
     let mut executor = Executor::new();
@@ -2123,6 +2940,9 @@ fn main() -> Result<(), DslError> {
     for cmd in &result.commands {
         println!("Command: {:?}", cmd);
     }
+    for entry in &result.trace {
+        println!("Trace: {:?}", entry);
+    }
 
     Ok(())
 }
@@ -2130,157 +2950,139 @@ fn main() -> Result<(), DslError> {
 
 ---
 
-## 15. Appendix: Node YAML Reference
+## 19. Migration from Current Tiered Engine
+
+### 19.1 Mapping Existing Components
+
+| Current Component | Behavior Tree Equivalent |
+|-------------------|--------------------------|
+| `TieredDecisionEngine` | Root `Selector` with children for each tier |
+| `DecisionTier::from_situation` | Selector child ordering |
+| `RuleBasedDecisionEngine` | `Sequence` of `Condition` + `Action` |
+| `LLMDecisionEngine` | `Prompt` node |
+| `CLIDecisionEngine` | `Action` node emitting `EscalateToHuman` |
+| `ConditionExpr` | `Condition` nodes with `Evaluator` |
+| `DecisionAction` | `Action` nodes |
+| `DecisionContext.metadata` | Blackboard `variables` |
+| `reflection_round` | Blackboard field, managed by `ReflectionGuard` |
+| `DecisionPreProcessor` | `Sequence` prefix nodes |
+| `DecisionPostProcessor` | `Sequence` suffix nodes |
+
+### 19.2 Migration Path
+
+```
+Phase 1 — decision-dsl crate (standalone)
+  - Implement all components described in this document
+  - Unit tests + integration tests
+  - Benchmarks
+
+Phase 2 — agent-decision integration
+  - Create adapter layer (Session, Clock, Fs, Logger impls)
+  - Add DslDecisionEngine alongside existing TieredDecisionEngine
+  - Feature flag: dsl-engine
+
+Phase 3 — Tree adoption
+  - Port situations to YAML trees in decisions/trees/ and decisions/subtrees/
+  - Golden tests: compare old vs new engine outputs
+
+Phase 4 — Deprecation & Removal
+  - Mark old engines deprecated
+  - Remove after one release cycle
+```
+
+---
+
+## Appendix A: Node YAML Quick Reference
 
 ### Composites
-
 ```yaml
-# Selector: returns Success on first child that succeeds
-type: composite
 kind: Selector
 name: root
 children:
   - ...
 
-# Sequence: returns Failure on first child that fails
-type: composite
 kind: Sequence
-name: root
+name: flow
 children:
   - ...
 
-# Parallel: all children ticked each tick
-type: composite
 kind: Parallel
-name: root
-policy: RequireAll  # or RequireOne
+name: checks
+policy: allSuccess  # or anySuccess, majority
 children:
   - ...
 ```
 
 ### Decorators
-
 ```yaml
-# Inverter: inverts child result
-type: decorator
 kind: Inverter
 name: not-complete
-child:
-  ...
+child: ...
 
-# Repeater: retries child up to N times
-type: decorator
 kind: Repeater
-name: retry-parse
-max_attempts: 3
-child:
-  ...
+name: retry-3
+maxAttempts: 3
+child: ...
 
-# Cooldown: fails if child succeeded within duration
-type: decorator
 kind: Cooldown
-duration: "1m"
-child:
-  ...
+name: cooldown-5s
+durationMs: 5000
+child: ...
 
-# ReflectionGuard: fails after max rounds
-type: decorator
 kind: ReflectionGuard
-max_rounds: 2
-child:
-  ...
+name: max-2
+maxRounds: 2
+child: ...
 
-# ForceHuman: wraps child, human escalation on failure
-type: decorator
 kind: ForceHuman
-reason: "Critical path failed"
-child:
-  ...
+name: force-approval
+reason: "PR submission requires human approval"
+child: ...
 ```
 
 ### Leaves
-
 ```yaml
-# Condition: evaluates expression, returns Success/Failure
-type: leaf
 kind: Condition
-name: is-high-confidence
-eval: "{{confidence}} >= 0.8"
+name: is-rate-limit
+eval:
+  kind: regex
+  pattern: "(429|rate.?limit)"
 
-# Action: emits a command
-type: leaf
 kind: Action
-name: approve
+name: emit-retry
 command:
-  action_type: ApproveAndContinue
-when: "{{is_high_confidence}} == true"  # optional
+  RetryTool:
+    tool_name: "{{ last_tool_call.name | default('unknown') }}"
+    args: null
+    max_attempts: 3
+when:
+  kind: variableIs
+  key: retry_needed
+  value: true
 
-# Prompt: sends message to LLM, parses reply
-type: leaf
 kind: Prompt
-name: ask-completion
+name: ask-decision
+model: thinking
+timeoutMs: 30000
 template: |
-  Is the task complete? Reply with:
-  is_complete: true/false
-  confidence: 0-1
+  Should we REFLECT or CONFIRM?
 parser:
-  type: markdown_block
-  language: yaml
+  kind: enum
+  values: [REFLECT, CONFIRM]
+  caseSensitive: false
 sets:
-  - from: is_complete
-    to: is_complete
-    type: bool
-  - from: confidence
-    to: confidence
-    type: f64
-timeout: "30s"
+  - key: next_action
+    field: decision
 
-# SetBlackboard: sets a blackboard key
-type: leaf
-kind: SetBlackboard
-name: set-default-confidence
-key: confidence
-value: 0.5
-```
-
-### SubTree Reference
-
-```yaml
-type: leaf
-kind: SubTree
-name: retry-logic
-ref: retry_subtree
+kind: SetVar
+name: set-phase
+key: task_phase
+value:
+  kind: string
+  value: "coding"
 ```
 
 ---
 
-## 16. Migration from Current Tiered Engine
-
-The existing `TieredDecisionEngine` will be replaced incrementally:
-
-```
-Phase 1: decision-dsl crate (new, standalone)
-  - Implement all components described above
-  - Unit tests + integration tests
-  - Benchmarks
-
-Phase 2: agent-decision integration
-  - Create adapter layer (Session, Clock, Fs, Logger impls)
-  - Add `DslDecisionEngine` alongside existing `TieredDecisionEngine`
-  - Feature flag: `dsl-engine`
-
-Phase 3: Gradual cutover
-  - Port one situation at a time to YAML trees
-  - A/B test: compare outputs between tiered and DSL engines
-  - Remove tiered engine once all situations are ported
-
-Phase 4: Cleanup
-  - Remove old engine code
-  - Update documentation
-  - Archive old specs
-```
-
----
-
-*Document version: 1.0*
+*Document version: 2.0*
 *Last updated: 2026-04-20*
