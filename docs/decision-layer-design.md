@@ -17,7 +17,7 @@
 
 ### 核心层次
 
-| 层次 | 模块 |职责 |
+| 层次 | 模块 | 职责 |
 |------|------|------|
 | **Core** | `context.rs`, `output.rs`, `error.rs`, `types.rs` | 基础类型定义 |
 | **Model** | `situation/`, `action/`, `task/` | 业务模型定义 |
@@ -430,10 +430,10 @@ claims_completion流程:
   Round 2 → confirm_completion OR request_human (达到max_reflection_rounds)
 
 状态变化规则:
-  ON reflect:        reflection_round += 1
+  ON reflect:            reflection_round += 1
   ON confirm_completion: reflection_round = 0 (reset)
-  ON continue:       reflection_round = 0 (reset)
-  ON 达到max:        强制 request_human
+  ON continue:           reflection_round = 0 (reset)
+  ON 达到max:            强制 request_human
 ```
 
 ---
@@ -490,7 +490,8 @@ pub trait DecisionAction: Send + Sync + 'static {
 
 ```rust
 pub trait DecisionPreProcessor {
-    fn process(&self, context: &mut DecisionContext) -> Result<()>;fn processor_name(&self) -> &'static str;
+    fn process(&self, context: &mut DecisionContext) -> Result<()>;
+    fn processor_name(&self) -> &'static str;
     fn clone_boxed(&self) -> Box<dyn DecisionPreProcessor>;
 }
 ```
@@ -502,7 +503,8 @@ pub trait DecisionPreProcessor {
 
 ```rust
 pub trait DecisionPostProcessor {
-    fn process(&self, output: &mut DecisionOutput) -> Result<()>;fn processor_name(&self) -> &'static str;
+    fn process(&self, output: &mut DecisionOutput) -> Result<()>;
+    fn processor_name(&self) -> &'static str;
     fn clone_boxed(&self) -> Box<dyn DecisionPostProcessor>;
 }
 ```
@@ -692,7 +694,7 @@ decision/src/
 │   ├── tiered_engine.rs      # 分层决策引擎
 │   ├── cli_engine.rs         # CLI引擎 (人工决策)
 │   ├── mock_engine.rs        # Mock引擎 (测试)
-│   ├── llm_caller.rs         # LLMCaller trait
+│   └── llm_caller.rs         # LLMCaller trait
 │
 ├── pipeline/                 # 流程编排层
 │   ├── pipeline.rs           # DecisionPipeline
