@@ -134,6 +134,11 @@ fn run_codex(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start codex executable `{executable}`"))?;
+
+    // Send PID to event channel for lifecycle tracking
+    let pid = child.id();
+    let _ = event_tx.send(ProviderEvent::ProviderPid(pid));
+
     logging::debug_event(
         "provider.codex.process_spawned",
         "spawned Codex process",
@@ -142,6 +147,7 @@ fn run_codex(
             "cwd": cwd.display().to_string(),
             "args": args,
             "resuming_thread": thread_id_for_log,
+            "pid": pid,
         }),
     );
 
@@ -263,6 +269,10 @@ fn run_codex_with_context(
         )
     })?;
 
+    // Send PID to event channel for lifecycle tracking
+    let pid = child.id();
+    let _ = event_tx.send(ProviderEvent::ProviderPid(pid));
+
     logging::debug_event(
         "provider.codex.process_spawned_with_context",
         "spawned Codex process with launch context",
@@ -272,6 +282,7 @@ fn run_codex_with_context(
             "args": args,
             "env_count": spec.effective_env.len(),
             "resuming_thread": thread_id_for_log,
+            "pid": pid,
         }),
     );
 

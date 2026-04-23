@@ -100,6 +100,11 @@ fn run_claude(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start claude executable `{executable}`"))?;
+
+    // Send PID to event channel for lifecycle tracking
+    let pid = child.id();
+    let _ = event_tx.send(ProviderEvent::ProviderPid(pid));
+
     logging::debug_event(
         "provider.claude.process_spawned",
         "spawned Claude process",
@@ -107,6 +112,7 @@ fn run_claude(
             "executable": executable,
             "cwd": cwd.display().to_string(),
             "args": args,
+            "pid": pid,
         }),
     );
 
@@ -214,6 +220,10 @@ fn run_claude_with_context(
         .spawn()
         .with_context(|| format!("failed to start claude executable `{executable}`"))?;
 
+    // Send PID to event channel for lifecycle tracking
+    let pid = child.id();
+    let _ = event_tx.send(ProviderEvent::ProviderPid(pid));
+
     logging::debug_event(
         "provider.claude.process_spawned_with_context",
         "spawned Claude process with launch context",
@@ -222,6 +232,7 @@ fn run_claude_with_context(
             "cwd": cwd.display().to_string(),
             "args": full_args,
             "env_count": spec.effective_env.len(),
+            "pid": pid,
         }),
     );
 

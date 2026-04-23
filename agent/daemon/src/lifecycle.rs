@@ -149,7 +149,16 @@ impl DaemonLifecycle {
         // 3. Wait briefly for existing connections to drain.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // 4. Write snapshots from SessionManager if available.
+        // 4. Terminate all active provider subprocesses (claude/codex).
+        if let Some(mgr) = &session_mgr {
+            if let Err(e) = mgr.terminate_all_provider_processes().await {
+                tracing::warn!("failed to terminate provider processes: {}", e);
+            }
+            // Wait briefly for processes to handle SIGTERM
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        // 5. Write snapshots from SessionManager if available.
         //    - ShutdownSnapshot (core format) for resume on next startup
         //    - SnapshotFile (protocol format) for external tools / monitoring
         if let Some(mgr) = session_mgr {
@@ -184,7 +193,7 @@ impl DaemonLifecycle {
             }
         }
 
-        // 5. Create backup of snapshot + event log (retain last 3).
+        // 6. Create backup of snapshot + event log (retain last 3).
         if let Some(ref path) = snapshot_path {
             // Use snapshot_path's parent, fallback to config_path's parent (workplace dir)
             let backup_dir = path.parent()
@@ -195,7 +204,7 @@ impl DaemonLifecycle {
             }
         }
 
-        // 6. Delete daemon.json.
+        // 7. Delete daemon.json.
         DaemonConfig::remove(&self.config_path)
             .await
             .context("remove daemon.json")?;

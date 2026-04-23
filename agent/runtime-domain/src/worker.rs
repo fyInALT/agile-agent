@@ -262,6 +262,12 @@ impl Worker {
             DomainEvent::SessionHandle(_) => {
                 vec![]
             }
+
+            // ── Provider PID (internal lifecycle) ──────────────────────
+            DomainEvent::ProviderPid(_) => {
+                // Internal event for tracking subprocess PID, no state change needed
+                vec![]
+            }
         };
 
         Ok(commands)

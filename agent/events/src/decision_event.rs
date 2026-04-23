@@ -275,6 +275,7 @@ impl From<&DomainEvent> for Option<DecisionEvent> {
             }),
 
             // ── System ────────────────────────────────────────────
+            DomainEvent::ProviderPid(_) => None, // Internal lifecycle event, no decision needed
             DomainEvent::Error(msg) => Some(DecisionEvent::Error {
                 message: msg.clone(),
                 error_type: None,

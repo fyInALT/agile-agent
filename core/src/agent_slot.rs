@@ -60,6 +60,8 @@ pub struct WorkerHandle {
     event_rx: Option<Receiver<ProviderEvent>>,
     /// Thread handle for join/cancel operations
     thread_handle: Option<JoinHandle<()>>,
+    /// PID of the provider subprocess (claude/codex) for cleanup on shutdown
+    provider_pid: Option<u32>,
     /// Last activity timestamp
     last_activity: Instant,
     /// Decision agent creation policy
@@ -94,6 +96,7 @@ impl std::fmt::Debug for WorkerHandle {
             .field("transcript_len", &self.transcript.len())
             .field("assigned_task_id", &self.assigned_task_id)
             .field("has_provider_thread", &self.has_provider_thread())
+            .field("provider_pid", &self.provider_pid)
             .field("last_activity", &self.last_activity)
             .field("decision_policy", &self.decision_policy)
             .field("launch_bundle", &self.launch_bundle.is_some())
@@ -119,6 +122,7 @@ impl WorkerHandle {
             assigned_task_id: None,
             event_rx: None,
             thread_handle: None,
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
@@ -151,6 +155,7 @@ impl WorkerHandle {
             assigned_task_id: None,
             event_rx: None,
             thread_handle: None,
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
@@ -184,6 +189,7 @@ impl WorkerHandle {
             assigned_task_id: None,
             event_rx: Some(event_rx),
             thread_handle: Some(thread_handle),
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
@@ -218,6 +224,7 @@ impl WorkerHandle {
             assigned_task_id: None,
             event_rx: Some(event_rx),
             thread_handle: Some(thread_handle),
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
@@ -285,6 +292,7 @@ impl WorkerHandle {
             assigned_task_id,
             event_rx: None,
             thread_handle: None,
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy: DecisionAgentCreationPolicy::default(),
             launch_bundle: None,
@@ -318,6 +326,7 @@ impl WorkerHandle {
             assigned_task_id: None,
             event_rx: None,
             thread_handle: None,
+            provider_pid: None,
             last_activity: Instant::now(),
             decision_policy,
             launch_bundle: None,
@@ -527,6 +536,71 @@ impl WorkerHandle {
         self.event_rx.is_some() && self.thread_handle.is_some()
     }
 
+    /// Get the provider subprocess PID (if running)
+    pub fn provider_pid(&self) -> Option<u32> {
+        self.provider_pid
+    }
+
+    /// Set the provider subprocess PID
+    pub fn set_provider_pid(&mut self, pid: u32) {
+        logging::debug_event(
+            "slot.pid.set",
+            "provider subprocess pid set",
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "pid": pid}),
+        );
+        self.provider_pid = Some(pid);
+        self.last_activity = Instant::now();
+    }
+
+    /// Clear the provider subprocess PID (when process exits normally)
+    pub fn clear_provider_pid(&mut self) {
+        self.provider_pid = None;
+    }
+
+    /// Kill the provider subprocess if it's still running.
+    ///
+    /// Returns true if a kill signal was sent, false if no PID was tracked.
+    /// Uses SIGTERM on Unix, TerminateProcess equivalent on other platforms.
+    #[cfg(unix)]
+    pub fn kill_provider_subprocess(&mut self) -> bool {
+        if let Some(pid) = self.provider_pid {
+            // Send SIGTERM to the provider subprocess
+            let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            if result == 0 {
+                logging::debug_event(
+                    "slot.pid.kill",
+                    "sent SIGTERM to provider subprocess",
+                    serde_json::json!({"agent_id": self.agent_id.as_str(), "pid": pid}),
+                );
+            } else {
+                logging::warn_event(
+                    "slot.pid.kill_failed",
+                    "failed to send SIGTERM to provider subprocess",
+                    serde_json::json!({"agent_id": self.agent_id.as_str(), "pid": pid, "errno": std::io::Error::last_os_error().raw_os_error()}),
+                );
+            }
+            self.provider_pid = None;
+            return true;
+        }
+        false
+    }
+
+    #[cfg(not(unix))]
+    pub fn kill_provider_subprocess(&mut self) -> bool {
+        // On non-Unix platforms, we can't easily kill by PID without more infrastructure
+        // This is a placeholder; Windows would need OpenProcess + TerminateProcess
+        if self.provider_pid.is_some() {
+            logging::warn_event(
+                "slot.pid.kill_unsupported",
+                "provider subprocess kill not implemented on this platform",
+                serde_json::json!({"agent_id": self.agent_id.as_str(), "pid": self.provider_pid}),
+            );
+            self.provider_pid = None;
+            return true;
+        }
+        false
+    }
+
     /// Get the Worker aggregate root
     pub fn worker(&self) -> &Worker {
         &self.worker
@@ -599,10 +673,11 @@ impl WorkerHandle {
         logging::debug_event(
             "slot.thread.clear",
             "provider thread cleared",
-            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label()}),
+            serde_json::json!({"agent_id": self.agent_id.as_str(), "codename": self.codename.as_str(), "old_status": self.status.label(), "provider_pid": self.provider_pid}),
         );
         self.event_rx = None;
         self.thread_handle = None;
+        self.provider_pid = None;
     }
 
     // =========================================================================

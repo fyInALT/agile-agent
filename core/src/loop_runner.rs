@@ -462,6 +462,9 @@ fn consume_provider_until_finished(
                     }
                     on_state_change(state)?;
                 }
+                ProviderEvent::ProviderPid(_pid) => {
+                    // PID is tracked in AgentSlot for shutdown cleanup; ignore in TUI loop
+                }
                 ProviderEvent::Finished => {
                     state.finish_provider_response();
                     on_state_change(state)?;

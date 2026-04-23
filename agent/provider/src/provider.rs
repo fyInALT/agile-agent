@@ -359,6 +359,7 @@ mod tests {
                 | ProviderEvent::PatchApplyStarted { .. }
                 | ProviderEvent::PatchApplyFinished { .. }
                 | ProviderEvent::SessionHandle(_)
+                | ProviderEvent::ProviderPid(_)
                 | ProviderEvent::Error(_) => {}
             }
         }

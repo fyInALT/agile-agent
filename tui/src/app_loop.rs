@@ -1146,6 +1146,9 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         should_clear_provider_rx = true;
                         break;
                     }
+                    ProviderEvent::ProviderPid(_pid) => {
+                        // PID is tracked for shutdown cleanup; TUI doesn't need to display it
+                    }
                     ProviderEvent::Finished => {
                         state.flush_active_entries_to_transcript();
                         state.app_mut().finish_provider_response();
@@ -2314,6 +2317,14 @@ fn handle_agent_provider_event(
                 state
                     .app_mut()
                     .push_image_generation(call_id, revised_prompt, result, saved_path);
+            }
+        }
+        ProviderEvent::ProviderPid(pid) => {
+            // Save PID for shutdown cleanup
+            if let Some(pool) = state.agent_pool.as_mut()
+                && let Some(slot) = pool.get_slot_mut_by_id(&agent_id)
+            {
+                slot.set_provider_pid(pid);
             }
         }
     }

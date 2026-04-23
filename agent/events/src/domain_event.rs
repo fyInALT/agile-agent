@@ -150,6 +150,9 @@ pub enum DomainEvent {
     },
 
     // ── System ─────────────────────────────────────────────────
+    /// Provider subprocess PID for lifecycle tracking
+    ProviderPid(u32),
+
     /// Generic error message
     Error(String),
 
@@ -179,6 +182,7 @@ impl DomainEvent {
                 | DomainEvent::McpToolCallStarted { .. }
                 | DomainEvent::PatchApplyStarted { .. }
                 | DomainEvent::SessionHandle(_)
+                | DomainEvent::ProviderPid(_)
         )
     }
 

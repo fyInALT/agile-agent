@@ -72,6 +72,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "libc",
  "pathdiff",
  "serde",
  "serde_json",

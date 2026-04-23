@@ -401,6 +401,50 @@ impl EventLoop {
         vec![]
     }
 
+    /// Terminate all active provider subprocesses (claude/codex).
+    ///
+    /// This should be called during shutdown to ensure child processes
+    /// are properly terminated before the daemon exits.
+    pub async fn terminate_all_provider_processes(&self) -> Result<()> {
+        let inner = self.inner.lock().await;
+        let slots = inner.agent_pool.slots();
+
+        for slot in slots {
+            if let Some(pid) = slot.provider_pid() {
+                // Send SIGTERM to the subprocess
+                #[cfg(unix)]
+                {
+                    use nix::libc::{kill, SIGTERM};
+                    let result = unsafe { kill(pid as i32, SIGTERM) };
+                    if result == 0 {
+                        tracing::info!(
+                            agent_id = %slot.agent_id().as_str(),
+                            pid = pid,
+                            "sent SIGTERM to provider subprocess"
+                        );
+                    } else {
+                        tracing::warn!(
+                            agent_id = %slot.agent_id().as_str(),
+                            pid = pid,
+                            error = std::io::Error::last_os_error().to_string(),
+                            "failed to send SIGTERM to provider subprocess"
+                        );
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    tracing::warn!(
+                        agent_id = %slot.agent_id().as_str(),
+                        pid = pid,
+                        "SIGTERM not available on non-Unix platforms, subprocess may linger"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Save a shutdown snapshot in agent-core format so that `RuntimeSession::bootstrap`
     /// can resume from it on the next startup.
     pub async fn save_shutdown_snapshot(&self, reason: ShutdownReason) -> Result<PathBuf> {
@@ -688,6 +732,19 @@ impl EventLoop {
 
                 // Update slot state based on event type.
                 match &event {
+                    agent_core::ProviderEvent::ProviderPid(pid) => {
+                        // Save PID for cleanup on shutdown
+                        if let Some(slot) =
+                            inner.agent_pool.get_slot_mut_by_id(&agent_id)
+                        {
+                            slot.set_provider_pid(*pid);
+                            tracing::debug!(
+                                agent_id = %agent_id.as_str(),
+                                pid = pid,
+                                "provider subprocess PID saved"
+                            );
+                        }
+                    }
                     agent_core::ProviderEvent::Finished => {
                         if let Some(slot) =
                             inner.agent_pool.get_slot_mut_by_id(&agent_id)
@@ -697,6 +754,7 @@ impl EventLoop {
                                     .transition_to(CoreAgentStatus::idle());
                             }
                             slot.clear_provider_thread();
+                            slot.clear_provider_pid();
                         }
                         inner.event_aggregator.remove_receiver(&agent_id);
                     }
@@ -711,6 +769,7 @@ impl EventLoop {
                                 CoreAgentStatus::blocked(error.clone()),
                             );
                             slot.clear_provider_thread();
+                            slot.clear_provider_pid();
                         }
                         inner.event_aggregator.remove_receiver(&agent_id);
                     }
