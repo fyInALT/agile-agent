@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use agent_decision::{BlockedState, BlockingReason};
+use agent_runtime_domain::worker_state::WorkerState;
 
 /// Status of an agent slot in the multi-agent runtime
 #[derive(Debug, Clone)]
@@ -372,6 +373,41 @@ impl AgentSlotStatus {
         }
     }
 
+    /// Map this operational status to the domain-model `WorkerState`.
+    ///
+    /// This is the bridge between the operational model (`AgentSlotStatus`)
+    /// and the domain model (`WorkerState`). Information loss is inherent
+    /// because `WorkerState` is intentionally simpler.
+    pub fn to_worker_state(&self) -> WorkerState {
+        match self {
+            Self::Idle => WorkerState::idle(),
+            Self::Starting => WorkerState::starting(),
+            Self::Responding { .. } => WorkerState::responding_streaming(),
+            Self::ToolExecuting { tool_name } => WorkerState::processing_tool(tool_name.clone()),
+            Self::Finishing => WorkerState::finishing(),
+            Self::Stopping => WorkerState::stopping(),
+            Self::Stopped { reason } => {
+                // Heuristic: "error" or "fail" in reason → Failed, otherwise Completed
+                let lower = reason.to_lowercase();
+                if lower.contains("error") || lower.contains("fail") || lower.contains("panic") {
+                    WorkerState::failed(reason.clone())
+                } else {
+                    WorkerState::completed()
+                }
+            }
+            Self::Error { message } => WorkerState::failed(message.clone()),
+            Self::Blocked { reason } => WorkerState::blocked(reason.clone()),
+            Self::BlockedForDecision { blocked_state } => {
+                WorkerState::blocked(blocked_state.reason().reason_type().to_string())
+            }
+            Self::Paused { reason } => WorkerState::paused(reason.clone()),
+            Self::WaitingForInput { .. } => WorkerState::waiting_for_input(),
+            Self::Resting { blocked_state, .. } => {
+                WorkerState::resting(blocked_state.reason().expires_at())
+            }
+        }
+    }
+
     /// Get a human-readable label for the status
     pub fn label(&self) -> String {
         match self {
@@ -571,5 +607,111 @@ mod tests {
         assert!(!AgentSlotStatus::idle().is_blocked());
         assert!(!AgentSlotStatus::responding_now().is_blocked());
         assert!(!AgentSlotStatus::stopped("test").is_blocked());
+    }
+
+    // ── to_worker_state mapping tests ───────────────────────────
+
+    #[test]
+    fn to_worker_state_idle() {
+        assert_eq!(AgentSlotStatus::idle().to_worker_state(), WorkerState::idle());
+    }
+
+    #[test]
+    fn to_worker_state_starting() {
+        assert_eq!(AgentSlotStatus::starting().to_worker_state(), WorkerState::starting());
+    }
+
+    #[test]
+    fn to_worker_state_responding() {
+        assert_eq!(
+            AgentSlotStatus::responding_now().to_worker_state(),
+            WorkerState::responding_streaming()
+        );
+    }
+
+    #[test]
+    fn to_worker_state_tool_executing() {
+        assert_eq!(
+            AgentSlotStatus::tool_executing("exec").to_worker_state(),
+            WorkerState::processing_tool("exec")
+        );
+    }
+
+    #[test]
+    fn to_worker_state_finishing() {
+        assert_eq!(
+            AgentSlotStatus::finishing().to_worker_state(),
+            WorkerState::finishing()
+        );
+    }
+
+    #[test]
+    fn to_worker_state_stopping() {
+        assert_eq!(
+            AgentSlotStatus::stopping().to_worker_state(),
+            WorkerState::stopping()
+        );
+    }
+
+    #[test]
+    fn to_worker_state_stopped_success() {
+        assert_eq!(
+            AgentSlotStatus::stopped("completed").to_worker_state(),
+            WorkerState::completed()
+        );
+    }
+
+    #[test]
+    fn to_worker_state_stopped_error() {
+        assert_eq!(
+            AgentSlotStatus::stopped("error: panic").to_worker_state(),
+            WorkerState::failed("error: panic")
+        );
+    }
+
+    #[test]
+    fn to_worker_state_error() {
+        assert_eq!(
+            AgentSlotStatus::error("oom").to_worker_state(),
+            WorkerState::failed("oom")
+        );
+    }
+
+    #[test]
+    fn to_worker_state_blocked() {
+        assert_eq!(
+            AgentSlotStatus::blocked("human").to_worker_state(),
+            WorkerState::blocked("human")
+        );
+    }
+
+    #[test]
+    fn to_worker_state_blocked_for_decision() {
+        let blocked_state = test_blocked_state();
+        let mapped = AgentSlotStatus::blocked_for_decision(blocked_state).to_worker_state();
+        assert_eq!(mapped, WorkerState::blocked("human_decision"));
+    }
+
+    #[test]
+    fn to_worker_state_paused() {
+        assert_eq!(
+            AgentSlotStatus::paused("user").to_worker_state(),
+            WorkerState::paused("user")
+        );
+    }
+
+    #[test]
+    fn to_worker_state_waiting_for_input() {
+        assert_eq!(
+            AgentSlotStatus::waiting_for_input().to_worker_state(),
+            WorkerState::waiting_for_input()
+        );
+    }
+
+    #[test]
+    fn to_worker_state_resting() {
+        let blocked_state = test_blocked_state();
+        let mapped = AgentSlotStatus::resting(blocked_state).to_worker_state();
+        assert!(matches!(mapped, WorkerState::Resting { until: Some(_) }));
     }
 }

@@ -800,6 +800,21 @@ impl WorkerHandle {
         self.status = new_status;
         self.last_activity = Instant::now();
 
+        // NEW: Synchronize WorkerState with AgentSlotStatus
+        let target_worker_state = self.status.to_worker_state();
+        if let Err(e) = self.worker.transition_state(target_worker_state.clone()) {
+            logging::warn_event(
+                "slot.worker_sync_failed",
+                "WorkerState transition failed after AgentSlotStatus change",
+                serde_json::json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "slot_status": self.status.label(),
+                    "target_worker_state": target_worker_state.label(),
+                    "error": e.to_string(),
+                }),
+            );
+        }
+
         logging::debug_event(
             "slot.transition.complete",
             "status transition completed",
@@ -1824,6 +1839,61 @@ mod tests {
         // Draining again should yield nothing
         let commands = slot.drain_commands();
         assert!(commands.is_empty());
+    }
+
+    // ── WorkerState sync tests (Sprint 8) ───────────────────────
+
+    #[test]
+    fn transition_to_syncs_worker_state_idle_to_starting() {
+        let mut slot = make_slot();
+        assert!(slot.worker().state().is_idle());
+
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::starting()).unwrap();
+        assert!(slot.worker().state().is_active());
+        assert!(matches!(slot.worker().state(), crate::worker_state::WorkerState::Starting));
+    }
+
+    #[test]
+    fn transition_to_syncs_worker_state_to_blocked() {
+        let mut slot = make_slot();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::starting()).unwrap();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::blocked("decision")).unwrap();
+
+        assert!(slot.worker().state().is_blocked());
+        assert!(matches!(slot.worker().state(), crate::worker_state::WorkerState::Blocked { .. }));
+    }
+
+    #[test]
+    fn transition_to_syncs_worker_state_blocked_to_idle() {
+        let mut slot = make_slot();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::starting()).unwrap();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::blocked("decision")).unwrap();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::idle()).unwrap();
+
+        assert!(slot.worker().state().is_idle());
+    }
+
+    #[test]
+    fn transition_to_syncs_worker_state_to_paused() {
+        let mut slot = make_slot();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::starting()).unwrap();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::paused("user")).unwrap();
+
+        assert!(slot.worker().state().is_paused());
+    }
+
+    #[test]
+    fn transition_to_does_not_fail_when_worker_sync_fails() {
+        // AgentSlotStatus allows self-loops (e.g., Resting → Resting).
+        // WorkerState does NOT allow self-loops.
+        // This tests that the slot transition succeeds even if WorkerState sync fails.
+        let mut slot = make_slot();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::starting()).unwrap();
+        slot.transition_to(crate::agent_slot::AgentSlotStatus::blocked("rate_limit")).unwrap();
+
+        // Self-loop: Blocked → Blocked is valid for AgentSlotStatus but not WorkerState
+        let result = slot.transition_to(crate::agent_slot::AgentSlotStatus::blocked("rate_limit"));
+        assert!(result.is_ok(), "AgentSlotStatus transition should succeed even if WorkerState sync fails");
     }
 }
 

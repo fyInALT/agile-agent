@@ -272,6 +272,19 @@ impl Worker {
         &self.state
     }
 
+    /// Transition the worker's state to `target`.
+    ///
+    /// Validates the transition using `WorkerState::can_transition_to` and
+    /// updates `self.state` on success. This is the **only** way to mutate
+    /// `WorkerState` from outside the `apply()` event pipeline — used by
+    /// `AgentSlot::transition_to()` to keep operational and domain states
+    /// in sync.
+    pub fn transition_state(&mut self, target: WorkerState) -> Result<(), WorkerError> {
+        let new_state = self.state.transition_to(target)?;
+        self.state = new_state;
+        Ok(())
+    }
+
     /// Get agent ID
     pub fn agent_id(&self) -> &AgentId {
         &self.agent_id
@@ -777,5 +790,60 @@ mod tests {
             status: agent_events::PatchApplyStatus::Completed,
         }).unwrap();
         assert!(cmds.is_empty());
+    }
+
+    // ── transition_state tests ──────────────────────────────────
+
+    #[test]
+    fn transition_state_valid() {
+        let mut w = Worker::new(
+            AgentId::new("ag-1"),
+            AgentCodename::new("test"),
+            AgentRole::Developer,
+        );
+        assert!(w.state().is_idle());
+
+        w.transition_state(WorkerState::starting()).unwrap();
+        assert!(w.state().is_active());
+
+        w.transition_state(WorkerState::responding_streaming()).unwrap();
+        assert!(matches!(w.state(), WorkerState::Responding { .. }));
+    }
+
+    #[test]
+    fn transition_state_invalid() {
+        let mut w = Worker::new(
+            AgentId::new("ag-1"),
+            AgentCodename::new("test"),
+            AgentRole::Developer,
+        );
+        let result = w.transition_state(WorkerState::responding_streaming());
+        assert!(result.is_err());
+        assert!(w.state().is_idle()); // state unchanged
+    }
+
+    #[test]
+    fn transition_state_to_blocked() {
+        let mut w = Worker::new(
+            AgentId::new("ag-1"),
+            AgentCodename::new("test"),
+            AgentRole::Developer,
+        );
+        w.transition_state(WorkerState::starting()).unwrap();
+        w.transition_state(WorkerState::blocked("decision")).unwrap();
+        assert!(w.state().is_blocked());
+    }
+
+    #[test]
+    fn transition_state_from_blocked_to_idle() {
+        let mut w = Worker::new(
+            AgentId::new("ag-1"),
+            AgentCodename::new("test"),
+            AgentRole::Developer,
+        );
+        w.transition_state(WorkerState::starting()).unwrap();
+        w.transition_state(WorkerState::blocked("decision")).unwrap();
+        w.transition_state(WorkerState::idle()).unwrap();
+        assert!(w.state().is_idle());
     }
 }
