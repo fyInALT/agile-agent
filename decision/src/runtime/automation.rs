@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::model::task::{Task, TaskStatus};
+use crate::model::task::{Task, DecisionTaskStatus};
 
 // ============================================================================
 // Story 11.1: Prompt Template Structure
@@ -554,7 +554,7 @@ impl DecisionFilter {
         }
 
         // Task pending confirmation → Confirm
-        if task.status == TaskStatus::PendingConfirmation {
+        if task.status == DecisionTaskStatus::PendingConfirmation {
             return WorkflowAction::ConfirmCompletion;
         }
 

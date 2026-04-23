@@ -4,7 +4,7 @@
 //! and health monitoring for the decision agent.
 
 use crate::core::error::DecisionError;
-use crate::state::lifecycle::AgentId;
+use crate::state::lifecycle::DecisionAgentId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -477,7 +477,7 @@ impl RecoveryAction {
 #[derive(Debug, Clone)]
 pub struct RecoveryContext {
     /// Agent ID
-    pub agent_id: AgentId,
+    pub agent_id: DecisionAgentId,
 
     /// Current retry count
     pub retry_count: u8,
@@ -499,7 +499,7 @@ pub struct RecoveryContext {
 }
 
 impl RecoveryContext {
-    pub fn new(agent_id: AgentId, max_retries: u8) -> Self {
+    pub fn new(agent_id: DecisionAgentId, max_retries: u8) -> Self {
         Self {
             agent_id,
             retry_count: 0,
@@ -935,7 +935,7 @@ mod tests {
 
     #[test]
     fn test_recovery_context_new() {
-        let ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         assert_eq!(ctx.retry_count, 0);
         assert_eq!(ctx.engine_switch_count, 0);
         assert!(!ctx.human_requested);
@@ -944,21 +944,21 @@ mod tests {
 
     #[test]
     fn test_recovery_context_determine_level() {
-        let ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         assert_eq!(ctx.determine_level(), RecoveryLevel::AutoRetry);
 
-        let mut ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let mut ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         ctx.retry_count = 2;
         assert_eq!(ctx.determine_level(), RecoveryLevel::AdjustedRetry);
 
-        let mut ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let mut ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         ctx.retry_count = 3;
         assert_eq!(ctx.determine_level(), RecoveryLevel::SwitchEngine);
     }
 
     #[test]
     fn test_recovery_context_determine_action_internal_error() {
-        let ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         let err = DecisionAgentError::InternalError;
         let action = ctx.determine_action(&err);
         assert!(matches!(action, RecoveryAction::FullReset));
@@ -966,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_recovery_context_determine_action_session_lost() {
-        let ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         let err = DecisionAgentError::SessionLost;
         let action = ctx.determine_action(&err);
         assert!(matches!(action, RecoveryAction::RecreateSession));
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn test_recovery_context_determine_action_context_parse() {
-        let ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         let err = DecisionAgentError::ContextParseError;
         let action = ctx.determine_action(&err);
         assert!(matches!(action, RecoveryAction::RebuildContext));
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn test_recovery_context_increment() {
-        let mut ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let mut ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         ctx.increment_retry();
         assert_eq!(ctx.retry_count, 1);
         assert_eq!(ctx.health.consecutive_failures, 1);
@@ -996,7 +996,7 @@ mod tests {
 
     #[test]
     fn test_recovery_context_record_success() {
-        let mut ctx = RecoveryContext::new(AgentId::new("agent-1"), 3);
+        let mut ctx = RecoveryContext::new(DecisionAgentId::new("agent-1"), 3);
         ctx.retry_count = 2;
         ctx.engine_switch_count = 1;
         ctx.human_requested = true;

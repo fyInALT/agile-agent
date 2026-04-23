@@ -134,4 +134,4 @@ pub use engine::tiered_engine::TieredDecisionEngine;
 pub use engine::task_engine::TaskDecisionEngine;
 
 /// Task entity
-pub use model::task::{Task, TaskStatus, TaskId};
+pub use model::task::{Task, DecisionTaskStatus, DecisionTaskId};

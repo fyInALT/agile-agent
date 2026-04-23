@@ -13,17 +13,17 @@ use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 
 // Import types from agent-decision
-use agent_decision::task::{Task, TaskId, TaskStatus};
+use agent_decision::task::{Task, DecisionTaskId, DecisionTaskStatus};
 
 /// Task information for display
 #[derive(Debug, Clone)]
 pub struct TaskInfo {
     /// Task ID
-    pub id: TaskId,
+    pub id: DecisionTaskId,
     /// Task description
     pub description: String,
     /// Current status
-    pub status: TaskStatus,
+    pub status: DecisionTaskStatus,
     /// Reflection count
     pub reflection_count: usize,
     /// Confirmation count
@@ -57,15 +57,15 @@ pub enum TaskPanelCommand {
     /// No action
     None,
     /// Select a task for detail view
-    SelectTask { id: TaskId },
+    SelectTask { id: DecisionTaskId },
     /// Request refresh
     Refresh,
     /// Force reflection
-    ForceReflect { id: TaskId },
+    ForceReflect { id: DecisionTaskId },
     /// Force confirmation
-    ForceConfirm { id: TaskId },
+    ForceConfirm { id: DecisionTaskId },
     /// Cancel task
-    CancelTask { id: TaskId },
+    CancelTask { id: DecisionTaskId },
 }
 
 impl Default for TaskPanel {
@@ -111,7 +111,7 @@ impl TaskPanel {
     }
 
     /// Get selected task ID
-    pub fn selected_task_id(&self) -> Option<TaskId> {
+    pub fn selected_task_id(&self) -> Option<DecisionTaskId> {
         self.tasks.get(self.selected_index).map(|t| t.id.clone())
     }
 
@@ -135,30 +135,30 @@ impl TaskPanel {
     }
 
     /// Get status display text
-    pub fn status_text(status: &TaskStatus) -> &'static str {
+    pub fn status_text(status: &DecisionTaskStatus) -> &'static str {
         match status {
-            TaskStatus::Pending => "Pending",
-            TaskStatus::InProgress => "In Progress",
-            TaskStatus::Reflecting => "Reflecting",
-            TaskStatus::PendingConfirmation => "Confirming",
-            TaskStatus::NeedsHumanDecision => "Needs Decision",
-            TaskStatus::Paused => "Paused",
-            TaskStatus::Completed => "Completed",
-            TaskStatus::Cancelled => "Cancelled",
+            DecisionTaskStatus::Pending => "Pending",
+            DecisionTaskStatus::InProgress => "In Progress",
+            DecisionTaskStatus::Reflecting => "Reflecting",
+            DecisionTaskStatus::PendingConfirmation => "Confirming",
+            DecisionTaskStatus::NeedsHumanDecision => "Needs Decision",
+            DecisionTaskStatus::Paused => "Paused",
+            DecisionTaskStatus::Completed => "Completed",
+            DecisionTaskStatus::Cancelled => "Cancelled",
         }
     }
 
     /// Get status indicator symbol
-    pub fn status_symbol(status: &TaskStatus) -> &'static str {
+    pub fn status_symbol(status: &DecisionTaskStatus) -> &'static str {
         match status {
-            TaskStatus::Pending => "○",
-            TaskStatus::InProgress => "◐",
-            TaskStatus::Reflecting => "↻",
-            TaskStatus::PendingConfirmation => "⏳",
-            TaskStatus::NeedsHumanDecision => "⚠",
-            TaskStatus::Paused => "⏸",
-            TaskStatus::Completed => "●",
-            TaskStatus::Cancelled => "✕",
+            DecisionTaskStatus::Pending => "○",
+            DecisionTaskStatus::InProgress => "◐",
+            DecisionTaskStatus::Reflecting => "↻",
+            DecisionTaskStatus::PendingConfirmation => "⏳",
+            DecisionTaskStatus::NeedsHumanDecision => "⚠",
+            DecisionTaskStatus::Paused => "⏸",
+            DecisionTaskStatus::Completed => "●",
+            DecisionTaskStatus::Cancelled => "✕",
         }
     }
 
@@ -287,11 +287,11 @@ mod tests {
         TaskInfo::from(task)
     }
 
-    fn create_test_task_with_status(description: &str, status: TaskStatus) -> TaskInfo {
+    fn create_test_task_with_status(description: &str, status: DecisionTaskStatus) -> TaskInfo {
         let mut task = Task::new(description.to_string(), vec![]);
-        if status != TaskStatus::Pending {
-            let _ = task.transition_to(TaskStatus::InProgress);
-            if status != TaskStatus::InProgress {
+        if status != DecisionTaskStatus::Pending {
+            let _ = task.transition_to(DecisionTaskStatus::InProgress);
+            if status != DecisionTaskStatus::InProgress {
                 let _ = task.transition_to(status);
             }
         }
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn t14_1_t2_status_displayed_correctly() {
-        let task = create_test_task_with_status("Test", TaskStatus::InProgress);
+        let task = create_test_task_with_status("Test", DecisionTaskStatus::InProgress);
         let panel = TaskPanel::with_tasks(vec![task]);
 
         let status = TaskPanel::status_text(&panel.tasks[0].status);
@@ -352,10 +352,10 @@ mod tests {
 
     #[test]
     fn test_status_symbols() {
-        assert_eq!(TaskPanel::status_symbol(&TaskStatus::Pending), "○");
-        assert_eq!(TaskPanel::status_symbol(&TaskStatus::InProgress), "◐");
-        assert_eq!(TaskPanel::status_symbol(&TaskStatus::Completed), "●");
-        assert_eq!(TaskPanel::status_symbol(&TaskStatus::Cancelled), "✕");
+        assert_eq!(TaskPanel::status_symbol(&DecisionTaskStatus::Pending), "○");
+        assert_eq!(TaskPanel::status_symbol(&DecisionTaskStatus::InProgress), "◐");
+        assert_eq!(TaskPanel::status_symbol(&DecisionTaskStatus::Completed), "●");
+        assert_eq!(TaskPanel::status_symbol(&DecisionTaskStatus::Cancelled), "✕");
     }
 
     #[test]

@@ -434,7 +434,7 @@ impl BlockingReason for RateLimitBlockedReason {
 
 /// Agent slot status - generic blocked
 #[derive(Debug)]
-pub enum AgentSlotStatus {
+pub enum DecisionAgentStatus {
     /// Agent is running
     Running,
 
@@ -448,42 +448,42 @@ pub enum AgentSlotStatus {
     Stopped,
 }
 
-impl AgentSlotStatus {
+impl DecisionAgentStatus {
     pub fn running() -> Self {
-        AgentSlotStatus::Running
+        DecisionAgentStatus::Running
     }
 
     pub fn blocked(reason: Box<dyn BlockingReason>) -> Self {
-        AgentSlotStatus::Blocked(BlockedState::new(reason))
+        DecisionAgentStatus::Blocked(BlockedState::new(reason))
     }
 
     pub fn idle() -> Self {
-        AgentSlotStatus::Idle
+        DecisionAgentStatus::Idle
     }
 
     pub fn stopped() -> Self {
-        AgentSlotStatus::Stopped
+        DecisionAgentStatus::Stopped
     }
 
     pub fn is_running(&self) -> bool {
-        matches!(self, AgentSlotStatus::Running)
+        matches!(self, DecisionAgentStatus::Running)
     }
 
     pub fn is_blocked(&self) -> bool {
-        matches!(self, AgentSlotStatus::Blocked(_))
+        matches!(self, DecisionAgentStatus::Blocked(_))
     }
 
     pub fn is_idle(&self) -> bool {
-        matches!(self, AgentSlotStatus::Idle)
+        matches!(self, DecisionAgentStatus::Idle)
     }
 
     pub fn is_stopped(&self) -> bool {
-        matches!(self, AgentSlotStatus::Stopped)
+        matches!(self, DecisionAgentStatus::Stopped)
     }
 
     pub fn blocked_state(&self) -> Option<&BlockedState> {
         match self {
-            AgentSlotStatus::Blocked(state) => Some(state),
+            DecisionAgentStatus::Blocked(state) => Some(state),
             _ => None,
         }
     }
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[test]
     fn test_agent_slot_status_running() {
-        let status = AgentSlotStatus::running();
+        let status = DecisionAgentStatus::running();
         assert!(status.is_running());
         assert!(!status.is_blocked());
     }
@@ -1147,7 +1147,7 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        let status = AgentSlotStatus::blocked(Box::new(blocking));
+        let status = DecisionAgentStatus::blocked(Box::new(blocking));
         assert!(status.is_blocked());
         assert!(!status.is_running());
     }
@@ -1159,7 +1159,7 @@ mod tests {
             Box::new(WaitingForChoiceSituation::default()),
             vec![],
         );
-        let status = AgentSlotStatus::blocked(Box::new(blocking));
+        let status = DecisionAgentStatus::blocked(Box::new(blocking));
         let state = status.blocked_state();
         assert!(state.is_some());
         assert_eq!(state.unwrap().reason().reason_type(), "human_decision");

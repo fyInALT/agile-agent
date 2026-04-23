@@ -5,7 +5,7 @@
 
 use crate::state::blocking::{HumanDecisionQueue, HumanDecisionRequest, HumanDecisionResponse};
 use crate::engine::engine::SessionHandle;
-use crate::state::lifecycle::AgentId;
+use crate::state::lifecycle::DecisionAgentId;
 use crate::provider::provider_kind::ProviderKind;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -70,7 +70,7 @@ pub struct PooledSession {
     pub provider: ProviderKind,
 
     /// Agent ID using this session
-    pub assigned_to: Option<AgentId>,
+    pub assigned_to: Option<DecisionAgentId>,
 
     /// Last activity time
     pub last_activity: Instant,
@@ -90,7 +90,7 @@ impl PooledSession {
         }
     }
 
-    pub fn assign(&mut self, agent_id: AgentId) {
+    pub fn assign(&mut self, agent_id: DecisionAgentId) {
         self.assigned_to = Some(agent_id);
         self.last_activity = Instant::now();
     }
@@ -119,7 +119,7 @@ pub struct DecisionSessionPool {
     available: HashMap<ProviderKind, VecDeque<PooledSession>>,
 
     /// Active sessions (agent_id -> session)
-    active: HashMap<AgentId, PooledSession>,
+    active: HashMap<DecisionAgentId, PooledSession>,
 }
 
 impl DecisionSessionPool {
@@ -132,12 +132,12 @@ impl DecisionSessionPool {
     }
 
     /// Check if agent already has session
-    pub fn has_session(&self, agent_id: &AgentId) -> bool {
+    pub fn has_session(&self, agent_id: &DecisionAgentId) -> bool {
         self.active.contains_key(agent_id)
     }
 
     /// Get session for agent if exists
-    pub fn get_session(&self, agent_id: &AgentId) -> Option<&PooledSession> {
+    pub fn get_session(&self, agent_id: &DecisionAgentId) -> Option<&PooledSession> {
         self.active.get(agent_id)
     }
 
@@ -145,7 +145,7 @@ impl DecisionSessionPool {
     pub fn acquire(
         &mut self,
         provider: ProviderKind,
-        agent_id: AgentId,
+        agent_id: DecisionAgentId,
     ) -> crate::error::Result<PooledSession> {
         // Check if agent already has session
         if let Some(session) = self.active.get(&agent_id) {
@@ -190,7 +190,7 @@ impl DecisionSessionPool {
     }
 
     /// Release session back to pool
-    pub fn release(&mut self, agent_id: &AgentId) {
+    pub fn release(&mut self, agent_id: &DecisionAgentId) {
         if let Some(mut session) = self.active.remove(agent_id) {
             session.release();
 
@@ -253,7 +253,7 @@ impl Default for DecisionSessionPool {
 #[derive(Debug, Clone)]
 pub enum RateLimitResult {
     /// Request allowed
-    Allowed { agent_id: AgentId },
+    Allowed { agent_id: DecisionAgentId },
 
     /// Request queued, waiting
     Waiting { position: usize },
@@ -261,7 +261,7 @@ pub enum RateLimitResult {
     /// Dequeued from waiting queue (minute reset, now allowed)
     /// Bug fix: Separate result type to distinguish from normal allowed
     DequeuedAllowed {
-        agent_id: AgentId,
+        agent_id: DecisionAgentId,
         original_position: usize,
     },
 }
@@ -305,7 +305,7 @@ pub struct DecisionRateLimiter {
     minute_start: Instant,
 
     /// Waiting queue
-    waiting: VecDeque<AgentId>,
+    waiting: VecDeque<DecisionAgentId>,
 }
 
 impl DecisionRateLimiter {
@@ -323,7 +323,7 @@ impl DecisionRateLimiter {
     /// Bug fix: Properly handle minute reset and waiting queue.
     /// When a minute resets, we process waiting agents but don't return
     /// their IDs to unrelated callers.
-    pub fn check(&mut self, agent_id: AgentId) -> RateLimitResult {
+    pub fn check(&mut self, agent_id: DecisionAgentId) -> RateLimitResult {
         // Check if minute passed - need to reset
         let minute_passed = self.minute_start.elapsed() > Duration::from_secs(60);
 
@@ -402,7 +402,7 @@ impl DecisionRateLimiter {
     }
 
     /// Get waiting queue position for agent
-    pub fn waiting_position(&self, agent_id: &AgentId) -> Option<usize> {
+    pub fn waiting_position(&self, agent_id: &DecisionAgentId) -> Option<usize> {
         self.waiting
             .iter()
             .position(|id| id == agent_id)
@@ -410,7 +410,7 @@ impl DecisionRateLimiter {
     }
 
     /// Remove agent from waiting queue
-    pub fn cancel_waiting(&mut self, agent_id: &AgentId) -> bool {
+    pub fn cancel_waiting(&mut self, agent_id: &DecisionAgentId) -> bool {
         if let Some(pos) = self.waiting.iter().position(|id| id == agent_id) {
             self.waiting.remove(pos);
             true
@@ -678,13 +678,13 @@ impl ThreadSafeSessionPool {
     pub fn acquire(
         &self,
         provider: ProviderKind,
-        agent_id: AgentId,
+        agent_id: DecisionAgentId,
     ) -> crate::error::Result<PooledSession> {
         let mut pool = self.pool.lock().unwrap();
         pool.acquire(provider, agent_id)
     }
 
-    pub fn release(&self, agent_id: &AgentId) {
+    pub fn release(&self, agent_id: &DecisionAgentId) {
         let mut pool = self.pool.lock().unwrap();
         pool.release(agent_id);
     }
@@ -720,7 +720,7 @@ impl ThreadSafeRateLimiter {
         }
     }
 
-    pub fn check(&self, agent_id: AgentId) -> RateLimitResult {
+    pub fn check(&self, agent_id: DecisionAgentId) -> RateLimitResult {
         let mut limiter = self.limiter.lock().unwrap();
         limiter.check(agent_id)
     }
@@ -730,7 +730,7 @@ impl ThreadSafeRateLimiter {
         limiter.status()
     }
 
-    pub fn cancel_waiting(&self, agent_id: &AgentId) -> bool {
+    pub fn cancel_waiting(&self, agent_id: &DecisionAgentId) -> bool {
         let mut limiter = self.limiter.lock().unwrap();
         limiter.cancel_waiting(agent_id)
     }
@@ -861,9 +861,9 @@ mod tests {
         let handle = SessionHandle::new("test-session", ProviderKind::Claude);
         let mut session = PooledSession::new(handle, ProviderKind::Claude);
 
-        session.assign(AgentId::new("agent-1"));
+        session.assign(DecisionAgentId::new("agent-1"));
         assert!(session.is_assigned());
-        assert_eq!(session.assigned_to, Some(AgentId::new("agent-1")));
+        assert_eq!(session.assigned_to, Some(DecisionAgentId::new("agent-1")));
 
         session.release();
         assert!(!session.is_assigned());
@@ -881,18 +881,18 @@ mod tests {
     #[test]
     fn test_decision_session_pool_new() {
         let pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        assert!(!pool.has_session(&AgentId::new("agent-1")));
+        assert!(!pool.has_session(&DecisionAgentId::new("agent-1")));
     }
 
     #[test]
     fn test_decision_session_pool_acquire() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        let result = pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"));
+        let result = pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"));
 
         assert!(result.is_ok());
         let session = result.unwrap();
         assert!(session.is_assigned());
-        assert!(pool.has_session(&AgentId::new("agent-1")));
+        assert!(pool.has_session(&DecisionAgentId::new("agent-1")));
     }
 
     #[test]
@@ -901,12 +901,12 @@ mod tests {
 
         // First acquire
         let session1 = pool
-            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
 
         // Same agent - should return same session
         let session2 = pool
-            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
 
         assert_eq!(session1.handle.session_id, session2.handle.session_id);
@@ -915,12 +915,12 @@ mod tests {
     #[test]
     fn test_decision_session_pool_release() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
 
-        pool.release(&AgentId::new("agent-1"));
+        pool.release(&DecisionAgentId::new("agent-1"));
 
-        assert!(!pool.has_session(&AgentId::new("agent-1")));
+        assert!(!pool.has_session(&DecisionAgentId::new("agent-1")));
     }
 
     #[test]
@@ -932,22 +932,22 @@ mod tests {
         });
 
         // Acquire max sessions
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-2"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-2"))
             .unwrap();
 
         // Should fail for third agent
-        let result = pool.acquire(ProviderKind::Claude, AgentId::new("agent-3"));
+        let result = pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-3"));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_decision_session_pool_stats() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
-        pool.acquire(ProviderKind::Codex, AgentId::new("agent-2"))
+        pool.acquire(ProviderKind::Codex, DecisionAgentId::new("agent-2"))
             .unwrap();
 
         let stats = pool.stats();
@@ -966,9 +966,9 @@ mod tests {
         });
 
         // Acquire and release
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
-        pool.release(&AgentId::new("agent-1"));
+        pool.release(&DecisionAgentId::new("agent-1"));
 
         // Wait for timeout
         std::thread::sleep(Duration::from_millis(150));
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn test_decision_session_pool_clear() {
         let mut pool = DecisionSessionPool::new(SessionPoolConfig::default());
-        pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+        pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
         pool.clear();
 
@@ -994,7 +994,7 @@ mod tests {
     #[test]
     fn test_rate_limit_result() {
         let allowed = RateLimitResult::Allowed {
-            agent_id: AgentId::new("agent-1"),
+            agent_id: DecisionAgentId::new("agent-1"),
         };
         let waiting = RateLimitResult::Waiting { position: 5 };
 
@@ -1041,7 +1041,7 @@ mod tests {
     fn test_decision_rate_limiter_allowed() {
         let mut limiter = DecisionRateLimiter::new(5);
 
-        let result = limiter.check(AgentId::new("agent-1"));
+        let result = limiter.check(DecisionAgentId::new("agent-1"));
         assert!(matches!(result, RateLimitResult::Allowed { .. }));
 
         let status = limiter.status();
@@ -1053,11 +1053,11 @@ mod tests {
         let mut limiter = DecisionRateLimiter::new(2);
 
         // Fill up limit
-        limiter.check(AgentId::new("agent-1"));
-        limiter.check(AgentId::new("agent-2"));
+        limiter.check(DecisionAgentId::new("agent-1"));
+        limiter.check(DecisionAgentId::new("agent-2"));
 
         // Third request should wait
-        let result = limiter.check(AgentId::new("agent-3"));
+        let result = limiter.check(DecisionAgentId::new("agent-3"));
         assert!(matches!(result, RateLimitResult::Waiting { position: 1 }));
 
         let status = limiter.status();
@@ -1068,11 +1068,11 @@ mod tests {
     fn test_decision_rate_limiter_cancel_waiting() {
         let mut limiter = DecisionRateLimiter::new(2);
 
-        limiter.check(AgentId::new("agent-1"));
-        limiter.check(AgentId::new("agent-2"));
-        limiter.check(AgentId::new("agent-3"));
+        limiter.check(DecisionAgentId::new("agent-1"));
+        limiter.check(DecisionAgentId::new("agent-2"));
+        limiter.check(DecisionAgentId::new("agent-3"));
 
-        assert!(limiter.cancel_waiting(&AgentId::new("agent-3")));
+        assert!(limiter.cancel_waiting(&DecisionAgentId::new("agent-3")));
         assert_eq!(limiter.status().waiting_count, 0);
     }
 
@@ -1080,20 +1080,20 @@ mod tests {
     fn test_decision_rate_limiter_waiting_position() {
         let mut limiter = DecisionRateLimiter::new(1);
 
-        limiter.check(AgentId::new("agent-1"));
-        limiter.check(AgentId::new("agent-2"));
-        limiter.check(AgentId::new("agent-3"));
+        limiter.check(DecisionAgentId::new("agent-1"));
+        limiter.check(DecisionAgentId::new("agent-2"));
+        limiter.check(DecisionAgentId::new("agent-3"));
 
-        assert_eq!(limiter.waiting_position(&AgentId::new("agent-2")), Some(1));
-        assert_eq!(limiter.waiting_position(&AgentId::new("agent-3")), Some(2));
+        assert_eq!(limiter.waiting_position(&DecisionAgentId::new("agent-2")), Some(1));
+        assert_eq!(limiter.waiting_position(&DecisionAgentId::new("agent-3")), Some(2));
     }
 
     #[test]
     fn test_decision_rate_limiter_clear_waiting() {
         let mut limiter = DecisionRateLimiter::new(1);
 
-        limiter.check(AgentId::new("agent-1"));
-        limiter.check(AgentId::new("agent-2"));
+        limiter.check(DecisionAgentId::new("agent-1"));
+        limiter.check(DecisionAgentId::new("agent-2"));
 
         limiter.clear_waiting();
         assert_eq!(limiter.status().waiting_count, 0);
@@ -1262,10 +1262,10 @@ mod tests {
     fn test_thread_safe_session_pool() {
         let pool = ThreadSafeSessionPool::new(SessionPoolConfig::default());
 
-        let result = pool.acquire(ProviderKind::Claude, AgentId::new("agent-1"));
+        let result = pool.acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"));
         assert!(result.is_ok());
 
-        pool.release(&AgentId::new("agent-1"));
+        pool.release(&DecisionAgentId::new("agent-1"));
 
         let stats = pool.stats();
         assert_eq!(stats.total_active, 0);
@@ -1277,7 +1277,7 @@ mod tests {
         let pool2 = pool1.clone();
 
         pool1
-            .acquire(ProviderKind::Claude, AgentId::new("agent-1"))
+            .acquire(ProviderKind::Claude, DecisionAgentId::new("agent-1"))
             .unwrap();
 
         // Both pools share the same underlying pool
@@ -1289,7 +1289,7 @@ mod tests {
     fn test_thread_safe_rate_limiter() {
         let limiter = ThreadSafeRateLimiter::new(5);
 
-        let result = limiter.check(AgentId::new("agent-1"));
+        let result = limiter.check(DecisionAgentId::new("agent-1"));
         assert!(matches!(result, RateLimitResult::Allowed { .. }));
 
         let status = limiter.status();
@@ -1301,7 +1301,7 @@ mod tests {
         let limiter1 = ThreadSafeRateLimiter::new(5);
         let limiter2 = limiter1.clone();
 
-        limiter1.check(AgentId::new("agent-1"));
+        limiter1.check(DecisionAgentId::new("agent-1"));
 
         // Both share the same underlying limiter
         let status = limiter2.status();

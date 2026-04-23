@@ -12,10 +12,10 @@ use crate::runtime::persistence::ExecutionRecord;
 
 /// Unique task identifier (UUID-based)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TaskId(String);
+pub struct DecisionTaskId(String);
 
-impl TaskId {
-    /// Generate a new unique TaskId
+impl DecisionTaskId {
+    /// Generate a new unique DecisionTaskId
     pub fn generate() -> Self {
         Self(Uuid::new_v4().to_string())
     }
@@ -26,7 +26,7 @@ impl TaskId {
     }
 }
 
-impl std::fmt::Display for TaskId {
+impl std::fmt::Display for DecisionTaskId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
@@ -35,7 +35,7 @@ impl std::fmt::Display for TaskId {
 /// Task status enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum DecisionTaskStatus {
     /// Task is waiting to start
     Pending,
     /// Task is actively being executed
@@ -54,7 +54,7 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-impl TaskStatus {
+impl DecisionTaskStatus {
     /// Get display text for TUI rendering
     pub fn display(&self) -> &'static str {
         match self {
@@ -70,7 +70,7 @@ impl TaskStatus {
     }
 }
 
-impl std::fmt::Display for TaskStatus {
+impl std::fmt::Display for DecisionTaskStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.display())
     }
@@ -80,20 +80,20 @@ impl std::fmt::Display for TaskStatus {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TransitionError {
     #[error("Invalid transition from {from} to {to}")]
-    InvalidTransition { from: TaskStatus, to: TaskStatus },
+    InvalidTransition { from: DecisionTaskStatus, to: DecisionTaskStatus },
 }
 
 /// Task entity with lifecycle tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     /// Unique task identifier
-    pub id: TaskId,
+    pub id: DecisionTaskId,
     /// Task description from Sprint Backlog
     pub description: String,
     /// Task boundary constraints
     pub constraints: Vec<String>,
     /// Current task status
-    pub status: TaskStatus,
+    pub status: DecisionTaskStatus,
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
     /// Last update timestamp
@@ -115,10 +115,10 @@ impl Task {
     pub fn new(description: String, constraints: Vec<String>) -> Self {
         let now = Utc::now();
         Self {
-            id: TaskId::generate(),
+            id: DecisionTaskId::generate(),
             description,
             constraints,
-            status: TaskStatus::Pending,
+            status: DecisionTaskStatus::Pending,
             created_at: now,
             updated_at: now,
             reflection_count: 0,
@@ -133,7 +133,7 @@ impl Task {
     ///
     /// Returns error if the transition is invalid.
     /// Updates `updated_at` timestamp on successful transition.
-    pub fn transition_to(&mut self, new_status: TaskStatus) -> Result<(), TransitionError> {
+    pub fn transition_to(&mut self, new_status: DecisionTaskStatus) -> Result<(), TransitionError> {
         if !self.is_valid_transition(new_status) {
             return Err(TransitionError::InvalidTransition {
                 from: self.status,
@@ -147,37 +147,37 @@ impl Task {
     }
 
     /// Check if transition to new status is valid
-    fn is_valid_transition(&self, new_status: TaskStatus) -> bool {
+    fn is_valid_transition(&self, new_status: DecisionTaskStatus) -> bool {
         match (self.status, new_status) {
             // Pending → InProgress
-            (TaskStatus::Pending, TaskStatus::InProgress) => true,
+            (DecisionTaskStatus::Pending, DecisionTaskStatus::InProgress) => true,
 
             // InProgress → Reflecting, PendingConfirmation, Paused, Cancelled
-            (TaskStatus::InProgress, TaskStatus::Reflecting) => true,
-            (TaskStatus::InProgress, TaskStatus::PendingConfirmation) => true,
-            (TaskStatus::InProgress, TaskStatus::Paused) => true,
-            (TaskStatus::InProgress, TaskStatus::Cancelled) => true,
+            (DecisionTaskStatus::InProgress, DecisionTaskStatus::Reflecting) => true,
+            (DecisionTaskStatus::InProgress, DecisionTaskStatus::PendingConfirmation) => true,
+            (DecisionTaskStatus::InProgress, DecisionTaskStatus::Paused) => true,
+            (DecisionTaskStatus::InProgress, DecisionTaskStatus::Cancelled) => true,
 
             // Reflecting → InProgress, NeedsHumanDecision, Paused
-            (TaskStatus::Reflecting, TaskStatus::InProgress) => true,
-            (TaskStatus::Reflecting, TaskStatus::NeedsHumanDecision) => true,
-            (TaskStatus::Reflecting, TaskStatus::Paused) => true, // Recovery transition
+            (DecisionTaskStatus::Reflecting, DecisionTaskStatus::InProgress) => true,
+            (DecisionTaskStatus::Reflecting, DecisionTaskStatus::NeedsHumanDecision) => true,
+            (DecisionTaskStatus::Reflecting, DecisionTaskStatus::Paused) => true, // Recovery transition
 
             // PendingConfirmation → Completed, Reflecting, Paused
-            (TaskStatus::PendingConfirmation, TaskStatus::Completed) => true,
-            (TaskStatus::PendingConfirmation, TaskStatus::Reflecting) => true,
-            (TaskStatus::PendingConfirmation, TaskStatus::Paused) => true, // Timeout during confirmation
+            (DecisionTaskStatus::PendingConfirmation, DecisionTaskStatus::Completed) => true,
+            (DecisionTaskStatus::PendingConfirmation, DecisionTaskStatus::Reflecting) => true,
+            (DecisionTaskStatus::PendingConfirmation, DecisionTaskStatus::Paused) => true, // Timeout during confirmation
 
             // NeedsHumanDecision → InProgress, Cancelled
-            (TaskStatus::NeedsHumanDecision, TaskStatus::InProgress) => true,
-            (TaskStatus::NeedsHumanDecision, TaskStatus::Cancelled) => true,
+            (DecisionTaskStatus::NeedsHumanDecision, DecisionTaskStatus::InProgress) => true,
+            (DecisionTaskStatus::NeedsHumanDecision, DecisionTaskStatus::Cancelled) => true,
 
             // Paused → InProgress, Cancelled
-            (TaskStatus::Paused, TaskStatus::InProgress) => true,
-            (TaskStatus::Paused, TaskStatus::Cancelled) => true,
+            (DecisionTaskStatus::Paused, DecisionTaskStatus::InProgress) => true,
+            (DecisionTaskStatus::Paused, DecisionTaskStatus::Cancelled) => true,
 
             // Any → Cancelled (except Completed which is terminal)
-            (_, TaskStatus::Cancelled) => self.status != TaskStatus::Completed,
+            (_, DecisionTaskStatus::Cancelled) => self.status != DecisionTaskStatus::Completed,
 
             // All other transitions are invalid
             _ => false,
@@ -186,12 +186,12 @@ impl Task {
 
     /// Check if task is actively executing
     pub fn is_active(&self) -> bool {
-        matches!(self.status, TaskStatus::InProgress | TaskStatus::Reflecting)
+        matches!(self.status, DecisionTaskStatus::InProgress | DecisionTaskStatus::Reflecting)
     }
 
     /// Check if task is completed
     pub fn is_complete(&self) -> bool {
-        self.status == TaskStatus::Completed
+        self.status == DecisionTaskStatus::Completed
     }
 
     /// Check if more reflection rounds are available
@@ -201,22 +201,22 @@ impl Task {
 
     /// Check if task can continue execution
     pub fn can_continue(&self) -> bool {
-        matches!(self.status, TaskStatus::InProgress | TaskStatus::Reflecting)
+        matches!(self.status, DecisionTaskStatus::InProgress | DecisionTaskStatus::Reflecting)
     }
 
     /// Check if task is cancelled
     pub fn is_cancelled(&self) -> bool {
-        self.status == TaskStatus::Cancelled
+        self.status == DecisionTaskStatus::Cancelled
     }
 
     /// Check if task needs human decision
     pub fn needs_human(&self) -> bool {
-        self.status == TaskStatus::NeedsHumanDecision
+        self.status == DecisionTaskStatus::NeedsHumanDecision
     }
 
     /// Check if task is paused
     pub fn is_paused(&self) -> bool {
-        self.status == TaskStatus::Paused
+        self.status == DecisionTaskStatus::Paused
     }
 }
 
@@ -228,9 +228,9 @@ mod tests {
 
     #[test]
     fn t9_1_t1_task_id_generation_is_unique() {
-        let id1 = TaskId::generate();
-        let id2 = TaskId::generate();
-        let id3 = TaskId::generate();
+        let id1 = DecisionTaskId::generate();
+        let id2 = DecisionTaskId::generate();
+        let id3 = DecisionTaskId::generate();
 
         assert_ne!(id1, id2);
         assert_ne!(id2, id3);
@@ -246,7 +246,7 @@ mod tests {
 
         assert!(!task.id.to_string().is_empty());
         assert_eq!(task.description, "Fix login bug");
-        assert_eq!(task.status, TaskStatus::Pending);
+        assert_eq!(task.status, DecisionTaskStatus::Pending);
         assert_eq!(task.reflection_count, 0);
         assert_eq!(task.confirmation_count, 0);
         assert_eq!(task.retry_count, 0);
@@ -300,9 +300,9 @@ mod tests {
 
     #[test]
     fn t9_1_t6_task_id_serializable() {
-        let id = TaskId::generate();
+        let id = DecisionTaskId::generate();
         let json = serde_json::to_string(&id).expect("Should serialize");
-        let deserialized: TaskId = serde_json::from_str(&json).expect("Should deserialize");
+        let deserialized: DecisionTaskId = serde_json::from_str(&json).expect("Should deserialize");
         assert_eq!(id, deserialized);
     }
 
@@ -312,14 +312,14 @@ mod tests {
     fn t9_2_t1_all_status_variants_defined() {
         // Verify all 8 status variants exist
         let statuses = [
-            TaskStatus::Pending,
-            TaskStatus::InProgress,
-            TaskStatus::Reflecting,
-            TaskStatus::PendingConfirmation,
-            TaskStatus::NeedsHumanDecision,
-            TaskStatus::Paused,
-            TaskStatus::Completed,
-            TaskStatus::Cancelled,
+            DecisionTaskStatus::Pending,
+            DecisionTaskStatus::InProgress,
+            DecisionTaskStatus::Reflecting,
+            DecisionTaskStatus::PendingConfirmation,
+            DecisionTaskStatus::NeedsHumanDecision,
+            DecisionTaskStatus::Paused,
+            DecisionTaskStatus::Completed,
+            DecisionTaskStatus::Cancelled,
         ];
 
         // Each should be distinct
@@ -334,34 +334,34 @@ mod tests {
 
     #[test]
     fn t9_2_t2_status_display_returns_readable_text() {
-        assert_eq!(TaskStatus::Pending.display(), "Pending");
-        assert_eq!(TaskStatus::InProgress.display(), "In Progress");
-        assert_eq!(TaskStatus::Reflecting.display(), "Reflecting");
+        assert_eq!(DecisionTaskStatus::Pending.display(), "Pending");
+        assert_eq!(DecisionTaskStatus::InProgress.display(), "In Progress");
+        assert_eq!(DecisionTaskStatus::Reflecting.display(), "Reflecting");
         assert_eq!(
-            TaskStatus::PendingConfirmation.display(),
+            DecisionTaskStatus::PendingConfirmation.display(),
             "Awaiting Confirmation"
         );
-        assert_eq!(TaskStatus::NeedsHumanDecision.display(), "Needs Decision");
-        assert_eq!(TaskStatus::Paused.display(), "Paused");
-        assert_eq!(TaskStatus::Completed.display(), "Completed");
-        assert_eq!(TaskStatus::Cancelled.display(), "Cancelled");
+        assert_eq!(DecisionTaskStatus::NeedsHumanDecision.display(), "Needs Decision");
+        assert_eq!(DecisionTaskStatus::Paused.display(), "Paused");
+        assert_eq!(DecisionTaskStatus::Completed.display(), "Completed");
+        assert_eq!(DecisionTaskStatus::Cancelled.display(), "Cancelled");
     }
 
     #[test]
     fn t9_2_t3_status_serialization_works() {
         // Test serialization of each status
         for status in [
-            TaskStatus::Pending,
-            TaskStatus::InProgress,
-            TaskStatus::Reflecting,
-            TaskStatus::PendingConfirmation,
-            TaskStatus::NeedsHumanDecision,
-            TaskStatus::Paused,
-            TaskStatus::Completed,
-            TaskStatus::Cancelled,
+            DecisionTaskStatus::Pending,
+            DecisionTaskStatus::InProgress,
+            DecisionTaskStatus::Reflecting,
+            DecisionTaskStatus::PendingConfirmation,
+            DecisionTaskStatus::NeedsHumanDecision,
+            DecisionTaskStatus::Paused,
+            DecisionTaskStatus::Completed,
+            DecisionTaskStatus::Cancelled,
         ] {
             let json = serde_json::to_string(&status).expect("Should serialize");
-            let deserialized: TaskStatus = serde_json::from_str(&json).expect("Should deserialize");
+            let deserialized: DecisionTaskStatus = serde_json::from_str(&json).expect("Should deserialize");
             assert_eq!(status, deserialized, "Status should roundtrip correctly");
         }
     }
@@ -371,82 +371,82 @@ mod tests {
     #[test]
     fn t9_3_t1_pending_to_inprogress_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        assert_eq!(task.status, TaskStatus::Pending);
+        assert_eq!(task.status, DecisionTaskStatus::Pending);
 
-        task.transition_to(TaskStatus::InProgress)
+        task.transition_to(DecisionTaskStatus::InProgress)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, DecisionTaskStatus::InProgress);
     }
 
     #[test]
     fn t9_3_t2_inprogress_to_reflecting_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Reflecting)
+        task.transition_to(DecisionTaskStatus::Reflecting)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::Reflecting);
+        assert_eq!(task.status, DecisionTaskStatus::Reflecting);
     }
 
     #[test]
     fn t9_3_t3_inprogress_to_pending_confirmation_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::PendingConfirmation)
+        task.transition_to(DecisionTaskStatus::PendingConfirmation)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::PendingConfirmation);
+        assert_eq!(task.status, DecisionTaskStatus::PendingConfirmation);
     }
 
     #[test]
     fn t9_3_t4_reflecting_to_inprogress_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::Reflecting).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::Reflecting).unwrap();
 
-        task.transition_to(TaskStatus::InProgress)
+        task.transition_to(DecisionTaskStatus::InProgress)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, DecisionTaskStatus::InProgress);
     }
 
     #[test]
     fn t9_3_t5_reflecting_to_needs_human_decision_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::Reflecting).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::Reflecting).unwrap();
 
-        task.transition_to(TaskStatus::NeedsHumanDecision)
+        task.transition_to(DecisionTaskStatus::NeedsHumanDecision)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::NeedsHumanDecision);
+        assert_eq!(task.status, DecisionTaskStatus::NeedsHumanDecision);
     }
 
     #[test]
     fn t9_3_t6_pending_confirmation_to_completed_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Completed)
+        task.transition_to(DecisionTaskStatus::Completed)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::Completed);
+        assert_eq!(task.status, DecisionTaskStatus::Completed);
     }
 
     #[test]
     fn t9_3_t7_pending_confirmation_to_reflecting_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Reflecting)
+        task.transition_to(DecisionTaskStatus::Reflecting)
             .expect("Should work");
 
-        assert_eq!(task.status, TaskStatus::Reflecting);
+        assert_eq!(task.status, DecisionTaskStatus::Reflecting);
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         // Pending -> Completed is invalid (must go through InProgress)
 
-        let result = task.transition_to(TaskStatus::Completed);
+        let result = task.transition_to(DecisionTaskStatus::Completed);
 
         assert!(result.is_err(), "Pending -> Completed should be invalid");
     }
@@ -466,7 +466,7 @@ mod tests {
 
         // Wait a tiny bit to ensure time difference
         std::thread::sleep(std::time::Duration::from_millis(1));
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
 
         assert!(
             task.updated_at > original_updated_at,
@@ -478,104 +478,104 @@ mod tests {
     fn t9_3_t10_any_to_cancelled_works() {
         // Any status can transition to Cancelled
         for initial_status in [
-            TaskStatus::Pending,
-            TaskStatus::InProgress,
-            TaskStatus::Reflecting,
-            TaskStatus::PendingConfirmation,
-            TaskStatus::NeedsHumanDecision,
-            TaskStatus::Paused,
+            DecisionTaskStatus::Pending,
+            DecisionTaskStatus::InProgress,
+            DecisionTaskStatus::Reflecting,
+            DecisionTaskStatus::PendingConfirmation,
+            DecisionTaskStatus::NeedsHumanDecision,
+            DecisionTaskStatus::Paused,
         ] {
             let mut task = Task::new("Test".to_string(), vec![]);
             // Manually set status for testing
             task.status = initial_status;
 
-            task.transition_to(TaskStatus::Cancelled).unwrap_or_else(|_| {
+            task.transition_to(DecisionTaskStatus::Cancelled).unwrap_or_else(|_| {
                 panic!(
                     "{} -> Cancelled should work",
                     initial_status.display()
                 )
             });
 
-            assert_eq!(task.status, TaskStatus::Cancelled);
+            assert_eq!(task.status, DecisionTaskStatus::Cancelled);
         }
     }
 
     #[test]
     fn t9_3_t11_paused_to_inprogress_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.status = TaskStatus::Paused;
+        task.status = DecisionTaskStatus::Paused;
 
-        task.transition_to(TaskStatus::InProgress)
+        task.transition_to(DecisionTaskStatus::InProgress)
             .expect("Paused -> InProgress should work");
 
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, DecisionTaskStatus::InProgress);
     }
 
     #[test]
     fn t9_3_t12_paused_to_cancelled_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.status = TaskStatus::Paused;
+        task.status = DecisionTaskStatus::Paused;
 
-        task.transition_to(TaskStatus::Cancelled)
+        task.transition_to(DecisionTaskStatus::Cancelled)
             .expect("Paused -> Cancelled should work");
 
-        assert_eq!(task.status, TaskStatus::Cancelled);
+        assert_eq!(task.status, DecisionTaskStatus::Cancelled);
     }
 
     #[test]
     fn t9_3_t13_needs_human_to_inprogress_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.status = TaskStatus::NeedsHumanDecision;
+        task.status = DecisionTaskStatus::NeedsHumanDecision;
 
-        task.transition_to(TaskStatus::InProgress)
+        task.transition_to(DecisionTaskStatus::InProgress)
             .expect("NeedsHumanDecision -> InProgress should work");
 
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, DecisionTaskStatus::InProgress);
     }
 
     #[test]
     fn t9_3_t14_needs_human_to_cancelled_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.status = TaskStatus::NeedsHumanDecision;
+        task.status = DecisionTaskStatus::NeedsHumanDecision;
 
-        task.transition_to(TaskStatus::Cancelled)
+        task.transition_to(DecisionTaskStatus::Cancelled)
             .expect("NeedsHumanDecision -> Cancelled should work");
 
-        assert_eq!(task.status, TaskStatus::Cancelled);
+        assert_eq!(task.status, DecisionTaskStatus::Cancelled);
     }
 
     #[test]
     fn t9_3_t15_inprogress_to_paused_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Paused)
+        task.transition_to(DecisionTaskStatus::Paused)
             .expect("InProgress -> Paused should work");
 
-        assert_eq!(task.status, TaskStatus::Paused);
+        assert_eq!(task.status, DecisionTaskStatus::Paused);
     }
 
     #[test]
     fn t9_3_t16_inprogress_to_cancelled_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
 
-        task.transition_to(TaskStatus::Cancelled)
+        task.transition_to(DecisionTaskStatus::Cancelled)
             .expect("InProgress -> Cancelled should work");
 
-        assert_eq!(task.status, TaskStatus::Cancelled);
+        assert_eq!(task.status, DecisionTaskStatus::Cancelled);
     }
 
     #[test]
     fn t9_3_t17_pending_confirmation_to_paused_works() {
         let mut task = Task::new("Test".to_string(), vec![]);
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::PendingConfirmation).unwrap();
 
-        task.transition_to(TaskStatus::Paused)
+        task.transition_to(DecisionTaskStatus::Paused)
             .expect("PendingConfirmation -> Paused should work for timeout");
 
-        assert_eq!(task.status, TaskStatus::Paused);
+        assert_eq!(task.status, DecisionTaskStatus::Paused);
     }
 
     // Task Helper Methods Tests
@@ -588,16 +588,16 @@ mod tests {
         assert!(!task.is_active());
 
         // InProgress - active
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
         assert!(task.is_active());
 
         // Reflecting - active
-        task.transition_to(TaskStatus::Reflecting).unwrap();
+        task.transition_to(DecisionTaskStatus::Reflecting).unwrap();
         assert!(task.is_active());
 
         // PendingConfirmation - not active
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::PendingConfirmation).unwrap();
         assert!(!task.is_active());
     }
 
@@ -606,9 +606,9 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         assert!(!task.is_complete());
 
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::PendingConfirmation).unwrap();
-        task.transition_to(TaskStatus::Completed).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::PendingConfirmation).unwrap();
+        task.transition_to(DecisionTaskStatus::Completed).unwrap();
         assert!(task.is_complete());
     }
 
@@ -637,19 +637,19 @@ mod tests {
         assert!(!task.can_continue());
 
         // InProgress - can continue
-        task.transition_to(TaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
         assert!(task.can_continue());
 
         // Reflecting - can continue
-        task.transition_to(TaskStatus::Reflecting).unwrap();
+        task.transition_to(DecisionTaskStatus::Reflecting).unwrap();
         assert!(task.can_continue());
 
         // NeedsHumanDecision - cannot continue
-        task.status = TaskStatus::NeedsHumanDecision;
+        task.status = DecisionTaskStatus::NeedsHumanDecision;
         assert!(!task.can_continue());
 
         // Paused - cannot continue
-        task.status = TaskStatus::Paused;
+        task.status = DecisionTaskStatus::Paused;
         assert!(!task.can_continue());
     }
 
@@ -658,7 +658,7 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         assert!(!task.is_cancelled());
 
-        task.transition_to(TaskStatus::Cancelled).unwrap();
+        task.transition_to(DecisionTaskStatus::Cancelled).unwrap();
         assert!(task.is_cancelled());
     }
 
@@ -667,7 +667,7 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         assert!(!task.needs_human());
 
-        task.status = TaskStatus::NeedsHumanDecision;
+        task.status = DecisionTaskStatus::NeedsHumanDecision;
         assert!(task.needs_human());
     }
 
@@ -676,8 +676,8 @@ mod tests {
         let mut task = Task::new("Test".to_string(), vec![]);
         assert!(!task.is_paused());
 
-        task.transition_to(TaskStatus::InProgress).unwrap();
-        task.transition_to(TaskStatus::Paused).unwrap();
+        task.transition_to(DecisionTaskStatus::InProgress).unwrap();
+        task.transition_to(DecisionTaskStatus::Paused).unwrap();
         assert!(task.is_paused());
     }
 }

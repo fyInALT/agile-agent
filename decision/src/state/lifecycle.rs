@@ -61,11 +61,11 @@ impl DestructionTrigger {
 
 /// Task ID
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TaskId(pub String);
+pub struct DecisionTaskId(pub String);
 
-impl TaskId {
+impl DecisionTaskId {
     pub fn new(id: impl Into<String>) -> Self {
-        TaskId(id.into())
+        DecisionTaskId(id.into())
     }
 
     pub fn as_str(&self) -> &str {
@@ -73,7 +73,7 @@ impl TaskId {
     }
 }
 
-impl std::fmt::Display for TaskId {
+impl std::fmt::Display for DecisionTaskId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -95,11 +95,11 @@ impl StoryId {
 
 /// Agent ID
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AgentId(pub String);
+pub struct DecisionAgentId(pub String);
 
-impl AgentId {
+impl DecisionAgentId {
     pub fn new(id: impl Into<String>) -> Self {
-        AgentId(id.into())
+        DecisionAgentId(id.into())
     }
 
     pub fn as_str(&self) -> &str {
@@ -107,7 +107,7 @@ impl AgentId {
     }
 }
 
-impl std::fmt::Display for AgentId {
+impl std::fmt::Display for DecisionAgentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -117,7 +117,7 @@ impl std::fmt::Display for AgentId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDecisionContext {
     /// Task ID
-    pub task_id: TaskId,
+    pub task_id: DecisionTaskId,
 
     /// Decisions made for this task
     pub decisions: Vec<DecisionRecord>,
@@ -139,7 +139,7 @@ pub struct TaskDecisionContext {
 }
 
 impl TaskDecisionContext {
-    pub fn new(task_id: TaskId) -> Self {
+    pub fn new(task_id: DecisionTaskId) -> Self {
         Self {
             task_id,
             decisions: Vec::new(),
@@ -224,19 +224,19 @@ impl Default for DecisionAgentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionAgentState {
     /// Decision agent ID
-    pub agent_id: AgentId,
+    pub agent_id: DecisionAgentId,
 
     /// Parent main agent ID
-    pub parent_agent_id: AgentId,
+    pub parent_agent_id: DecisionAgentId,
 
     /// Current task ID
-    pub current_task_id: Option<TaskId>,
+    pub current_task_id: Option<DecisionTaskId>,
 
     /// Current story ID
     pub current_story_id: Option<StoryId>,
 
     /// Task contexts (active)
-    pub task_contexts: HashMap<TaskId, TaskDecisionContext>,
+    pub task_contexts: HashMap<DecisionTaskId, TaskDecisionContext>,
 
     /// Configuration
     pub config: DecisionAgentConfig,
@@ -255,7 +255,7 @@ pub struct DecisionAgentState {
 }
 
 impl DecisionAgentState {
-    pub fn new(agent_id: AgentId, parent_agent_id: AgentId, config: DecisionAgentConfig) -> Self {
+    pub fn new(agent_id: DecisionAgentId, parent_agent_id: DecisionAgentId, config: DecisionAgentConfig) -> Self {
         Self {
             agent_id,
             parent_agent_id,
@@ -270,7 +270,7 @@ impl DecisionAgentState {
         }
     }
 
-    pub fn switch_task(&mut self, new_task: TaskId) {
+    pub fn switch_task(&mut self, new_task: DecisionTaskId) {
         // Archive current task
         if let Some(current_id) = &self.current_task_id
             && let Some(ctx) = self.task_contexts.get_mut(current_id) {
@@ -400,14 +400,14 @@ mod tests {
 
     #[test]
     fn test_task_id() {
-        let id = TaskId::new("task-1");
+        let id = DecisionTaskId::new("task-1");
         assert_eq!(id.as_str(), "task-1");
         assert_eq!(format!("{}", id), "task-1");
     }
 
     #[test]
     fn test_task_decision_context_new() {
-        let ctx = TaskDecisionContext::new(TaskId::new("task-1"));
+        let ctx = TaskDecisionContext::new(DecisionTaskId::new("task-1"));
         assert_eq!(ctx.task_id.as_str(), "task-1");
         assert_eq!(ctx.decisions.len(), 0);
         assert_eq!(ctx.reflection_rounds, 0);
@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_task_decision_context_increment() {
-        let mut ctx = TaskDecisionContext::new(TaskId::new("task-1"));
+        let mut ctx = TaskDecisionContext::new(DecisionTaskId::new("task-1"));
         ctx.increment_reflection();
         ctx.increment_retry();
         assert_eq!(ctx.reflection_rounds, 1);
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_task_decision_context_complete() {
-        let mut ctx = TaskDecisionContext::new(TaskId::new("task-1"));
+        let mut ctx = TaskDecisionContext::new(DecisionTaskId::new("task-1"));
         ctx.mark_complete();
         assert!(ctx.is_complete());
         assert!(ctx.completed_at.is_some());
@@ -443,8 +443,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_new() {
         let state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
         assert_eq!(state.agent_id.as_str(), "dec-1");
@@ -455,21 +455,21 @@ mod tests {
     #[test]
     fn test_decision_agent_state_switch_task() {
         let mut state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
-        state.switch_task(TaskId::new("task-1"));
+        state.switch_task(DecisionTaskId::new("task-1"));
         assert!(state.current_task_id.is_some());
-        assert!(state.task_contexts.contains_key(&TaskId::new("task-1")));
+        assert!(state.task_contexts.contains_key(&DecisionTaskId::new("task-1")));
     }
 
     #[test]
     fn test_decision_agent_state_switch_story() {
         let mut state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -482,8 +482,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_can_reflect() {
         let state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -493,8 +493,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_max_reflection() {
         let mut state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -507,8 +507,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_can_retry() {
         let state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -518,8 +518,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_serde() {
         let state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -531,8 +531,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_persist() {
         let state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_task_decision_context_elapsed() {
-        let ctx = TaskDecisionContext::new(TaskId::new("task-1"));
+        let ctx = TaskDecisionContext::new(DecisionTaskId::new("task-1"));
         // Should be close to 0 seconds since just created
         assert!(ctx.elapsed_seconds() < 5);
     }
@@ -555,8 +555,8 @@ mod tests {
     #[test]
     fn test_decision_agent_state_clear_for_new_story() {
         let mut state = DecisionAgentState::new(
-            AgentId::new("dec-1"),
-            AgentId::new("main-1"),
+            DecisionAgentId::new("dec-1"),
+            DecisionAgentId::new("main-1"),
             DecisionAgentConfig::default(),
         );
 

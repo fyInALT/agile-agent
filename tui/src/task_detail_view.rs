@@ -14,7 +14,7 @@ use crossterm::event::KeyEventKind;
 
 use crate::task_panel::TaskPanel;
 use agent_decision::persistence::ExecutionRecord;
-use agent_decision::task::{Task, TaskStatus};
+use agent_decision::task::{Task, DecisionTaskStatus};
 use agent_decision::workflow::{StageId, WorkflowAction};
 
 /// Task detail view state
@@ -202,7 +202,7 @@ mod tests {
             "Test task with history".to_string(),
             vec!["constraint1".to_string()],
         );
-        let _ = task.transition_to(TaskStatus::InProgress);
+        let _ = task.transition_to(DecisionTaskStatus::InProgress);
 
         // Add some history records
         task.execution_history.push(ExecutionRecord::new(

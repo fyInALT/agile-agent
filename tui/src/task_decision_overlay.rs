@@ -7,7 +7,7 @@
 
 #![allow(dead_code)]
 
-use agent_decision::task::{TaskId, TaskStatus};
+use agent_decision::task::{DecisionTaskId, DecisionTaskStatus};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -17,11 +17,11 @@ use crossterm::event::KeyModifiers;
 #[derive(Debug, Clone)]
 pub struct TaskDecisionRequest {
     /// Task ID
-    pub task_id: TaskId,
+    pub task_id: DecisionTaskId,
     /// Task description
     pub description: String,
     /// Current status
-    pub status: TaskStatus,
+    pub status: DecisionTaskStatus,
     /// Decision question
     pub question: String,
     /// Available options
@@ -59,9 +59,9 @@ impl TaskDecisionOption {
 impl TaskDecisionRequest {
     /// Create a new task decision request
     pub fn new(
-        task_id: TaskId,
+        task_id: DecisionTaskId,
         description: String,
-        status: TaskStatus,
+        status: DecisionTaskStatus,
         question: String,
         options: Vec<TaskDecisionOption>,
     ) -> Self {
@@ -76,11 +76,11 @@ impl TaskDecisionRequest {
     }
 
     /// Create a standard completion confirmation request
-    pub fn completion_confirmation(task_id: TaskId, description: String) -> Self {
+    pub fn completion_confirmation(task_id: DecisionTaskId, description: String) -> Self {
         Self::new(
             task_id,
             description,
-            TaskStatus::PendingConfirmation,
+            DecisionTaskStatus::PendingConfirmation,
             "Task appears complete. Confirm completion?".to_string(),
             vec![
                 TaskDecisionOption::new("approve", "Approve", "Mark task as completed"),
@@ -91,11 +91,11 @@ impl TaskDecisionRequest {
     }
 
     /// Create a human intervention request
-    pub fn human_intervention(task_id: TaskId, description: String, reason: String) -> Self {
+    pub fn human_intervention(task_id: DecisionTaskId, description: String, reason: String) -> Self {
         Self::new(
             task_id,
             description,
-            TaskStatus::NeedsHumanDecision,
+            DecisionTaskStatus::NeedsHumanDecision,
             reason,
             vec![
                 TaskDecisionOption::new("approve", "Approve", "Continue with current approach"),
@@ -147,14 +147,14 @@ impl TaskDecisionOverlay {
     /// Get status display text
     pub fn status_text(&self) -> &'static str {
         match self.request.status {
-            TaskStatus::Pending => "Pending",
-            TaskStatus::InProgress => "In Progress",
-            TaskStatus::Reflecting => "Reflecting",
-            TaskStatus::PendingConfirmation => "Confirming",
-            TaskStatus::NeedsHumanDecision => "Needs Decision",
-            TaskStatus::Paused => "Paused",
-            TaskStatus::Completed => "Completed",
-            TaskStatus::Cancelled => "Cancelled",
+            DecisionTaskStatus::Pending => "Pending",
+            DecisionTaskStatus::InProgress => "In Progress",
+            DecisionTaskStatus::Reflecting => "Reflecting",
+            DecisionTaskStatus::PendingConfirmation => "Confirming",
+            DecisionTaskStatus::NeedsHumanDecision => "Needs Decision",
+            DecisionTaskStatus::Paused => "Paused",
+            DecisionTaskStatus::Completed => "Completed",
+            DecisionTaskStatus::Cancelled => "Cancelled",
         }
     }
 
