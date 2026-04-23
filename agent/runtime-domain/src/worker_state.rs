@@ -351,6 +351,16 @@ impl WorkerState {
     }
 }
 
+impl From<WorkerState> for agent_types::WorkerStatus {
+    fn from(state: WorkerState) -> Self {
+        match state {
+            WorkerState::Idle => Self::Idle,
+            WorkerState::Completed | WorkerState::Failed { .. } => Self::Stopped,
+            _ => Self::Running,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

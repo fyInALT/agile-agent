@@ -113,6 +113,12 @@ impl std::fmt::Display for DecisionAgentId {
     }
 }
 
+impl From<agent_types::AgentId> for DecisionAgentId {
+    fn from(id: agent_types::AgentId) -> Self {
+        Self(id.as_str().to_string())
+    }
+}
+
 /// Task decision context
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDecisionContext {
