@@ -3107,3 +3107,198 @@ mod git_detection_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod decision_tests {
+    use super::*;
+
+    fn lines_to_strings(lines: &[Line<'static>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decision_cell_shows_full_display_with_prompt_and_thinking() {
+        // Create a Decision entry with full details
+        let entry = TranscriptEntry::Decision {
+            agent_id: "agent-001".to_string(),
+            situation_type: "claims_completion".to_string(),
+            action_type: "reflect".to_string(),
+            reasoning: "Task appears complete, need to verify".to_string(),
+            confidence: 80,
+            tier: "Medium".to_string(),
+            decision_prompt: Some("Please analyze the current state...".to_string()),
+            thinking: Some("Based on the output, the task seems complete...".to_string()),
+        };
+
+        let cell = history_cell_for_entry(&entry);
+        let lines = cell.display_lines(80);
+        let rendered = lines_to_strings(&lines);
+
+        // Should show decision header
+        assert!(
+            rendered.iter().any(|line| line.contains("DECISION LAYER")),
+            "Expected 'DECISION LAYER' header in: {:?}",
+            rendered
+        );
+
+        // Should show INPUT section
+        assert!(
+            rendered.iter().any(|line| line.contains("INPUT")),
+            "Expected 'INPUT' section in: {:?}",
+            rendered
+        );
+
+        // Should show THINKING section
+        assert!(
+            rendered.iter().any(|line| line.contains("THINKING")),
+            "Expected 'THINKING' section in: {:?}",
+            rendered
+        );
+
+        // Should show OUTPUT section
+        assert!(
+            rendered.iter().any(|line| line.contains("OUTPUT")),
+            "Expected 'OUTPUT' section in: {:?}",
+            rendered
+        );
+
+        // Should show action type
+        assert!(
+            rendered.iter().any(|line| line.contains("reflect")),
+            "Expected 'reflect' action in: {:?}",
+            rendered
+        );
+
+        // Should show reasoning
+        assert!(
+            rendered.iter().any(|line| line.contains("Task appears complete")),
+            "Expected reasoning in: {:?}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn decision_cell_hides_input_when_prompt_empty() {
+        let entry = TranscriptEntry::Decision {
+            agent_id: "agent-001".to_string(),
+            situation_type: "waiting_for_choice".to_string(),
+            action_type: "select_first".to_string(),
+            reasoning: "Auto-approved".to_string(),
+            confidence: 90,
+            tier: "Simple".to_string(),
+            decision_prompt: Some("".to_string()), // Empty prompt
+            thinking: Some("Thinking content".to_string()),
+        };
+
+        let cell = history_cell_for_entry(&entry);
+        let lines = cell.display_lines(80);
+        let rendered = lines_to_strings(&lines);
+
+        // Should NOT show INPUT section when prompt is empty
+        assert!(
+            !rendered.iter().any(|line| line.contains("INPUT")),
+            "Should NOT show 'INPUT' section when prompt is empty: {:?}",
+            rendered
+        );
+
+        // Should still show THINKING
+        assert!(
+            rendered.iter().any(|line| line.contains("THINKING")),
+            "Expected 'THINKING' section in: {:?}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn decision_cell_hides_thinking_when_empty() {
+        let entry = TranscriptEntry::Decision {
+            agent_id: "agent-001".to_string(),
+            situation_type: "error".to_string(),
+            action_type: "retry".to_string(),
+            reasoning: "Retry due to error".to_string(),
+            confidence: 70,
+            tier: "Simple".to_string(),
+            decision_prompt: Some("Prompt content".to_string()),
+            thinking: None, // No thinking
+        };
+
+        let cell = history_cell_for_entry(&entry);
+        let lines = cell.display_lines(80);
+        let rendered = lines_to_strings(&lines);
+
+        // Should show INPUT section
+        assert!(
+            rendered.iter().any(|line| line.contains("INPUT")),
+            "Expected 'INPUT' section in: {:?}",
+            rendered
+        );
+
+        // Should NOT show THINKING section when thinking is None
+        assert!(
+            !rendered.iter().any(|line| line.contains("THINKING")),
+            "Should NOT show 'THINKING' section when thinking is None: {:?}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn decision_cell_shows_minimal_without_prompt_and_thinking() {
+        let entry = TranscriptEntry::Decision {
+            agent_id: "agent-001".to_string(),
+            situation_type: "agent_idle".to_string(),
+            action_type: "continue_all_tasks".to_string(),
+            reasoning: "No rule matched".to_string(),
+            confidence: 50,
+            tier: "Simple".to_string(),
+            decision_prompt: None,
+            thinking: None,
+        };
+
+        let cell = history_cell_for_entry(&entry);
+        let lines = cell.display_lines(80);
+        let rendered = lines_to_strings(&lines);
+
+        // Should show decision header
+        assert!(
+            rendered.iter().any(|line| line.contains("DECISION LAYER")),
+            "Expected 'DECISION LAYER' header in: {:?}",
+            rendered
+        );
+
+        // Should NOT show INPUT section
+        assert!(
+            !rendered.iter().any(|line| line.contains("INPUT")),
+            "Should NOT show 'INPUT' section: {:?}",
+            rendered
+        );
+
+        // Should NOT show THINKING section
+        assert!(
+            !rendered.iter().any(|line| line.contains("THINKING")),
+            "Should NOT show 'THINKING' section: {:?}",
+            rendered
+        );
+
+        // Should still show OUTPUT section
+        assert!(
+            rendered.iter().any(|line| line.contains("OUTPUT")),
+            "Expected 'OUTPUT' section in: {:?}",
+            rendered
+        );
+
+        // Should show action and reasoning in OUTPUT
+        assert!(
+            rendered.iter().any(|line| line.contains("continue_all_tasks")),
+            "Expected action in OUTPUT: {:?}",
+            rendered
+        );
+    }
+}

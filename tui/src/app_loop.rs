@@ -222,12 +222,16 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
 
                                 logging::debug_event(
                                     "app_loop.decision_response",
-                                    "received decision response",
+                                    "received decision response with details",
                                     serde_json::json!({
                                         "agent_id": agent_id.as_str(),
                                         "action": action_name,
                                         "reasoning": output.reasoning,
                                         "confidence": output.confidence,
+                                        "decision_prompt_len": response.decision_prompt().map(|p| p.len()).unwrap_or(0),
+                                        "thinking_len": response.thinking().map(|t| t.len()).unwrap_or(0),
+                                        "decision_prompt_preview": response.decision_prompt().map(|p| if p.len() > 100 { &p[..100] } else { p }).unwrap_or("None"),
+                                        "thinking_preview": response.thinking().map(|t| if t.len() > 100 { &t[..100] } else { t }).unwrap_or("None"),
                                     }),
                                 );
 
@@ -289,6 +293,21 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                 match outcome {
                     DecisionOutcome::Pure(cmds) => {
                         // Pure path: dispatch RuntimeCommands via effect handler
+                        // Also push Decision entry to transcript for display
+                        if let Some(ref info) = output_info {
+                            state.app_mut().push_decision(
+                                agent_id.as_str().to_string(),
+                                info.situation_type.clone(),
+                                info.action_type.clone(),
+                                info.reasoning.clone(),
+                                info.confidence,
+                                info.tier.clone(),
+                                info.decision_prompt.clone(),
+                                info.thinking.clone(),
+                            );
+                            // Set decision status in status bar (max 15 chars)
+                            state.set_decision_status(Some(info.action_type.clone()));
+                        }
                         if let Err(e) = crate::effect_handler::dispatch_runtime_commands(&cmds, &mut state) {
                             tracing::warn!(
                                 agent_id = %agent_id.as_str(),
