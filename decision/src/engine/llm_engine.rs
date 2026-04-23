@@ -478,7 +478,27 @@ impl LLMDecisionEngine {
     /// Extract reasoning from response
     fn extract_reasoning(&self, response: &str) -> String {
         self.extract_field(response, "REASONING")
-            .unwrap_or_else(|| "Decision made by LLM engine".to_string())
+            .unwrap_or_else(|| {
+                // If no REASONING field, try to extract meaningful content from response
+                // Take first non-empty line that looks like reasoning
+                for line in response.lines() {
+                    let trimmed = line.trim();
+                    // Skip ACTION, PARAMETERS, CONFIDENCE fields
+                    if !trimmed.starts_with("ACTION:")
+                        && !trimmed.starts_with("PARAMETERS:")
+                        && !trimmed.starts_with("CONFIDENCE:")
+                        && trimmed.len() > 10
+                    {
+                        return trimmed.to_string();
+                    }
+                }
+                // Fallback: return truncated response
+                if response.len() > 100 {
+                    format!("{}...[truncated]", &response[..100])
+                } else {
+                    response.to_string()
+                }
+            })
     }
 
     /// Parse custom instruction from unstructured response

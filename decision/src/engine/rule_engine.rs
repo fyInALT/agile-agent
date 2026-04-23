@@ -340,6 +340,7 @@ impl DecisionEngine for RuleBasedDecisionEngine {
         _action_registry: &ActionRegistry,
     ) -> crate::error::Result<DecisionOutput> {
         let rule = self.find_matching_rule(&context);
+        let situation_type = context.trigger_situation.situation_type().name;
 
         if let Some(rule) = rule {
             let actions: Vec<Box<dyn DecisionAction>> = rule
@@ -348,17 +349,25 @@ impl DecisionEngine for RuleBasedDecisionEngine {
                 .filter_map(|spec| spec.build_action())
                 .collect();
 
+            // Build detailed reasoning with rule match context
+            let reasoning = format!(
+                "Rule '{}' matched for situation '{}'. Condition satisfied, executing action: {}",
+                rule.name,
+                situation_type,
+                actions.first().map(|a| a.action_type().name.clone()).unwrap_or_else(|| "unknown".to_string())
+            );
+
             return Ok(
-                DecisionOutput::new(actions, format!("Rule: {}", rule.name)).with_confidence(0.9)
+                DecisionOutput::new(actions, reasoning).with_confidence(0.9)
             );
         }
 
-        // No matching rule - default action
+        // No matching rule - default action with context
         Ok(DecisionOutput::new(
             vec![Box::new(CustomInstructionAction::new(
                 "Continue with current task",
             ))],
-            "No matching rule",
+            format!("No rule matched for situation '{}', using default action", situation_type),
         )
         .with_confidence(0.5))
     }
