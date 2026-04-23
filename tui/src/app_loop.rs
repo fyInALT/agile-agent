@@ -282,47 +282,13 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
             for (agent_id, outcome, output_info) in decision_results {
                 match outcome {
                     DecisionOutcome::Pure(cmds) => {
-                        // Pure path: dispatch RuntimeCommands inline
-                        for cmd in cmds {
-                            match cmd {
-                                RuntimeCommand::NotifyUser { agent_id: _, message } => {
-                                    state.app_mut().push_status_message(message);
-                                }
-                                RuntimeCommand::Terminate { agent_id, reason } => {
-                                    state.app_mut().push_status_message(format!(
-                                        "🧠 {}: agent terminated ({})",
-                                        agent_id.as_str(), reason
-                                    ));
-                                    if let Some(pool) = state.agent_pool.as_mut() {
-                                        let _ = pool.stop_agent(&agent_id);
-                                    }
-                                }
-                                RuntimeCommand::TransitionState { agent_id, new_status } => {
-                                    if let Some(pool) = state.agent_pool.as_mut() {
-                                        use agent_core::agent_slot::AgentSlotStatus as CoreAgentStatus;
-                                        if let Some(slot) = pool.get_slot_mut_by_id(&agent_id) {
-                                            let target = match new_status.as_str() {
-                                                "idle" => CoreAgentStatus::idle(),
-                                                "starting" => CoreAgentStatus::starting(),
-                                                "responding" => CoreAgentStatus::responding_now(),
-                                                _ => CoreAgentStatus::idle(),
-                                            };
-                                            let _ = slot.transition_to(target);
-                                        }
-                                    }
-                                    state.app_mut().push_status_message(format!(
-                                        "🧠 {}: state transitioned to {}",
-                                        agent_id.as_str(), new_status
-                                    ));
-                                }
-                                _ => {
-                                    // Other commands not yet supported in TUI pure path
-                                    tracing::warn!(
-                                        command = ?cmd,
-                                        "TUI pure path: unhandled RuntimeCommand"
-                                    );
-                                }
-                            }
+                        // Pure path: dispatch RuntimeCommands via effect handler
+                        if let Err(e) = crate::effect_handler::dispatch_runtime_commands(&cmds, &mut state) {
+                            tracing::warn!(
+                                agent_id = %agent_id.as_str(),
+                                error = ?e,
+                                "TUI pure path: effect dispatch failed"
+                            );
                         }
                     }
                     DecisionOutcome::Legacy(results) => {

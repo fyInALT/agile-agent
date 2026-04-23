@@ -33,6 +33,8 @@ mod app_loop;
 #[cfg(feature = "core")]
 mod command_runtime;
 #[cfg(feature = "core")]
+mod effect_handler;
+#[cfg(feature = "core")]
 mod exec_command;
 #[cfg(feature = "core")]
 mod exec_semantics;
