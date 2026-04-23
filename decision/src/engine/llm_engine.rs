@@ -6,6 +6,7 @@
 
 use crate::model::action::DecisionAction;
 use crate::model::action::action_registry::ActionRegistry;
+use crate::model::action::builtin_actions::RequestHumanAction;
 use crate::core::context::DecisionContext;
 use crate::engine::engine::{DecisionEngine, SessionHandle};
 use crate::core::error::DecisionError;
@@ -77,6 +78,9 @@ pub struct LLMDecisionEngine {
 
     /// Reflection round counter (for claims_completion)
     reflection_round: u8,
+
+    /// Maximum reflection rounds before forcing human escalation (hard limit)
+    max_reflection_rounds: u8,
 }
 
 /// Decision record for LLM history
@@ -113,6 +117,7 @@ impl LLMDecisionEngine {
             llm_caller: None,
             prompt_builder: None,
             reflection_round: 0,
+            max_reflection_rounds: 2,
         }
     }
 
@@ -127,6 +132,7 @@ impl LLMDecisionEngine {
             llm_caller: None,
             prompt_builder: None,
             reflection_round: 0,
+            max_reflection_rounds: 2,
         }
     }
 
@@ -141,6 +147,7 @@ impl LLMDecisionEngine {
             llm_caller: None,
             prompt_builder: None,
             reflection_round: 0,
+            max_reflection_rounds: 2,
         }
     }
 
@@ -157,6 +164,7 @@ impl LLMDecisionEngine {
             llm_caller: Some(caller),
             prompt_builder: None,
             reflection_round: 0,
+            max_reflection_rounds: 2,
         }
     }
 
@@ -175,6 +183,7 @@ impl LLMDecisionEngine {
             llm_caller: Some(caller),
             prompt_builder: None,
             reflection_round: 0,
+            max_reflection_rounds: 2,
         }
     }
 
@@ -193,6 +202,7 @@ impl LLMDecisionEngine {
             llm_caller: None,
             prompt_builder: Some(PromptBuilder::with_config(prompt_config)),
             reflection_round: 0,
+            max_reflection_rounds: 2,
         })
     }
 
@@ -232,6 +242,16 @@ impl LLMDecisionEngine {
     /// Reset reflection round (for new task)
     pub fn reset_reflection_round(&mut self) {
         self.reflection_round = 0;
+    }
+
+    /// Set maximum reflection rounds (hard limit)
+    pub fn set_max_reflection_rounds(&mut self, max: u8) {
+        self.max_reflection_rounds = max;
+    }
+
+    /// Get maximum reflection rounds
+    pub fn max_reflection_rounds(&self) -> u8 {
+        self.max_reflection_rounds
     }
 
     /// Sync reflection round from context (if provided)
@@ -417,7 +437,7 @@ impl LLMDecisionEngine {
         let params_line = self.extract_field(response, "PARAMETERS");
 
         if let Some(action_name) = action_line {
-            let action_type = ActionType::new(&action_name);
+            let action_type = ActionType::new(action_name.to_lowercase());
 
             // Try to get action from registry with parameters
             if let Some(action) =
@@ -638,7 +658,7 @@ impl DecisionEngine for LLMDecisionEngine {
         let response = self.call_llm_with_retry(&prompt)?;
 
         // 3. Parse response to actions
-        let actions = self.parse_response_internal(
+        let mut actions = self.parse_response_internal(
             &response,
             context.trigger_situation.as_ref(),
             action_registry,
@@ -657,12 +677,22 @@ impl DecisionEngine for LLMDecisionEngine {
         let confidence = self.extract_confidence(&response);
 
         // 5. Auto-manage reflection_round based on action type
-        if let Some(first_action) = actions.first() {
-            let action_name = first_action.action_type().name;
+        let action_name = actions.first().map(|a| a.action_type().name.clone());
 
+        if let Some(action_name) = action_name {
             // If action is "reflect", increment round for next iteration
+            // Hard limit: if max reflection rounds reached, force human escalation
             if action_name == "reflect" && situation_type_name == "claims_completion" {
-                self.increment_reflection_round();
+                if self.reflection_round >= self.max_reflection_rounds {
+                    actions = vec![Box::new(RequestHumanAction::new(
+                        format!(
+                            "Maximum reflection rounds ({}) reached. Human review required.",
+                            self.max_reflection_rounds
+                        ),
+                    ))];
+                } else {
+                    self.increment_reflection_round();
+                }
             }
 
             // If action is "confirm_completion" or "continue", reset reflection round
@@ -670,16 +700,18 @@ impl DecisionEngine for LLMDecisionEngine {
                 self.reset_reflection_round();
             }
 
-            // 6. Record decision
-            let record = LLMDecisionRecord {
-                id: format!("dec-{}", uuid::Uuid::new_v4()),
-                situation_type: context.trigger_situation.situation_type(),
-                action_type: first_action.action_type(),
-                reasoning: reasoning.clone(),
-                confidence,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            };
-            self.history.push(record);
+            // 6. Record decision (use potentially overridden action)
+            if let Some(recorded_action) = actions.first() {
+                let record = LLMDecisionRecord {
+                    id: format!("dec-{}", uuid::Uuid::new_v4()),
+                    situation_type: context.trigger_situation.situation_type(),
+                    action_type: recorded_action.action_type(),
+                    reasoning: reasoning.clone(),
+                    confidence,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                self.history.push(record);
+            }
         }
 
         Ok(DecisionOutput::new(actions, reasoning)
@@ -1082,5 +1114,61 @@ mod tests {
                 || prompt.contains("claims completion")
                 || prompt.contains("decision assistant")
         );
+    }
+
+    #[test]
+    fn test_parse_response_reflect_case_insensitive() {
+        let engine = LLMDecisionEngine::new(ProviderKind::Claude);
+        let registry = make_test_registry();
+        let situation: Box<dyn crate::situation::DecisionSituation> = Box::new(
+            ClaimsCompletionSituation::new("Task completed"),
+        );
+
+        // LLM may return "Reflect" with capital R — must still parse correctly
+        let response = "ACTION: Reflect\nPARAMETERS: {\"prompt\": \"Verify the work\"}\nREASONING: Need verification\nCONFIDENCE: 0.8";
+        let actions = engine
+            .parse_response(response, situation.as_ref(), &registry)
+            .unwrap();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_type().name, "reflect");
+    }
+
+    #[derive(Debug, Clone)]
+    struct ReflectMockCaller;
+
+    impl LLMCaller for ReflectMockCaller {
+        fn call(&self, _prompt: &str, _timeout_ms: u64) -> Result<String, DecisionError> {
+            Ok("ACTION: reflect\nPARAMETERS: {\"prompt\": \"verify\"}\nREASONING: Need to verify\nCONFIDENCE: 0.8".to_string())
+        }
+
+        fn is_healthy(&self) -> bool {
+            true
+        }
+
+        fn caller_id(&self) -> &str {
+            "reflect-mock"
+        }
+    }
+
+    #[test]
+    fn test_reflection_round_hard_limit_enforced() {
+        let caller = Arc::new(ReflectMockCaller);
+        let mut engine = LLMDecisionEngine::with_llm_caller(ProviderKind::Claude, caller);
+
+        // Set max reflection rounds to 1 and current round to 1 (at limit)
+        engine.set_max_reflection_rounds(1);
+        engine.set_reflection_round(1);
+
+        let context = make_test_context("claims_completion");
+        let registry = make_test_registry();
+
+        let output = engine.decide(context, &registry).unwrap();
+
+        // Should be overridden to request_human, not reflect
+        assert_eq!(output.actions.len(), 1);
+        assert_eq!(output.actions[0].action_type().name, "request_human");
+        // Reflection round should NOT increment past the limit
+        assert_eq!(engine.reflection_round(), 1);
     }
 }

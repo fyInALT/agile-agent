@@ -343,6 +343,16 @@ impl TieredDecisionEngine {
         self.llm_engine.reset_reflection_round();
     }
 
+    /// Set maximum reflection rounds (hard limit)
+    pub fn set_max_reflection_rounds(&mut self, max: u8) {
+        self.llm_engine.set_max_reflection_rounds(max);
+    }
+
+    /// Get maximum reflection rounds
+    pub fn max_reflection_rounds(&self) -> u8 {
+        self.llm_engine.max_reflection_rounds()
+    }
+
     /// Get a clone of the engine config
     ///
     /// This allows creating a new engine with the same configuration,
