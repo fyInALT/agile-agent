@@ -91,11 +91,7 @@ impl ProviderSelectionOverlay {
 
     /// Get provider label for display
     pub fn provider_label(provider: ProviderKind) -> &'static str {
-        match provider {
-            ProviderKind::Claude => "Claude",
-            ProviderKind::Codex => "Codex",
-            ProviderKind::Mock => "Mock",
-        }
+        provider.display_name()
     }
 }
 

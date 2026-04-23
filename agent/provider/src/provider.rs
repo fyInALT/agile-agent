@@ -27,11 +27,11 @@ pub struct ProviderCapabilities {
 /// Get capabilities for a provider kind
 pub fn provider_capabilities(kind: ProviderKind) -> ProviderCapabilities {
     match kind {
-        ProviderKind::Mock => ProviderCapabilities {
-            supports_slash_passthrough: false,
-        },
         ProviderKind::Claude | ProviderKind::Codex => ProviderCapabilities {
             supports_slash_passthrough: true,
+        },
+        _ => ProviderCapabilities {
+            supports_slash_passthrough: false,
         },
     }
 }
@@ -69,13 +69,13 @@ pub fn start_provider(
         }),
     );
     match provider {
-        ProviderKind::Mock => start_mock_provider(prompt, event_tx),
         ProviderKind::Claude => {
             crate::providers::claude::start(prompt, cwd, session_handle, event_tx)
         }
         ProviderKind::Codex => {
             crate::providers::codex::start(prompt, cwd, session_handle, event_tx)
         }
+        _ => start_mock_provider(prompt, event_tx),
     }
 }
 
@@ -100,13 +100,13 @@ pub fn start_provider_with_context(
     );
 
     match context.spec.provider {
-        ProviderKind::Mock => start_mock_provider(prompt, event_tx),
         ProviderKind::Claude => {
             crate::providers::claude::start_with_context(context, prompt, event_tx)
         }
         ProviderKind::Codex => {
             crate::providers::codex::start_with_context(context, prompt, event_tx)
         }
+        _ => start_mock_provider(prompt, event_tx),
     }
 }
 
@@ -178,6 +178,16 @@ fn run_provider_internal_with_context(
                     serde_json::json!({ "error": e.to_string() }),
                 );
             }
+        }
+        _ => {
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                thread::sleep(Duration::from_millis(60));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
         }
     }
 }
@@ -265,6 +275,16 @@ fn run_provider_internal(
                     serde_json::json!({ "error": e.to_string() }),
                 );
             }
+        }
+        _ => {
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                thread::sleep(Duration::from_millis(60));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
         }
     }
 }

@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 agent-events = { path = "../agent/events" }
+agent-types = { path = "../agent/types" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"

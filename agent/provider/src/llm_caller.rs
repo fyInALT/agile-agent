@@ -212,6 +212,18 @@ fn run_provider_for_llm_call(
         }
         ProviderKind::Claude => crate::providers::claude::start(prompt, cwd, None, event_tx),
         ProviderKind::Codex => crate::providers::codex::start(prompt, cwd, None, event_tx),
+        _ => {
+            use crate::mock_provider;
+            let _ = event_tx.send(ProviderEvent::Status("mock provider started".to_string()));
+            for chunk in mock_provider::build_reply_chunks(&prompt) {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                if event_tx.send(ProviderEvent::AssistantChunk(chunk)).is_err() {
+                    return;
+                }
+            }
+            let _ = event_tx.send(ProviderEvent::Finished);
+            Ok(())
+        }
     };
 
     // Provider takes ownership of event_tx, so we can't use it in fallback

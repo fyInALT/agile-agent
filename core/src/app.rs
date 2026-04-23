@@ -666,7 +666,6 @@ impl AppState {
 
     pub fn current_session_handle(&self) -> Option<SessionHandle> {
         match self.selected_provider {
-            ProviderKind::Mock => None,
             ProviderKind::Claude => {
                 self.claude_session_id
                     .as_ref()
@@ -681,6 +680,7 @@ impl AppState {
                         thread_id: thread_id.clone(),
                     })
             }
+            _ => None,
         }
     }
 
@@ -981,6 +981,10 @@ mod tests {
         assert_eq!(state.selected_provider, ProviderKind::Claude);
         state.toggle_provider();
         assert_eq!(state.selected_provider, ProviderKind::Codex);
+        state.toggle_provider();
+        assert_eq!(state.selected_provider, ProviderKind::ACP);
+        state.toggle_provider();
+        assert_eq!(state.selected_provider, ProviderKind::Unknown);
         state.toggle_provider();
         assert_eq!(state.selected_provider, ProviderKind::Mock);
     }

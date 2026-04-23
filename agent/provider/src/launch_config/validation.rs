@@ -47,8 +47,8 @@ pub fn validate_reserved_args(args: &[String], provider: ProviderKind) -> Valida
     let reserved = match provider {
         ProviderKind::Claude => RESERVED_ARGS_CLAUDE,
         ProviderKind::Codex => RESERVED_ARGS_CODEX,
-        ProviderKind::Mock => {
-            // Mock provider doesn't have reserved args
+        _ => {
+            // Mock and unsupported providers don't have reserved args
             return Ok(());
         }
     };
@@ -71,6 +71,7 @@ pub fn validate_provider_supports_launch_config(provider: ProviderKind) -> Valid
     match provider {
         ProviderKind::Mock => Err(ValidationError::MockProviderNoOverrides),
         ProviderKind::Claude | ProviderKind::Codex => Ok(()),
+        _ => Err(ValidationError::InvalidProvider(provider.label().to_string())),
     }
 }
 

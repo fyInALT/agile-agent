@@ -247,7 +247,7 @@ impl DecisionAgentSlot {
         let decision_provider = match provider_kind {
             ProviderKind::Claude => DecisionProviderKind::Claude,
             ProviderKind::Codex => DecisionProviderKind::Codex,
-            ProviderKind::Mock => DecisionProviderKind::Unknown, // Mock doesn't need decisions
+            _ => DecisionProviderKind::Unknown, // Mock/ACP/Unknown don't need decisions
         };
 
         // Create tiered engine with same provider as work agent

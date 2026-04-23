@@ -47,9 +47,10 @@ impl CliBaseType {
     /// Convert from ProviderKind (existing enum)
     pub fn from_provider_kind(kind: ProviderKind) -> Self {
         match kind {
-            ProviderKind::Mock => Self::Mock,
             ProviderKind::Claude => Self::Claude,
             ProviderKind::Codex => Self::Codex,
+            ProviderKind::Mock => Self::Mock,
+            _ => Self::OpenCode,
         }
     }
 
@@ -61,7 +62,7 @@ impl CliBaseType {
             Self::Mock => Some(ProviderKind::Mock),
             Self::Claude => Some(ProviderKind::Claude),
             Self::Codex => Some(ProviderKind::Codex),
-            Self::OpenCode => None, // Not yet supported as ProviderKind
+            Self::OpenCode => None, // Not yet supported in runtime
         }
     }
 

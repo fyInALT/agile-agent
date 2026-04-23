@@ -307,11 +307,7 @@ impl LaunchConfigOverlayState {
 
     /// Get provider label
     pub fn provider_label(&self) -> &'static str {
-        match self.provider {
-            ProviderKind::Claude => "claude",
-            ProviderKind::Codex => "codex",
-            ProviderKind::Mock => "mock",
-        }
+        self.provider.label()
     }
 }
 

@@ -16,7 +16,7 @@ fn default_executable_name(provider: ProviderKind) -> Option<&'static str> {
     match provider {
         ProviderKind::Claude => Some("claude"),
         ProviderKind::Codex => Some("codex"),
-        ProviderKind::Mock => None,
+        _ => None,
     }
 }
 
@@ -61,7 +61,7 @@ pub fn resolve_executable_path(
     let env_override = match provider {
         ProviderKind::Claude => std::env::var("CLAUDE_PATH_ENV").ok(),
         ProviderKind::Codex => std::env::var("CODEX_PATH_ENV").ok(),
-        ProviderKind::Mock => None,
+        _ => None,
     };
 
     let resolved = if let Some(custom_path) = env_override {

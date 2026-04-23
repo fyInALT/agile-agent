@@ -37,9 +37,9 @@ pub enum ProviderType {
 impl ProviderType {
     pub fn from_provider_kind(kind: ProviderKind) -> Self {
         match kind {
-            ProviderKind::Mock => Self::Mock,
             ProviderKind::Claude => Self::Claude,
             ProviderKind::Codex => Self::Codex,
+            _ => Self::Mock,
         }
     }
 

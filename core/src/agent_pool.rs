@@ -1043,11 +1043,7 @@ impl WorkerPool {
             // Handle providers without ProviderKind mapping
             if let Some(provider_kind) = provider_kind_opt {
                 // Convert to decision ProviderKind
-                let decision_provider = match provider_kind {
-                    ProviderKind::Claude => agent_decision::provider_kind::ProviderKind::Claude,
-                    ProviderKind::Codex => agent_decision::provider_kind::ProviderKind::Codex,
-                    ProviderKind::Mock => agent_decision::provider_kind::ProviderKind::Unknown,
-                };
+                let decision_provider = provider_kind;
 
                 // Convert core ProviderEvent to decision ProviderEvent via shared kernel
                 let decision_event: Option<agent_decision::provider::ProviderEvent> = event.into();
