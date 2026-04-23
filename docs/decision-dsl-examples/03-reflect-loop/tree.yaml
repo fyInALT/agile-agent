@@ -1,0 +1,19 @@
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: reflect_loop_example
+  description: "Handles claims_completion with reflection rounds using a SubTree"
+spec:
+  root:
+    kind: Selector
+    name: root
+    children:
+      # Priority 1: Claims completion → use the reflect sub-tree
+      - kind: SubTree
+        name: use_reflect_loop
+        ref: reflect
+
+      # Priority 2: Default
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue

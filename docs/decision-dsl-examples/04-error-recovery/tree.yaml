@@ -1,0 +1,130 @@
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: error_recovery
+  description: "Classifies errors using a thinking model and branches to targeted recovery strategies"
+spec:
+  root:
+    kind: Sequence
+    name: error_recovery
+    children:
+      # Guard: only run when an error is present
+      - kind: Condition
+        name: is_error
+        eval:
+          kind: outputContains
+          pattern: "error"
+          caseSensitive: false
+
+      # Ask a thinking model to classify the error and recommend recovery
+      # This is a SINGLE Prompt that produces THREE blackboard variables
+      - kind: Prompt
+        name: classify_error
+        model: thinking
+        timeoutMs: 45000
+        template: |
+          The agent encountered an error. Classify it:
+
+          Error output:
+          {{ provider_output | truncate(600) }}
+
+          Last tool call: {{ last_tool_call.name }}
+          Tool input: {{ last_tool_call.input | default("N/A") }}
+          Tool output: {{ last_tool_call.output | default("N/A") | truncate(300) }}
+
+          Classify as one of:
+          - SYNTAX: Code compilation/syntax error
+          - TEST: Test failure
+          - PERMISSION: File/network permission denied
+          - TIMEOUT: Operation timed out
+          - RATE_LIMIT: API rate limited
+          - LOGIC: Logic bug in implementation
+          - UNKNOWN: Cannot determine
+
+          Then recommend: RETRY, FIX, SKIP, or ESCALATE
+
+          Reply in this exact format:
+          CLASS: <classification>
+          RECOMMEND: <recommendation>
+          REASON: <one sentence>
+        parser:
+          kind: structured
+          pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)\\s*REASON:\\s*(.*)"
+          fields:
+            - name: classification
+              group: 1
+            - name: recommendation
+              group: 2
+            - name: reason
+              group: 3
+        sets:
+          - key: error_class
+            field: classification
+          - key: error_recommendation
+            field: recommendation
+          - key: error_reason
+            field: reason
+
+      # Branch to recovery path based on the model's recommendation
+      - kind: Selector
+        name: act_on_recommendation
+        children:
+          # Path A: Retry the failed operation
+          - kind: Sequence
+            name: retry_flow
+            children:
+              - kind: Condition
+                name: recommend_retry
+                eval:
+                  kind: variableIs
+                  key: error_recommendation
+                  value: RETRY
+              - kind: Action
+                name: emit_retry
+                command:
+                  RetryTool:
+                    tool_name: "{{ last_tool_call.name | default('unknown') }}"
+                    args: null
+                    max_attempts: 3
+
+          # Path B: Send a targeted fix instruction to the agent
+          - kind: Sequence
+            name: fix_flow
+            children:
+              - kind: Condition
+                name: recommend_fix
+                eval:
+                  kind: variableIs
+                  key: error_recommendation
+                  value: FIX
+              - kind: Action
+                name: emit_custom_instruction
+                command:
+                  SendCustomInstruction:
+                    prompt: |
+                      The agent encountered a {{ variables.error_class }} error.
+                      Reason: {{ variables.error_reason }}
+                      Please fix this issue and retry.
+                    target_agent: "{{ agent_id }}"
+
+          # Path C: Escalate to human (covers both ESCALATE and SKIP)
+          - kind: Sequence
+            name: escalate_flow
+            children:
+              - kind: Condition
+                name: recommend_escalate_or_skip
+                eval:
+                  kind: or
+                  conditions:
+                    - kind: variableIs
+                      key: error_recommendation
+                      value: ESCALATE
+                    - kind: variableIs
+                      key: error_recommendation
+                      value: SKIP
+              - kind: Action
+                name: emit_escalate
+                command:
+                  EscalateToHuman:
+                    reason: "Error recovery: {{ variables.error_recommendation }}"
+                    context: "{{ variables.error_reason }}"

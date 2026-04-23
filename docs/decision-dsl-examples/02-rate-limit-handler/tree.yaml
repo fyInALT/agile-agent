@@ -1,0 +1,43 @@
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: rate_limit_handler
+  description: "Handles 429/rate-limit errors with cooldown-protected retry"
+spec:
+  root:
+    kind: Selector
+    name: root
+    children:
+      # Priority 1: Rate limit detected → retry with cooldown
+      - kind: Sequence
+        name: rate_limit_handler
+        children:
+          - kind: Condition
+            name: is_rate_limit
+            eval:
+              kind: regex
+              pattern: "(429|rate.?limit|quota.?exceeded)"
+
+          # Cooldown prevents immediate re-retry (stateful across ticks)
+          - kind: Cooldown
+            name: rate_limit_cooldown
+            durationMs: 5000
+            child:
+              kind: Action
+              name: emit_retry
+              command:
+                RetryTool:
+                  tool_name: "{{ last_tool_call.name | default('unknown') }}"
+                  args: null
+                  max_attempts: 1
+
+          # Set a flag so other systems know this was a rate-limit retry
+          - kind: SetVar
+            name: set_retry_flag
+            key: retry_due_to_rate_limit
+            value: { kind: boolean, value: true }
+
+      # Priority 2: Default — no rate limit, continue normally
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue

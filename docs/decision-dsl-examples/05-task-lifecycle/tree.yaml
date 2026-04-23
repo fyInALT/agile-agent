@@ -1,0 +1,129 @@
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: task_lifecycle_orchestrator
+  description: "Routes decisions based on task phase, reusing SubTrees from Examples 02-04"
+spec:
+  root:
+    kind: Selector
+    name: root
+    children:
+      # Phase 1: Task starting — git setup
+      - kind: Sequence
+        name: phase_starting
+        children:
+          - kind: Condition
+            name: is_starting_phase
+            eval:
+              kind: variableIs
+              key: task_phase
+              value: starting
+          - kind: SubTree
+            name: use_task_start
+            ref: task_start
+
+      # Phase 2: Coding — normal work with error recovery
+      - kind: Sequence
+        name: phase_coding
+        children:
+          - kind: Condition
+            name: is_coding_phase
+            eval:
+              kind: variableIs
+              key: task_phase
+              value: coding
+
+          # Universal safety: rate limit check (reused from Example 02)
+          - kind: SubTree
+            name: use_rate_limit
+            ref: rate_limit
+
+          # Error detection and recovery (reused from Example 04)
+          - kind: Condition
+            name: is_error
+            eval:
+              kind: outputContains
+              pattern: "error"
+              caseSensitive: false
+          - kind: SubTree
+            name: use_error_recovery
+            ref: error_recovery
+
+      # Phase 3: Completing — verify before accepting completion
+      - kind: Sequence
+        name: phase_completing
+        children:
+          - kind: Condition
+            name: is_completing_phase
+            eval:
+              kind: variableIs
+              key: task_phase
+              value: completing
+          # Reuse the reflect loop from Example 03
+          - kind: SubTree
+            name: use_reflect
+            ref: reflect
+
+      # Phase 4: Idle — check for next task
+      - kind: Sequence
+        name: phase_idle
+        children:
+          - kind: Condition
+            name: is_idle_phase
+            eval:
+              kind: variableIs
+              key: task_phase
+              value: idle
+
+          - kind: Prompt
+            name: check_new_tasks
+            template: |
+              The agent has completed all assigned tasks.
+              Are there new tasks to start?
+              Reply with exactly one word: YES or NO.
+            parser:
+              kind: enum
+              values: [YES, NO]
+              caseSensitive: false
+            sets:
+              - key: has_new_tasks
+                field: decision
+
+          - kind: Selector
+            name: branch_on_new_tasks
+            children:
+              # New tasks available → transition back to starting
+              - kind: Sequence
+                name: start_new_task
+                children:
+                  - kind: Condition
+                    name: has_new_tasks_yes
+                    eval:
+                      kind: variableIs
+                      key: has_new_tasks
+                      value: YES
+                  - kind: SetVar
+                    name: set_phase_starting
+                    key: task_phase
+                    value: { kind: string, value: starting }
+
+              # No new tasks → stop
+              - kind: Sequence
+                name: stop_if_done
+                children:
+                  - kind: Condition
+                    name: has_new_tasks_no
+                    eval:
+                      kind: variableIs
+                      key: has_new_tasks
+                      value: NO
+                  - kind: Action
+                    name: emit_stop
+                    command:
+                      StopIfComplete:
+                        reason: "All tasks completed, no new assignments"
+
+      # Default: approve and continue
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue

@@ -1,0 +1,30 @@
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: hello_decision
+  description: "The simplest behavior tree: handle waiting-for-choice or default to continue"
+spec:
+  root:
+    kind: Selector
+    name: root
+    children:
+      # Priority 1: Agent is waiting for a human to choose between options
+      - kind: Sequence
+        name: handle_choice
+        children:
+          - kind: Condition
+            name: is_waiting_for_choice
+            eval:
+              kind: outputContains
+              pattern: "waiting for choice"
+              caseSensitive: false
+          - kind: Action
+            name: select_first
+            command:
+              SelectOption:
+                option_id: "0"
+
+      # Priority 2: Default — just let the agent keep working
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue

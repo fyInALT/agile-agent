@@ -1,0 +1,86 @@
+apiVersion: decision.agile-agent.io/v1
+kind: SubTree
+metadata:
+  name: task_start
+  description: "Prepares git branch and worktree for a new task, then transitions to coding phase"
+spec:
+  root:
+    kind: Sequence
+    name: task_start
+    children:
+      - kind: Prompt
+        name: choose_git_strategy
+        template: |
+          Starting task: {{ current_task_id }}
+          Description: {{ task_description | truncate(300) }}
+
+          Choose git strategy:
+          - NEW_BRANCH: Create a new feature branch
+          - EXISTING: Use existing branch
+          Reply with exactly one: NEW_BRANCH or EXISTING
+        parser:
+          kind: enum
+          values: [NEW_BRANCH, EXISTING]
+          caseSensitive: false
+        sets:
+          - key: git_strategy
+            field: decision
+
+      - kind: Selector
+        name: branch_on_strategy
+        children:
+          # Path A: Create new branch
+          - kind: Sequence
+            name: new_branch_flow
+            children:
+              - kind: Condition
+                name: strategy_is_new
+                eval:
+                  kind: variableIs
+                  key: git_strategy
+                  value: NEW_BRANCH
+              - kind: Action
+                name: create_branch
+                command:
+                  CreateTaskBranch:
+                    branch_name: "feature/{{ current_task_id | slugify }}"
+                    base_branch: "main"
+                    worktree_path: null
+              - kind: Action
+                name: prepare_task
+                command:
+                  PrepareTaskStart:
+                    task_id: "{{ current_task_id }}"
+                    task_description: "{{ task_description }}"
+              # Transition to coding phase
+              - kind: SetVar
+                name: set_phase_coding
+                key: task_phase
+                value: { kind: string, value: coding }
+
+          # Path B: Use existing branch
+          - kind: Sequence
+            name: existing_branch_flow
+            children:
+              - kind: Condition
+                name: strategy_is_existing
+                eval:
+                  kind: variableIs
+                  key: git_strategy
+                  value: EXISTING
+              - kind: Action
+                name: rebase
+                command:
+                  RebaseToMain:
+                    base_branch: "main"
+              - kind: Action
+                name: prepare_task
+                command:
+                  PrepareTaskStart:
+                    task_id: "{{ current_task_id }}"
+                    task_description: "{{ task_description }}"
+              # Transition to coding phase
+              - kind: SetVar
+                name: set_phase_coding
+                key: task_phase
+                value: { kind: string, value: coding }

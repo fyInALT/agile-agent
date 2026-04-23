@@ -1,0 +1,96 @@
+apiVersion: decision.agile-agent.io/v1
+kind: SubTree
+metadata:
+  name: reflect
+  description: "Handles claims_completion with up to 2 reflection rounds"
+spec:
+  root:
+    kind: Sequence
+    name: claims_completion_flow
+    children:
+      # Guard: only run for claims_completion situations
+      - kind: Condition
+        name: is_claims_completion
+        eval:
+          kind: outputContains
+          pattern: "claims_completion"
+          caseSensitive: false
+
+      # ReflectionGuard: allow at most 2 reflection rounds
+      # When max is reached, this decorator returns FAILURE
+      # and the Prompt node is NOT executed (saving LLM tokens)
+      - kind: ReflectionGuard
+        name: max_2_reflections
+        maxRounds: 2
+        child:
+          kind: Prompt
+          name: ask_reflect_or_confirm
+          model: thinking
+          timeoutMs: 30000
+          template: |
+            You are a decision helper for a software development agent.
+
+            ## Task
+            {{ task_description }}
+
+            ## Recent Work Summary
+            {{ context_summary | truncate(800) }}
+
+            ## Agent's Claim
+            {{ provider_output | truncate(500) }}
+
+            ## Reflection Round
+            {{ reflection_round }} / {{ max_reflection_rounds }}
+
+            The agent claims the task is complete.
+            Should we:
+            - REFLECT: Ask the agent to review its work more carefully
+            - CONFIRM: Accept the completion and move on
+
+            Consider: Are tests passing? Are all requirements met? Is the code clean?
+            Reply with exactly one word: REFLECT or CONFIRM.
+          parser:
+            kind: enum
+            values: [REFLECT, CONFIRM]
+            caseSensitive: false
+          sets:
+            - key: next_action
+              field: decision
+
+      # Branch based on the LLM's decision
+      - kind: Selector
+        name: branch_on_decision
+        children:
+          # Branch A: LLM said REFLECT
+          - kind: Sequence
+            name: do_reflect
+            children:
+              - kind: Condition
+                name: decision_is_reflect
+                eval:
+                  kind: variableIs
+                  key: next_action
+                  value: REFLECT
+              - kind: Action
+                name: emit_reflect
+                command:
+                  Reflect:
+                    prompt: |
+                      Please review your work carefully before confirming completion:
+                      1. Are all tests passing?
+                      2. Have you reviewed all changed files?
+                      3. Does the code follow project conventions?
+
+          # Branch B: LLM said CONFIRM
+          - kind: Sequence
+            name: do_confirm
+            children:
+              - kind: Condition
+                name: decision_is_confirm
+                eval:
+                  kind: variableIs
+                  key: next_action
+                  value: CONFIRM
+              - kind: Action
+                name: emit_confirm
+                command: ConfirmCompletion
