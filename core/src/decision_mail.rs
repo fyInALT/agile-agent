@@ -73,6 +73,7 @@ impl DecisionRequest {
 /// Response from decision agent to work agent
 ///
 /// Contains the decision output (actions to execute) or error.
+/// Also includes the decision prompt and thinking process for display.
 pub struct DecisionResponse {
     /// The work agent ID that requested the decision
     pub work_agent_id: AgentId,
@@ -80,6 +81,10 @@ pub struct DecisionResponse {
     pub output: Option<DecisionOutput>,
     /// Error message (if decision failed)
     pub error: Option<String>,
+    /// The decision prompt sent to the LLM (for display)
+    pub decision_prompt: Option<String>,
+    /// The thinking/reasoning process from the LLM (for display)
+    pub thinking: Option<String>,
 }
 
 impl std::fmt::Debug for DecisionResponse {
@@ -88,6 +93,8 @@ impl std::fmt::Debug for DecisionResponse {
             .field("work_agent_id", &self.work_agent_id)
             .field("output", &self.output.as_ref().map(|_| "<DecisionOutput>"))
             .field("error", &self.error)
+            .field("decision_prompt", &self.decision_prompt.as_ref().map(|p| if p.len() > 50 { &p[..50] } else { p }))
+            .field("thinking", &self.thinking.as_ref().map(|t| if t.len() > 50 { &t[..50] } else { t }))
             .finish()
     }
 }
@@ -98,6 +105,8 @@ impl Clone for DecisionResponse {
             work_agent_id: self.work_agent_id.clone(),
             output: self.output.clone(),
             error: self.error.clone(),
+            decision_prompt: self.decision_prompt.clone(),
+            thinking: self.thinking.clone(),
         }
     }
 }
@@ -109,6 +118,24 @@ impl DecisionResponse {
             work_agent_id,
             output: Some(output),
             error: None,
+            decision_prompt: None,
+            thinking: None,
+        }
+    }
+
+    /// Create a successful decision response with prompt and thinking
+    pub fn success_with_details(
+        work_agent_id: AgentId,
+        output: DecisionOutput,
+        decision_prompt: Option<String>,
+        thinking: Option<String>,
+    ) -> Self {
+        Self {
+            work_agent_id,
+            output: Some(output),
+            error: None,
+            decision_prompt,
+            thinking,
         }
     }
 
@@ -118,6 +145,8 @@ impl DecisionResponse {
             work_agent_id,
             output: None,
             error: Some(error_message),
+            decision_prompt: None,
+            thinking: None,
         }
     }
 
@@ -139,6 +168,16 @@ impl DecisionResponse {
     /// Get the error message if available
     pub fn error_message(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    /// Get the decision prompt if available
+    pub fn decision_prompt(&self) -> Option<&String> {
+        self.decision_prompt.as_ref()
+    }
+
+    /// Get the thinking process if available
+    pub fn thinking(&self) -> Option<&String> {
+        self.thinking.as_ref()
     }
 }
 
