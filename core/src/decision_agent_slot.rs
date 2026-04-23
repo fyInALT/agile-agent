@@ -444,8 +444,13 @@ impl DecisionAgentSlot {
                     }),
                 );
 
-                // Send success response
-                let response = DecisionResponse::success(request.work_agent_id.clone(), output);
+                // Send success response with decision details for display
+                let response = DecisionResponse::success_with_details(
+                    request.work_agent_id.clone(),
+                    output,
+                    Some(decision_prompt),
+                    None, // TODO: get thinking from engine if available
+                );
 
                 if let Err(e) = self.mail_receiver.send_response(response.clone()) {
                     self.error_count += 1;

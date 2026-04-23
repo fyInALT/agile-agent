@@ -216,8 +216,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     reasoning: output.reasoning.clone(),
                                     confidence: output.confidence,
                                     tier: "auto".to_string(), // TODO: get from engine
-                                    decision_prompt: None, // TODO: get from decision engine
-                                    thinking: None, // TODO: get from LLM response
+                                    decision_prompt: response.decision_prompt().cloned(),
+                                    thinking: response.thinking().cloned(),
                                 };
 
                                 logging::debug_event(
