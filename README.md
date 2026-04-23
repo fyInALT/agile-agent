@@ -24,11 +24,19 @@ Implemented:
 - daemon-centric architecture with WebSocket JSON-RPC 2.0 protocol
 - modular crate structure: types, toolkit, provider, worktree, backlog, storage, protocol, daemon, commands
 - OpenAI-backed LLM provider with simple/thinking model tiers
+- **Event-sourced Worker aggregate** with `apply(event) -> Vec<RuntimeCommand>` pattern
+- **Shared DomainEvent** (24 variants) across provider and decision layers
+- **Pure domain model** in `agent-runtime-domain` (Worker, WorkerState, TranscriptJournal)
+- **Effect system** in `agent-behavior-infra` (RuntimeCommand, EffectHandler trait)
+- **Frontend-backend separation**: TUI and CLI are protocol-only clients
+- **Decision layer decoupling**: `agent-decision` is read-only, produces `DecisionCommand`
+- **7-phase EventLoop** with RuntimeCommand dispatch
 
 In progress:
 
 - workflow self-improvement
 - full parallel multi-agent runtime across TUI execution
+- decision layer integration with daemon decision interpreter
 
 Not started yet:
 
@@ -38,30 +46,36 @@ Not started yet:
 
 ```text
 agile-agent/
-├── agent/             # Core agent crates (modular architecture)
-│   ├── daemon/        # WebSocket server, session manager, event pump
-│   ├── protocol/      # JSON-RPC types, events, state snapshots
-│   ├── types/         # Foundation types (AgentId, TaskId, ProviderKind)
-│   ├── toolkit/       # Tool call types (PatchChange, ExecCommand)
-│   ├── provider/      # Provider execution (Claude, Codex, launch config)
-│   ├── worktree/      # Git worktree management
-│   ├── backlog/       # Task/backlog domain
-│   ├── storage/       # Persistence layer
-│   └── commands/      # Slash command system
-├── cli/               # `agile-agent` binary and CLI integration tests
-├── core/              # Runtime engine, AgentPool, AppState, verification
-├── decision/          # Decision layer, classifiers, engines
-├── docs/              # Product specs, sprint specs
-├── kanban/            # Trait-based Kanban domain model
-├── llm-provider/      # OpenAI client/provider abstraction
-├── scripts/           # Developer helper scripts
-├── test-support/      # Shared test harnesses and fixtures
-└── tui/               # Terminal UI, rendering, transcript, overlays
+├── agent/                 # Core agent crates (modular architecture)
+│   ├── daemon/            # WebSocket server, EventLoop, event pump
+│   ├── events/            # Shared DomainEvent (24 variants), DecisionEvent
+│   ├── protocol/          # JSON-RPC types, events, state snapshots
+│   ├── runtime-domain/    # Pure domain types (Worker, WorkerState, TranscriptJournal)
+│   ├── behavior-infra/    # Effect system (RuntimeCommand, EffectHandler trait)
+│   ├── types/             # Foundation types (AgentId, TaskId, ProviderKind)
+│   ├── toolkit/           # Tool call types (PatchChange, ExecCommand)
+│   ├── provider/          # Provider execution (Claude, Codex, launch config)
+│   ├── worktree/          # Git worktree management
+│   ├── backlog/           # Task/backlog domain
+│   ├── storage/           # Persistence layer
+│   └── commands/          # Slash command system
+├── cli/                   # `agile-agent` binary and CLI integration tests
+├── core/                  # Runtime engine, WorkerPool, RuntimeSession, verification
+├── decision/              # Decision layer, classifiers, engines, DecisionCommand
+├── docs/                  # Product specs, sprint specs
+├── kanban/                # Trait-based Kanban domain model
+├── llm-provider/          # OpenAI client/provider abstraction
+├── scripts/               # Developer helper scripts
+├── test-support/          # Shared test harnesses and fixtures
+└── tui/                   # Terminal UI, rendering, transcript, overlays
 ```
 
 Workspace crates:
 
-- `agent-daemon`: WebSocket server owning all runtime state
+- `agent-daemon`: WebSocket server owning all runtime state via EventLoop
+- `agent-events`: Shared DomainEvent (24 variants) and DecisionEvent for event-sourced architecture
+- `agent-runtime-domain`: Pure domain types (Worker aggregate root, WorkerState, TranscriptJournal)
+- `agent-behavior-infra`: Effect system with RuntimeCommand and EffectHandler trait
 - `agent-protocol`: JSON-RPC 2.0 types, events, snapshots, auto-link
 - `agent-types`: Foundation types (AgentId, WorkplaceId, TaskId, ProviderKind)
 - `agent-toolkit`: Tool call types (PatchChange, ExecCommandStatus, WebSearchAction)
@@ -70,9 +84,9 @@ Workspace crates:
 - `agent-backlog`: Task and backlog management
 - `agent-storage`: Persistence layer (snapshot, events.jsonl)
 - `agent-commands`: Slash command routing and execution
-- `agent-cli`: `agile-agent` binary, TUI entrypoint, CLI subcommands
-- `agent-core`: Runtime engine (AgentPool, AppState), verification, artifacts
-- `agent-decision`: Classifier, tiered decision engine, action/situation registry
+- `agent-cli`: `agile-agent` binary, TUI entrypoint, CLI subcommands (protocol-first)
+- `agent-core`: Runtime engine (WorkerPool, RuntimeSession), verification, artifacts
+- `agent-decision`: Classifier, tiered decision engine, DecisionCommand (read-only)
 - `agent-tui`: Codex-style terminal UI (protocol-only client)
 - `agent-kanban`: Extensible Kanban domain model with trait architecture
 - `agent-llm-provider`: OpenAI client with simple/thinking model tiers
@@ -90,104 +104,126 @@ Key docs:
 
 ### Overview
 
-agile-agent uses a layered crate architecture with two runtime modes:
+agile-agent uses a layered crate architecture with event-sourced domain model and frontend-backend separation:
 
-- **Embedded mode** (default, `core` feature): TUI and CLI directly link `agent-core`, running the full runtime in-process.
-- **Protocol mode** (no `core` feature): TUI/CLI connect to a per-workspace `agent-daemon` over WebSocket JSON-RPC 2.0.
+- **Frontend (TUI/CLI)**: Protocol-only clients connecting to daemon via WebSocket JSON-RPC 2.0
+- **Daemon (`agent-daemon`)**: Owns all runtime state via EventLoop, serves snapshots and broadcasts events
+- **Core (`agent-core`)**: Runtime engine integration layer (WorkerPool, RuntimeSession)
+- **Decision Layer (`agent-decision`)**: Read-only decision engine producing DecisionCommand
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                     UI / CLI Layer                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  agent-cli   │  │  agent-tui   │  │  agent-daemon    │  │
-│  │  (binary)    │  │  (embedded / │  │  (WebSocket      │  │
-│  │              │  │   protocol)  │  │   server)        │  │
-│  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  │
-└─────────┼─────────────────┼───────────────────┼────────────┘
-          │                 │                   │
-          │   Embedded      │   Protocol        │
-          │   (in-process)  │   (WebSocket)     │
-          ▼                 ▼                   ▼
+│                     Frontend Layer                          │
+│  ┌──────────────┐  ┌──────────────┐                        │
+│  │  agent-cli   │  │  agent-tui   │                        │
+│  │  (binary)    │  │ (protocol-   │                        │
+│  │              │  │  only client)│                        │
+│  └──────┬───────┘  └──────┬───────┘                        │
+└─────────┼─────────────────┼──────────────────────────────────┘
+          │                 │
+          │   WebSocket     │   JSON-RPC 2.0
+          ▼                 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Runtime / Orchestration                    │
-│              agent-core  (~15k lines, 46 modules)           │
+│                    Daemon Layer                              │
+│              agent-daemon (~95k lines)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  AgentPool   │  │  AppState    │  │ MultiAgentSession│  │
-│  │  (lifecycle, │  │  (transcript,│  │  (bootstrap,     │  │
-│  │   focus,     │  │   backlog,   │  │   event routing) │  │
-│  │   decisions) │  │   skills)    │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │DecisionLayer │  │WorktreeCoord │  │ ProviderProfile  │  │
-│  │(1:1 paired   │  │(git isolation│  │ (named configs)  │  │
-│  │ agents)      │  │ per agent)   │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-┌─────────────────┐ ┌──────────┐ ┌──────────────┐
-│  agent-decision │ │agent-    │ │agent-kanban  │
-│  (tiered engine,│ │worktree  │ │(Scrum board) │
-│   classifiers)  │ │(git ops) │ │              │
-└─────────────────┘ └──────────┘ └──────────────┘
+│  │  EventLoop   │  │ Broadcaster  │  │ConnectionManager │  │
+│  │ (7 phases,   │  │ (event fan-  │  │ (auth, heartbeat)│  │
+│  │  RuntimeCmd) │  │    out)      │  │                  │  │
+│  └──────┬───────┘  └──────────────┘  └──────────────────┘  │
+└─────────┼───────────────────────────────────────────────────┘
           │
           ▼
-┌─────────────────┐
-│agent-llm-provider│
-│ (OpenAI client) │
-└─────────────────┘
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-┌─────────────────┐ ┌──────────┐ ┌──────────────┐
-│  agent-provider │ │agent-    │ │ agent-backlog │
-│  (Claude/Codex/ │ │protocol  │ │ (task state)  │
-│   Mock threads) │ │(JSON-RPC)│ │               │
-└─────────────────┘ └──────────┘ └──────────────┘
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-┌─────────────────┐ ┌──────────┐ ┌──────────────┐
-│  agent-toolkit  │ │agent-    │ │ agent-storage │
-│  (tool types)   │ │commands  │ │ (paths, mig)  │
-│                 │ │(slash /) │ │               │
-└─────────────────┘ └──────────┘ └──────────────┘
-                         │
-                         ▼
-                ┌─────────────────┐
-                │   agent-types   │
-                │ (foundation IDs │
-                │  & enums, zero  │
-                │   dependencies) │
-                └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Runtime Layer                             │
+│              agent-core (~500k lines)                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  WorkerPool  │  │RuntimeSession│  │ EventAggregator  │  │
+│  │ (lifecycle, │  │ (bootstrap,  │  │ (multi-source    │  │
+│  │   focus)     │  │  persistence)│  │  event poll)     │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │DecisionAgent │  │ WorkerHandle │  │ SharedWorkplace  │  │
+│  │Coordinator   │  │ (agent slot) │  │ State            │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────┬───────────────────────────────────────────┘
+                  │
+    ┌─────────────┼─────────────┐
+    ▼             ▼             ▼
+┌───────────┐ ┌──────────┐ ┌──────────────┐
+│  agent-   │ │ agent-   │ │ agent-       │
+│  decision │ │ events   │ │ behavior-    │
+│ (Decision │ │ (Domain  │ │ infra        │
+│  Command) │ │  Event)  │ │(EffectSystem)│
+└───────────┘ └──────────┘ └──────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Domain Layer                              │
+│  ┌─────────────────┐  ┌──────────────────────────────────┐ │
+│  │agent-runtime-   │  │ agent-events                      │ │
+│  │domain           │  │ (DomainEvent 24 variants,         │ │
+│  │(Worker aggregate│  │  DecisionEvent protocol)          │ │
+│  │ root, pure      │  │                                    │ │
+│  │ state machine)  │  │                                    │ │
+│  └─────────────────┘  └──────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                  │
+    ┌─────────────┼─────────────┬─────────────┐
+    ▼             ▼             ▼             ▼
+┌───────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  agent-   │ │ agent-   │ │ agent-   │ │ agent-   │
+│  worktree │ │ backlog  │ │ kanban   │ │ provider │
+│ (git ops) │ │(task st) │ │(Scrum)   │ │(Claude/  │
+└───────────┘ └──────────┘ └──────────┘ │ Codex)   │
+                                         └──────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │   agent-types   │
+         │ (foundation IDs │
+         │  & enums, zero  │
+         │   dependencies) │
+         └─────────────────┘
 ```
 
 ### Crate Dependency Graph
 
 ```text
-agent-cli ──┬──► agent-core ──┬──► agent-types
-            │                 ├──► agent-toolkit
-            ├──► agent-tui ───┼──► agent-decision
-            │   (core feat)   ├──► agent-kanban
-            │                 ├──► agent-provider
-            │                 ├──► agent-worktree
-            │                 ├──► agent-backlog
-            │                 ├──► agent-storage
-            │                 ├──► agent-commands
-            │                 └──► agent-llm-provider (via decision)
-            │
-            ├──► agent-protocol ──► agent-types
-            │
-            └──► agent-decision (headless loop)
+agent-cli ──┬──► agent-core ──┬──► agent-events
+             │                 ├──► agent-runtime-domain
+             │                 ├──► agent-behavior-infra
+             │                 ├──► agent-types
+             │                 ├──► agent-toolkit
+             │                 ├──► agent-decision
+             │                 ├──► agent-kanban
+             │                 ├──► agent-provider
+             │                 ├──► agent-worktree
+             │                 ├──► agent-backlog
+             │                 ├──► agent-storage
+             │                 ├──► agent-commands
+             │                 └──► agent-llm-provider (via decision)
+             │
+             ├──► agent-protocol ──► agent-types
+             │
+             └──► agent-tui ──► agent-protocol
+                (protocol-only)
 
 agent-daemon ──► agent-core
              ──► agent-protocol
+             ──► agent-events
              ──► agent-types
 
+agent-events ──► agent-types
+
+agent-runtime-domain ──► agent-types
+
+agent-behavior-infra ──► agent-events
+                        ──► agent-runtime-domain
+
 agent-provider ──► agent-types
-               ──► agent-toolkit
-               ──► agent-decision
+                ──► agent-toolkit
+                ──► agent-events
 
 agent-kanban ──► agent-backlog ──► agent-types
 
@@ -198,7 +234,7 @@ agent-storage  ──► agent-types
 agent-toolkit  ──► agent-types
 agent-protocol ──► agent-types
 agent-llm-provider ──► (none)
-agent-decision ──► (none)
+agent-decision ──► agent-events
 agent-test-support ──► agent-core
 ```
 
@@ -211,6 +247,24 @@ Zero-dependency crate containing all shared domain primitives. Every other crate
 - `RuntimeMode` — `SingleAgent | MultiAgent`
 - `AgentStatus`, `TaskStatus`, `TodoStatus` — lifecycle enums
 - `ProviderKind` — `Mock | Claude | Codex`
+
+#### `agent-events` — Shared Domain Events
+Event-sourced architecture foundation with 24 domain event variants.
+- `DomainEvent` — 24 variants: `WorkerSpawned`, `WorkerStatusChanged`, `TaskAssigned`, `DecisionRequested`, etc.
+- `DecisionEvent` — Decision layer protocol events
+- Event-driven communication between provider and decision layers
+
+#### `agent-runtime-domain` — Pure Domain Model
+Pure types with no external dependencies, forming the domain core.
+- `Worker` — Aggregate root with `apply(event) -> Vec<RuntimeCommand>` pattern
+- `WorkerState` — State machine with explicit transitions
+- `TranscriptJournal`, `JournalEntry` — Transcript persistence types
+
+#### `agent-behavior-infra` — Effect System
+Effect handling infrastructure separating pure state transitions from side effects.
+- `RuntimeCommand` — Effect enum: spawn provider, send message, update state
+- `EffectHandler` trait — Injectable effect execution
+- `NoopEffectHandler`, `RecordingEffectHandler` — Test utilities
 
 #### `agent-toolkit` — Tool Call Types
 Types for tool invocations and their statuses.
@@ -272,59 +326,50 @@ Extensible Scrum board domain with trait-based elements.
 - `FileKanbanRepository` — JSON file persistence with `index.json`
 - `TransitionRule` / `TransitionRegistry` — dependency-aware status transitions
 
-#### `agent-decision` — Tiered Decision Layer
-Autonomous decision-making with situation classification and tiered engine selection.
+#### `agent-decision` — Tiered Decision Layer (Read-Only)
+Autonomous decision-making with situation classification and tiered engine selection. Produces `DecisionCommand` for the daemon to interpret.
 - `DecisionPipeline` — main entry: Pre-Processors → Strategy → Maker → Post-Processors
 - `TieredDecisionEngine` — routes by complexity:
   - **Simple** → `RuleBasedDecisionEngine`
   - **Medium/Complex** → `LLMDecisionEngine`
   - **Critical** → `CLIDecisionEngine` (human escalation)
 - `OutputClassifier` — converts provider events into `ClassifyResult`
-- `ActionRegistry` / `SituationRegistry` — built-in cases: `waiting-for-choice`, `claims-completion`, `error`, `agent_idle`
-- `LLMCaller` trait — injectable LLM backend (implemented by `agent-provider`)
+- `DecisionCommand` — output enum: `Continue`, `RequestHumanDecision`, `MarkTaskComplete`, `Escalate`, etc.
+- `ActionRegistry` / `SituationRegistry` — built-in cases
+- `LLMCaller` trait — injectable LLM backend
 
 ### Runtime Layer (`agent-core`)
 
-`agent-core` is the coordination heart (~15k lines, 46 modules). It is an integration layer that re-exports from sub-crates for backward compatibility.
+`agent-core` is the coordination heart (~500k lines total). It integrates sub-crates and provides the runtime engine.
 
-#### App State & Transcript
-- `AppState` — central mutable TUI state: transcript, input buffer, backlog, skills, provider selection
-- `TranscriptEntry` — rich enum: `User`, `Assistant`, `Thinking`, `Decision`, `ExecCommand`, `PatchApply`, `WebSearch`, `McpToolCall`, `GenericToolCall`, `Status`, `Error`
-- `LoopPhase` — `Idle | Planning | Executing | Verifying | Escalating`
+#### Worker Aggregate Root (Event-Sourced)
+- `Worker` (in `agent-runtime-domain`) — Pure aggregate root: `apply(event) -> Vec<RuntimeCommand>`
+- `WorkerState` — 12+ status variants with explicit transition matrix
+- State transitions are validated; effects are delegated to `EffectHandler`
 
-#### Agent Identity & Runtime
-- `AgentRuntime` — bootstrap (restore/create/recreate), persistence, session sync
-- `AgentMeta` — serializable identity with `ProviderType` and session continuity
-- `AgentBootstrap` / `AgentBootstrapKind` — tracks creation path
+#### Runtime Session & Event Aggregation
+- `RuntimeSession` — Top-level session with `SharedWorkplaceState` and `WorkerPool`
+- `SharedWorkplaceState` — Workplace-wide: `BacklogState`, `SkillRegistry`, `LoopControlFlags`
+- `EventAggregator` — Polls all provider channels non-blockingly, merges events
 
-#### Agent Slot (Single Agent)
-- `AgentSlot` — **1680-line struct**. Owns one agent's entire runtime: status, session, transcript, assigned task, provider thread handle, `mpsc::Receiver<ProviderEvent>`, worktree info, decision policy
-- `AgentSlotStatus` — 12+ variants: `Idle`, `Starting`, `Responding`, `ToolExecuting`, `Finishing`, `Stopping`, `Stopped`, `Error`, `Blocked`, `BlockedForDecision`, `Paused`, `WaitingForInput`, `Resting`
-  - Explicit `can_transition_to()` validation matrix (~80 rules)
-- `AgentStateMachine` trait — explicit state transition logic
-
-#### Agent Pool (Multi-Agent Coordination)
-- `AgentPool` — **4570-line coordinator**. Vec of `AgentSlot`s + delegated sub-modules:
-  - `AgentLifecycleManager` — spawn/stop/pause/resume
+#### Worker Pool (Multi-Agent Coordination)
+- `WorkerPool` (alias `AgentPool`) — Vec of `WorkerHandle`s with delegated sub-modules:
+  - `WorkerLifecycleManager` — spawn/stop/pause/resume
   - `TaskAssignmentCoordinator` — assign/auto-assign/complete tasks
   - `FocusManager` — TUI focus index
   - `BlockedHandler` — blocked agent config, history, notifier
   - `DecisionAgentCoordinator` — 1:1 decision agent pairing
   - `WorktreeCoordinator` — git worktree bridge
-  - `WorktreeRecovery` — orphaned/idle worktree cleanup
   - `DecisionExecutor` — executes decision layer outputs
-  - `EventConverter` — `ProviderEvent` → decision input
+
+#### Worker Handle (Single Agent)
+- `WorkerHandle` (alias `AgentSlot`) — Owns one agent's runtime: status, session, transcript, assigned task, provider thread handle, `mpsc::Receiver<ProviderEvent>`, worktree info
+- `WorkerSlotStatus` — 12+ variants: `Idle`, `Starting`, `Responding`, `ToolExecuting`, `Finishing`, `Stopping`, `Stopped`, `Error`, `Blocked`, `BlockedForDecision`, `Paused`, `WaitingForInput`, `Resting`
 
 #### Decision Layer Integration
-- `DecisionAgentSlot` — paired decision agent per work agent. Owns `TieredDecisionEngine`, `ActionRegistry`, async provider thread
-- `DecisionRequest` / `DecisionResponse` — mpsc channel-based request/response between work agent and decision agent
-- `DecisionMail` — split into `DecisionMailSender` / `DecisionMailReceiver`
-
-#### Session & Shared State
-- `MultiAgentSession` — top-level session: `SharedWorkplaceState` + `AgentPool` + `EventAggregator`
-- `SharedWorkplaceState` — workplace-wide: `BacklogState`, `SkillRegistry`, `LoopControlFlags`, optional `KanbanService`
-- `LoopControlFlags` — `should_quit`, `loop_paused`, `loop_run_active`, `max_iterations`, `current_iteration`
-- `AgentState` — serializable snapshot for crash recovery with `was_interrupted` flag
+- `DecisionAgentSlot` — Paired decision agent per work agent. Owns `TieredDecisionEngine`, `ActionRegistry`, async provider thread
+- `DecisionRequest` / `DecisionResponse` — mpsc channel-based request/response
+- `DecisionMail` — Split into `DecisionMailSender` / `DecisionMailReceiver`
 
 #### Provider Profile System
 - `ProviderProfile`, `ProfileId`, `ProfileStore`, `ProfilePersistence`
@@ -332,77 +377,87 @@ Autonomous decision-making with situation classification and tiered engine selec
 
 ### UI Layer
 
-#### `agent-tui` — Dual-Mode Terminal UI
-- **Embedded mode** (`core` feature, default): Direct `agent-core` integration with full multi-agent orchestration
-- **Protocol mode** (no `core`): WebSocket client connecting to `agent-daemon`
-
-**Embedded mode modules (~25 core-only):**
-- `app_loop.rs` (~3200 lines) — main event loop: render → decision poll → autonomous loop → input → provider drain → multi-agent event poll → idle checks → mail processing
-- `render.rs` (~2900 lines) — ratatui renderer for all 6 view modes
-- `ui_state.rs` (~4600 lines) — `TuiState`: `AgentPool`, `EventAggregator`, composer, overlays, view state cache
-- `view_mode.rs` — 6 modes: `Overview`, `Focused`, `Split`, `Dashboard`, `Mail`, `TaskMatrix`
+#### `agent-tui` — Protocol-Only Terminal UI
+TUI connects to daemon via WebSocket JSON-RPC 2.0. All runtime state lives in the daemon.
+- `app_loop.rs` (~140k lines) — main event loop: render → decision poll → autonomous loop → input → provider drain → multi-agent event poll → idle checks → mail processing
+- `render.rs` (~95k lines) — ratatui renderer for all view modes
+- `ui_state.rs` (~170k lines) — `TuiState`: event handling, composer, overlays, view state cache
+- `view_mode.rs` — Multiple modes: `Overview`, `Focused`, `Split`, `Dashboard`, `Mail`, `TaskMatrix`, `TaskDetail`
 - `composer/textarea.rs` — Unicode-aware grapheme-cluster input widget
 - `input.rs` — `InputOutcome` enum (~30 variants) mapping keys to semantic actions
-
-**Protocol mode modules:**
 - `protocol_app_loop.rs` — async WebSocket event loop
 - `protocol_client.rs`, `reconnecting_client.rs`, `websocket_client.rs` — JSON-RPC 2.0 over WebSocket
+- `effect_handler.rs` — `TuiEffectHandler` implementing `EffectHandler` trait
 
-#### `agent-cli` — Binary Entry Point
-- `main.rs` → `app_runner::run()`
+#### `agent-cli` — Protocol-First Binary Entry Point
+- `main.rs` → app runner
 - Subcommands: `doctor`, `agent`, `workplace`, `decision`, `profile`, `resume-last`, `run-loop`, `probe`, `daemon`
-- `run_loop_headless_single_agent()` — autonomous loop with `LoopGuardrails`
-- `run_loop_headless_multi_agent()` — `MultiAgentSession` with task assignment
-- `protocol_client.rs` — blocking WebSocket JSON-RPC client
+- Headless autonomous loop with `LoopGuardrails`
+- Protocol client for WebSocket JSON-RPC communication
 
 ### Daemon Layer
 
 #### `agent-daemon` — Per-Workspace Daemon (Binary)
-The only binary crate under `agent/`. Owns all runtime state and serves JSON-RPC 2.0 over WebSocket.
-- `main.rs` — CLI args, `SessionManager` bootstrap, `WebSocketServer`, SIGTERM handling
+The only binary crate under `agent/`. Owns all runtime state via EventLoop and serves JSON-RPC 2.0 over WebSocket.
+- `main.rs` — CLI args, `EventLoop` bootstrap, `WebSocketServer`, SIGTERM handling
 - `server.rs` — binds `127.0.0.1:0` (ephemeral port)
 - `router.rs` — method dispatch table
-- `session_mgr.rs` — owns `RuntimeSession`, `AgentPool`, `EventAggregator`, `AgentMailbox`
+- `session_mgr.rs` (~95k lines) — owns `RuntimeSession`, `WorkerPool`, `EventAggregator`, worker mailboxes
   - `snapshot()` / `write_snapshot()` — SHA-256 checksum validation
-- `connection.rs` — per-connection state machine: localhost origin check, bearer token auth, rate limiter (token bucket), heartbeat timeout (120s), input truncation (1MB)
+  - 7-phase event loop with `RuntimeCommand` dispatch
+- `connection.rs` (~24k lines) — per-connection state machine: localhost origin check, bearer token auth, rate limiter (token bucket), heartbeat timeout (120s), input truncation (1MB)
 - `broadcaster.rs` — `EventBroadcaster` fans out to all clients
 - `event_pump.rs` — converts `ProviderEvent` → protocol `Event` with monotonic seq numbers
 - `lifecycle.rs` — `DaemonLifecycle`: start → accept loop → graceful shutdown → snapshot → rotate backups (keep 3) → remove `daemon.json`
+- `handler/` — Request handlers for JSON-RPC methods
 
 ### Key Architectural Patterns
 
-#### 1. Thread-Based Concurrency with mpsc Channels
+#### 1. Event-Sourced Worker Aggregate
+The `Worker` aggregate root (in `agent-runtime-domain`) follows the event-sourcing pattern: `apply(event) -> Vec<RuntimeCommand>`. State transitions are pure, and side effects are delegated to `EffectHandler`. This enables:
+- Deterministic state reconstruction from event history
+- Easy testing with `RecordingEffectHandler`
+- Clear separation of concerns
+
+#### 2. Frontend-Backend Separation
+TUI and CLI are protocol-only clients connecting to daemon via WebSocket. All runtime state lives in the daemon's EventLoop. This enables:
+- Multiple frontend clients connecting to same daemon
+- Daemon restart without losing state (via snapshots)
+- Protocol-level compatibility guarantees
+
+#### 3. Decision Layer Decoupling
+`agent-decision` is read-only — it produces `DecisionCommand`, which is interpreted by `DecisionCommandInterpreter` in the daemon. This prevents the decision layer from directly mutating runtime state.
+
+#### 4. Thread-Based Concurrency with mpsc Channels
 Each agent spawns a named OS thread running the LLM CLI process. Communication is one-way: provider thread → main thread via `std::sync::mpsc::Receiver<ProviderEvent>`. The `EventAggregator` polls all channels non-blockingly. Decision agents use a second mpsc pair (`DecisionMail`) for request/response.
 
-#### 2. Explicit State Machine (`AgentSlotStatus`)
-`AgentSlotStatus` has 12+ variants with an explicitly validated transition matrix (`can_transition_to()`, ~80 rules). Invalid transitions return `Err(String)`. This prevents illegal moves like `Idle → Responding` directly.
+#### 5. Explicit State Machine (`WorkerSlotStatus`)
+`WorkerSlotStatus` has 12+ variants with an explicitly validated transition matrix. Invalid transitions return `Err(String)`. This prevents illegal state moves.
 
-#### 3. Decision-Agent Pairing (1:1)
-Every non-Mock work agent gets a paired `DecisionAgentSlot`. The decision agent owns a `TieredDecisionEngine` and processes `DecisionRequest`s asynchronously in a background thread to avoid blocking the TUI. Reflection rounds are tracked to enforce limits on completion claim retries.
+#### 6. Decision-Agent Pairing (1:1)
+Every non-Mock work agent gets a paired `DecisionAgentSlot`. The decision agent owns a `TieredDecisionEngine` and processes `DecisionRequest`s asynchronously in a background thread to avoid blocking the TUI.
 
-#### 4. Worktree Isolation for Parallel Agents
-`AgentPool` can spawn agents with git worktrees (`spawn_agent_with_worktree`). Each agent gets its own branch (`agent/{id}`) and directory. `WorktreeCoordinator` + `WorktreeRecovery` manage state persistence, orphan detection, and recreation on resume.
+#### 7. Worktree Isolation for Parallel Agents
+`WorkerPool` can spawn agents with git worktrees. Each agent gets its own branch (`agent/{id}`) and directory. `WorktreeCoordinator` manages state persistence and recreation on resume.
 
-#### 5. Backward-Compatibility Re-Export Layer
-`agent-core/lib.rs` re-exports large swaths of `agent-toolkit`, `agent-provider`, `agent-worktree`, `agent-backlog`, `agent-storage`, and `agent-types` so downstream crates can use `agent_core::TypeName`. Extensive `backward_compatibility_tests` verify these re-exports are functional.
+#### 8. Provider Profile System
+Named profiles with custom env vars, CLI args, and `${VAR}` interpolation. `WorkerPool` can spawn agents via `spawn_agent_with_profile`, resolving `CliBaseType` → `ProviderKind`.
 
-#### 6. Provider Profile System
-Named profiles with custom env vars, CLI args, and `${VAR}` interpolation. `AgentPool` can spawn agents via `spawn_agent_with_profile`, resolving `CliBaseType` → `ProviderKind`.
-
-#### 7. Autonomous Loop with Guardrails
+#### 9. Autonomous Loop with Guardrails
 `loop_runner.rs` implements `run_loop()`: pick ready todo → plan task → execute via provider → verify → continue/escalate. `LoopGuardrails` enforce `max_iterations`, `max_continuations_per_task`, `max_verification_failures`.
 
-#### 8. Event-Driven Transcript Updates
-`AppState` (global, single-agent) and `AgentSlot` (per-agent, multi-agent) both maintain transcripts. Tool call entries are updated in-place by `call_id`. The `EventAggregator` collects events from all agents for the TUI loop.
+#### 10. Event-Driven Transcript Updates
+`WorkerHandle` maintains transcripts. Tool call entries are updated in-place by `call_id`. The `EventAggregator` collects events from all agents for the TUI loop.
 
-#### 9. Persistence & Crash Recovery
-`AgentRuntime` persists `meta.json`, `state.json`, `transcript.json`, `messages.json`, `memory.json` per agent. `ShutdownSnapshot` captures all agent states on quit. `AgentState::was_interrupted` detects unclean shutdowns. The daemon writes `snapshot.json` with SHA-256 checksums.
+#### 11. Persistence & Crash Recovery
+Runtime persists `meta.json`, `state.json`, `transcript.json`, `messages.json`, `memory.json` per agent. `ShutdownSnapshot` captures all agent states on quit. The daemon writes `snapshot.json` with SHA-256 checksums.
 
-#### 10. Trait-Based Extensibility
+#### 12. Trait-Based Extensibility
 Multiple crates use object-safe traits with `clone_boxed()`:
 - `agent-decision`: `DecisionEngine`, `DecisionMaker`, `DecisionStrategy`, `OutputClassifier`
 - `agent-kanban`: `KanbanElementTrait`, `TransitionRule`
 - `agent-llm-provider`: `LlmProvider`
+- `agent-behavior-infra`: `EffectHandler`
 
 ## Features
 
@@ -504,16 +559,19 @@ The TUI requires at least one real provider (`claude` or `codex`) to be installe
 
 ### Decision Layer
 
-The `agent-decision` crate currently includes:
+The `agent-decision` crate provides:
 
 - provider-output classification by situation type
 - rule-based, LLM-backed, CLI, mock, and tiered decision engines
-- action and situation registries with built-in cases such as waiting-for-choice, claims-completion, partial-completion, and error recovery
+- action and situation registries with built-in cases
+- `DecisionCommand` output for daemon interpretation
 - human decision request and response types for escalation flows
+
+**Read-only design**: The decision layer does not directly mutate runtime state. It produces `DecisionCommand`, which is interpreted by `DecisionCommandInterpreter` in the daemon.
 
 Current limitation:
 
-- the decision-layer crate is real and used by ongoing integration work, but the top-level CLI and TUI decision UX are still partial
+- decision layer integration with daemon is in progress; the end-to-end decision UX is still being wired through
 
 ### Autonomous Loop
 
