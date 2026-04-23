@@ -654,7 +654,12 @@ impl DecisionAgentSlot {
                             "reflection_round": updated_reflection,
                         }),
                     );
-                    DecisionResponse::success(work_agent_id.clone(), output)
+                    DecisionResponse::success_with_details(
+                        work_agent_id.clone(),
+                        output,
+                        Some(decision_prompt),
+                        None, // TODO: get thinking from engine if available
+                    )
                 }
                 Err(e) => {
                     logging::warn_event(
