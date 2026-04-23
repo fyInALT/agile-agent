@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain_event::DomainEvent;
-use crate::{ExecCommandStatus, PatchApplyStatus, SessionHandle};
+use crate::{ExecCommandStatus, PatchApplyStatus, SessionHandle, WebSearchAction};
 
 /// Decision-layer event — subset of DomainEvent relevant to decision making.
 ///
@@ -35,7 +35,35 @@ pub enum DecisionEvent {
     ClaudeToolCallStarted { name: String, input: Option<String> },
 
     /// Tool call finished
-    ClaudeToolCallFinished { name: String, output: Option<String>, success: bool },
+    ClaudeToolCallFinished {
+        name: String,
+        output: Option<String>,
+        success: bool,
+        /// MCP result blocks (populated for MCP tool calls)
+        result_blocks: Option<Vec<String>>,
+    },
+
+    // ── Web search events ─────────────────────────────────────
+    /// Web search started
+    WebSearchStarted {
+        call_id: Option<String>,
+        query: String,
+    },
+
+    /// Web search finished
+    WebSearchFinished {
+        call_id: Option<String>,
+        query: String,
+        action: Option<WebSearchAction>,
+    },
+
+    // ── Image events ──────────────────────────────────────────
+    /// Image generation finished
+    ImageGenerationFinished {
+        call_id: Option<String>,
+        result: Option<String>,
+        saved_path: Option<String>,
+    },
 
     // ── Codex-specific events ───────────────────────────────────
     /// Approval request from Codex
@@ -78,6 +106,8 @@ impl DecisionEvent {
                 | DecisionEvent::CodexPatchApplyStarted { .. }
                 | DecisionEvent::StatusUpdate { .. }
                 | DecisionEvent::SessionHandle { .. }
+                | DecisionEvent::WebSearchStarted { .. }
+                | DecisionEvent::ImageGenerationFinished { .. }
         )
     }
 
@@ -91,6 +121,7 @@ impl DecisionEvent {
                 | DecisionEvent::CodexError { .. }
                 | DecisionEvent::ACPNotification { .. }
                 | DecisionEvent::ACPError { .. }
+                | DecisionEvent::WebSearchFinished { action: None, .. }
         )
     }
 }
@@ -137,6 +168,7 @@ impl From<&DomainEvent> for Option<DecisionEvent> {
                 name: "exec".to_string(),
                 output: output_preview.clone(),
                 success: matches!(status, ExecCommandStatus::Completed),
+                result_blocks: None,
             }),
             DomainEvent::ExecCommandOutputDelta { .. } => Some(DecisionEvent::StatusUpdate {
                 status: "running".to_string(),
@@ -160,22 +192,40 @@ impl From<&DomainEvent> for Option<DecisionEvent> {
                 name: name.clone(),
                 output: output_preview.clone(),
                 success: *success,
+                result_blocks: None,
             }),
 
             // ── Web search ────────────────────────────────────────
-            DomainEvent::WebSearchStarted { .. } => Some(DecisionEvent::StatusUpdate {
-                status: "websearch started".to_string(),
-            }),
-            DomainEvent::WebSearchFinished { .. } => Some(DecisionEvent::StatusUpdate {
-                status: "websearch completed".to_string(),
-            }),
+            DomainEvent::WebSearchStarted { call_id, query } => {
+                Some(DecisionEvent::WebSearchStarted {
+                    call_id: call_id.clone(),
+                    query: query.clone(),
+                })
+            }
+            DomainEvent::WebSearchFinished { call_id, query, action } => {
+                Some(DecisionEvent::WebSearchFinished {
+                    call_id: call_id.clone(),
+                    query: query.clone(),
+                    action: action.clone(),
+                })
+            }
 
             // ── Images ────────────────────────────────────────────
-            DomainEvent::ViewImage { .. } | DomainEvent::ImageGenerationFinished { .. } => {
+            DomainEvent::ViewImage { .. } => {
                 Some(DecisionEvent::StatusUpdate {
                     status: "running".to_string(),
                 })
             }
+            DomainEvent::ImageGenerationFinished {
+                call_id,
+                result,
+                saved_path,
+                ..
+            } => Some(DecisionEvent::ImageGenerationFinished {
+                call_id: call_id.clone(),
+                result: result.clone(),
+                saved_path: saved_path.clone(),
+            }),
 
             // ── MCP ───────────────────────────────────────────────
             DomainEvent::McpToolCallStarted { invocation, .. } => {
@@ -184,11 +234,26 @@ impl From<&DomainEvent> for Option<DecisionEvent> {
                     input: Some(format!("{}:{}", invocation.server, invocation.tool)),
                 })
             }
-            DomainEvent::McpToolCallFinished { error, .. } => {
+            DomainEvent::McpToolCallFinished {
+                error,
+                result_blocks,
+                ..
+            } => {
+                let blocks: Option<Vec<String>> = if result_blocks.is_empty() {
+                    None
+                } else {
+                    Some(
+                        result_blocks
+                            .iter()
+                            .map(|v| v.to_string())
+                            .collect(),
+                    )
+                };
                 Some(DecisionEvent::ClaudeToolCallFinished {
                     name: "mcp".to_string(),
                     output: error.clone(),
                     success: error.is_none(),
+                    result_blocks: blocks,
                 })
             }
 
@@ -334,7 +399,7 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success }) => {
+            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success, .. }) => {
                 assert_eq!(name, "exec");
                 assert_eq!(output, Some("file1 file2".to_string()));
                 assert!(success);
@@ -392,7 +457,7 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success }) => {
+            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success, .. }) => {
                 assert_eq!(name, "read_file");
                 assert_eq!(output, Some("content".to_string()));
                 assert!(success);
@@ -506,7 +571,7 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success }) => {
+            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success, .. }) => {
                 assert_eq!(name, "mcp");
                 assert_eq!(output, Some("tool failed".to_string()));
                 assert!(!success);
@@ -531,7 +596,7 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success }) => {
+            Some(DecisionEvent::ClaudeToolCallFinished { name, output, success, .. }) => {
                 assert_eq!(name, "mcp");
                 assert!(output.is_none());
                 assert!(success);
@@ -548,10 +613,11 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::StatusUpdate { status }) => {
-                assert_eq!(status, "websearch started");
+            Some(DecisionEvent::WebSearchStarted { call_id, query }) => {
+                assert_eq!(call_id, Some("ws-1".to_string()));
+                assert_eq!(query, "test query");
             }
-            _ => panic!("Expected StatusUpdate variant"),
+            _ => panic!("Expected WebSearchStarted variant"),
         }
     }
 
@@ -567,10 +633,12 @@ mod tests {
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::StatusUpdate { status }) => {
-                assert_eq!(status, "websearch completed");
+            Some(DecisionEvent::WebSearchFinished { call_id, query, action }) => {
+                assert_eq!(call_id, Some("ws-1".to_string()));
+                assert_eq!(query, "test query");
+                assert!(action.is_some());
             }
-            _ => panic!("Expected StatusUpdate variant"),
+            _ => panic!("Expected WebSearchFinished variant"),
         }
     }
 
@@ -609,15 +677,17 @@ mod tests {
         let event = DomainEvent::ImageGenerationFinished {
             call_id: Some("gen-1".to_string()),
             revised_prompt: None,
-            result: None,
-            saved_path: None,
+            result: Some("image data".to_string()),
+            saved_path: Some("/tmp/img.png".to_string()),
         };
         let result: Option<DecisionEvent> = (&event).into();
         match result {
-            Some(DecisionEvent::StatusUpdate { status }) => {
-                assert_eq!(status, "running");
+            Some(DecisionEvent::ImageGenerationFinished { call_id, result, saved_path }) => {
+                assert_eq!(call_id, Some("gen-1".to_string()));
+                assert_eq!(result, Some("image data".to_string()));
+                assert_eq!(saved_path, Some("/tmp/img.png".to_string()));
             }
-            _ => panic!("Expected StatusUpdate variant"),
+            _ => panic!("Expected ImageGenerationFinished variant"),
         }
     }
 

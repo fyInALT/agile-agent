@@ -22,9 +22,27 @@ impl OutputClassifier for ClaudeClassifier {
             ProviderEvent::ClaudeAssistantChunk { .. } => None,
             ProviderEvent::ClaudeThinkingChunk { .. } => None,
             ProviderEvent::ClaudeToolCallStarted { .. } => None,
-            ProviderEvent::ClaudeToolCallFinished { .. } => None,
+            ProviderEvent::ClaudeToolCallFinished { success, .. } if *success => None,
             ProviderEvent::StatusUpdate { .. } => None,
             ProviderEvent::SessionHandle { .. } => None,
+            ProviderEvent::WebSearchStarted { .. } => None,
+            ProviderEvent::ImageGenerationFinished { .. } => None,
+
+            // Web search finished with no action = failed search
+            ProviderEvent::WebSearchFinished { action: None, .. } => {
+                Some(SituationType::new("web_search_failed"))
+            }
+            ProviderEvent::WebSearchFinished { .. } => None,
+
+            // Tool call finished with failure
+            ProviderEvent::ClaudeToolCallFinished { success: false, name, .. }
+                if name == "mcp" =>
+            {
+                Some(SituationType::with_subtype("error", "mcp_tool_failed"))
+            }
+            ProviderEvent::ClaudeToolCallFinished { success: false, .. } => {
+                Some(error())
+            }
 
             // Finished - Claude-specific subtype
             ProviderEvent::Finished { .. } => Some(claude_finished()),
@@ -58,6 +76,7 @@ impl OutputClassifier for ClaudeClassifier {
                 name,
                 output,
                 success,
+                ..
             } => Some(ContextUpdate::tool_call(
                 ToolCallRecord::new(name.clone(), *success)
                     .with_output_preview(output.clone().unwrap_or_default()),
@@ -194,5 +213,58 @@ mod tests {
         let result = classifier_registry.classify(&event, ProviderKind::Claude);
 
         assert!(result.is_needs_decision());
+    }
+
+    #[test]
+    fn web_search_no_results_triggers_decision() {
+        let classifier = ClaudeClassifier;
+        let event = ProviderEvent::WebSearchFinished {
+            call_id: Some("ws-1".to_string()),
+            query: "nonexistent_library_rust".to_string(),
+            action: None,
+        };
+        let result = classifier.classify_type(&event);
+        assert_eq!(result, Some(SituationType::new("web_search_failed")));
+    }
+
+    #[test]
+    fn web_search_with_results_is_running() {
+        let classifier = ClaudeClassifier;
+        let event = ProviderEvent::WebSearchFinished {
+            call_id: Some("ws-1".to_string()),
+            query: "rust".to_string(),
+            action: Some(agent_events::WebSearchAction::Search {
+                query: Some("rust".to_string()),
+                queries: None,
+            }),
+        };
+        let result = classifier.classify_type(&event);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn mcp_tool_failure_triggers_error_subtype() {
+        let classifier = ClaudeClassifier;
+        let event = ProviderEvent::ClaudeToolCallFinished {
+            name: "mcp".to_string(),
+            output: Some("connection refused".to_string()),
+            success: false,
+            result_blocks: None,
+        };
+        let result = classifier.classify_type(&event);
+        assert_eq!(result, Some(SituationType::with_subtype("error", "mcp_tool_failed")));
+    }
+
+    #[test]
+    fn successful_mcp_tool_is_running() {
+        let classifier = ClaudeClassifier;
+        let event = ProviderEvent::ClaudeToolCallFinished {
+            name: "mcp".to_string(),
+            output: Some("ok".to_string()),
+            success: true,
+            result_blocks: None,
+        };
+        let result = classifier.classify_type(&event);
+        assert!(result.is_none());
     }
 }
