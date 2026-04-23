@@ -647,6 +647,7 @@ impl AppState {
     /// Push a decision entry to transcript
     ///
     /// Used to display decision layer outputs with special formatting.
+    #[allow(clippy::too_many_arguments)]
     pub fn push_decision(
         &mut self,
         agent_id: String,

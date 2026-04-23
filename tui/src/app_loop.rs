@@ -86,6 +86,48 @@ struct DecisionOutputInfo {
     thinking: Option<String>,
 }
 
+/// Push a Decision transcript entry to both AppState (global) and the agent's slot transcript.
+///
+/// The multi-agent TUI renders the focused slot's transcript, not the global AppState transcript,
+/// so decision layer outputs must be mirrored into the slot transcript to be visible.
+fn push_decision_to_both(
+    state: &mut TuiState,
+    agent_id: &agent_core::agent_runtime::AgentId,
+    info: &DecisionOutputInfo,
+    action_type_override: Option<String>,
+) {
+    let action_type = action_type_override.unwrap_or_else(|| info.action_type.clone());
+    let confidence_u8 = (info.confidence * 100.0).clamp(0.0, 100.0) as u8;
+
+    // Global transcript (shown in single-agent mode)
+    state.app_mut().push_decision(
+        agent_id.as_str().to_string(),
+        info.situation_type.clone(),
+        action_type.clone(),
+        info.reasoning.clone(),
+        info.confidence,
+        info.tier.clone(),
+        info.decision_prompt.clone(),
+        info.thinking.clone(),
+    );
+
+    // Slot transcript (shown in multi-agent mode when slot is focused)
+    if let Some(pool) = state.agent_pool.as_mut()
+        && let Some(slot) = pool.get_slot_mut_by_id(agent_id)
+    {
+        slot.append_transcript(TranscriptEntry::Decision {
+            agent_id: agent_id.as_str().to_string(),
+            situation_type: info.situation_type.clone(),
+            action_type,
+            reasoning: info.reasoning.clone(),
+            confidence: confidence_u8,
+            tier: info.tier.clone(),
+            decision_prompt: info.decision_prompt.clone(),
+            thinking: info.thinking.clone(),
+        });
+    }
+}
+
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
     let launch_cwd = env::current_dir()?;
 
@@ -299,16 +341,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         // Pure path: dispatch RuntimeCommands via effect handler
                         // Also push Decision entry to transcript for display
                         if let Some(ref info) = output_info {
-                            state.app_mut().push_decision(
-                                agent_id.as_str().to_string(),
-                                info.situation_type.clone(),
-                                info.action_type.clone(),
-                                info.reasoning.clone(),
-                                info.confidence,
-                                info.tier.clone(),
-                                info.decision_prompt.clone(),
-                                info.thinking.clone(),
-                            );
+                            push_decision_to_both(&mut state, &agent_id, info, None);
                             // Set decision status in status bar (max 15 chars)
                             state.set_decision_status(Some(info.action_type.clone()));
                         }
@@ -326,15 +359,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                 agent_core::agent_pool::DecisionExecutionResult::Executed { option_id } => {
                             // Push decision entry to transcript for detailed display
                             if let Some(ref info) = output_info {
-                                state.app_mut().push_decision(
-                                    agent_id.as_str().to_string(),
-                                    info.situation_type.clone(),
-                                    format!("{} → {}", info.action_type, option_id),
-                                    info.reasoning.clone(),
-                                    info.confidence,
-                                    info.tier.clone(),
-                                    info.decision_prompt.clone(),
-                                    info.thinking.clone(),
+                                push_decision_to_both(
+                                    &mut state,
+                                    &agent_id,
+                                    info,
+                                    Some(format!("{} → {}", info.action_type, option_id)),
                                 );
                                 // Set decision status in status bar (max 15 chars)
                                 state.set_decision_status(Some(option_id.clone()));
@@ -347,16 +376,7 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                         }
                         agent_core::agent_pool::DecisionExecutionResult::AcceptedRecommendation => {
                             if let Some(ref info) = output_info {
-                                state.app_mut().push_decision(
-                                    agent_id.as_str().to_string(),
-                                    info.situation_type.clone(),
-                                    info.action_type.clone(),
-                                    info.reasoning.clone(),
-                                    info.confidence,
-                                    info.tier.clone(),
-                                    info.decision_prompt.clone(),
-                                    info.thinking.clone(),
-                                );
+                                push_decision_to_both(&mut state, &agent_id, info, None);
                                 // Set decision status in status bar (max 15 chars)
                                 state.set_decision_status(Some(info.action_type.clone()));
                             }
@@ -369,15 +389,11 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                             instruction,
                         } => {
                             if let Some(ref info) = output_info {
-                                state.app_mut().push_decision(
-                                    agent_id.as_str().to_string(),
-                                    info.situation_type.clone(),
-                                    "custom_instruction".to_string(),
-                                    info.reasoning.clone(),
-                                    info.confidence,
-                                    info.tier.clone(),
-                                    info.decision_prompt.clone(),
-                                    info.thinking.clone(),
+                                push_decision_to_both(
+                                    &mut state,
+                                    &agent_id,
+                                    info,
+                                    Some("custom_instruction".to_string()),
                                 );
                             }
                             // Set decision status in status bar (max 15 chars)

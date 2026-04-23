@@ -656,8 +656,9 @@ impl HistoryCell for DecisionHistoryCell {
         ]));
 
         // ── INPUT SECTION ─────────────────────────────────────
-        if let Some(prompt) = &self.decision_prompt {
-            if !prompt.is_empty() {
+        if let Some(prompt) = &self.decision_prompt
+            && !prompt.is_empty()
+        {
                 lines.push(Line::from(vec![
                     Span::styled("┌─ ", Style::default().fg(Color::Cyan)),
                     Span::styled(
@@ -687,7 +688,6 @@ impl HistoryCell for DecisionHistoryCell {
                 lines.push(Line::from(vec![
                     Span::styled("└───", Style::default().fg(Color::Cyan)),
                 ]));
-            }
         }
 
         // Agent and situation info
@@ -705,8 +705,9 @@ impl HistoryCell for DecisionHistoryCell {
         ]));
 
         // ── THINKING SECTION ─────────────────────────────────────
-        if let Some(thinking) = &self.thinking {
-            if !thinking.is_empty() {
+        if let Some(thinking) = &self.thinking
+            && !thinking.is_empty()
+        {
                 lines.push(Line::from(vec![
                     Span::styled("┌─ ", Style::default().fg(Color::Yellow)),
                     Span::styled(
@@ -736,7 +737,6 @@ impl HistoryCell for DecisionHistoryCell {
                 lines.push(Line::from(vec![
                     Span::styled("└───", Style::default().fg(Color::Yellow)),
                 ]));
-            }
         }
 
         // ── OUTPUT/RESULT SECTION ─────────────────────────────────────
