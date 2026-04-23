@@ -80,6 +80,10 @@ struct DecisionOutputInfo {
     reasoning: String,
     confidence: f64,
     tier: String,
+    /// Decision prompt sent to LLM (optional, for showing input)
+    decision_prompt: Option<String>,
+    /// Thinking/reasoning process from LLM (optional, for showing process)
+    thinking: Option<String>,
 }
 
 pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
@@ -212,6 +216,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     reasoning: output.reasoning.clone(),
                                     confidence: output.confidence,
                                     tier: "auto".to_string(), // TODO: get from engine
+                                    decision_prompt: None, // TODO: get from decision engine
+                                    thinking: None, // TODO: get from LLM response
                                 };
 
                                 logging::debug_event(
@@ -304,6 +310,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     info.reasoning.clone(),
                                     info.confidence,
                                     info.tier.clone(),
+                                    info.decision_prompt.clone(),
+                                    info.thinking.clone(),
                                 );
                                 // Set decision status in status bar (max 15 chars)
                                 state.set_decision_status(Some(option_id.clone()));
@@ -323,6 +331,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     info.reasoning.clone(),
                                     info.confidence,
                                     info.tier.clone(),
+                                    info.decision_prompt.clone(),
+                                    info.thinking.clone(),
                                 );
                                 // Set decision status in status bar (max 15 chars)
                                 state.set_decision_status(Some(info.action_type.clone()));
@@ -343,6 +353,8 @@ pub fn run(terminal: &mut AppTerminal, resume_last: bool) -> Result<AppState> {
                                     info.reasoning.clone(),
                                     info.confidence,
                                     info.tier.clone(),
+                                    info.decision_prompt.clone(),
+                                    info.thinking.clone(),
                                 );
                             }
                             // Set decision status in status bar (max 15 chars)

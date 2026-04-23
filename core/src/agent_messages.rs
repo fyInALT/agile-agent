@@ -397,6 +397,8 @@ fn map_entry(
             reasoning,
             confidence,
             tier,
+            decision_prompt: _,
+            thinking: _,
         } => AgentMessageEnvelope {
             sequence,
             direction: AgentMessageDirection::Internal,

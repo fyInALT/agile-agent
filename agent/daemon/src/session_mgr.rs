@@ -1396,6 +1396,8 @@ fn map_transcript_entry(seq: usize, entry: &TranscriptEntry) -> TranscriptItem {
             reasoning,
             confidence,
             tier,
+            decision_prompt,
+            thinking,
         } => (
             ItemKind::SystemMessage,
             reasoning.clone(),
@@ -1406,6 +1408,8 @@ fn map_transcript_entry(seq: usize, entry: &TranscriptEntry) -> TranscriptItem {
                 "action": action_type,
                 "confidence": confidence,
                 "tier": tier,
+                "decision_prompt": decision_prompt,
+                "thinking": thinking,
             }),
         ),
         TranscriptEntry::ExecCommand {

@@ -168,6 +168,8 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             reasoning,
             confidence,
             tier,
+            decision_prompt,
+            thinking,
         } => Box::new(DecisionHistoryCell {
             agent_id: agent_id.clone(),
             situation_type: situation_type.clone(),
@@ -175,6 +177,8 @@ pub(crate) fn history_cell_for_entry(entry: &TranscriptEntry) -> Box<dyn History
             reasoning: reasoning.clone(),
             confidence: *confidence,
             tier: tier.clone(),
+            decision_prompt: decision_prompt.clone(),
+            thinking: thinking.clone(),
         }),
     }
 }
@@ -606,6 +610,8 @@ struct DecisionHistoryCell {
     reasoning: String,
     confidence: u8,
     tier: String,
+    decision_prompt: Option<String>,
+    thinking: Option<String>,
 }
 
 impl HistoryCell for DecisionHistoryCell {
@@ -616,25 +622,25 @@ impl HistoryCell for DecisionHistoryCell {
         // Decision header with special styling (green for decision layer)
         let decision_color = Color::Green;
 
-        // Horizontal separator line before decision output
-        let separator: String = "─".repeat(width_usize.min(40));
+        // Horizontal separator line before decision output (醒目的开头)
+        let separator: String = "━".repeat(width_usize.min(60));
         lines.push(Line::from(vec![Span::styled(
             separator,
             Style::default()
                 .fg(decision_color)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(Modifier::BOLD),
         )]));
 
-        // Decision header line
+        // Decision header line - 醒目的标题
         lines.push(Line::from(vec![
             Span::styled(
-                "◆ ",
+                "🧠 ",
                 Style::default()
                     .fg(decision_color)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "DECISION",
+                "DECISION LAYER",
                 Style::default()
                     .fg(decision_color)
                     .add_modifier(Modifier::BOLD),
@@ -649,27 +655,109 @@ impl HistoryCell for DecisionHistoryCell {
             Span::styled("]", Style::default().fg(decision_color)),
         ]));
 
+        // ── INPUT SECTION ─────────────────────────────────────
+        if let Some(prompt) = &self.decision_prompt {
+            if !prompt.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("┌─ ", Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        "INPUT",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ───", Style::default().fg(Color::Cyan)),
+                ]));
+
+                // Show truncated prompt preview (first few lines)
+                let prompt_preview = if prompt.len() > 300 {
+                    format!("{}...[truncated]", &prompt[..300])
+                } else {
+                    prompt.clone()
+                };
+                for line in prompt_preview.lines().take(5) {
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::Cyan)),
+                        Span::styled(
+                            line.to_string(),
+                            Style::default().fg(Color::Gray),
+                        ),
+                    ]));
+                }
+                lines.push(Line::from(vec![
+                    Span::styled("└───", Style::default().fg(Color::Cyan)),
+                ]));
+            }
+        }
+
         // Agent and situation info
         lines.push(Line::from(vec![
             Span::styled("  Agent: ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(self.agent_id.clone(), Style::default().fg(Color::Cyan)),
+            Span::styled(self.agent_id.clone(), Style::default().fg(Color::Yellow)),
             Span::styled(
                 " │ Situation: ",
                 Style::default().add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 self.situation_type.clone(),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(Color::Magenta),
             ),
+        ]));
+
+        // ── THINKING SECTION ─────────────────────────────────────
+        if let Some(thinking) = &self.thinking {
+            if !thinking.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("┌─ ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        "THINKING",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ───", Style::default().fg(Color::Yellow)),
+                ]));
+
+                // Show thinking preview
+                let thinking_preview = if thinking.len() > 500 {
+                    format!("{}...[truncated]", &thinking[..500])
+                } else {
+                    thinking.clone()
+                };
+                for line in thinking_preview.lines().take(8) {
+                    lines.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::Yellow)),
+                        Span::styled(
+                            line.to_string(),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                }
+                lines.push(Line::from(vec![
+                    Span::styled("└───", Style::default().fg(Color::Yellow)),
+                ]));
+            }
+        }
+
+        // ── OUTPUT/RESULT SECTION ─────────────────────────────────────
+        lines.push(Line::from(vec![
+            Span::styled("┌─ ", Style::default().fg(decision_color)),
+            Span::styled(
+                "OUTPUT",
+                Style::default()
+                    .fg(decision_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ───", Style::default().fg(decision_color)),
         ]));
 
         // Action taken
         lines.push(Line::from(vec![
-            Span::styled("  Action: ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled("│ Action: ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
                 self.action_type.clone(),
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -678,23 +766,26 @@ impl HistoryCell for DecisionHistoryCell {
             ),
             Span::styled(
                 format!("{}%", self.confidence),
-                Style::default().fg(Color::Green),
+                Style::default().fg(decision_color),
             ),
         ]));
 
         // Reasoning (wrapped if needed)
         if !self.reasoning.is_empty() {
-            lines.push(Line::from(vec![Span::styled(
-                "  Reasoning: ",
-                Style::default().add_modifier(Modifier::DIM),
-            )]));
+            lines.push(Line::from(vec![
+                Span::styled("│ Reasoning: ", Style::default().add_modifier(Modifier::DIM)),
+            ]));
             lines.extend(wrap_prefixed(
-                "    ",
+                "│   ",
                 &self.reasoning,
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
                 width_usize,
             ));
         }
+
+        lines.push(Line::from(vec![
+            Span::styled("└───", Style::default().fg(decision_color)),
+        ]));
 
         lines
     }

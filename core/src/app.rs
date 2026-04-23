@@ -50,6 +50,10 @@ pub enum TranscriptEntry {
         confidence: u8,
         /// Tier used (Simple/Medium/Complex/Critical)
         tier: String,
+        /// Decision layer input prompt (what was sent to the decision engine)
+        decision_prompt: Option<String>,
+        /// Decision layer thinking process (raw LLM thinking output)
+        thinking: Option<String>,
     },
     ExecCommand {
         call_id: Option<String>,
@@ -651,6 +655,8 @@ impl AppState {
         reasoning: String,
         confidence: f64,
         tier: String,
+        decision_prompt: Option<String>,
+        thinking: Option<String>,
     ) {
         // Convert confidence from f64 (0.0-1.0) to u8 (0-100)
         let confidence_u8 = (confidence * 100.0).clamp(0.0, 100.0) as u8;
@@ -661,6 +667,8 @@ impl AppState {
             reasoning,
             confidence: confidence_u8,
             tier,
+            decision_prompt,
+            thinking,
         });
     }
 
