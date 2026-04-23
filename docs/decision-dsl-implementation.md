@@ -113,7 +113,8 @@ decision-dsl/
     │   ├── session.rs      # Session (LLM same-session)
     │   ├── clock.rs        # Clock (time source)
     │   ├── fs.rs           # Fs (filesystem abstraction)
-    │   └── log.rs          # Logger (structured logging)
+    │   ├── log.rs          # Logger (structured logging)
+    │   └── watcher.rs      # Watcher (hot-reload change detection)
     └── error.rs            # Error types
 ```
 
@@ -124,7 +125,7 @@ decision-dsl/
 pub use parser::{DslParser, YamlParser, Tree, ParseError};
 pub use runtime::{DslRunner, Executor, TickContext, TickResult, Blackboard, BlackboardValue};
 pub use runtime::trace::{NodeTrace, TraceEntry};
-pub use ext::{Session, SessionError, Clock, Fs, FsError, Logger, LogLevel};
+pub use ext::{Session, SessionError, Clock, Fs, FsError, Logger, LogLevel, Watcher, PollWatcher, WatcherError};
 pub use error::{DslError, RuntimeError};
 
 // Everything in nodes/, eval/, parser_out/, template/ is pub(crate)
@@ -386,6 +387,74 @@ pub enum LogLevel { Trace, Debug, Info, Warn, Error }
 pub struct NullLogger;
 impl Logger for NullLogger {
     fn log(&self, _level: LogLevel, _target: &str, _msg: &str) {}
+}
+```
+
+### 4.5 Watcher
+
+```rust
+use std::path::Path;
+
+/// Abstraction over file-system change detection for hot reload.
+///
+/// The host provides a Watcher implementation. The engine queries it
+/// before each tick (or on a background interval) to decide whether
+/// to re-parse the DSL bundle.
+pub trait Watcher {
+    /// Check if any DSL source files have changed since the last call.
+    fn has_changed(&mut self) -> bool;
+
+    /// Return the list of changed files (for incremental reload).
+    fn changed_files(&mut self) -> Vec<PathBuf>;
+}
+
+#[derive(Debug, Clone)]
+pub struct WatcherError {
+    pub message: String,
+}
+
+/// Poll-based watcher using file modification times.
+/// Zero-dependency: does not use inotify/fsevents.
+pub struct PollWatcher {
+    base_path: PathBuf,
+    fs: Box<dyn Fs>,
+    last_mtrees: HashMap<PathBuf, SystemTime>,
+}
+
+impl PollWatcher {
+    pub fn new(base_path: PathBuf, fs: Box<dyn Fs>) -> Self {
+        Self { base_path, fs, last_mtrees: HashMap::new() }
+    }
+
+    fn scan_mtrees(&self) -> Result<HashMap<PathBuf, SystemTime>, FsError> {
+        let mut mtrees = HashMap::new();
+        for dir in &[self.base_path.join("trees"), self.base_path.join("subtrees")] {
+            for path in self.fs.read_dir(dir)? {
+                // RealFs would use std::fs::metadata; MockFs would return pre-set values
+                let mtime = self.fs.modified(&path)?;
+                mtrees.insert(path, mtime);
+            }
+        }
+        Ok(mtrees)
+    }
+}
+
+impl Watcher for PollWatcher {
+    fn has_changed(&mut self) -> bool {
+        match self.scan_mtrees() {
+            Ok(current) => {
+                let changed = current != self.last_mtrees;
+                self.last_mtrees = current;
+                changed
+            }
+            Err(_) => false, // On error, assume no change
+        }
+    }
+
+    fn changed_files(&mut self) -> Vec<PathBuf> {
+        // Compare current mtimes with last_mtrees, return deltas
+        vec![]
+    }
 }
 ```
 
@@ -899,15 +968,27 @@ For zero-dependency compliance, the `script` evaluator in V1 supports a tiny exp
 ///   blackboard.provider_output.contains("claims_completion")
 ///   blackboard.reflection_round < 2 && blackboard.confidence > 0.8
 fn evaluate_minimal_script(script: &str, bb: &Blackboard) -> Result<bool, RuntimeError> {
-    // Parse simple comparisons and method calls
-    // Full implementation: recursive descent parser for:
-    //   expr   := term (('&&' | '||') term)*
-    //   term   := comparison | '(' expr ')'
+    // Design: recursive descent parser for a tiny expression language.
+    //
+    // Grammar:
+    //   expr       := term (('&&' | '||') term)*
+    //   term       := comparison | '(' expr ')'
     //   comparison := path op literal
-    //   op     := '==' | '!=' | '<' | '<=' | '>' | '>='
-    //   path   := 'blackboard.' identifier ('.' identifier)*
-    //   literal := string | number | bool
-    todo!("minimal script engine")
+    //   op         := '==' | '!=' | '<' | '<=' | '>' | '>='
+    //   path       := 'blackboard.' identifier ('.' identifier)*
+    //   literal    := string | number | bool
+    //
+    // Implementation sketch:
+    //   1. Tokenize the script into tokens (identifier, operator, literal, punctuation).
+    //   2. Parse into an AST using recursive descent.
+    //   3. Evaluate the AST against the Blackboard:
+    //      - Resolve paths via bb.get_path()
+    //      - Compare values using the specified operator.
+    //      - Short-circuit && and ||.
+    //
+    // For V1, script evaluators can also be implemented as a pre-registered
+    // custom evaluator if the host provides a full scripting engine (e.g. Rhai).
+    Err(RuntimeError::Custom("script evaluator not yet implemented".into()))
 }
 ```
 
@@ -2601,33 +2682,57 @@ impl Tree {
 
 ### 16.2 Hot Reload
 
+Hot reload uses the `Watcher` trait (see §4.5). The engine queries the watcher before each tick; if files changed, it re-parses the bundle.
+
 ```rust
 use std::sync::{Arc, RwLock};
+use decision_dsl::ext::Watcher;
 
-pub struct DslWatcher {
+pub struct DslReloader {
     parser: YamlParser,
-    base_path: PathBuf,
-    current_bundle: Arc<RwLock<Bundle>>,
     fs: Box<dyn Fs>,
+    watcher: Box<dyn Watcher>,
+    current_bundle: Arc<RwLock<Bundle>>,
 }
 
-impl DslWatcher {
-    pub fn load(&mut self) -> Result<(), DslError> {
-        let bundle = self.parser.parse_bundle(&self.base_path, self.fs.as_ref())?;
+impl DslReloader {
+    pub fn new(
+        parser: YamlParser,
+        fs: Box<dyn Fs>,
+        watcher: Box<dyn Watcher>,
+    ) -> Self {
+        Self {
+            parser,
+            fs,
+            watcher,
+            current_bundle: Arc::new(RwLock::new(Bundle::default())),
+        }
+    }
+
+    pub fn load(&mut self, base_path: &Path) -> Result<(), DslError> {
+        let bundle = self.parser.parse_bundle(base_path, self.fs.as_ref())?;
         *self.current_bundle.write().unwrap() = bundle;
         Ok(())
     }
 
-    /// Poll-based hot reload (simple, no file-system watchers needed).
-    pub fn reload_if_changed(&mut self) -> Result<bool, DslError> {
-        // Check mtimes of tree files
-        let trees_dir = self.base_path.join("trees");
-        let subtrees_dir = self.base_path.join("subtrees");
+    /// Call before each tick. Returns true if bundle was reloaded.
+    pub fn reload_if_changed(&mut self, base_path: &Path) -> Result<bool, DslError> {
+        if !self.watcher.has_changed() {
+            return Ok(false);
+        }
 
-        // Simplified: always reload for now
-        // Full implementation would track file mtimes
-        self.load()?;
-        Ok(true)
+        match self.load(base_path) {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                // Log error, keep old bundle running
+                // Host decides whether to surface the error
+                Err(e)
+            }
+        }
+    }
+
+    pub fn current_bundle(&self) -> Arc<RwLock<Bundle>> {
+        self.current_bundle.clone()
     }
 }
 ```
@@ -2635,7 +2740,7 @@ impl DslWatcher {
 **Hot reload semantics**:
 - In-flight decisions use the old tree.
 - New decisions use the reloaded tree.
-- If reload fails, the old tree continues to run.
+- If reload fails, the old tree continues to run. An error is returned to the host.
 
 ---
 
