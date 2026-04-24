@@ -1,9 +1,11 @@
 # Decision DSL Reflection: Toward a More Elegant Design
 
-> An architectural critique of the current behavior-tree-based DSL, drawing on patterns from Temporal, AWS Step Functions, Celery, XState, Zig, and Kubernetes controllers.
+> An architectural critique of the **pre-`55cd8a7` behavior-tree-based DSL**, drawing on patterns from Temporal, AWS Step Functions, Celery, XState, Zig, and Kubernetes controllers.
 >
 > **Audience**: authors of `decision-dsl.md` and `decision-dsl-implementation.md`.
-> **Status**: proposal — not yet committed to sprints.
+> **Status**: Historical — most proposals herein have been adopted in the `implementation/` documents.
+>
+> **Note**: The `implementation/` documents (`decision-dsl-ast.md`, `decision-dsl-runtime.md`, etc.) already incorporate the redesign proposed in this document: enum-based `Evaluator`/`OutputParser`, `enum_dispatch` for `Node`, scoped Blackboard, grouped `DecisionCommand`, `minijinja` templates, and high-level `DecisionRules` syntax. This document is retained as design rationale.
 
 ---
 
@@ -439,7 +441,7 @@ steps:
 The root tree's Selector pattern (try first handler, else second handler, ...) is conceptually a **priority-ordered rule list**. Make this explicit:
 
 ```yaml
-apiVersion: decision.agile-agent.io/v2
+apiVersion: decision.agile-agent.io/v1
 kind: DecisionRules
 metadata:
   name: default_decisions

@@ -322,3 +322,52 @@ Below is a realistic session showing the reflect loop in action. The decision la
 
 - `tree.yaml` — The root behavior tree.
 - `subtrees/reflect.yaml` — The reusable reflect-loop sub-tree.
+
+---
+
+## DecisionRules + Switch Shorthand
+
+The reflect loop is the canonical use case for Switch-on-prompt:
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: completion_decisions
+spec:
+  rules:
+    - priority: 1
+      name: claims_completion
+      if:
+        kind: outputContains
+        pattern: "claims_completion"
+      then:
+        kind: Switch
+        name: reflect_or_confirm
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            ## Task
+            {{ task_description }}
+
+            Should we REFLECT or CONFIRM?
+            Reply with exactly one word.
+          parser:
+            kind: enum
+            values: [REFLECT, CONFIRM]
+        cases:
+          REFLECT:
+            command:
+              Reflect:
+                prompt: "Review your work carefully"
+          CONFIRM:
+            command: ConfirmCompletion
+      reflectionMaxRounds: 2
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+This desugars to the full BehaviorTree with `ReflectionGuard` → `Prompt` → `Selector(Condition+Action branches)` shown above.

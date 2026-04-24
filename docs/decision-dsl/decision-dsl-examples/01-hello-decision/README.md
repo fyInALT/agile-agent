@@ -158,3 +158,33 @@ Below is a realistic session between the user, the work agent (Claude/Codex), an
 ## Files
 
 - `tree.yaml` — The behavior tree definition.
+
+---
+
+## DecisionRules Shorthand
+
+The same logic can be expressed more concisely using the DecisionRules format (see `decision-dsl.md` §9):
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: hello_decision
+spec:
+  rules:
+    - priority: 1
+      name: handle_choice
+      if:
+        kind: outputContains
+        pattern: "waiting for choice"
+      then:
+        command:
+          SelectOption:
+            option_id: "0"
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+This desugars to the same BehaviorTree AST shown above.

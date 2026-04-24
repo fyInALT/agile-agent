@@ -267,6 +267,7 @@ on:
   kind: prompt
   model: thinking            # Optional. "standard" (default) or "thinking".
   timeoutMs: 30000           # Optional. Default: 30000.
+  resultKey: decision        # Optional. Blackboard key for parser result. Default: "decision".
   template: |
     Should we REFLECT or CONFIRM?
     Reply with exactly one word.
@@ -288,10 +289,13 @@ cases:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `on` | Yes | Switch condition. Use `on: { kind: prompt, ... }` or `on: { kind: variable, key: ... }`. |
-| `cases` | Yes | Map of match value → action. Values come from the parser's `decision` field. |
-| `_default` | No | Default case. If omitted, Switch returns Failure on unrecognized values. |
+| `cases` | Yes | Map of match value → action. Values come from the parser result. |
+| `_default` | No | Default case. If omitted, Switch returns Failure on unrecognized values. `_default` is a reserved key and cannot be used as a case value. |
+| `on.resultKey` | No | Blackboard key where the parser result is stored. Default: `"decision"`. Cases match against this key. |
 
 **Desugaring**: `Switch(on: Prompt) → Sequence(Prompt(on), Selector(for each case: When(if: var==case, then: case.command), DefaultCase))`
+
+**Note on `Switch on Prompt`**: The `enum` parser is recommended because it produces a single value that maps cleanly to case keys. If you use `structured` or `json` parsers, set `resultKey` to the field name you want to branch on (e.g., `resultKey: classification`). The parser's output field name must match the case values.
 
 #### Switch on Variable
 
@@ -555,6 +559,31 @@ eval:
 
 See [decision-dsl-evaluators.md](decision-dsl-evaluators.md) for the full evaluator catalog.
 
+**Built-in Evaluators Quick Reference**:
+
+| Kind | Description |
+|------|-------------|
+| `outputContains` | Checks if `provider_output` contains a substring. |
+| `situationIs` | Checks if `provider_output` or `context_summary` contains a situation type. |
+| `reflectionRoundUnder` | True if `reflection_round < max`. |
+| `variableIs` | Checks if a blackboard variable equals an expected value. Supports dot-notation. |
+| `regex` | Matches `provider_output` against a regex pattern. |
+| `script` | Evaluates a minimal expression against the blackboard. |
+| `or` | True if any sub-condition is true. |
+| `and` | True if all sub-conditions are true. |
+| `not` | Inverts a single sub-condition. |
+
+```yaml
+# Example: not + outputContains
+kind: Condition
+name: is_not_rate_limit
+eval:
+  kind: not
+  condition:
+    kind: outputContains
+    pattern: "429"
+```
+
 #### Action
 
 Emits a `DecisionCommand`. Optionally guarded by a `when` condition.
@@ -640,6 +669,37 @@ value:
 
 References a reusable sub-tree. SubTrees preserve their identity in traces (unlike the previous design which inlined them).
 
+#### SubTree File Format
+
+SubTree files are standalone YAML documents with `kind: SubTree`:
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: SubTree
+metadata:
+  name: reflect_loop
+  description: "Standard reflection loop"
+spec:
+  root:
+    kind: Selector
+    name: reflect_root
+    children:
+      - kind: Condition
+        name: max_rounds_check
+        eval:
+          kind: reflectionRoundUnder
+          max: 3
+      - kind: Action
+        name: emit_reflect
+        command:
+          Reflect:
+            prompt: "Review your work carefully"
+```
+
+#### SubTree Reference Node
+
+Inside a BehaviorTree, reference a SubTree by name:
+
 ```yaml
 kind: SubTree
 name: reflect_handler
@@ -716,7 +776,9 @@ command:
 command:
   PrepareTaskStart:
     task_id: "TASK-123"
-    task_description: "Implement user authentication"
+    description: "Implement user authentication"
+
+command: WakeUp
 ```
 
 ### Human Commands
@@ -754,8 +816,8 @@ command:
   PreparePr:
     title: "Add auth module"
     description: "Implements JWT-based authentication"
-    base_branch: "main"
-    as_draft: false
+    base: "main"
+    draft: false
 ```
 
 ### Command Interpolation
@@ -1386,47 +1448,28 @@ impl DslLoader {
 
 ### 10.4 Hot Reload
 
+Hot reload uses `DslReloader` with `PollWatcher` (zero external dependencies beyond `Fs`).
+
 ```rust
-pub struct DslWatcher {
-    loader: DslLoader,
-    current_tree: Arc<RwLock<BehaviorTree>>,
-}
+use decision_dsl::{DslReloader, YamlParser, StdFs};
+use std::sync::Arc;
 
-impl DslWatcher {
-    pub fn start_watching(&self) -> Result<(), notify::Error> {
-        let mut watcher = notify::recommended_watcher(|res| {
-            match res {
-                Ok(event) => {
-                    if event.kind.is_modify() {
-                        self.reload();
-                    }
-                }
-                Err(e) => tracing::error!("Watch error: {}", e),
-            }
-        })?;
-        watcher.watch(&self.loader.base_path, RecursiveMode::Recursive)?;
-        Ok(())
-    }
+let parser = YamlParser::new();
+let fs = Box::new(StdFs);
+let mut reloader = DslReloader::new(parser, fs, PathBuf::from("decisions/"))?;
 
-    fn reload(&self) {
-        match self.loader.load_rules("default") {
-            Ok(new_tree) => {
-                *self.current_tree.write() = new_tree;
-                tracing::info!("DSL hot-reloaded successfully");
-            }
-            Err(e) => {
-                tracing::error!("DSL reload failed: {}", e);
-                // Keep old tree running
-            }
-        }
-    }
+// In the host's event loop:
+if reloader.check_and_reload()? {
+    println!("DSL rules hot-reloaded");
 }
+let bundle = reloader.current();
 ```
 
 **Hot reload semantics**:
-- In-flight decisions use the old tree.
-- New decisions use the reloaded tree.
-- If reload fails, the old tree continues to run. An error is logged.
+- In-flight decisions use the old tree (the executor holds its own `Tree` reference).
+- New decisions use the reloaded tree from `reloader.current()`.
+- If reload fails, the old bundle continues to run. An error is returned but not fatal.
+- `PollWatcher` checks `Fs::modified()` on the directory; no OS-specific file watching APIs are required.
 
 ---
 
@@ -1511,14 +1554,22 @@ registry.register_filter("kebab_case", |input: &str| {
 
 | High-Level Construct | Desugars To |
 |---------------------|-------------|
-| `DecisionRules { rules }` | `Selector(rule[1], rule[2], ..., rule[n])` |
-| `Rule { if, then, cooldownMs }` | `Cooldown(Sequence(Condition(if), then.desugar()))` (cooldown omitted if 0) |
-| `Rule { if, then, reflectionMaxRounds }` | `ReflectionGuard(Sequence(Condition(if), then.desugar()))` (guard omitted if 0) |
-| `Switch { on: prompt, cases }` | `Sequence(Prompt(on), Selector(for each case: When(if: var==case, then: case.command), DefaultCase))` |
-| `Switch { on: variable, cases }` | `Selector(for each case: When(if: var==case, then: case.command), DefaultCase)` |
-| `When { if, then }` | `Sequence(Condition(if), Action(then.command))` |
+| `DecisionRules { rules }` | `Selector(rule[1], rule[2], ..., rule[n], NoMatchFallback)` |
+| `Rule { if, then }` | `Sequence(Condition(if), then.desugar())` |
+| `Rule { if, then, cooldownMs }` | `Cooldown(Sequence(Condition(if), then.desugar()))` |
+| `Rule { if, then, reflectionMaxRounds }` | `ReflectionGuard(Sequence(Condition(if), then.desugar()))` |
+| `Rule { if, then, on_error: escalate }` | `Selector(Rule.desugar(), Action(EscalateToHuman))` |
+| `Rule { if, then, on_error: retry }` | `Repeater(2, Rule.desugar())` |
+| `Switch { on: prompt, cases }` | `Sequence(Prompt(on), Selector(for each case: When(if: var==case, then: case.desugar()), DefaultCase.desugar()))` |
+| `Switch { on: variable, cases }` | `Selector(for each case: When(if: var==case, then: case.desugar()), DefaultCase.desugar())` |
+| `When { if, then }` | `WhenNode(condition, then.desugar())` |
 | `Pipeline { steps }` | `Sequence(for each step: if → Condition; then → Action)` |
 | `then: { command: ... }` (inline) | `Action(command)` |
+
+**Notes**:
+- `DecisionRules` automatically appends a `NoMatchFallback` action (`ApproveAndContinue`) as the last child of the Selector.
+- Decorator wrapping order (from outermost to innermost): `Cooldown` → `ReflectionGuard` → `on_error`.
+- `cases` and `_default` in `Switch` accept any `ThenSpec`, not just inline commands.
 
 ---
 

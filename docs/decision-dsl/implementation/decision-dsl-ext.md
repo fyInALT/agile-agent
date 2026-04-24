@@ -84,16 +84,113 @@ impl Logger for NullLogger {
     fn log(&self, _level: LogLevel, _target: &str, _msg: &str) {}
 }
 
-pub struct TracingLogger;
-impl Logger for TracingLogger {
+/// A simple Logger that prints to stderr. Zero dependencies.
+pub struct StderrLogger;
+impl Logger for StderrLogger {
     fn log(&self, level: LogLevel, target: &str, msg: &str) {
-        match level {
-            LogLevel::Trace => tracing::trace!(target, "{}", msg),
-            LogLevel::Debug => tracing::debug!(target, "{}", msg),
-            LogLevel::Info => tracing::info!(target, "{}", msg),
-            LogLevel::Warn => tracing::warn!(target, "{}", msg),
-            LogLevel::Error => tracing::error!(target, "{}", msg),
+        eprintln!("[{:?}] {}: {}", level, target, msg);
+    }
+}
+```
+
+### 1.4 Fs
+
+```rust
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+/// File system abstraction for parse-time directory scanning and hot reload.
+pub trait Fs {
+    fn read_to_string(&self, path: &Path) -> Result<String, FsError>;
+    fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError>;
+    fn modified(&self, path: &Path) -> Result<SystemTime, FsError>;
+}
+
+#[derive(Debug, Clone)]
+pub enum FsError {
+    Io(String),
+    NotFound(PathBuf),
+}
+
+impl std::fmt::Display for FsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FsError::Io(msg) => write!(f, "fs error: {}", msg),
+            FsError::NotFound(path) => write!(f, "not found: {}", path.display()),
         }
+    }
+}
+
+impl std::error::Error for FsError {}
+
+/// Zero-dependency `Fs` implementation using `std::fs`.
+pub struct StdFs;
+
+impl Fs for StdFs {
+    fn read_to_string(&self, path: &Path) -> Result<String, FsError> {
+        std::fs::read_to_string(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+
+    fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError> {
+        std::fs::read_dir(path)
+            .map_err(|e| FsError::Io(e.to_string()))?
+            .map(|e| e.map(|entry| entry.path()).map_err(|e| FsError::Io(e.to_string())))
+            .collect()
+    }
+
+    fn modified(&self, path: &Path) -> Result<SystemTime, FsError> {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .map_err(|e| FsError::Io(e.to_string()))
+    }
+}
+```
+
+### 1.5 Watcher
+
+```rust
+/// Watches a file or directory for changes. Used by DslReloader for hot reload.
+pub trait Watcher {
+    /// Check if the watched path has changed since the last call.
+    fn has_changed(&mut self) -> Result<bool, WatcherError>;
+}
+
+#[derive(Debug, Clone)]
+pub enum WatcherError {
+    Io(String),
+}
+
+impl std::fmt::Display for WatcherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WatcherError::Io(msg) => write!(f, "watcher error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for WatcherError {}
+
+/// A zero-dependency poll-based watcher that checks mtime.
+pub struct PollWatcher {
+    path: PathBuf,
+    last_modified: Option<SystemTime>,
+    fs: Box<dyn Fs>,
+}
+
+impl PollWatcher {
+    pub fn new(path: PathBuf, fs: Box<dyn Fs>) -> Result<Self, WatcherError> {
+        let last_modified = fs.modified(&path).ok();
+        Ok(Self { path, last_modified, fs })
+    }
+}
+
+impl Watcher for PollWatcher {
+    fn has_changed(&mut self) -> Result<bool, WatcherError> {
+        let current = self.fs.modified(&self.path)
+            .map_err(|e| WatcherError::Io(e.to_string()))?;
+        let changed = self.last_modified.map(|last| current > last).unwrap_or(true);
+        self.last_modified = Some(current);
+        Ok(changed)
     }
 }
 ```
@@ -501,8 +598,9 @@ fn sub_tree_preserves_identity() {
 | Executor / Tick | 95% — all node types, resume paths |
 | Blackboard | 100% — all types, dot notation, scoped access, push/pop scope |
 | Template Engine | 90% — variable interpolation, filters, conditionals, loops (delegated to minijinja) |
-| Prompt Node | 90% — pending, ready, parse fail, command parser |
+| Prompt Node | 90% — pending, ready, parse fail, command parser, timeout |
 | SubTree Node | 90% — scope isolation, identity in traces |
+| Fs / Watcher | 100% — StdFs, PollWatcher, DslReloader |
 | Error Types | 100% — Display, From impls |
 
 ---
@@ -548,7 +646,64 @@ Trees are `Send + Sync`. The executor is `!Sync` (mutates running_path). One exe
 
 ---
 
-## 5. Observability
+## 5. Hot Reload
+
+### 5.1 DslReloader
+
+`DslReloader` watches the decisions directory and atomically swaps the loaded tree when files change. In-flight decisions continue with the old tree; new ticks use the new tree.
+
+```rust
+pub struct DslReloader {
+    parser: YamlParser,
+    fs: Box<dyn Fs>,
+    watcher: Box<dyn Watcher>,
+    dir: PathBuf,
+    current_bundle: Arc<RwLock<Bundle>>,
+}
+
+impl DslReloader {
+    pub fn new(
+        parser: YamlParser,
+        fs: Box<dyn Fs>,
+        dir: PathBuf,
+    ) -> Result<Self, DslError> {
+        let watcher = Box::new(PollWatcher::new(dir.clone(), fs.duplicate()?)?);
+        let bundle = parser.parse_bundle(&dir, fs.as_ref())?;
+        Ok(Self {
+            parser,
+            fs,
+            watcher,
+            dir,
+            current_bundle: Arc::new(RwLock::new(bundle)),
+        })
+    }
+
+    /// Check for changes and reload if necessary.
+    pub fn check_and_reload(&mut self) -> Result<bool, DslError> {
+        if self.watcher.has_changed()? {
+            let new_bundle = self.parser.parse_bundle(&self.dir, self.fs.as_ref())?;
+            let mut guard = self.current_bundle.write().unwrap();
+            *guard = new_bundle;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Get a read lock on the current bundle.
+    pub fn current(&self) -> std::sync::RwLockReadGuard<Bundle> {
+        self.current_bundle.read().unwrap()
+    }
+}
+```
+
+### 5.2 PollWatcher
+
+See §1.5 for `PollWatcher` implementation. It uses `Fs::modified()` to detect changes without additional dependencies.
+
+---
+
+## 6. Observability
 
 ### 5.1 TraceEntry (Updated)
 

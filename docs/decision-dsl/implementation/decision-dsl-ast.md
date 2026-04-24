@@ -67,7 +67,9 @@ pub(crate) struct RuleSpec {
     pub name: String,
     pub condition: Option<Evaluator>,       // `if` field
     pub action: ThenSpec,                   // `then` field
+    #[serde(rename = "cooldownMs")]
     pub cooldown_ms: Option<u64>,
+    #[serde(rename = "reflectionMaxRounds")]
     pub reflection_max_rounds: Option<u8>,
     pub on_error: Option<OnError>,
 }
@@ -149,17 +151,18 @@ fn desugar_rule(rule: RuleSpec, registry: &EvaluatorRegistry) -> Result<Node, Pa
         inner
     };
 
-    // Wrap in Cooldown if specified
+    // Wrap in Cooldown if specified (outermost — applies after all other decorators)
     if let Some(ms) = rule.cooldown_ms {
         node = Node::Cooldown(CooldownNode {
             name: format!("{}_cooldown", rule.name),
-            duration: Duration::from_millis(ms),
+            duration_ms: ms,
             child: Box::new(node),
             last_success: None,
         });
     }
 
-    // Wrap in ReflectionGuard if specified
+    // Wrap in ReflectionGuard if specified (inside Cooldown, so reflection counting
+    // happens even during cooldown — prevents infinite reflection loops)
     if let Some(max_rounds) = rule.reflection_max_rounds {
         node = Node::ReflectionGuard(ReflectionGuardNode {
             name: format!("{}_reflection", rule.name),
@@ -167,6 +170,36 @@ fn desugar_rule(rule: RuleSpec, registry: &EvaluatorRegistry) -> Result<Node, Pa
             child: Box::new(node),
         });
     }
+
+    // Apply on_error wrapping (innermost — closest to the action)
+    node = match rule.on_error {
+        Some(OnError::Escalate) => {
+            Node::Selector(SelectorNode {
+                name: format!("{}_error_handler", rule.name),
+                children: vec![
+                    node,
+                    Node::Action(ActionNode {
+                        name: format!("{}_escalate_fallback", rule.name),
+                        command: DecisionCommand::Human(HumanCommand::Escalate {
+                            reason: format!("Rule '{}' failed — escalating to human", rule.name),
+                            context: None,
+                        }),
+                        when: None,
+                    }),
+                ],
+                active_child: None,
+            })
+        }
+        Some(OnError::Retry) => {
+            Node::Repeater(RepeaterNode {
+                name: format!("{}_retry", rule.name),
+                max_attempts: 2, // original attempt + 1 retry
+                child: Box::new(node),
+                current: 0,
+            })
+        }
+        Some(OnError::Skip) | None => node, // Selector naturally falls through on Failure
+    };
 
     Ok(node)
 }
@@ -194,15 +227,20 @@ fn desugar_then(then: ThenSpec, registry: &EvaluatorRegistry) -> Result<Node, Pa
 
 fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
     match switch.on {
-        SwitchOn::Prompt { model, timeout_ms, template, parser } => {
+        SwitchOn::Prompt { model, timeout_ms, template, parser, result_key } => {
+            let result_key = result_key.unwrap_or_else(|| "decision".into());
+
             // Sequence(Prompt, Selector(case_when_1, case_when_2, ..., DefaultCase))
             let prompt_node = Node::Prompt(PromptNode {
                 name: format!("{}_prompt", switch.name),
                 model,
                 template,
                 parser,
-                sets: vec![],  // enum parser auto-sets "decision"
-                timeout: Duration::from_millis(timeout_ms.unwrap_or(30000)),
+                sets: vec![SetMapping {
+                    key: result_key.clone(),
+                    field: "decision".into(), // enum/structured parser writes to this field name
+                }],
+                timeout_ms: timeout_ms.unwrap_or(30000),
                 pending: false,
             });
 
@@ -211,7 +249,7 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                 let when = Node::When(WhenNode {
                     name: format!("{}_{}", switch.name, value.to_lowercase()),
                     condition: Evaluator::VariableIs {
-                        key: "decision".into(),
+                        key: result_key.clone(),
                         expected: BlackboardValue::String(value.clone()),
                     },
                     action: Box::new(desugar_then(action.clone(), registry)?),
@@ -219,13 +257,9 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                 case_nodes.push(when);
             }
 
-            // Default case
+            // Default case (supports any ThenSpec, not just inline commands)
             if let Some(default_action) = switch.default {
-                case_nodes.push(Node::Action(ActionNode {
-                    name: format!("{}_default", switch.name),
-                    command: extract_command(default_action)?,
-                    when: None,
-                }));
+                case_nodes.push(desugar_then(default_action, registry)?);
             }
 
             Ok(Node::Sequence(SequenceNode {
@@ -255,11 +289,7 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                 case_nodes.push(when);
             }
             if let Some(default_action) = switch.default {
-                case_nodes.push(Node::Action(ActionNode {
-                    name: format!("{}_default", switch.name),
-                    command: extract_command(default_action)?,
-                    when: None,
-                }));
+                case_nodes.push(desugar_then(default_action, registry)?);
             }
             Ok(Node::Selector(SelectorNode {
                 name: format!("{}_branch", switch.name),
@@ -357,12 +387,14 @@ pub(crate) enum Node {
 pub(crate) struct SelectorNode {
     pub name: String,
     pub children: Vec<Node>,
+    #[serde(skip)]
     pub active_child: Option<usize>,
 }
 
 pub(crate) struct SequenceNode {
     pub name: String,
     pub children: Vec<Node>,
+    #[serde(skip)]
     pub active_child: Option<usize>,
 }
 
@@ -387,20 +419,25 @@ pub(crate) struct InverterNode {
 
 pub(crate) struct RepeaterNode {
     pub name: String,
+    #[serde(rename = "maxAttempts")]
     pub max_attempts: u32,
     pub child: Box<Node>,
+    #[serde(skip)]
     pub current: u32,
 }
 
 pub(crate) struct CooldownNode {
     pub name: String,
-    pub duration: Duration,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: u64,
     pub child: Box<Node>,
+    #[serde(skip)]
     pub last_success: Option<Instant>,
 }
 
 pub(crate) struct ReflectionGuardNode {
     pub name: String,
+    #[serde(rename = "maxRounds")]
     pub max_rounds: u8,
     pub child: Box<Node>,
 }
@@ -438,8 +475,12 @@ pub(crate) struct PromptNode {
     pub template: String,
     pub parser: OutputParser,
     pub sets: Vec<SetMapping>,
-    pub timeout: Duration,
+    #[serde(rename = "timeoutMs")]
+    pub timeout_ms: u64,
+    #[serde(skip)]
     pub pending: bool,
+    #[serde(skip)]
+    pub sent_at: Option<std::time::Instant>,
 }
 
 pub(crate) struct SetVarNode {
@@ -450,7 +491,9 @@ pub(crate) struct SetVarNode {
 
 pub(crate) struct SubTreeNode {
     pub name: String,
+    #[serde(rename = "ref")]
     pub ref_name: String,
+    #[serde(skip)]
     pub resolved_root: Option<Box<Node>>,  // Resolved at tick time
 }
 
@@ -467,15 +510,21 @@ pub(crate) struct SwitchSpec {
     pub name: String,
     pub on: SwitchOn,
     pub cases: HashMap<String, ThenSpec>,
+    #[serde(rename = "_default")]
     pub default: Option<ThenSpec>,
 }
 
 pub(crate) enum SwitchOn {
     Prompt {
         model: Option<String>,
+        #[serde(rename = "timeoutMs")]
         timeout_ms: Option<u64>,
         template: String,
         parser: OutputParser,
+        /// Blackboard key where the parser result is stored. Default: "decision".
+        /// Cases match against this key.
+        #[serde(rename = "resultKey")]
+        result_key: Option<String>,
     },
     Variable {
         key: String,
@@ -486,6 +535,7 @@ pub(crate) struct WhenSpec {
     pub name: String,
     pub condition: Evaluator,
     pub then: ThenSpec,
+    pub on_error: Option<OnError>,
 }
 
 pub(crate) struct PipelineSpec {
@@ -515,29 +565,43 @@ pub enum DecisionCommand {
 pub enum AgentCommand {
     ApproveAndContinue,
     Reflect { prompt: String },
+    #[serde(rename = "SendCustomInstruction")]
     SendInstruction { prompt: String, target_agent: String },
+    #[serde(rename = "TerminateAgent")]
     Terminate { reason: String },
     WakeUp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GitCommand {
-    Commit { message: String, wip: bool },
+    #[serde(rename = "CommitChanges")]
+    Commit { message: String, #[serde(rename = "is_wip")] wip: bool },
+    #[serde(rename = "StashChanges")]
     Stash { description: String, include_untracked: bool },
+    #[serde(rename = "DiscardChanges")]
     Discard,
-    CreateBranch { name: String, base: String },
-    Rebase { base: String },
+    #[serde(rename = "CreateTaskBranch")]
+    CreateBranch {
+        #[serde(rename = "branch_name")]
+        name: String,
+        #[serde(rename = "base_branch")]
+        base: String,
+    },
+    #[serde(rename = "RebaseToMain")]
+    Rebase { #[serde(rename = "base_branch")] base: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TaskCommand {
     ConfirmCompletion,
     StopIfComplete { reason: String },
+    #[serde(rename = "PrepareTaskStart")]
     PrepareStart { task_id: String, description: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HumanCommand {
+    #[serde(rename = "EscalateToHuman")]
     Escalate { reason: String, context: Option<String> },
     SelectOption { option_id: String },
     SkipDecision,
@@ -546,11 +610,31 @@ pub enum HumanCommand {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProviderCommand {
     RetryTool { tool_name: String, args: Option<String>, max_attempts: u32 },
-    Switch { provider_type: String },
+    SwitchProvider { provider_type: String },
     SuggestCommit { message: String, mandatory: bool, reason: String },
     PreparePr { title: String, description: String, base: String, draft: bool },
 }
 ```
+
+### 1.8 Serde Rename Mapping (Rust ↔ YAML)
+
+Rust enum variants use idiomatic short names. YAML serialization maps to the full DSL command names via `#[serde(rename)]`:
+
+| Rust Variant | YAML Name (in DSL) | Field Renames |
+|-------------|---------------------|---------------|
+| `AgentCommand::SendInstruction` | `SendCustomInstruction` | — |
+| `AgentCommand::Terminate` | `TerminateAgent` | — |
+| `GitCommand::Commit` | `CommitChanges` | `wip` → `is_wip` |
+| `GitCommand::Stash` | `StashChanges` | — |
+| `GitCommand::Discard` | `DiscardChanges` | — |
+| `GitCommand::CreateBranch` | `CreateTaskBranch` | `name` → `branch_name`, `base` → `base_branch` |
+| `GitCommand::Rebase` | `RebaseToMain` | `base` → `base_branch` |
+| `HumanCommand::Escalate` | `EscalateToHuman` | — |
+| `TaskCommand::PrepareStart` | `PrepareTaskStart` | — |
+
+All other variants use the same name in both Rust and YAML (e.g., `ApproveAndContinue`, `Reflect`, `RetryTool`, `SwitchProvider`, `SelectOption`, `ConfirmCompletion`, etc.).
+
+Git commands carry an optional `worktree_path` in the outer `DecisionCommand::Git(_, Option<String>)` tuple. When serialized to YAML, `worktree_path` appears as a field within each Git command object.
 
 ---
 
@@ -561,6 +645,7 @@ The Blackboard is the shared memory of the behavior tree. It uses **scoped layer
 ### 2.1 Data Model
 
 ```rust
+#[derive(Default)]
 pub struct Blackboard {
     // --- Built-in input variables (strongly typed) ---
     pub task_description: String,
@@ -708,6 +793,11 @@ impl Blackboard {
                     BlackboardValue::Map(m)
                 }).collect()
             )),
+            "llm_responses" => Some(BlackboardValue::Map(
+                self.llm_responses.iter().map(|(k, v)| {
+                    (k.clone(), BlackboardValue::String(v.clone()))
+                }).collect()
+            )),
             // Scoped variable lookup
             _ => self.get(first).cloned(),
         };
@@ -798,28 +888,64 @@ impl Blackboard {
 Template rendering uses the `minijinja` crate. The Blackboard's built-in fields and scoped variables are exposed as template context.
 
 ```rust
-use minijinja::{Environment, Value};
+use minijinja::Value;
+use std::collections::HashMap;
 
 impl Blackboard {
     /// Build a minijinja context from the current Blackboard state.
     pub fn to_template_context(&self) -> Value {
-        let mut ctx = minijinja::value::Object::new();
-        ctx.set("task_description", self.task_description.clone());
-        ctx.set("provider_output", self.provider_output.clone());
-        ctx.set("context_summary", self.context_summary.clone());
-        ctx.set("reflection_round", self.reflection_round);
-        ctx.set("max_reflection_rounds", self.max_reflection_rounds);
-        ctx.set("confidence_accumulator", self.confidence_accumulator);
-        ctx.set("agent_id", self.agent_id.clone());
-        ctx.set("current_task_id", self.current_task_id.clone());
-        ctx.set("current_story_id", self.current_story_id.clone());
-        // Expose scoped variables at root level
+        let mut ctx: HashMap<String, Value> = HashMap::new();
+        ctx.insert("task_description".into(), Value::from_serialize(&self.task_description));
+        ctx.insert("provider_output".into(), Value::from_serialize(&self.provider_output));
+        ctx.insert("context_summary".into(), Value::from_serialize(&self.context_summary));
+        ctx.insert("reflection_round".into(), Value::from(self.reflection_round));
+        ctx.insert("max_reflection_rounds".into(), Value::from(self.max_reflection_rounds));
+        ctx.insert("confidence_accumulator".into(), Value::from(self.confidence_accumulator));
+        ctx.insert("agent_id".into(), Value::from_serialize(&self.agent_id));
+        ctx.insert("current_task_id".into(), Value::from_serialize(&self.current_task_id));
+        ctx.insert("current_story_id".into(), Value::from_serialize(&self.current_story_id));
+
+        // Expose last_tool_call as a nested object
+        if let Some(ref tc) = self.last_tool_call {
+            let mut tc_map = HashMap::new();
+            tc_map.insert("name".into(), Value::from_serialize(&tc.name));
+            tc_map.insert("input".into(), Value::from_serialize(&tc.input));
+            tc_map.insert("output".into(), Value::from_serialize(&tc.output));
+            ctx.insert("last_tool_call".into(), Value::from_serialize(tc_map));
+        }
+
+        // Expose file_changes as a list
+        let file_changes: Vec<HashMap<String, Value>> = self.file_changes.iter().map(|fc| {
+            let mut m = HashMap::new();
+            m.insert("path".into(), Value::from_serialize(&fc.path));
+            m.insert("change_type".into(), Value::from_serialize(&fc.change_type));
+            m
+        }).collect();
+        ctx.insert("file_changes".into(), Value::from_serialize(file_changes));
+
+        // Expose scoped variables at root level (innermost scope wins)
         for scope in &self.scopes {
             for (k, v) in scope {
-                ctx.set(k, blackboard_value_to_minijinja(v));
+                ctx.insert(k.clone(), blackboard_value_to_minijinja(v));
             }
         }
-        Value::from_object(ctx)
+
+        Value::from_serialize(ctx)
+    }
+}
+
+fn blackboard_value_to_minijinja(v: &BlackboardValue) -> Value {
+    match v {
+        BlackboardValue::String(s) => Value::from_serialize(s),
+        BlackboardValue::Integer(i) => Value::from(*i),
+        BlackboardValue::Float(f) => Value::from(*f),
+        BlackboardValue::Boolean(b) => Value::from(*b),
+        BlackboardValue::List(l) => Value::from_serialize(
+            l.iter().map(blackboard_value_to_minijinja).collect::<Vec<_>>()
+        ),
+        BlackboardValue::Map(m) => Value::from_serialize(
+            m.iter().map(|(k, v)| (k.clone(), blackboard_value_to_minijinja(v))).collect::<HashMap<_, _>>()
+        ),
     }
 }
 ```

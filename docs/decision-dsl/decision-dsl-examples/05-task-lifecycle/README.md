@@ -496,3 +496,76 @@ Below is a realistic session showing the **complete task lifecycle** — from gi
 
 - `tree.yaml` — The root task lifecycle orchestrator.
 - `subtrees/task-start.yaml` — Task startup sub-tree (git branch selection).
+
+---
+
+## DecisionRules Shorthand
+
+Phase-based routing with cross-example SubTree reuse can be expressed as DecisionRules with Switch nodes:
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: task_lifecycle
+spec:
+  rules:
+    - priority: 1
+      name: phase_starting
+      if:
+        kind: variableIs
+        key: task_phase
+        value: "starting"
+      then:
+        kind: Switch
+        name: git_strategy
+        on:
+          kind: prompt
+          template: |
+            Choose git strategy for {{ current_task_id }}.
+            Reply: NEW_BRANCH or EXISTING
+          parser:
+            kind: enum
+            values: [NEW_BRANCH, EXISTING]
+        cases:
+          NEW_BRANCH:
+            command:
+              CreateTaskBranch:
+                branch_name: "feature/{{ current_task_id | slugify }}"
+                base_branch: "main"
+          EXISTING:
+            command:
+              RebaseToMain:
+                base_branch: "main"
+
+    - priority: 2
+      name: phase_completing
+      if:
+        kind: variableIs
+        key: task_phase
+        value: "completing"
+      then:
+        kind: Switch
+        name: reflect_or_confirm
+        on:
+          kind: prompt
+          template: "REFLECT or CONFIRM?"
+          parser:
+            kind: enum
+            values: [REFLECT, CONFIRM]
+        cases:
+          REFLECT:
+            command:
+              Reflect:
+                prompt: "Review your work carefully"
+          CONFIRM:
+            command: ConfirmCompletion
+      reflectionMaxRounds: 2
+
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+Phase transitions are managed by `SetVar` nodes that write `task_phase` — these are emitted by the downstream commands or by explicit `SetVar` actions after each phase completes.

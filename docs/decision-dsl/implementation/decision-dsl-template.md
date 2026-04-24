@@ -25,66 +25,27 @@ The previous design proposed a hand-rolled 300-line template engine. This was a 
 
 ## 2. Blackboard as Template Context
 
-The Blackboard's built-in fields and scoped variables are exposed:
+The Blackboard's built-in fields and scoped variables are exposed as a minijinja `Value`.
+See [`decision-dsl-ast.md`](decision-dsl-ast.md) §2.2 for the full `to_template_context()` implementation.
+
+The conversion logic (`blackboard_value_to_minijinja`) maps `BlackboardValue` variants to minijinja `Value`:
 
 ```rust
-use minijinja::{Environment, Value, context};
-
-impl Blackboard {
-    pub fn to_template_context(&self) -> Value {
-        let mut ctx = context! {
-            task_description => self.task_description.clone(),
-            provider_output => self.provider_output.clone(),
-            context_summary => self.context_summary.clone(),
-            reflection_round => self.reflection_round,
-            max_reflection_rounds => self.max_reflection_rounds,
-            confidence_accumulator => self.confidence_accumulator,
-            agent_id => self.agent_id.clone(),
-            current_task_id => self.current_task_id.clone(),
-            current_story_id => self.current_story_id.clone(),
-        };
-
-        // Expose last_tool_call as a structured object
-        if let Some(ref t) = self.last_tool_call {
-            ctx.set("last_tool_call", context! {
-                name => t.name.clone(),
-                input => t.input.clone(),
-                output => t.output.clone(),
-            });
-        }
-
-        // Expose file_changes as a list of objects
-        let changes: Vec<Value> = self.file_changes.iter().map(|fc| {
-            context! { path => fc.path.clone(), change_type => fc.change_type.clone() }.into()
-        }).collect();
-        ctx.set("file_changes", Value::from(changes));
-
-        // Expose custom variables from all scopes (innermost wins)
-        for scope in self.scopes.iter().rev() {
-            for (k, v) in scope {
-                ctx.set(k, blackboard_to_minijinja(v));
-            }
-        }
-
-        ctx.into()
-    }
-}
-
-fn blackboard_to_minijinja(v: &BlackboardValue) -> Value {
+fn blackboard_value_to_minijinja(v: &BlackboardValue) -> minijinja::Value {
+    use minijinja::Value;
     match v {
-        BlackboardValue::String(s) => Value::from(s.clone()),
+        BlackboardValue::String(s) => Value::from_serialize(s),
         BlackboardValue::Integer(i) => Value::from(*i),
         BlackboardValue::Float(f) => Value::from(*f),
         BlackboardValue::Boolean(b) => Value::from(*b),
         BlackboardValue::List(l) => {
-            Value::from(l.iter().map(blackboard_to_minijinja).collect::<Vec<_>>())
+            Value::from_serialize(l.iter().map(blackboard_value_to_minijinja).collect::<Vec<_>>())
         }
         BlackboardValue::Map(m) => {
-            let mut obj = minijinja::value::Object::new();
-            for (k, v) in m {
-                obj.set(k, blackboard_to_minijinja(v));
-            }
-            Value::from_object(obj)
+            let map: HashMap<String, Value> = m.iter()
+                .map(|(k, v)| (k.clone(), blackboard_value_to_minijinja(v)))
+                .collect();
+            Value::from_serialize(map)
         }
     }
 }
@@ -125,21 +86,23 @@ pub(crate) fn create_template_env() -> Environment<'static> {
 
 ```rust
 use minijinja::Environment;
+use std::sync::OnceLock;
 
-lazy_static::lazy_static! {
-    static ref TEMPLATE_ENV: Environment<'static> = create_template_env();
+static TEMPLATE_ENV: OnceLock<Environment<'static>> = OnceLock::new();
+
+fn get_template_env() -> &'static Environment<'static> {
+    TEMPLATE_ENV.get_or_init(|| create_template_env())
 }
 
 pub(crate) fn render_prompt_template(
     template_str: &str,
-    bb: &Blackboard,
+    ctx: &minijinja::Value,
 ) -> Result<String, RuntimeError> {
-    let tmpl = TEMPLATE_ENV
+    let env = get_template_env();
+    let tmpl = env
         .template_from_str(template_str)
         .map_err(|e| RuntimeError::FilterError(e.to_string()))?;
-
-    let ctx = bb.to_template_context();
-    tmpl.render(&ctx)
+    tmpl.render(ctx)
         .map_err(|e| RuntimeError::FilterError(e.to_string()))
 }
 ```
@@ -156,10 +119,11 @@ pub(crate) fn render_command_templates(
     bb: &Blackboard,
 ) -> Result<DecisionCommand, RuntimeError> {
     let ctx = bb.to_template_context();
+    let env = get_template_env();
 
     // Helper: render a string template against the context
     let render = |s: &str| -> Result<String, RuntimeError> {
-        let tmpl = TEMPLATE_ENV
+        let tmpl = env
             .template_from_str(s)
             .map_err(|e| RuntimeError::FilterError(e.to_string()))?;
         tmpl.render(&ctx)
@@ -167,6 +131,7 @@ pub(crate) fn render_command_templates(
     };
 
     match cmd {
+        // --- Agent commands ---
         DecisionCommand::Agent(AgentCommand::Reflect { prompt }) => {
             Ok(DecisionCommand::Agent(AgentCommand::Reflect { prompt: render(prompt)? }))
         }
@@ -176,6 +141,15 @@ pub(crate) fn render_command_templates(
                 target_agent: render(target_agent)?,
             }))
         }
+        DecisionCommand::Agent(AgentCommand::Terminate { reason }) => {
+            Ok(DecisionCommand::Agent(AgentCommand::Terminate {
+                reason: render(reason)?,
+            }))
+        }
+        DecisionCommand::Agent(AgentCommand::ApproveAndContinue) |
+        DecisionCommand::Agent(AgentCommand::WakeUp) => Ok(cmd.clone()),
+
+        // --- Git commands ---
         DecisionCommand::Git(GitCommand::Commit { message, wip }, wt) => {
             Ok(DecisionCommand::Git(GitCommand::Commit {
                 message: render(message)?,
@@ -194,10 +168,20 @@ pub(crate) fn render_command_templates(
                 include_untracked: *include_untracked,
             }, wt.clone()))
         }
+        DecisionCommand::Git(GitCommand::Discard, wt) => {
+            Ok(DecisionCommand::Git(GitCommand::Discard, wt.clone()))
+        }
         DecisionCommand::Git(GitCommand::Rebase { base }, wt) => {
             Ok(DecisionCommand::Git(GitCommand::Rebase {
                 base: render(base)?,
             }, wt.clone()))
+        }
+
+        // --- Task commands ---
+        DecisionCommand::Task(TaskCommand::StopIfComplete { reason }) => {
+            Ok(DecisionCommand::Task(TaskCommand::StopIfComplete {
+                reason: render(reason)?,
+            }))
         }
         DecisionCommand::Task(TaskCommand::PrepareStart { task_id, description }) => {
             Ok(DecisionCommand::Task(TaskCommand::PrepareStart {
@@ -205,22 +189,33 @@ pub(crate) fn render_command_templates(
                 description: render(description)?,
             }))
         }
-        DecisionCommand::Task(TaskCommand::StopIfComplete { reason }) => {
-            Ok(DecisionCommand::Task(TaskCommand::StopIfComplete {
-                reason: render(reason)?,
-            }))
-        }
+        DecisionCommand::Task(TaskCommand::ConfirmCompletion) => Ok(cmd.clone()),
+
+        // --- Human commands ---
         DecisionCommand::Human(HumanCommand::Escalate { reason, context }) => {
             Ok(DecisionCommand::Human(HumanCommand::Escalate {
                 reason: render(reason)?,
                 context: context.as_ref().map(|c| render(c)).transpose()?,
             }))
         }
+        DecisionCommand::Human(HumanCommand::SelectOption { option_id }) => {
+            Ok(DecisionCommand::Human(HumanCommand::SelectOption {
+                option_id: render(option_id)?,
+            }))
+        }
+        DecisionCommand::Human(HumanCommand::SkipDecision) => Ok(cmd.clone()),
+
+        // --- Provider commands ---
         DecisionCommand::Provider(ProviderCommand::RetryTool { tool_name, args, max_attempts }) => {
             Ok(DecisionCommand::Provider(ProviderCommand::RetryTool {
                 tool_name: render(tool_name)?,
                 args: args.as_ref().map(|a| render(a)).transpose()?,
                 max_attempts: *max_attempts,
+            }))
+        }
+        DecisionCommand::Provider(ProviderCommand::SwitchProvider { provider_type }) => {
+            Ok(DecisionCommand::Provider(ProviderCommand::SwitchProvider {
+                provider_type: render(provider_type)?,
             }))
         }
         DecisionCommand::Provider(ProviderCommand::SuggestCommit { message, mandatory, reason }) => {
@@ -238,8 +233,6 @@ pub(crate) fn render_command_templates(
                 draft: *draft,
             }))
         }
-        // Commands with no string fields: pass through
-        other => Ok(other.clone()),
     }
 }
 ```

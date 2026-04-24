@@ -13,7 +13,7 @@ Condition nodes, `When` guards, and rule `if` fields all use the same `Evaluator
 pub(crate) enum Evaluator {
     OutputContains {
         pattern: String,
-        #[serde(default)]
+        #[serde(default, rename = "caseSensitive")]
         case_sensitive: bool,
     },
     SituationIs {
@@ -27,8 +27,8 @@ pub(crate) enum Evaluator {
         expected: BlackboardValue,
     },
     RegexMatch {
-        #[serde(with = "serde_regex")]
-        pattern: Regex,
+        /// Regex pattern string. Compiled to `Regex` at parse time.
+        pattern: String,
     },
     Script {
         expression: String,
@@ -76,7 +76,9 @@ impl Evaluator {
                 }
             }
             Self::RegexMatch { pattern } => {
-                Ok(pattern.is_match(&bb.provider_output))
+                let re = Regex::new(pattern)
+                    .map_err(|e| RuntimeError::FilterError(format!("invalid regex: {}", e)))?;
+                Ok(re.is_match(&bb.provider_output))
             }
             Self::Script { expression } => {
                 evaluate_minimal_script(expression, bb)
@@ -261,13 +263,13 @@ impl EvaluatorRegistry {
             }),
             "regex" => {
                 let pattern_str = get_string(props, "pattern")?;
-                let re = Regex::new(&pattern_str)
-                    .map_err(|e| ParseError::InvalidProperty {
-                        key: "pattern".into(),
-                        value: pattern_str,
-                        reason: e.to_string(),
-                    })?;
-                Ok(Evaluator::RegexMatch { pattern: re })
+                // Validate regex at parse time; store as string for serialization compatibility
+                Regex::new(&pattern_str).map_err(|e| ParseError::InvalidProperty {
+                    key: "pattern".into(),
+                    value: pattern_str.clone(),
+                    reason: e.to_string(),
+                })?;
+                Ok(Evaluator::RegexMatch { pattern: pattern_str })
             }
             "script" => Ok(Evaluator::Script {
                 expression: get_string(props, "expression")?,
@@ -326,7 +328,7 @@ Prompt nodes and Switch prompts use `OutputParser` to turn raw LLM text into str
 pub(crate) enum OutputParser {
     Enum {
         values: Vec<String>,
-        #[serde(default)]
+        #[serde(default, rename = "caseSensitive")]
         case_sensitive: bool,
     },
     Structured {
@@ -350,7 +352,7 @@ pub(crate) enum OutputParser {
 pub(crate) struct StructuredField {
     pub name: String,
     pub group: usize,
-    #[serde(default)]
+    #[serde(default, rename = "type")]
     pub ty: FieldType,
 }
 

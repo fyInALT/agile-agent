@@ -239,3 +239,35 @@ Below is a realistic session showing how the decision layer handles a rate-limit
 ## Files
 
 - `tree.yaml` — The behavior tree definition.
+
+---
+
+## DecisionRules Shorthand
+
+The rate-limit handler — including the Cooldown decorator — can be expressed as a single rule:
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: rate_limit_decisions
+spec:
+  rules:
+    - priority: 1
+      name: rate_limit
+      if:
+        kind: regex
+        pattern: "(429|rate.?limit|quota)"
+      then:
+        command:
+          RetryTool:
+            tool_name: "{{ last_tool_call.name }}"
+            max_attempts: 3
+      cooldownMs: 5000
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+The `cooldownMs` field desugars to a `Cooldown` decorator wrapping the rule body — identical to the explicit BT above.

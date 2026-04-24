@@ -60,7 +60,40 @@ impl DslRunner for Executor {
 }
 ```
 
-### 1.3 `enum_dispatch` Node Trait
+### 1.3 Decision Cycle Lifecycle
+
+Each decision cycle follows a 6-phase lifecycle, matching the architecture in `decision-layer-design.md` §6.3:
+
+```
+1. OBSERVE
+   └── Collect task_description, provider_output, context_summary
+       from the work agent's state.
+
+2. BUILD BLACKBOARD
+   └── Populate Blackboard with inputs and persistent state
+       (reflection_round, decision_history, etc.).
+
+3. RESET
+   └── Call executor.reset() to clear internal node state
+       and running_path.
+
+4. TICK
+   └── Call executor.tick(&mut tree, &mut ctx).
+       └── If Running: store executor state, return empty commands.
+           Poll again later.
+       └── If Success/Failure: collect commands from blackboard.
+
+5. PERSIST
+   └── Write changed state (reflection_round, variables, etc.)
+       back to the agent's persistent state store.
+
+6. RETURN
+   └── Return Vec<DecisionCommand> to the runtime host.
+```
+
+This lifecycle is driven by the host (e.g., `agent-decision`'s `DslDecisionEngine`). The host calls `build_blackboard()` → `executor.reset()` → `executor.tick()` → persists state → returns commands. See the Host Integration example in `README.md` §5.
+
+### 1.4 `enum_dispatch` Node Trait
 
 All node structs implement the `NodeBehavior` trait. `enum_dispatch` auto-generates the `Node::tick()` and `Node::reset()` match arms:
 
@@ -262,8 +295,9 @@ impl NodeBehavior for RepeaterNode {
 ```rust
 impl NodeBehavior for CooldownNode {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
+        let duration = std::time::Duration::from_millis(self.duration_ms);
         if let Some(last) = self.last_success {
-            if ctx.clock.now().duration_since(last) < self.duration {
+            if ctx.clock.now().duration_since(last) < duration {
                 return Ok(NodeStatus::Failure);
             }
         }
@@ -481,6 +515,17 @@ Tick 2: Prompt node checks session.is_ready() → receives reply
 impl NodeBehavior for PromptNode {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError> {
         if self.pending {
+            // Check timeout first
+            if let Some(sent_at) = self.sent_at {
+                let timeout = std::time::Duration::from_millis(self.timeout_ms);
+                if ctx.clock.now().duration_since(sent_at) > timeout {
+                    self.pending = false;
+                    self.sent_at = None;
+                    tracer.record_prompt_failure(&self.name, "timeout");
+                    return Ok(NodeStatus::Failure);
+                }
+            }
+
             // Async continuation: check for reply
             if !ctx.session.is_ready() {
                 return Ok(NodeStatus::Running);
@@ -491,7 +536,7 @@ impl NodeBehavior for PromptNode {
 
             match self.parser.parse(&reply) {
                 Ok(values) => {
-                    // Handle CommandParser special case
+                    // Handle CommandParser special case (__command magic key)
                     if let Some(BlackboardValue::String(cmd_json)) = values.get("__command") {
                         let cmd: DecisionCommand = serde_json::from_str(cmd_json)
                             .map_err(|e| RuntimeError::FilterError(e.to_string()))?;
@@ -506,11 +551,13 @@ impl NodeBehavior for PromptNode {
                     }
 
                     self.pending = false;
+                    self.sent_at = None;
                     tracer.record_prompt_success(&self.name, &reply);
                     Ok(NodeStatus::Success)
                 }
                 Err(e) => {
                     self.pending = false;
+                    self.sent_at = None;
                     tracer.record_prompt_failure(&self.name, &e.to_string());
                     Ok(NodeStatus::Failure)
                 }
@@ -518,7 +565,7 @@ impl NodeBehavior for PromptNode {
         } else {
             // First tick: render and send
             let context = ctx.blackboard.to_template_context();
-            let rendered = minijinja::render_str!(&self.template, context)
+            let rendered = render_prompt_template(&self.template, &context)
                 .map_err(|e| RuntimeError::FilterError(e.to_string()))?;
 
             ctx.session.send_with_hint(
@@ -527,6 +574,7 @@ impl NodeBehavior for PromptNode {
             )?;
 
             self.pending = true;
+            self.sent_at = Some(ctx.clock.now());
             tracer.record_prompt_sent(&self.name);
             Ok(NodeStatus::Running)
         }
@@ -534,6 +582,7 @@ impl NodeBehavior for PromptNode {
 
     fn reset(&mut self) {
         self.pending = false;
+        self.sent_at = None;
     }
 
     fn name(&self) -> &str { &self.name }
@@ -585,10 +634,10 @@ impl Node {
         let children = self.children_mut();
         let child = &mut children[child_idx];
 
-        tracing::trace!(
-            target: "decision-dsl",
-            "resume_at: depth={}, child_idx={}, node={}",
-            depth, child_idx, child.name()
+        ctx.logger.log(
+            LogLevel::Trace,
+            "decision-dsl",
+            &format!("resume_at: depth={}, child_idx={}, node={}", depth, child_idx, child.name()),
         );
 
         let status = child.resume_at(path, depth + 1, ctx, tracer)?;
@@ -610,11 +659,12 @@ Action nodes and `Switch` cases support template interpolation in command string
 fn render_command_templates(cmd: &DecisionCommand, bb: &Blackboard) -> Result<DecisionCommand, RuntimeError> {
     let ctx = bb.to_template_context();
     let render = |s: &str| -> Result<String, RuntimeError> {
-        minijinja::render_str!(s, ctx.clone())
+        render_prompt_template(s, &ctx)
             .map_err(|e| RuntimeError::FilterError(e.to_string()))
     };
 
     match cmd {
+        // --- Agent commands ---
         DecisionCommand::Agent(AgentCommand::Reflect { prompt }) => {
             Ok(DecisionCommand::Agent(AgentCommand::Reflect { prompt: render(prompt)? }))
         }
@@ -624,6 +674,15 @@ fn render_command_templates(cmd: &DecisionCommand, bb: &Blackboard) -> Result<De
                 target_agent: render(target_agent)?,
             }))
         }
+        DecisionCommand::Agent(AgentCommand::Terminate { reason }) => {
+            Ok(DecisionCommand::Agent(AgentCommand::Terminate {
+                reason: render(reason)?,
+            }))
+        }
+        DecisionCommand::Agent(AgentCommand::ApproveAndContinue) |
+        DecisionCommand::Agent(AgentCommand::WakeUp) => Ok(cmd.clone()),
+
+        // --- Git commands ---
         DecisionCommand::Git(GitCommand::Commit { message, wip }, wt) => {
             Ok(DecisionCommand::Git(GitCommand::Commit {
                 message: render(message)?,
@@ -642,6 +701,44 @@ fn render_command_templates(cmd: &DecisionCommand, bb: &Blackboard) -> Result<De
                 include_untracked: *include_untracked,
             }, wt.clone()))
         }
+        DecisionCommand::Git(GitCommand::Discard, wt) => {
+            Ok(DecisionCommand::Git(GitCommand::Discard, wt.clone()))
+        }
+        DecisionCommand::Git(GitCommand::Rebase { base }, wt) => {
+            Ok(DecisionCommand::Git(GitCommand::Rebase {
+                base: render(base)?,
+            }, wt.clone()))
+        }
+
+        // --- Task commands ---
+        DecisionCommand::Task(TaskCommand::StopIfComplete { reason }) => {
+            Ok(DecisionCommand::Task(TaskCommand::StopIfComplete {
+                reason: render(reason)?,
+            }))
+        }
+        DecisionCommand::Task(TaskCommand::PrepareStart { task_id, description }) => {
+            Ok(DecisionCommand::Task(TaskCommand::PrepareStart {
+                task_id: render(task_id)?,
+                description: render(description)?,
+            }))
+        }
+        DecisionCommand::Task(TaskCommand::ConfirmCompletion) => Ok(cmd.clone()),
+
+        // --- Human commands ---
+        DecisionCommand::Human(HumanCommand::Escalate { reason, context }) => {
+            Ok(DecisionCommand::Human(HumanCommand::Escalate {
+                reason: render(reason)?,
+                context: context.as_ref().map(|c| render(c)).transpose()?,
+            }))
+        }
+        DecisionCommand::Human(HumanCommand::SelectOption { option_id }) => {
+            Ok(DecisionCommand::Human(HumanCommand::SelectOption {
+                option_id: render(option_id)?,
+            }))
+        }
+        DecisionCommand::Human(HumanCommand::SkipDecision) => Ok(cmd.clone()),
+
+        // --- Provider commands ---
         DecisionCommand::Provider(ProviderCommand::RetryTool { tool_name, args, max_attempts }) => {
             Ok(DecisionCommand::Provider(ProviderCommand::RetryTool {
                 tool_name: render(tool_name)?,
@@ -649,14 +746,26 @@ fn render_command_templates(cmd: &DecisionCommand, bb: &Blackboard) -> Result<De
                 max_attempts: *max_attempts,
             }))
         }
-        DecisionCommand::Human(HumanCommand::Escalate { reason, context }) => {
-            Ok(DecisionCommand::Human(HumanCommand::Escalate {
-                reason: render(reason)?,
-                context: context.as_ref().map(|c| render(c)).transpose()?,
+        DecisionCommand::Provider(ProviderCommand::SwitchProvider { provider_type }) => {
+            Ok(DecisionCommand::Provider(ProviderCommand::SwitchProvider {
+                provider_type: render(provider_type)?,
             }))
         }
-        // Commands with no string fields pass through unchanged
-        other => Ok(other.clone()),
+        DecisionCommand::Provider(ProviderCommand::SuggestCommit { message, mandatory, reason }) => {
+            Ok(DecisionCommand::Provider(ProviderCommand::SuggestCommit {
+                message: render(message)?,
+                mandatory: *mandatory,
+                reason: render(reason)?,
+            }))
+        }
+        DecisionCommand::Provider(ProviderCommand::PreparePr { title, description, base, draft }) => {
+            Ok(DecisionCommand::Provider(ProviderCommand::PreparePr {
+                title: render(title)?,
+                description: render(description)?,
+                base: render(base)?,
+                draft: *draft,
+            }))
+        }
     }
 }
 ```

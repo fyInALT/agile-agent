@@ -46,7 +46,21 @@
 | Global table `_G` | `Blackboard` — scoped key-value store |
 | `lua_load` + `lua_pcall` | `DslParser::parse_document` → desugar → `DslRunner::tick` |
 
-### 1.3 Two Authoring Styles, One AST
+### 1.3 Divergence from Architecture Doc
+
+The architecture document (`docs/decision-layer-design.md`) defines nodes via `pub trait BehaviorNode` + `Box<dyn BehaviorNode>` (trait objects). This implementation intentionally uses `enum_dispatch` instead. Rationale:
+
+| Aspect | `Box<dyn BehaviorNode>` (architecture) | `enum_dispatch NodeBehavior` (implementation) |
+|--------|--------------------------------------|----------------------------------------------|
+| Allocation | Heap per node | Stack-allocated enum, one allocation per `Vec<Node>` |
+| Clone | Requires `dyn_clone` crate | `#[derive(Clone)]` |
+| Debug | Type name only via `{:?}` | Full field inspection via `#[derive(Debug)]` |
+| Serialization | Manual `Serialize`/`Deserialize` impls | `#[derive(Serialize, Deserialize)]` for YAML round-trip |
+| Extensibility | Register new impls externally | Add variant to enum + impl `NodeBehavior` |
+
+The tradeoff is that enum dispatch requires the `Node` enum to know all variants at compile time, while trait objects allow external extension. Given the fixed set of node types defined in the DSL spec, compile-time exhaustiveness is the better fit. See `decision-dsl-reflection.md` for the full critique.
+
+### 1.4 Two Authoring Styles, One AST
 
 ```
 ┌─────────────────────┐
@@ -133,7 +147,13 @@ enum_dispatch = "0.3"            # Auto-generate Node match arms
 # No agent-* crates. Only mock trait impls.
 ```
 
-Removed vs previous design: hand-rolled template engine (~500 lines), `dyn_clone` crate, manual visitor match arms.
+**Dependency policy**: `decision-dsl` does not depend on any `agent-*` crate. External dependencies are limited to:
+- `serde` ecosystem (serialization)
+- `regex` (pattern matching)
+- `minijinja` (templating — ~500 lines of hand-rolled engine replaced)
+- `enum_dispatch` (code generation — eliminates ~120 manual match arms)
+
+Removed vs previous design: hand-rolled template engine (~500 lines), `dyn_clone` crate, manual visitor match arms, `serde_regex` (regex compilation moved to parse time).
 
 ---
 
@@ -182,26 +202,39 @@ decision-dsl/
     │   ├── mod.rs
     │   ├── session.rs          # Session (send, send_with_hint, is_ready, receive)
     │   ├── clock.rs            # Clock (time source)
-    │   └── log.rs              # Logger (structured logging)
+    │   ├── log.rs              # Logger (structured logging)
+    │   ├── fs.rs               # Fs (read_to_string, read_dir, modified)
+    │   └── watcher.rs          # Watcher + PollWatcher + DslReloader
     └── error.rs                # ParseError, RuntimeError, DslError
 ```
 
 ### Visibility Rules
 
 ```rust
-// lib.rs — ONLY these are pub
-pub use parser::{DslParser, YamlParser, DslDocument, RuleSpec, ThenSpec};
-pub use ast::{Tree, TreeKind, Metadata, Spec, Bundle};
+// lib.rs — Public API surface (intentionally minimal)
+
+// === Core traits ===
+pub use parser::DslParser;
+pub use runtime::DslRunner;
+
+// === Host-facing types ===
+pub use parser::YamlParser;
+pub use runtime::{Executor, TickContext, TickResult, Blackboard, BlackboardValue};
 pub use ast::command::{DecisionCommand, AgentCommand, GitCommand, TaskCommand, HumanCommand, ProviderCommand};
-pub use runtime::{DslRunner, Executor, TickContext, TickResult, Blackboard, BlackboardValue};
 pub use runtime::trace::{TraceEntry, Tracer};
-pub use eval::{Evaluator, EvaluatorRegistry};
-pub use parser_out::{OutputParser, OutputParserRegistry, StructuredField, FieldType};
-pub use ext::{Session, SessionError, SessionErrorKind, Clock, SystemClock, Logger, LogLevel, NullLogger, TracingLogger};
 pub use error::{DslError, ParseError, RuntimeError};
 
-// Everything in nodes/, template/ is pub(crate)
+// === Injectable traits ===
+pub use ext::{Session, SessionError, SessionErrorKind, Clock, SystemClock, Logger, LogLevel, NullLogger};
+pub use ext::{Fs, FsError, StdFs, Watcher, WatcherError, DslReloader};
+
+// === Internal (pub(crate) only) ===
+// ast::Tree, ast::Node, ast::Spec, eval::Evaluator, parser_out::OutputParser,
+// nodes::*, template::*, parser::DslDocument, parser::RuleSpec, parser::ThenSpec,
+// desugaring internals, validator internals.
 ```
+
+Design principle: The host sees only what it needs to parse YAML, set up a blackboard, tick the executor, and read commands. All AST internals, node behaviors, evaluators, and parsers are sealed.
 
 ---
 
@@ -218,13 +251,26 @@ pub trait DslParser {
     fn parse_document(&self, yaml: &str) -> Result<DslDocument, ParseError>;
 
     /// Parse a directory into a Bundle (desugared, validated).
-    fn parse_bundle(&self, dir: &Path) -> Result<Bundle, ParseError>;
+    /// Requires an `Fs` implementation for file system access.
+    fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError>;
 }
 
 /// Concrete implementation.
 pub struct YamlParser {
     pub evaluator_registry: EvaluatorRegistry,
     pub parser_registry: OutputParserRegistry,
+}
+
+impl DslParser for YamlParser {
+    fn parse_document(&self, yaml: &str) -> Result<DslDocument, ParseError> {
+        // See parser/mod.rs for implementation
+        todo!()
+    }
+
+    fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError> {
+        // See parser/mod.rs for implementation
+        todo!()
+    }
 }
 
 impl YamlParser {
@@ -383,6 +429,28 @@ impl Session for ProviderSessionBridge {
     }
 }
 
+/// Bridge: adapts std::fs to decision_dsl::Fs.
+pub struct StdFs;
+
+impl Fs for StdFs {
+    fn read_to_string(&self, path: &Path) -> Result<String, FsError> {
+        std::fs::read_to_string(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+
+    fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError> {
+        std::fs::read_dir(path)
+            .map_err(|e| FsError::Io(e.to_string()))?
+            .map(|e| e.map(|entry| entry.path()).map_err(|e| FsError::Io(e.to_string())))
+            .collect()
+    }
+
+    fn modified(&self, path: &Path) -> Result<SystemTime, FsError> {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .map_err(|e| FsError::Io(e.to_string()))
+    }
+}
+
 /// Host's decision engine using the DSL.
 pub struct DslDecisionEngine {
     parser: YamlParser,
@@ -476,6 +544,7 @@ Phase 1 — decision-dsl crate (standalone)
   - Implement enum-based AST, evaluators, parsers
   - Implement desugaring pass (DecisionRules → BT AST)
   - Implement executor with enum_dispatch
+  - Implement hot reload (DslReloader + PollWatcher)
   - Unit tests + integration tests for all constructs
 
 Phase 2 — agent-decision integration

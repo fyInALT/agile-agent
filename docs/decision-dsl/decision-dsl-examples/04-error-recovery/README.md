@@ -409,3 +409,61 @@ Below is a realistic session showing how the decision layer classifies and recov
 ## Files
 
 - `tree.yaml` — The complete error recovery behavior tree.
+
+---
+
+## DecisionRules + Switch Shorthand
+
+Error recovery with structured parsing is a rule with Switch-on-prompt:
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: error_recovery
+spec:
+  rules:
+    - priority: 1
+      name: error_recovery
+      if:
+        kind: outputContains
+        pattern: "error"
+      then:
+        kind: Switch
+        name: classify_and_recover
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            Classify this error and recommend recovery.
+            Error: {{ provider_output | truncate(600) }}
+            Reply format: CLASS: <type> RECOMMEND: <action>
+          parser:
+            kind: structured
+            pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)"
+            fields:
+              - { name: classification, group: 1 }
+              - { name: recommendation, group: 2 }
+        cases:
+          RETRY:
+            command:
+              RetryTool:
+                tool_name: "{{ last_tool_call.name }}"
+                max_attempts: 3
+          FIX:
+            command:
+              SendCustomInstruction:
+                prompt: "Fix the error and retry"
+                target_agent: "{{ agent_id }}"
+          ESCALATE:
+            command:
+              EscalateToHuman:
+                reason: "Error recovery chose escalation"
+      on_error: escalate
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+This desugars to `Sequence(Condition(is_error), Prompt(classify), Selector(retry/fix/escalate branches))` — identical to the BT above.
