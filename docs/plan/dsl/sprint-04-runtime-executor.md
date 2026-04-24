@@ -48,7 +48,7 @@ Implement the `DslRunner` trait, `Executor` struct, and `TickContext`.
 | T4.1.5 | Implement `Executor::tick` with running-path management | Todo | - |
 | T4.1.6 | Implement `Executor::reset` | Todo | - |
 | T4.1.7 | Implement command draining from blackboard after tick | Todo | - |
-| T4.1.8 | Implement `Tree::resume_at` for async Prompt continuation | Todo | - |
+| T4.1.8 | Implement `Node::resume_at` for async Prompt continuation | Todo | - |
 | T4.1.9 | Write unit tests for basic tick loop | Todo | - |
 | T4.1.10 | Write unit tests for Running → Success resume | Todo | - |
 | T4.1.11 | Write unit tests for Running → Failure resume | Todo | - |
@@ -211,7 +211,7 @@ Implement Condition, Action, and SetVar.
 | T4.4.5 | Write unit tests for Condition with all evaluator types | Todo | - |
 | T4.4.6 | Write unit tests for Action with template rendering | Todo | - |
 | T4.4.7 | Write unit tests for Action `when` guard | Todo | - |
-| T4.4.8 | Write unit tests for SetVar | Todo | - |
+| T4.4.8 | Write unit tests for SetVar with all BlackboardValue types (string, integer, float, boolean, list) | Todo | - |
 
 #### Acceptance Criteria
 

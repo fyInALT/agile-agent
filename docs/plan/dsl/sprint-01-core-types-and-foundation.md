@@ -224,8 +224,8 @@ Implement the `DecisionCommand` hierarchy. Commands are the only output of the D
 | T1.4.2 | Define `AgentCommand` (5 variants) with serde renames | Todo | - |
 | T1.4.3 | Define `GitCommand` (5 variants) with serde renames | Todo | - |
 | T1.4.4 | Define `TaskCommand` (3 variants) with serde renames | Todo | - |
-| T1.4.5 | Define `HumanCommand` (3 variants) with serde renames | Todo | - |
-| T1.4.6 | Define `ProviderCommand` (4 variants) | Todo | - |
+| T1.4.5 | Define `HumanCommand` (3 variants: Escalate, SelectOption, SkipDecision) with serde renames | Todo | - |
+| T1.4.6 | Define `ProviderCommand` (4 variants: RetryTool, SwitchProvider, SuggestCommit, PreparePr) | Todo | - |
 | T1.4.7 | Derive `Debug`, `Clone`, `PartialEq`, `Eq`, `Serialize`, `Deserialize` | Todo | - |
 | T1.4.8 | Write unit tests for YAML round-trip serialization | Todo | - |
 
@@ -255,6 +255,11 @@ Serde rename mapping:
 - `Rebase { base }` → field `base_branch`
 - `PrepareStart` → `PrepareTaskStart`
 - `Escalate` → `EscalateToHuman`
+- `SelectOption` — no serde rename needed
+- `SkipDecision` — no serde rename needed
+- `SwitchProvider` — no serde rename needed
+- `SuggestCommit` — no serde rename needed
+- `PreparePr` — no serde rename needed
 
 ---
 

@@ -50,6 +50,7 @@ Implement the `Evaluator` enum and all 9 built-in evaluators. Evaluators are pur
 | T3.1.9 | Implement `Not` evaluator | Todo | - |
 | T3.1.10 | Define `EvaluatorRegistry` with `register` / `create` methods | Todo | - |
 | T3.1.11 | Implement `with_builtins()` constructor | Todo | - |
+| T3.1.12 | Implement `Custom` evaluator dispatch through registry | Todo | - |
 | T3.1.12 | Write unit tests for all 9 evaluators | Todo | - |
 
 #### Acceptance Criteria
@@ -98,6 +99,7 @@ Implement the `OutputParser` enum and all 4 built-in parsers. Parsers convert ra
 | T3.2.6 | Implement `Command` parser (`__command` magic key for direct command emission) | Todo | - |
 | T3.2.7 | Define `OutputParserRegistry` with `register` / `create` methods | Todo | - |
 | T3.2.8 | Implement `with_builtins()` constructor | Todo | - |
+| T3.2.9 | Implement `Custom` parser dispatch through registry | Todo | - |
 | T3.2.9 | Write unit tests for all 4 parsers | Todo | - |
 | T3.2.10 | Write unit tests for missing capture group error | Todo | - |
 
@@ -156,6 +158,7 @@ Integrate `minijinja` for Jinja2-compatible template rendering. All Prompt templ
 - `Blackboard::to_template_context()` exposes built-in fields + scoped variables.
 - `last_tool_call` is exposed as a nested object; `file_changes` as a list of objects.
 - Standard minijinja filters (`upper`, `lower`, `length`, `default`, `join`, etc.) are available.
+- minijinja built-in features work without custom implementation: `{% if %}`, `{% for %}`, `| json`, whitespace control.
 
 #### Technical Notes
 

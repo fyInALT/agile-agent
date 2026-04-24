@@ -49,7 +49,8 @@ Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost no
 | T2.1.7 | Add `#[serde(rename = "...")]` for camelCase YAML fields | Todo | - |
 | T2.1.8 | Define `SetMapping` struct | Todo | - |
 | T2.1.9 | Define `ParallelPolicy` enum | Todo | - |
-| T2.1.10 | Write unit tests for Node serialization round-trip | Todo | - |
+| T2.1.10 | Define `NodeStatus` enum (`Success`, `Failure`, `Running`) | Todo | - |
+| T2.1.11 | Write unit tests for Node serialization round-trip | Todo | - |
 
 #### Acceptance Criteria
 
@@ -201,7 +202,7 @@ Implement load-time validation to reject invalid DSL before execution.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.4.1 | Implement `validate_api_version` (reject unknown versions) | Todo | - |
+| T2.4.1 | Implement `validate_api_version` (format: `decision.agile-agent.io/v{N}`) | Todo | - |
 | T2.4.2 | Implement `validate_unique_names` within a tree | Todo | - |
 | T2.4.3 | Implement `validate_unique_priorities` for DecisionRules | Todo | - |
 | T2.4.4 | Implement `validate_evaluators` (all `kind` values registered) | Todo | - |

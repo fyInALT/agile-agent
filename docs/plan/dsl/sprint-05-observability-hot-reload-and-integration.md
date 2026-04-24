@@ -160,7 +160,8 @@ Build mock trait implementations and golden tests for the entire engine.
 | T5.3.7 | Write integration test: SubTree scope isolation | Todo | - |
 | T5.3.8 | Write integration test: Cooldown with MockClock | Todo | - |
 | T5.3.9 | Write golden tests: compare expected vs actual trace output | Todo | - |
-| T5.3.10 | Set coverage targets: Parser 95%, Desugaring 100%, Evaluators 100%, Parsers 100%, Executor 95%, Blackboard 100% | Todo | - |
+| T5.3.10 | Write property-based tests for evaluator combinations (or/and/not) | Todo | - |
+| T5.3.11 | Set coverage targets: Parser 95%, Desugaring 100%, Evaluators 100%, Parsers 100%, Executor 95%, Blackboard 100% | Todo | - |
 
 #### Acceptance Criteria
 
@@ -209,7 +210,9 @@ Provide bridge implementations for integration into `agent-decision` and `agent-
 | T5.4.3 | Document `TickContext` construction from host state | Todo | - |
 | T5.4.4 | Document `Blackboard` population from work agent state | Todo | - |
 | T5.4.5 | Document command consumption by `DecisionCommandInterpreter` | Todo | - |
-| T5.4.6 | Provide example integration test in `agent-decision` crate | Todo | - |
+| T5.4.6 | Document `build_blackboard(agent_state)` helper for host state → Blackboard mapping | Todo | - |
+| T5.4.7 | Document `DslDecisionEngine::reload()` for hot reload integration | Todo | - |
+| T5.4.8 | Provide example integration test in `agent-decision` crate | Todo | - |
 
 #### Acceptance Criteria
 
@@ -261,8 +264,9 @@ Add performance targets and optional metrics collection.
 | T5.5.3 | Add benchmark for 1M evaluator calls/second target | Todo | - |
 | T5.5.4 | Add benchmark for Parser + Desugaring throughput | Todo | - |
 | T5.5.5 | Document memory footprint targets (20KB parse, 10KB AST, 2KB per tick) | Todo | - |
-| T5.5.6 | Document `Send + Sync` / `!Sync` executor semantics | Todo | - |
-| T5.5.7 | Write criterion benchmarks | Todo | - |
+| T5.5.6 | Document `Send + Sync` / `!Sync` executor semantics (Trees are Send+Sync; Executor is !Sync) | Todo | - |
+| T5.5.7 | Document Parallel Safety: one executor + blackboard per agent thread | Todo | - |
+| T5.5.8 | Write criterion benchmarks | Todo | - |
 
 #### Acceptance Criteria
 
