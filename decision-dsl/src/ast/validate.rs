@@ -1,9 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::ext::error::ParseError;
 
 use super::document::{Bundle, Tree};
+use super::eval::{Evaluator, EvaluatorRegistry};
 use super::node::{Node, NodeBehavior, SubTreeNode};
+use super::parser_out::{OutputParser, OutputParserRegistry};
 
 // ── validate_api_version ────────────────────────────────────────────────────
 
@@ -58,7 +60,7 @@ fn check_subtree_refs(node: &Node, bundle: &Bundle) -> Result<(), ParseError> {
 // ── detect_circular_subtree_refs ────────────────────────────────────────────
 
 pub fn detect_circular_subtree_refs(bundle: &Bundle) -> Result<(), ParseError> {
-    for (name, tree) in &bundle.subtrees {
+    for (_name, tree) in &bundle.subtrees {
         let mut visited = HashSet::new();
         let mut path = Vec::new();
         if let Some(cycle) = detect_cycle_in_node(&tree.spec.root, bundle, &mut visited, &mut path) {
@@ -67,7 +69,7 @@ pub fn detect_circular_subtree_refs(bundle: &Bundle) -> Result<(), ParseError> {
             });
         }
     }
-    for (name, tree) in &bundle.trees {
+    for (_name, tree) in &bundle.trees {
         let mut visited = HashSet::new();
         let mut path = Vec::new();
         if let Some(cycle) = detect_cycle_in_node(&tree.spec.root, bundle, &mut visited, &mut path) {
@@ -124,18 +126,100 @@ pub fn validate_unique_priorities(rules: &[super::document::RuleSpec]) -> Result
     Ok(())
 }
 
+// ── validate_evaluators ──────────────────────────────────────────────────────
+
+pub fn validate_evaluators(tree: &Tree, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
+    check_evaluators_in_node(&tree.spec.root, registry)
+}
+
+fn check_evaluators_in_node(node: &Node, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
+    match node {
+        Node::Condition(cond) => validate_evaluator(&cond.evaluator, registry),
+        Node::When(when) => {
+            validate_evaluator(&when.condition, registry)?;
+            check_evaluators_in_node(&when.action, registry)
+        }
+        Node::Action(action) => {
+            if let Some(eval) = &action.when {
+                validate_evaluator(eval, registry)?;
+            }
+            Ok(())
+        }
+        _ => {
+            for child in node.children() {
+                check_evaluators_in_node(child, registry)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_evaluator(evaluator: &Evaluator, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
+    match evaluator {
+        Evaluator::Custom { name, .. } => {
+            // Sprint 3 will implement registry lookup
+            // For now, reject all Custom evaluators since registry is empty placeholder
+            Err(ParseError::UnknownEvaluatorKind { kind: name.clone() })
+        }
+        Evaluator::Or { conditions } | Evaluator::And { conditions } => {
+            for cond in conditions {
+                validate_evaluator(cond, registry)?;
+            }
+            Ok(())
+        }
+        Evaluator::Not { condition } => validate_evaluator(condition, registry),
+        _ => Ok(()), // Built-in evaluators are always valid
+    }
+}
+
+// ── validate_parsers ───────────────────────────────────────────────────────────
+
+pub fn validate_parsers(tree: &Tree, registry: &OutputParserRegistry) -> Result<(), ParseError> {
+    check_parsers_in_node(&tree.spec.root, registry)
+}
+
+fn check_parsers_in_node(node: &Node, registry: &OutputParserRegistry) -> Result<(), ParseError> {
+    match node {
+        Node::Prompt(prompt) => validate_parser(&prompt.parser, registry),
+        _ => {
+            for child in node.children() {
+                check_parsers_in_node(child, registry)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_parser(parser: &OutputParser, _registry: &OutputParserRegistry) -> Result<(), ParseError> {
+    match parser {
+        OutputParser::Custom { name, .. } => {
+            // Sprint 3 will implement registry lookup
+            // For now, reject all Custom parsers since registry is empty placeholder
+            Err(ParseError::UnknownParserKind { kind: name.clone() })
+        }
+        _ => Ok(()), // Built-in parsers are always valid
+    }
+}
+
 // ── validate_bundle ─────────────────────────────────────────────────────────
 
 pub fn validate_bundle(bundle: &Bundle) -> Result<(), ParseError> {
+    let evaluator_registry = EvaluatorRegistry::new();
+    let parser_registry = OutputParserRegistry::new();
+
     for (_, tree) in &bundle.trees {
         validate_api_version(tree)?;
         validate_unique_names(tree)?;
         validate_subtree_refs(tree, bundle)?;
+        validate_evaluators(tree, &evaluator_registry)?;
+        validate_parsers(tree, &parser_registry)?;
     }
     for (_, tree) in &bundle.subtrees {
         validate_api_version(tree)?;
         validate_unique_names(tree)?;
         validate_subtree_refs(tree, bundle)?;
+        validate_evaluators(tree, &evaluator_registry)?;
+        validate_parsers(tree, &parser_registry)?;
     }
     detect_circular_subtree_refs(bundle)?;
     Ok(())

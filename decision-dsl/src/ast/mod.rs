@@ -12,8 +12,8 @@ pub use document::{
 };
 pub use parser::{DslParser, YamlParser};
 pub use validate::{
-    detect_circular_subtree_refs, validate_api_version, validate_bundle, validate_subtree_refs,
-    validate_unique_names, validate_unique_priorities,
+    detect_circular_subtree_refs, validate_api_version, validate_bundle, validate_evaluators,
+    validate_parsers, validate_subtree_refs, validate_unique_names, validate_unique_priorities,
 };
 pub use eval::{Evaluator, EvaluatorRegistry};
 pub use node::{

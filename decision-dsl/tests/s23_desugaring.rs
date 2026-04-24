@@ -1,9 +1,9 @@
 use decision_dsl::ast::{
-    ActionNode, DslDocument, Evaluator, Metadata, Node, NodeBehavior, OnError, SelectorNode,
-    SequenceNode, SwitchOn, SwitchSpec, ThenSpec, TreeKind, WhenNode, WhenSpec,
+    ActionNode, DslDocument, Evaluator, Metadata, Node, OnError, PipelineSpec, PipelineStep,
+    SwitchOn, SwitchSpec, ThenSpec, TreeKind, WhenSpec,
 };
 use decision_dsl::ext::blackboard::BlackboardValue;
-use decision_dsl::ext::command::{AgentCommand, DecisionCommand, HumanCommand};
+use decision_dsl::ext::command::{AgentCommand, DecisionCommand};
 
 fn make_action(name: &str, cmd: DecisionCommand) -> Node {
     Node::Action(ActionNode {
@@ -319,6 +319,310 @@ fn switch_on_variable_desugars_to_selector() {
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Selector(_)));
+    }
+}
+
+// ── Switch result_key configuration ──────────────────────────────────────────
+
+#[test]
+fn switch_result_key_defaults_to_decision() {
+    let mut cases = std::collections::HashMap::new();
+    cases.insert(
+        "yes".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        }),
+    );
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "ask".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "ask".into(),
+                    on: SwitchOn::Prompt {
+                        model: None,
+                        timeout_ms: None,
+                        template: "yes or no?".into(),
+                        parser: decision_dsl::ast::OutputParser::Enum {
+                            values: vec!["yes".into(), "no".into()],
+                            case_sensitive: false,
+                        },
+                        result_key: None, // Should default to "decision"
+                    },
+                    cases,
+                    default: None,
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        if let Node::Sequence(seq) = rule_node {
+            // Check Prompt node sets key = "decision"
+            if let Node::Prompt(prompt) = &seq.children[0] {
+                assert_eq!(prompt.sets.len(), 1);
+                assert_eq!(prompt.sets[0].key, "decision");
+            }
+            // Check When node matches against "decision" key
+            if let Node::Selector(branch_sel) = &seq.children[1] {
+                if let Node::When(when) = &branch_sel.children[0] {
+                    match &when.condition {
+                        decision_dsl::ast::Evaluator::VariableIs { key, .. } => {
+                            assert_eq!(key, "decision");
+                        }
+                        _ => panic!("expected VariableIs"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn switch_custom_result_key_stored_correctly() {
+    let mut cases = std::collections::HashMap::new();
+    cases.insert(
+        "yes".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        }),
+    );
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "ask".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "ask".into(),
+                    on: SwitchOn::Prompt {
+                        model: None,
+                        timeout_ms: None,
+                        template: "yes or no?".into(),
+                        parser: decision_dsl::ast::OutputParser::Enum {
+                            values: vec!["yes".into(), "no".into()],
+                            case_sensitive: false,
+                        },
+                        result_key: Some("my_result".into()), // Custom result_key
+                    },
+                    cases,
+                    default: None,
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        if let Node::Sequence(seq) = rule_node {
+            // Check Prompt node sets key = "my_result"
+            if let Node::Prompt(prompt) = &seq.children[0] {
+                assert_eq!(prompt.sets.len(), 1);
+                assert_eq!(prompt.sets[0].key, "my_result");
+            }
+            // Check When node matches against "my_result" key
+            if let Node::Selector(branch_sel) = &seq.children[1] {
+                if let Node::When(when) = &branch_sel.children[0] {
+                    match &when.condition {
+                        decision_dsl::ast::Evaluator::VariableIs { key, .. } => {
+                            assert_eq!(key, "my_result");
+                        }
+                        _ => panic!("expected VariableIs"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Switch default with nested ThenSpec ───────────────────────────────────────
+
+#[test]
+fn switch_default_supports_nested_when() {
+    let mut cases = std::collections::HashMap::new();
+    cases.insert(
+        "A".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        }),
+    );
+
+    let default_action = ThenSpec::When(Box::new(WhenSpec {
+        name: "default_when".into(),
+        condition: decision_dsl::ast::Evaluator::VariableIs {
+            key: "fallback".into(),
+            expected: decision_dsl::ext::blackboard::BlackboardValue::Boolean(true),
+        },
+        then: ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+        },
+        on_error: None,
+    }));
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "choose".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "choose".into(),
+                    on: SwitchOn::Variable { key: "choice".into() },
+                    cases,
+                    default: Some(Box::new(default_action)),
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        if let Node::Selector(branch_sel) = rule_node {
+            // Last child should be When node (the default)
+            let default_node = &branch_sel.children[1];
+            assert!(matches!(default_node, Node::When(_)));
+            if let Node::When(when) = default_node {
+                assert_eq!(when.name, "default_when");
+            }
+        }
+    }
+}
+
+#[test]
+fn switch_default_supports_nested_switch() {
+    let mut cases = std::collections::HashMap::new();
+    cases.insert(
+        "A".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        }),
+    );
+
+    let mut inner_cases = std::collections::HashMap::new();
+    inner_cases.insert(
+        "X".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+        }),
+    );
+
+    let default_action = ThenSpec::Switch(SwitchSpec {
+        name: "inner_switch".into(),
+        on: SwitchOn::Variable { key: "inner_choice".into() },
+        cases: inner_cases,
+        default: None,
+    });
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "choose".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "choose".into(),
+                    on: SwitchOn::Variable { key: "choice".into() },
+                    cases,
+                    default: Some(Box::new(default_action)),
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        if let Node::Selector(branch_sel) = rule_node {
+            // Last child should be Selector (nested switch)
+            let default_node = &branch_sel.children[1];
+            assert!(matches!(default_node, Node::Selector(_)));
+            if let Node::Selector(inner_sel) = default_node {
+                assert_eq!(inner_sel.name, "inner_switch_branch");
+            }
+        }
+    }
+}
+
+#[test]
+fn switch_default_supports_nested_pipeline() {
+    let mut cases = std::collections::HashMap::new();
+    cases.insert(
+        "A".into(),
+        Box::new(ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        }),
+    );
+
+    let default_action = ThenSpec::Pipeline(PipelineSpec {
+        name: "default_pipeline".into(),
+        steps: vec![
+            PipelineStep::Guard {
+                condition: decision_dsl::ast::Evaluator::VariableIs {
+                    key: "x".into(),
+                    expected: decision_dsl::ext::blackboard::BlackboardValue::Boolean(true),
+                },
+            },
+            PipelineStep::Action {
+                command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+            },
+        ],
+    });
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "choose".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "choose".into(),
+                    on: SwitchOn::Variable { key: "choice".into() },
+                    cases,
+                    default: Some(Box::new(default_action)),
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        if let Node::Selector(branch_sel) = rule_node {
+            // Last child should be Sequence (pipeline)
+            let default_node = &branch_sel.children[1];
+            assert!(matches!(default_node, Node::Sequence(_)));
+            if let Node::Sequence(seq) = default_node {
+                assert_eq!(seq.name, "default_pipeline");
+            }
+        }
     }
 }
 

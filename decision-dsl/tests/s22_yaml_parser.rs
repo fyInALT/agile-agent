@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use decision_dsl::ast::{
-    DslDocument, DslParser, Metadata, OnError, TreeKind, YamlParser,
+    DslDocument, DslParser, OnError, YamlParser,
 };
-use decision_dsl::ext::command::{AgentCommand, DecisionCommand, HumanCommand};
 use decision_dsl::ext::traits::{Fs, FsError};
 
 // ── parse_document: DecisionRules ───────────────────────────────────────────

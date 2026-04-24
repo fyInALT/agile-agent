@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use crate::ext::blackboard::BlackboardValue;
 use crate::ext::command::{AgentCommand, DecisionCommand, HumanCommand};
@@ -11,9 +10,8 @@ use super::document::{
 use super::eval::Evaluator;
 use super::node::{
     ActionNode, ConditionNode, CooldownNode, Node, PromptNode, ReflectionGuardNode, RepeaterNode,
-    SelectorNode, SequenceNode, SetMapping, SetVarNode, SubTreeNode, WhenNode,
+    SelectorNode, SequenceNode, SetMapping, SubTreeNode, WhenNode,
 };
-use super::parser_out::OutputParser;
 
 impl DslDocument {
     pub fn desugar(self) -> Result<Tree, ParseError> {

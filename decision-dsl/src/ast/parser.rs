@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +6,9 @@ use crate::ext::error::ParseError;
 use crate::ext::traits::Fs;
 
 use super::document::{Bundle, DslDocument, Metadata, Tree, TreeKind};
+use super::eval::EvaluatorRegistry;
 use super::node::Node;
+use super::parser_out::OutputParserRegistry;
 
 // ── DslParser trait ─────────────────────────────────────────────────────────
 
@@ -19,11 +20,24 @@ pub trait DslParser {
 // ── YamlParser ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
-pub struct YamlParser;
+pub struct YamlParser {
+    pub evaluator_registry: EvaluatorRegistry,
+    pub parser_registry: OutputParserRegistry,
+}
 
 impl YamlParser {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn with_registries(
+        evaluator_registry: EvaluatorRegistry,
+        parser_registry: OutputParserRegistry,
+    ) -> Self {
+        Self {
+            evaluator_registry,
+            parser_registry,
+        }
     }
 }
 

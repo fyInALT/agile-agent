@@ -1,8 +1,11 @@
 use decision_dsl::ast::{
-    validate_bundle, validate_unique_priorities, ActionNode, Bundle, DslParser, Evaluator,
-    Metadata, Node, OutputParser, RuleSpec, Spec, SubTreeNode, ThenSpec, Tree, TreeKind,
+    validate_evaluators, validate_parsers, validate_unique_priorities, ActionNode,
+    Bundle, ConditionNode, DslParser, Metadata, Node, RuleSpec, Spec, SubTreeNode, ThenSpec, Tree,
+    TreeKind,
 };
+use decision_dsl::ast::eval::{Evaluator, EvaluatorRegistry};
 use decision_dsl::ast::parser::YamlParser;
+use decision_dsl::ast::parser_out::{OutputParser, OutputParserRegistry};
 use decision_dsl::ext::command::{AgentCommand, DecisionCommand};
 use decision_dsl::ext::error::ParseError;
 use decision_dsl::ext::traits::{Fs, FsError};
@@ -253,4 +256,143 @@ spec:
     let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs);
     match &result { Ok(b) => println!("bundle trees = {}", b.trees.len()), Err(e) => println!("err = {}", e) };
     assert!(result.is_err());
+}
+
+// ── validate_evaluators ──────────────────────────────────────────────────────
+
+fn make_condition_node(name: &str, evaluator: Evaluator) -> Node {
+    Node::Condition(ConditionNode {
+        name: name.into(),
+        evaluator,
+    })
+}
+
+#[test]
+fn builtin_evaluator_is_valid() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: make_condition_node("c", Evaluator::OutputContains {
+                pattern: "test".into(),
+                case_sensitive: false,
+            }),
+        },
+    };
+    let registry = EvaluatorRegistry::new();
+    assert!(validate_evaluators(&tree, &registry).is_ok());
+}
+
+#[test]
+fn custom_evaluator_rejected() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: make_condition_node("c", Evaluator::Custom {
+                name: "my_custom".into(),
+                params: std::collections::HashMap::new(),
+            }),
+        },
+    };
+    let registry = EvaluatorRegistry::new();
+    let err = validate_evaluators(&tree, &registry).unwrap_err();
+    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "my_custom"));
+}
+
+#[test]
+fn composite_evaluator_validates_nested() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: make_condition_node("c", Evaluator::Or {
+                conditions: vec![
+                    Evaluator::OutputContains { pattern: "a".into(), case_sensitive: false },
+                    Evaluator::Custom {
+                        name: "nested_custom".into(),
+                        params: std::collections::HashMap::new(),
+                    },
+                ],
+            }),
+        },
+    };
+    let registry = EvaluatorRegistry::new();
+    let err = validate_evaluators(&tree, &registry).unwrap_err();
+    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "nested_custom"));
+}
+
+#[test]
+fn when_node_evaluator_validated() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: Node::When(decision_dsl::ast::WhenNode {
+                name: "w".into(),
+                condition: Evaluator::Custom {
+                    name: "when_custom".into(),
+                    params: std::collections::HashMap::new(),
+                },
+                action: Box::new(make_action("a")),
+            }),
+        },
+    };
+    let registry = EvaluatorRegistry::new();
+    let err = validate_evaluators(&tree, &registry).unwrap_err();
+    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "when_custom"));
+}
+
+// ── validate_parsers ───────────────────────────────────────────────────────────
+
+fn make_prompt_node(name: &str, parser: OutputParser) -> Node {
+    Node::Prompt(decision_dsl::ast::PromptNode {
+        name: name.into(),
+        model: None,
+        template: "test".into(),
+        parser,
+        sets: vec![],
+        timeout_ms: 30000,
+        pending: false,
+        sent_at: None,
+    })
+}
+
+#[test]
+fn builtin_parser_is_valid() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: make_prompt_node("p", OutputParser::Enum {
+                values: vec!["a".into(), "b".into()],
+                case_sensitive: false,
+            }),
+        },
+    };
+    let registry = OutputParserRegistry::new();
+    assert!(validate_parsers(&tree, &registry).is_ok());
+}
+
+#[test]
+fn custom_parser_rejected() {
+    let tree = Tree {
+        api_version: "decision.agile-agent.io/v1".into(),
+        kind: TreeKind::BehaviorTree,
+        metadata: Metadata { name: "t".into(), description: None },
+        spec: Spec {
+            root: make_prompt_node("p", OutputParser::Custom {
+                name: "my_parser".into(),
+                params: std::collections::HashMap::new(),
+            }),
+        },
+    };
+    let registry = OutputParserRegistry::new();
+    let err = validate_parsers(&tree, &registry).unwrap_err();
+    assert!(matches!(err, ParseError::UnknownParserKind { kind } if kind == "my_parser"));
 }
