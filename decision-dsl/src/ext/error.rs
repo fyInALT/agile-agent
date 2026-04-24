@@ -1,5 +1,29 @@
 use std::fmt;
 
+// ── SessionError / SessionErrorKind ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionErrorKind {
+    Unavailable,
+    Timeout,
+    UnexpectedFormat,
+    SendFailed,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionError {
+    pub kind: SessionErrorKind,
+    pub message: String,
+}
+
+impl fmt::Display for SessionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "session error ({:?}): {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for SessionError {}
+
 // ── ParseError ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,7 +108,7 @@ pub enum RuntimeError {
     EvaluatorFailure { name: String, detail: String },
     TemplateRenderFailure { detail: String },
     PromptTimeout { node: String, timeout_ms: u64 },
-    SessionError { detail: String },
+    SessionError { kind: SessionErrorKind, message: String },
     MaxReflectionExceeded,
     CooldownActive { node: String, remaining_ms: u64 },
 }
@@ -105,7 +129,9 @@ impl fmt::Display for RuntimeError {
             RuntimeError::PromptTimeout { node, timeout_ms } => {
                 write!(f, "prompt node '{node}' timed out after {timeout_ms}ms")
             }
-            RuntimeError::SessionError { detail } => write!(f, "session error: {detail}"),
+            RuntimeError::SessionError { kind, message } => {
+                write!(f, "session error ({kind:?}): {message}")
+            }
             RuntimeError::MaxReflectionExceeded => write!(f, "max reflection rounds exceeded"),
             RuntimeError::CooldownActive { node, remaining_ms } => {
                 write!(f, "cooldown active on node '{node}', {remaining_ms}ms remaining")
@@ -148,6 +174,21 @@ impl From<ParseError> for DslError {
 impl From<RuntimeError> for DslError {
     fn from(err: RuntimeError) -> Self {
         DslError::Runtime(err)
+    }
+}
+
+impl From<SessionError> for RuntimeError {
+    fn from(err: SessionError) -> Self {
+        RuntimeError::SessionError {
+            kind: err.kind,
+            message: err.message,
+        }
+    }
+}
+
+impl From<SessionError> for DslError {
+    fn from(err: SessionError) -> Self {
+        DslError::Runtime(err.into())
     }
 }
 

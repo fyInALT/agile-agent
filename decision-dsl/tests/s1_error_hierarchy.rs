@@ -1,4 +1,4 @@
-use decision_dsl::ext::error::{DslError, ParseError, RuntimeError};
+use decision_dsl::ext::error::{DslError, ParseError, RuntimeError, SessionErrorKind};
 use std::error::Error;
 
 // ── ParseError ──────────────────────────────────────────────────────────────
@@ -151,8 +151,8 @@ fn runtime_error_display_prompt_timeout() {
 
 #[test]
 fn runtime_error_display_session_error() {
-    let e = RuntimeError::SessionError { detail: "closed".into() };
-    assert_eq!(e.to_string(), "session error: closed");
+    let e = RuntimeError::SessionError { kind: SessionErrorKind::SendFailed, message: "closed".into() };
+    assert_eq!(e.to_string(), "session error (SendFailed): closed");
 }
 
 #[test]
