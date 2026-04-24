@@ -45,13 +45,20 @@ Implement the `Evaluator` enum and all 9 built-in evaluators. Evaluators are pur
 | T3.1.4 | Implement `ReflectionRoundUnder` evaluator | Todo | - |
 | T3.1.5 | Implement `VariableIs` evaluator with dot-notation support | Todo | - |
 | T3.1.6 | Implement `RegexMatch` evaluator (compile regex at parse time) | Todo | - |
-| T3.1.7 | Implement `Script` evaluator (minimal expression evaluation) | Todo | - |
+| T3.1.7 | Implement `Script` evaluator with grammar: `comparison (('&&' | '\|\|') comparison)*` where comparison supports `path op literal`, `is_dangerous(path)`, and `path.contains(string)` | Todo | - |
+| T3.1.7a | Implement `is_dangerous(provider_output)` — checks for known dangerous keywords ("delete", "drop", "rm -rf", "truncate table", etc.) | Todo | - |
+| T3.1.7b | Implement `path.contains(string)` dot-call syntax | Todo | - |
+| T3.1.7c | Implement short-circuit evaluation for `&&` and `\|\|` | Todo | - |
 | T3.1.8 | Implement `Or` / `And` composite evaluators with short-circuit | Todo | - |
 | T3.1.9 | Implement `Not` evaluator | Todo | - |
 | T3.1.10 | Define `EvaluatorRegistry` with `register` / `create` methods | Todo | - |
 | T3.1.11 | Implement `with_builtins()` constructor | Todo | - |
 | T3.1.12 | Implement `Custom` evaluator dispatch through registry | Todo | - |
 | T3.1.12 | Write unit tests for all 9 evaluators | Todo | - |
+| T3.1.13 | Write unit tests for Script evaluator comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) | Todo | - |
+| T3.1.14 | Write unit tests for Script evaluator nested expressions (`reflection_round < 2 && provider_output.contains("error")`) | Todo | - |
+| T3.1.15 | Write unit tests for Script evaluator short-circuit correctness (`&&` stops on first false, `||` stops on first true) | Todo | - |
+| T3.1.16 | Write unit tests for Script evaluator path resolution with dot-notation (`last_tool_call.name`, `file_changes.0.path`) | Todo | - |
 
 #### Acceptance Criteria
 
@@ -59,8 +66,22 @@ Implement the `Evaluator` enum and all 9 built-in evaluators. Evaluators are pur
 - `Or` short-circuits on first `true`; `And` short-circuits on first `false`.
 - `RegexMatch` stores pattern as `String` (validated at parse time, compiled at eval time).
 - `Custom` variant allows host-registered evaluators.
+- `Script` evaluator: `is_dangerous(provider_output)` detects dangerous keywords; `path.contains(string)` checks substring membership; `&&` / `||` short-circuit correctly; comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) work with numeric and string literals; nested expressions combine operators and function calls; dot-notation paths resolve correctly.
 
 #### Technical Notes
+
+**Script evaluator grammar (V1)**:
+```
+expr       := comparison (('&&' | '||') comparison)*
+comparison := path op literal | 'is_dangerous' '(' path ')' | path '.' 'contains' '(' string ')'
+path       := identifier ('.' identifier)*
+op         := '==' | '!=' | '<' | '<=' | '>' | '>='
+literal    := string | number | 'true' | 'false'
+```
+
+Built-in functions:
+- `is_dangerous(provider_output)` → `true` if output contains dangerous keywords (delete, drop, rm -rf, truncate table, etc.)
+- `path.contains(string)` → `true` if the string value at `path` contains the given substring
 
 ```rust
 pub(crate) enum Evaluator {
@@ -151,6 +172,8 @@ Integrate `minijinja` for Jinja2-compatible template rendering. All Prompt templ
 | T3.3.6 | Implement `Blackboard::to_template_context()` | Todo | - |
 | T3.3.7 | Write unit tests for template rendering with variables | Todo | - |
 | T3.3.8 | Write unit tests for template filters | Todo | - |
+| T3.3.9 | Write unit tests for template syntax validation at load time (detect invalid `{% if %}` tags, unclosed braces) | Todo | - |
+| T3.3.10 | Write unit tests for template runtime error handling (missing variable with `default`, invalid filter) | Todo | - |
 
 #### Acceptance Criteria
 
@@ -159,6 +182,8 @@ Integrate `minijinja` for Jinja2-compatible template rendering. All Prompt templ
 - `last_tool_call` is exposed as a nested object; `file_changes` as a list of objects.
 - Standard minijinja filters (`upper`, `lower`, `length`, `default`, `join`, etc.) are available.
 - minijinja built-in features work without custom implementation: `{% if %}`, `{% for %}`, `| json`, whitespace control.
+- Invalid template syntax is detected at load time with clear error messages.
+- Runtime template errors (missing variables without `default`, unknown filters) are caught and reported.
 
 #### Technical Notes
 

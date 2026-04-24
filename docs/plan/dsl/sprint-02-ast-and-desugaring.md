@@ -157,12 +157,16 @@ Implement the desugaring pass that compiles high-level constructs to low-level B
 | T2.3.5 | Implement `desugar_switch` for `SwitchOn::Variable` (Selector + When) | Todo | - |
 | T2.3.6 | Handle `result_key` configuration in Switch prompt desugaring | Todo | - |
 | T2.3.7 | Handle `default` case in Switch (any ThenSpec, not just command) | Todo | - |
-| T2.3.8 | Implement `desugar_when` | Todo | - |
+| T2.3.8 | Implement `desugar_when` (without on_error) | Todo | - |
+| T2.3.8a | Handle `WhenSpec.on_error` wrapping: `skip` → no-op, `escalate` → Selector with EscalateToHuman fallback, `retry` → Repeater(2) | Todo | - |
 | T2.3.9 | Implement `desugar_pipeline` | Todo | - |
 | T2.3.10 | Add automatic `NoMatchFallback` (`ApproveAndContinue`) to DecisionRules | Todo | - |
 | T2.3.11 | Write unit tests for DecisionRules → Selector desugaring | Todo | - |
 | T2.3.12 | Write unit tests for Switch prompt desugaring | Todo | - |
-| T2.3.13 | Write unit tests for on_error wrapping (Escalate, Retry, Skip) | Todo | - |
+| T2.3.13 | Write unit tests for on_error wrapping (Escalate, Retry, Skip) on Rule | Todo | - |
+| T2.3.13a | Write unit tests for `When.on_error` wrapping (Escalate, Retry) | Todo | - |
+| T2.3.14 | Write unit tests for Switch `result_key` configuration (cases match against specified key, default `decision`) | Todo | - |
+| T2.3.15 | Write unit tests for `_default` case supporting nested Switch/When/Pipeline in ThenSpec | Todo | - |
 
 #### Acceptance Criteria
 
@@ -170,6 +174,11 @@ Implement the desugaring pass that compiles high-level constructs to low-level B
 - Decorator wrapping order: `Cooldown` (outer) → `ReflectionGuard` → `on_error` (inner).
 - `Switch on Prompt` produces `Sequence(Prompt, Selector(When...))`.
 - `_default` supports nested Switch / When / Pipeline.
+- `When { if, then, on_error }` applies the same error-handling wrapping as `Rule.on_error`:
+  - `skip` → no extra wrapping (When already returns Failure on false condition)
+  - `escalate` → `Selector(When(...), Action(EscalateToHuman))`
+  - `retry` → `Repeater(2, When(...))`
+- `result_key` in Switch on Prompt correctly stores parser result in specified blackboard key; cases match against this key.
 
 #### Technical Notes
 
@@ -186,6 +195,8 @@ Desugaring table:
 | `Switch on Prompt` | `Sequence(Prompt, Selector(When..., Default))` |
 | `Switch on Variable` | `Selector(When..., Default)` |
 | `When { if, then }` | `WhenNode(condition, then.desugar())` |
+| `When { if, then, on_error: escalate }` | `Selector(WhenNode(...), Action(EscalateToHuman))` |
+| `When { if, then, on_error: retry }` | `Repeater(2, WhenNode(...))` |
 | `Pipeline { steps }` | `Sequence(Condition/Action...)` |
 
 ---

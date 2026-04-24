@@ -211,7 +211,9 @@ Implement Condition, Action, and SetVar.
 | T4.4.5 | Write unit tests for Condition with all evaluator types | Todo | - |
 | T4.4.6 | Write unit tests for Action with template rendering | Todo | - |
 | T4.4.7 | Write unit tests for Action `when` guard | Todo | - |
-| T4.4.8 | Write unit tests for SetVar with all BlackboardValue types (string, integer, float, boolean, list) | Todo | - |
+| T4.4.8 | Write unit tests for SetVar with all BlackboardValue types (string, integer, float, boolean, list, map) | Todo | - |
+| T4.4.9 | Write unit tests for SetVar with nested structures (List containing Maps, Map containing Lists) | Todo | - |
+| T4.4.10 | Write unit tests for command interpolation timing (template evaluated at Action tick, not at DSL load) | Todo | - |
 
 #### Acceptance Criteria
 
@@ -219,6 +221,8 @@ Implement Condition, Action, and SetVar.
 - Action: renders command templates, pushes to `blackboard.commands`, returns `Success`.
 - Action with `when`: returns `Failure` if guard evaluator is `false`.
 - SetVar: writes to innermost scope, returns `Success`.
+- SetVar handles all `BlackboardValue` types including nested `Map` and `List` structures.
+- Command template interpolation happens at Action tick time; changes to blackboard between ticks affect subsequent renders.
 
 #### Technical Notes
 

@@ -267,12 +267,13 @@ Add performance targets and optional metrics collection.
 | T5.5.6 | Document `Send + Sync` / `!Sync` executor semantics (Trees are Send+Sync; Executor is !Sync) | Todo | - |
 | T5.5.7 | Document Parallel Safety: one executor + blackboard per agent thread | Todo | - |
 | T5.5.8 | Write criterion benchmarks | Todo | - |
+| T5.5.9 | Write memory footprint verification tests (assert parse ≤ 20KB, AST ≤ 10KB, blackboard ≤ 2KB) | Todo | - |
 
 #### Acceptance Criteria
 
 - Benchmark suite runs with `cargo bench`.
 - 1M evaluator calls/second target is measurable.
-- Memory footprint is documented and verifiable.
+- Memory footprint is documented and verifiable via explicit tests.
 - No regressions in `cargo test --lib` from benchmark code.
 
 #### Technical Notes
