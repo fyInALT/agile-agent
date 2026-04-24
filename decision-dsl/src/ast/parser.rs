@@ -166,6 +166,7 @@ impl DslParser for YamlParser {
                 }
             }
             if let (Some(av), Some(md)) = (api_version, metadata) {
+                super::validate::validate_unique_priorities(&all_rules)?;
                 let root = super::node::Node::Selector(super::node::SelectorNode {
                     name: format!("{}_root", md.name),
                     children: vec![],

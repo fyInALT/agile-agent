@@ -258,6 +258,48 @@ spec:
     assert!(result.is_err());
 }
 
+#[test]
+fn parse_bundle_rejects_duplicate_priorities() {
+    let mut files = std::collections::HashMap::new();
+    files.insert(
+        std::path::PathBuf::from("/bundle/rules.d/rule1.yaml"),
+        r#"
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: rules
+rules:
+  - priority: 1
+    name: rule_a
+    then:
+      kind: InlineCommand
+      payload:
+        command:
+          kind: Agent
+          payload:
+            kind: WakeUp
+  - priority: 1
+    name: rule_b
+    then:
+      kind: InlineCommand
+      payload:
+        command:
+          kind: Agent
+          payload:
+            kind: WakeUp
+"#
+        .into(),
+    );
+
+    let fs = MockFs { files };
+    let parser = YamlParser::new();
+    let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs);
+    match result {
+        Err(err) => assert!(matches!(err, ParseError::DuplicatePriority { priority: 1 })),
+        Ok(b) => panic!("expected error, got bundle with {} trees", b.trees.len()),
+    }
+}
+
 // ── validate_evaluators ──────────────────────────────────────────────────────
 
 fn make_condition_node(name: &str, evaluator: Evaluator) -> Node {
@@ -285,7 +327,7 @@ fn builtin_evaluator_is_valid() {
 }
 
 #[test]
-fn custom_evaluator_rejected() {
+fn custom_evaluator_is_valid() {
     let tree = Tree {
         api_version: "decision.agile-agent.io/v1".into(),
         kind: TreeKind::BehaviorTree,
@@ -298,12 +340,12 @@ fn custom_evaluator_rejected() {
         },
     };
     let registry = EvaluatorRegistry::new();
-    let err = validate_evaluators(&tree, &registry).unwrap_err();
-    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "my_custom"));
+    // Sprint 3 implements registry — Custom evaluators are valid until then
+    assert!(validate_evaluators(&tree, &registry).is_ok());
 }
 
 #[test]
-fn composite_evaluator_validates_nested() {
+fn composite_evaluator_with_custom_is_valid() {
     let tree = Tree {
         api_version: "decision.agile-agent.io/v1".into(),
         kind: TreeKind::BehaviorTree,
@@ -321,12 +363,12 @@ fn composite_evaluator_validates_nested() {
         },
     };
     let registry = EvaluatorRegistry::new();
-    let err = validate_evaluators(&tree, &registry).unwrap_err();
-    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "nested_custom"));
+    // Custom evaluators are valid until Sprint 3 registry implementation
+    assert!(validate_evaluators(&tree, &registry).is_ok());
 }
 
 #[test]
-fn when_node_evaluator_validated() {
+fn when_node_custom_evaluator_is_valid() {
     let tree = Tree {
         api_version: "decision.agile-agent.io/v1".into(),
         kind: TreeKind::BehaviorTree,
@@ -343,8 +385,8 @@ fn when_node_evaluator_validated() {
         },
     };
     let registry = EvaluatorRegistry::new();
-    let err = validate_evaluators(&tree, &registry).unwrap_err();
-    assert!(matches!(err, ParseError::UnknownEvaluatorKind { kind } if kind == "when_custom"));
+    // Sprint 3 implements registry — Custom evaluators are valid until then
+    assert!(validate_evaluators(&tree, &registry).is_ok());
 }
 
 // ── validate_parsers ───────────────────────────────────────────────────────────
@@ -380,7 +422,7 @@ fn builtin_parser_is_valid() {
 }
 
 #[test]
-fn custom_parser_rejected() {
+fn custom_parser_is_valid() {
     let tree = Tree {
         api_version: "decision.agile-agent.io/v1".into(),
         kind: TreeKind::BehaviorTree,
@@ -393,6 +435,6 @@ fn custom_parser_rejected() {
         },
     };
     let registry = OutputParserRegistry::new();
-    let err = validate_parsers(&tree, &registry).unwrap_err();
-    assert!(matches!(err, ParseError::UnknownParserKind { kind } if kind == "my_parser"));
+    // Sprint 3 implements registry — Custom parsers are valid until then
+    assert!(validate_parsers(&tree, &registry).is_ok());
 }

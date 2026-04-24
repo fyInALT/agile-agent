@@ -156,10 +156,9 @@ fn check_evaluators_in_node(node: &Node, registry: &EvaluatorRegistry) -> Result
 
 fn validate_evaluator(evaluator: &Evaluator, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
     match evaluator {
-        Evaluator::Custom { name, .. } => {
-            // Sprint 3 will implement registry lookup
-            // For now, reject all Custom evaluators since registry is empty placeholder
-            Err(ParseError::UnknownEvaluatorKind { kind: name.clone() })
+        Evaluator::Custom { .. } => {
+            // Sprint 3 implements registry lookup — Custom is valid until then
+            Ok(())
         }
         Evaluator::Or { conditions } | Evaluator::And { conditions } => {
             for cond in conditions {
@@ -192,10 +191,9 @@ fn check_parsers_in_node(node: &Node, registry: &OutputParserRegistry) -> Result
 
 fn validate_parser(parser: &OutputParser, _registry: &OutputParserRegistry) -> Result<(), ParseError> {
     match parser {
-        OutputParser::Custom { name, .. } => {
-            // Sprint 3 will implement registry lookup
-            // For now, reject all Custom parsers since registry is empty placeholder
-            Err(ParseError::UnknownParserKind { kind: name.clone() })
+        OutputParser::Custom { .. } => {
+            // Sprint 3 implements registry lookup — Custom is valid until then
+            Ok(())
         }
         _ => Ok(()), // Built-in parsers are always valid
     }
