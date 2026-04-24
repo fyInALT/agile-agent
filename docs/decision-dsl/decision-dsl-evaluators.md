@@ -8,7 +8,91 @@
 
 Condition nodes and Action `when` guards both use the same `Evaluator` trait.
 
-###1 Trait Definition
+###1 YAML Property Helpers
+
+These helpers extract typed values from `serde_yaml::Mapping` (the raw YAML properties of a node).
+They perform the camelCase → snake_case field mapping at parse time.
+
+```rust
+fn get_string(props: &serde_yaml::Mapping, key: &str) -> Result<String, ParseError> {
+    props.get(serde_yaml::Value::String(key.to_string()))
+        .or_else(|| props.get(&serde_yaml::Value::String(to_camel_case(key))))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| ParseError::MissingProperty(key))
+}
+
+fn get_bool(props: &serde_yaml::Mapping, key: &str) -> Option<bool> {
+    props.get(serde_yaml::Value::String(key.to_string()))
+        .or_else(|| props.get(&serde_yaml::Value::String(to_camel_case(key))))
+        .and_then(|v| v.as_bool())
+}
+
+fn get_u32(props: &serde_yaml::Mapping, key: &str) -> Result<u32, ParseError> {
+    props.get(serde_yaml::Value::String(key.to_string()))
+        .or_else(|| props.get(&serde_yaml::Value::String(to_camel_case(key))))
+        .and_then(|v| v.as_u64())
+        .and_then(|n| n.try_into().ok())
+        .ok_or_else(|| ParseError::MissingProperty(key))
+}
+
+fn get_string_array(props: &serde_yaml::Mapping, key: &str) -> Result<Vec<String>, ParseError> {
+    let arr = props.get(serde_yaml::Value::String(key.to_string()))
+        .or_else(|| props.get(&serde_yaml::Value::String(to_camel_case(key))))
+        .and_then(|v| v.as_sequence())
+        .ok_or_else(|| ParseError::MissingProperty(key))?;
+    arr.iter()
+        .map(|v| v.as_str().map(|s| s.to_string()).ok_or_else(|| ParseError::Custom(format!("expected string array in {}", key))))
+        .collect()
+}
+
+fn get_structured_fields(props: &serde_yaml::Mapping) -> Result<Vec<StructuredField>, ParseError> {
+    let fields_seq = props.get("fields")
+        .and_then(|v| v.as_sequence())
+        .ok_or_else(|| ParseError::MissingProperty("fields"))?;
+    let mut result = Vec::new();
+    for item in fields_seq {
+        let map = item.as_mapping().ok_or_else(|| ParseError::Custom("expected mapping in fields".into()))?;
+        let name = get_string(map, "name")?;
+        let group = map.get("group")
+            .and_then(|v| v.as_u64())
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(|| ParseError::MissingProperty("group"))?;
+        let ty = map.get("type")
+            .and_then(|v| v.as_str())
+            .map(|s| match s {
+                "string" => FieldType::String,
+                "integer" => FieldType::Integer,
+                "float" => FieldType::Float,
+                "boolean" => FieldType::Boolean,
+                _ => FieldType::String,
+            })
+            .unwrap_or(FieldType::String);
+        result.push(StructuredField { name, group, ty });
+    }
+    Ok(result)
+}
+
+/// Convert snake_case key to camelCase for YAML property lookup.
+/// Example: "case_sensitive" → "caseSensitive"
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = false;
+    for ch in s.chars() {
+        if ch == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(ch.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+```
+
+###2 Trait Definition
 
 ```rust
 pub(crate) trait Evaluator: std::fmt::Debug + Send + Sync {
@@ -114,7 +198,7 @@ pub struct VariableIs {
 impl Evaluator for VariableIs {
     fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
         match bb.get_path(&self.key) {
-            Some(value) => Ok(value == &self.expected),
+            Some(value) => Ok(&value == &self.expected),
             None => Ok(false),
         }
     }

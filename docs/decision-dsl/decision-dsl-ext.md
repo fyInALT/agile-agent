@@ -59,10 +59,12 @@ impl Clock for MockClock {
 
 ```rust
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub trait Fs {
     fn read_to_string(&self, path: &Path) -> Result<String, FsError>;
     fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError>;
+    fn modified(&self, path: &Path) -> Result<SystemTime, FsError>;
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +87,14 @@ impl Fs for RealFs {
             path: path.to_path_buf(), message: e.to_string(),
         })).collect()
     }
+
+    fn modified(&self, path: &Path) -> Result<SystemTime, FsError> {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .map_err(|e| FsError {
+                path: path.to_path_buf(), message: e.to_string(),
+            })
+    }
 }
 ```
 
@@ -102,12 +112,28 @@ pub struct NullLogger;
 impl Logger for NullLogger {
     fn log(&self, _level: LogLevel, _target: &str, _msg: &str) {}
 }
+
+/// Adapter to the `tracing` crate.
+pub struct TracingLogger;
+
+impl Logger for TracingLogger {
+    fn log(&self, level: LogLevel, target: &str, msg: &str) {
+        match level {
+            LogLevel::Trace => tracing::trace!(target, "{}", msg),
+            LogLevel::Debug => tracing::debug!(target, "{}", msg),
+            LogLevel::Info => tracing::info!(target, "{}", msg),
+            LogLevel::Warn => tracing::warn!(target, "{}", msg),
+            LogLevel::Error => tracing::error!(target, "{}", msg),
+        }
+    }
+}
 ```
 
 ###5 Watcher
 
 ```rust
 use std::path::Path;
+use std::time::SystemTime;
 
 /// Abstraction over file-system change detection for hot reload.
 ///
@@ -744,6 +770,11 @@ impl Tree {
     pub fn validate_parsers(&self, registry: &OutputParserRegistry) -> Result<(), ParseError> {
         self.spec.root.validate_parsers_recursive(registry)
     }
+
+    /// All SubTree references must resolve to known subtrees.
+    pub fn validate_subtree_refs(&self, subtrees: &HashMap<String, Tree>) -> Result<(), ParseError> {
+        self.spec.root.validate_subtree_refs_recursive(subtrees)
+    }
 }
 ```
 
@@ -866,7 +897,7 @@ impl Tracer {
         self.current_depth += 1;
     }
 
-    pub fn exit(&mut self, node_name: &str, status: NodeStatus, duration: std::time::Duration) {
+    pub fn exit(&mut self, node_name: &str, status: NodeStatus, duration: std::time::Duration, child_index: usize) {
         self.current_depth -= 1;
         self.entries.push(TraceEntry::Exit {
             node_name: node_name.to_string(),
@@ -874,7 +905,7 @@ impl Tracer {
             duration,
         });
         if status == NodeStatus::Running {
-            self.running_path.push(child_index); // tracked externally
+            self.running_path.push(child_index);
         }
     }
 

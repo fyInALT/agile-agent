@@ -140,7 +140,7 @@ decision-dsl/
 pub use parser::{DslParser, YamlParser, Tree, ParseError};
 pub use runtime::{DslRunner, Executor, TickContext, TickResult, Blackboard, BlackboardValue};
 pub use runtime::trace::{NodeTrace, TraceEntry};
-pub use ext::{Session, SessionError, Clock, Fs, FsError, Logger, LogLevel, Watcher, PollWatcher, WatcherError};
+pub use ext::{Session, SessionError, Clock, Fs, FsError, Logger, LogLevel, TracingLogger, Watcher, PollWatcher, WatcherError};
 pub use error::{DslError, RuntimeError};
 
 // Everything in nodes/, eval/, parser_out/, template/ is pub(crate)
@@ -178,14 +178,78 @@ impl YamlParser {
             filter_registry: FilterRegistry::with_builtins(),
         }
     }
+
+    /// Convert raw serde_yaml::Value into a typed AST Tree.
+    fn value_to_tree(&self, raw: serde_yaml::Value) -> Result<Tree, ParseError> {
+        let mapping = raw.as_mapping().ok_or_else(|| ParseError::Custom("expected YAML mapping".into()))?;
+
+        let api_version = get_string(mapping, "apiVersion")?;
+        let kind_str = get_string(mapping, "kind")?;
+        let kind = match kind_str.as_str() {
+            "BehaviorTree" => TreeKind::BehaviorTree,
+            "SubTree" => TreeKind::SubTree,
+            _ => return Err(ParseError::InvalidProperty {
+                key: "kind".into(), value: kind_str, reason: "expected BehaviorTree or SubTree".into(),
+            }),
+        };
+
+        let metadata = mapping.get("metadata")
+            .and_then(|v| v.as_mapping())
+            .ok_or_else(|| ParseError::MissingProperty("metadata"))?;
+        let name = get_string(metadata, "name")?;
+        let description = get_string(metadata, "description").ok();
+
+        let spec = mapping.get("spec")
+            .and_then(|v| v.as_mapping())
+            .ok_or_else(|| ParseError::MissingProperty("spec"))?;
+        let root = spec.get("root")
+            .ok_or_else(|| ParseError::MissingProperty("spec.root"))?;
+        let root_node = self.value_to_node(root)?;
+
+        Ok(Tree { api_version, kind, metadata: Metadata { name, description }, spec: Spec { root: root_node } })
+    }
+
+    /// Recursively convert a serde_yaml::Value into a Node.
+    fn value_to_node(&self, raw: &serde_yaml::Value) -> Result<Node, ParseError> {
+        let mapping = raw.as_mapping().ok_or_else(|| ParseError::Custom("expected node mapping".into()))?;
+        let kind = get_string(mapping, "kind")?;
+        let name = get_string(mapping, "name")?;
+
+        // Extract properties (everything except kind, name, children, child)
+        let mut properties = mapping.clone();
+        properties.remove("kind");
+        properties.remove("name");
+        properties.remove("children");
+        properties.remove("child");
+
+        // Recurse into children
+        let children = if let Some(children_val) = mapping.get("children") {
+            children_val.as_sequence()
+                .ok_or_else(|| ParseError::Custom("expected children sequence".into()))?
+                .iter()
+                .map(|c| self.value_to_node(c))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
+
+        // Handle single-child decorators
+        let mut final_children = children;
+        if let Some(child_val) = mapping.get("child") {
+            let child_node = self.value_to_node(child_val)?;
+            final_children.push(child_node);
+        }
+
+        self.node_registry.create(&kind, name, properties, final_children)
+    }
 }
 
 impl DslParser for YamlParser {
     fn parse_tree(&self, yaml: &str) -> Result<Tree, ParseError> {
         let raw: serde_yaml::Value = serde_yaml::from_str(yaml)?;
         let tree = self.value_to_tree(raw)?;
+        tree.validate_api_version()?;
         tree.validate_unique_names()?;
-        tree.validate_subtree_refs()?;
         tree.validate_evaluators(&self.evaluator_registry)?;
         tree.validate_parsers(&self.parser_registry)?;
         Ok(tree)
@@ -211,6 +275,48 @@ impl DslParser for YamlParser {
 ```
 
 See [`decision-dsl-ast.md`](decision-dsl-ast.md) for the full AST, Blackboard, and Bundle design.
+
+### 3.1a YAML-to-Rust Naming Conventions
+
+The parser automatically converts YAML camelCase field names to Rust snake_case:
+
+| YAML (camelCase) | Rust (snake_case) | Type conversion |
+|------------------|-------------------|-----------------|
+| `apiVersion` | `api_version` | `String` |
+| `durationMs` | `duration` | `u64` → `Duration` |
+| `timeoutMs` | `timeout` | `u64` → `Duration` |
+| `maxAttempts` | `max_attempts` | `u32` |
+| `maxRounds` | `max_rounds` | `u8` |
+| `caseSensitive` | `case_sensitive` | `bool` |
+| `ref` (SubTree) | `ref_name` | `String` |
+
+The helper `get_string(props, "case_sensitive")` first looks for `"case_sensitive"`; if not found, it falls back to `"caseSensitive"` via `to_camel_case()`. This allows both conventions in YAML while normalizing to Rust style internally.
+
+```rust
+fn get_string(mapping: &serde_yaml::Mapping, key: &str) -> Result<String, ParseError> {
+    mapping.get(serde_yaml::Value::String(key.to_string()))
+        .or_else(|| mapping.get(&serde_yaml::Value::String(to_camel_case(key))))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| ParseError::MissingProperty(key))
+}
+
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize = false;
+    for ch in s.chars() {
+        if ch == '_' {
+            capitalize = true;
+        } else if capitalize {
+            result.push(ch.to_ascii_uppercase());
+            capitalize = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+```
 
 ### 3.2 DslRunner
 

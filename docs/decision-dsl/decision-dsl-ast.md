@@ -32,6 +32,7 @@ pub(crate) enum TreeKind {
     SubTree,
 }
 
+#[derive(Default)]
 pub(crate) struct Bundle {
     pub trees: HashMap<String, Tree>,
     pub subtrees: HashMap<String, Tree>,
@@ -398,6 +399,27 @@ All template rendering, evaluator access, and dot-notation paths go through a un
 
 ```rust
 impl Blackboard {
+    pub fn new() -> Self {
+        Self {
+            task_description: String::new(),
+            provider_output: String::new(),
+            context_summary: String::new(),
+            reflection_round: 0,
+            max_reflection_rounds: 2,
+            confidence_accumulator: 0.0,
+            agent_id: String::new(),
+            current_task_id: String::new(),
+            current_story_id: String::new(),
+            last_tool_call: None,
+            file_changes: Vec::new(),
+            project_rules: ProjectRules::default(),
+            decision_history: Vec::new(),
+            variables: HashMap::new(),
+            commands: Vec::new(),
+            llm_responses: HashMap::new(),
+        }
+    }
+
     /// Get a value by dot-notation path.
     /// Supported paths:
     ///   - "task_description"
@@ -528,3 +550,262 @@ impl Blackboard {
 
 ---
 
+
+
+## Appendix: Parser Internals
+
+### Node Registry
+
+The node registry maps YAML `kind` strings to node factories. It is the C-function-equivalent registry.
+
+```rust
+/// Factory function that creates a Node from raw YAML properties and children.
+pub(crate) type NodeFactory = fn(
+    name: String,
+    properties: serde_yaml::Mapping,
+    children: Vec<Node>,
+) -> Result<Node, ParseError>;
+
+/// Registry of node factories.
+pub(crate) struct NodeRegistry {
+    factories: HashMap<String, NodeFactory>,
+}
+
+impl NodeRegistry {
+    pub fn new() -> Self {
+        Self { factories: HashMap::new() }
+    }
+
+    pub fn with_builtins() -> Self {
+        let mut reg = Self::new();
+        // Composites
+        reg.register("Selector", SelectorNode::from_yaml);
+        reg.register("Sequence", SequenceNode::from_yaml);
+        reg.register("Parallel", ParallelNode::from_yaml);
+        // Decorators
+        reg.register("Inverter", InverterNode::from_yaml);
+        reg.register("Repeater", RepeaterNode::from_yaml);
+        reg.register("Cooldown", CooldownNode::from_yaml);
+        reg.register("ReflectionGuard", ReflectionGuardNode::from_yaml);
+        reg.register("ForceHuman", ForceHumanNode::from_yaml);
+        // Leaves
+        reg.register("Condition", ConditionNode::from_yaml);
+        reg.register("Action", ActionNode::from_yaml);
+        reg.register("Prompt", PromptNode::from_yaml);
+        reg.register("SetVar", SetVarNode::from_yaml);
+        reg.register("SubTree", SubTreeRefNode::from_yaml);
+        reg
+    }
+
+    pub fn register(&mut self, kind: &str, factory: NodeFactory) {
+        self.factories.insert(kind.to_string(), factory);
+    }
+
+    pub fn create(
+        &self,
+        kind: &str,
+        name: String,
+        properties: serde_yaml::Mapping,
+        children: Vec<Node>,
+    ) -> Result<Node, ParseError> {
+        let factory = self.factories
+            .get(kind)
+            .ok_or_else(|| ParseError::UnknownNodeKind { kind: kind.to_string() })?;
+        factory(name, properties, children)
+    }
+}
+```
+
+### Tree Resume (Async Prompt Continuation)
+
+When a Prompt node returns `Running`, the executor stores the path and resumes from there on the next tick.
+
+```rust
+impl Tree {
+    pub fn resume(
+        &self,
+        path: &[usize],
+        ctx: &mut TickContext,
+        tracer: &mut Tracer,
+    ) -> Result<NodeStatus, RuntimeError> {
+        self.spec.root.resume_at(path, 0, ctx, tracer)
+    }
+}
+
+impl Node {
+    pub fn resume_at(
+        &mut self,
+        path: &[usize],
+        depth: usize,
+        ctx: &mut TickContext,
+        tracer: &mut Tracer,
+    ) -> Result<NodeStatus, RuntimeError> {
+        if depth >= path.len() {
+            // We're at the running node, tick it
+            return self.tick(ctx, tracer);
+        }
+
+        let child_idx = path[depth];
+        match self {
+            Node::Selector(n) => {
+                n.active_child = Some(child_idx);
+                let status = n.children[child_idx].resume_at(path, depth + 1, ctx, tracer)?;
+                match status {
+                    NodeStatus::Success | NodeStatus::Failure => {
+                        n.active_child = None;
+                        // Re-run Selector logic from the next child
+                        for i in (child_idx + 1)..n.children.len() {
+                            tracer.enter(n.name(), i);
+                            let t0 = ctx.clock.now();
+                            let child_status = n.children[i].tick(ctx, tracer)?;
+                            let duration = t0.elapsed();
+                            tracer.exit(n.name(), i, child_status, duration, i);
+                            match child_status {
+                                NodeStatus::Success => return Ok(NodeStatus::Success),
+                                NodeStatus::Running => {
+                                    n.active_child = Some(i);
+                                    return Ok(NodeStatus::Running);
+                                }
+                                NodeStatus::Failure => continue,
+                            }
+                        }
+                        Ok(NodeStatus::Failure)
+                    }
+                    NodeStatus::Running => Ok(NodeStatus::Running),
+                }
+            }
+            Node::Sequence(n) => {
+                n.active_child = Some(child_idx);
+                let status = n.children[child_idx].resume_at(path, depth + 1, ctx, tracer)?;
+                match status {
+                    NodeStatus::Success => {
+                        n.active_child = None;
+                        // Continue with remaining children
+                        for i in (child_idx + 1)..n.children.len() {
+                            tracer.enter(n.name(), i);
+                            let t0 = ctx.clock.now();
+                            let child_status = n.children[i].tick(ctx, tracer)?;
+                            let duration = t0.elapsed();
+                            tracer.exit(n.name(), i, child_status, duration, i);
+                            match child_status {
+                                NodeStatus::Success => continue,
+                                NodeStatus::Running => {
+                                    n.active_child = Some(i);
+                                    return Ok(NodeStatus::Running);
+                                }
+                                NodeStatus::Failure => return Ok(NodeStatus::Failure),
+                            }
+                        }
+                        Ok(NodeStatus::Success)
+                    }
+                    NodeStatus::Running => Ok(NodeStatus::Running),
+                    NodeStatus::Failure => {
+                        n.active_child = None;
+                        Ok(NodeStatus::Failure)
+                    }
+                }
+            }
+            Node::Inverter(n) => n.child.resume_at(path, depth + 1, ctx, tracer),
+            Node::Repeater(n) => n.child.resume_at(path, depth + 1, ctx, tracer),
+            Node::Cooldown(n) => n.child.resume_at(path, depth + 1, ctx, tracer),
+            Node::ReflectionGuard(n) => n.child.resume_at(path, depth + 1, ctx, tracer),
+            Node::ForceHuman(n) => n.child.resume_at(path, depth + 1, ctx, tracer),
+            // Leaf nodes should not appear mid-path
+            _ => self.tick(ctx, tracer),
+        }
+    }
+
+    pub fn validate_subtree_refs_recursive(
+        &self,
+        subtrees: &HashMap<String, Tree>,
+    ) -> Result<(), ParseError> {
+        match self {
+            Node::SubTreeRef(n) => {
+                if !subtrees.contains_key(&n.ref_name) {
+                    return Err(ParseError::UnresolvedSubTree { name: n.ref_name.clone() });
+                }
+            }
+            Node::Selector(n) => {
+                for child in &n.children { child.validate_subtree_refs_recursive(subtrees)?; }
+            }
+            Node::Sequence(n) => {
+                for child in &n.children { child.validate_subtree_refs_recursive(subtrees)?; }
+            }
+            Node::Parallel(n) => {
+                for child in &n.children { child.validate_subtree_refs_recursive(subtrees)?; }
+            }
+            Node::Inverter(n) => n.child.validate_subtree_refs_recursive(subtrees)?,
+            Node::Repeater(n) => n.child.validate_subtree_refs_recursive(subtrees)?,
+            Node::Cooldown(n) => n.child.validate_subtree_refs_recursive(subtrees)?,
+            Node::ReflectionGuard(n) => n.child.validate_subtree_refs_recursive(subtrees)?,
+            Node::ForceHuman(n) => n.child.validate_subtree_refs_recursive(subtrees)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn validate_unique_names_recursive(&self, seen: &mut HashSet<String>) -> Result<(), ParseError> {
+        if !seen.insert(self.name().to_string()) {
+            return Err(ParseError::DuplicateName { name: self.name().to_string() });
+        }
+        match self {
+            Node::Selector(n) => for child in &n.children { child.validate_unique_names_recursive(seen)?; }
+            Node::Sequence(n) => for child in &n.children { child.validate_unique_names_recursive(seen)?; }
+            Node::Parallel(n) => for child in &n.children { child.validate_unique_names_recursive(seen)?; }
+            Node::Inverter(n) => n.child.validate_unique_names_recursive(seen)?,
+            Node::Repeater(n) => n.child.validate_unique_names_recursive(seen)?,
+            Node::Cooldown(n) => n.child.validate_unique_names_recursive(seen)?,
+            Node::ReflectionGuard(n) => n.child.validate_unique_names_recursive(seen)?,
+            Node::ForceHuman(n) => n.child.validate_unique_names_recursive(seen)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn validate_evaluators_recursive(&self, registry: &EvaluatorRegistry) -> Result<(), ParseError> {
+        match self {
+            Node::Condition(n) => {
+                // Evaluator kind already validated at construction time
+            }
+            Node::Action(n) => {
+                if let Some(ref eval) = n.when {
+                    // Already validated at construction
+                }
+            }
+            Node::Selector(n) => for child in &n.children { child.validate_evaluators_recursive(registry)?; }
+            Node::Sequence(n) => for child in &n.children { child.validate_evaluators_recursive(registry)?; }
+            Node::Parallel(n) => for child in &n.children { child.validate_evaluators_recursive(registry)?; }
+            Node::Inverter(n) => n.child.validate_evaluators_recursive(registry)?,
+            Node::Repeater(n) => n.child.validate_evaluators_recursive(registry)?,
+            Node::Cooldown(n) => n.child.validate_evaluators_recursive(registry)?,
+            Node::ReflectionGuard(n) => n.child.validate_evaluators_recursive(registry)?,
+            Node::ForceHuman(n) => n.child.validate_evaluators_recursive(registry)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn validate_parsers_recursive(&self, registry: &OutputParserRegistry) -> Result<(), ParseError> {
+        match self {
+            Node::Prompt(n) => {
+                // Parser kind already validated at construction time
+            }
+            Node::Selector(n) => for child in &n.children { child.validate_parsers_recursive(registry)?; }
+            Node::Sequence(n) => for child in &n.children { child.validate_parsers_recursive(registry)?; }
+            Node::Parallel(n) => for child in &n.children { child.validate_parsers_recursive(registry)?; }
+            Node::Inverter(n) => n.child.validate_parsers_recursive(registry)?,
+            Node::Repeater(n) => n.child.validate_parsers_recursive(registry)?,
+            Node::Cooldown(n) => n.child.validate_parsers_recursive(registry)?,
+            Node::ReflectionGuard(n) => n.child.validate_parsers_recursive(registry)?,
+            Node::ForceHuman(n) => n.child.validate_parsers_recursive(registry)?,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+```
+
+---
+
+*Document version: 3.1*
+*Last updated: 2026-04-20*

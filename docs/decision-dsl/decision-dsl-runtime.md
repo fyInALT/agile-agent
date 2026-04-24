@@ -18,7 +18,7 @@ impl SelectorNode {
             let t0 = ctx.clock.now();
             let status = self.children[i].tick(ctx, tracer)?;
             let duration = t0.elapsed();
-            tracer.exit(self.name(), i, status, duration);
+            tracer.exit(self.name(), i, status, duration, i);
 
             match status {
                 NodeStatus::Success => {
@@ -52,7 +52,7 @@ impl SequenceNode {
             let t0 = ctx.clock.now();
             let status = self.children[i].tick(ctx, tracer)?;
             let duration = t0.elapsed();
-            tracer.exit(self.name(), i, status, duration);
+            tracer.exit(self.name(), i, status, duration, i);
 
             match status {
                 NodeStatus::Success => continue,
@@ -87,7 +87,7 @@ impl ParallelNode {
             let t0 = ctx.clock.now();
             let status = child.tick(ctx, tracer)?;
             let duration = t0.elapsed();
-            tracer.exit(self.name(), i, status, duration);
+            tracer.exit(self.name(), i, status, duration, i);
 
             match status {
                 NodeStatus::Success => successes += 1,
