@@ -1,58 +1,385 @@
 # Decision DSL Specification
 
-> This document defines the YAML-based DSL for authoring behavior trees in the decision layer. A behavior tree is a hierarchical structure of nodes that the `BehaviorTreeExecutor` ticks to produce `DecisionCommand` values.
+> This document defines the YAML-based DSL for authoring decision rules in the decision layer. Users write high-level **decision rules** that desugar to a behavior tree AST executed by the `BehaviorTreeExecutor`.
 
 ---
 
 ## 1. DSL Overview
 
-The decision DSL is a **declarative YAML format** for defining behavior trees. Each file defines one tree or one reusable sub-tree.
+The decision DSL is a **declarative YAML format** for defining what the decision layer should do when an agent produces output. Two authoring styles are supported:
+
+| Style | Kind | Use case |
+|-------|------|----------|
+| **DecisionRules** (recommended) | `kind: DecisionRules` | Priority-ordered rule list. Covers 90% of decisions in ~30% of the YAML. |
+| **BehaviorTree** (advanced) | `kind: BehaviorTree` | Full behavior tree. For complex scenarios that don't fit the rules model. |
+
+Both styles compile to the same internal AST and produce identical `DecisionCommand` output.
 
 ### File Structure
 
 ```
 decisions/
-├── trees/
-│   └── default.yaml              # The root decision tree
-├── subtrees/
-│   ├── rate_limit.yaml           # Reusable rate-limit handler
-│   ├── reflect_loop.yaml         # Reusable reflect loop
-│   └── human_escalation.yaml     # Reusable human escalation
+├── rules.d/                        # DecisionRules files
+│   ├── default.yaml                # The root rule set
+│   └── task-lifecycle.yaml
+├── trees/                          # BehaviorTree files (advanced)
+│   └── complex-recovery.yaml
+├── subtrees/                       # Reusable sub-trees
+│   ├── reflect_loop.yaml
+│   └── human_escalation.yaml
 └── schemas/
-    └── action_schemas.yaml       # Action parameter schemas
+    └── action_schemas.yaml
 ```
 
-### Top-Level Format
-
-Every DSL file has the same top-level structure:
+### DecisionRules Format (Recommended)
 
 ```yaml
 apiVersion: decision.agile-agent.io/v1
-kind: BehaviorTree          # or SubTree
+kind: DecisionRules
 metadata:
-  name: default_decision_tree
+  name: default_decisions
   description: "Handles all common decision scenarios"
+spec:
+  rules:
+    - priority: 1
+      name: rate_limit
+      if:
+        kind: regex
+        pattern: "(429|rate.?limit|quota.?exceeded)"
+      then:
+        command:
+          RetryTool:
+            tool_name: "{{ last_tool_call.name }}"
+            max_attempts: 3
+      cooldownMs: 5000
+
+    - priority: 2
+      name: dangerous_action
+      if:
+        kind: outputContains
+        pattern: "delete_files"
+      then:
+        command:
+          EscalateToHuman:
+            reason: "Dangerous action detected"
+            context: "{{ provider_output | truncate(200) }}"
+
+    - priority: 3
+      name: claims_completion
+      if:
+        kind: outputContains
+        pattern: "claims_completion"
+      then:
+        kind: Switch
+        name: reflect_or_confirm
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            ## Task
+            {{ task_description }}
+
+            ## Agent's Claim
+            {{ provider_output | truncate(500) }}
+
+            Should we REFLECT or CONFIRM?
+            Reply with exactly one word: REFLECT or CONFIRM.
+          parser:
+            kind: enum
+            values: [REFLECT, CONFIRM]
+        cases:
+          REFLECT:
+            command:
+              Reflect:
+                prompt: "Review your work carefully"
+          CONFIRM:
+            command: ConfirmCompletion
+      reflectionMaxRounds: 2
+
+    - priority: 4
+      name: error_recovery
+      if:
+        kind: outputContains
+        pattern: "error"
+      then:
+        kind: Switch
+        name: classify_and_act
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            Classify this error and recommend action.
+            Error: {{ provider_output | truncate(600) }}
+            Reply format: CLASS: <type> RECOMMEND: <action>
+          parser:
+            kind: structured
+            pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)"
+            fields:
+              - { name: classification, group: 1 }
+              - { name: recommendation, group: 2 }
+        cases:
+          RETRY:
+            command:
+              RetryTool:
+                tool_name: "{{ last_tool_call.name }}"
+                max_attempts: 3
+          FIX:
+            command:
+              SendCustomInstruction:
+                prompt: "Fix the {{ recommendation }} and retry"
+                target_agent: "{{ agent_id }}"
+          ESCALATE:
+            command:
+              EscalateToHuman:
+                reason: "Error recovery chose escalation"
+
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+### BehaviorTree Format (Advanced)
+
+```yaml
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: complex_recovery
+  description: "Complex error recovery with custom tree structure"
 spec:
   root:
     kind: Selector
     name: root_handler
     children:
-      - ...
+      - kind: SubTree
+        name: use_rate_limit
+        ref: rate_limit_handler
+      - kind: When
+        name: handle_dangerous
+        if:
+          kind: script
+          expression: "is_dangerous(provider_output)"
+        then:
+          command:
+            EscalateToHuman:
+              reason: "Dangerous action detected"
+      - kind: Action
+        name: default_continue
+        command: ApproveAndContinue
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `apiVersion` | Yes | Schema version for migration. Format: `decision.agile-agent.io/v{N}`. |
-| `kind` | Yes | `BehaviorTree` (has executor) or `SubTree` (reusable unit). |
+| `kind` | Yes | `DecisionRules`, `BehaviorTree`, or `SubTree`. |
 | `metadata.name` | Yes | Unique identifier for the tree. |
 | `metadata.description` | No | Human-readable description. |
-| `spec.root` | Yes | The root node of the tree. |
+| `spec.rules` | Yes (DecisionRules) | Priority-ordered list of decision rules. |
+| `spec.root` | Yes (BehaviorTree) | The root node of the behavior tree. |
 
 ---
 
-## 2. Node YAML Schema
+## 2. DecisionRules Spec
 
-### 2.1 Common Fields
+### 2.1 Rule Structure
+
+Each rule in `spec.rules` is tried in priority order (lowest number first). The first rule whose `if` condition matches is executed; subsequent rules are skipped.
+
+```yaml
+rules:
+  - priority: 1           # Integer. Lower = higher priority. Must be unique.
+    name: my_rule         # Unique name for tracing.
+    if:                   # Optional. If omitted, rule always matches.
+      kind: outputContains
+      pattern: "429"
+    then:                 # Required. Action, Switch, When, Pipeline, or command inline.
+      command: ApproveAndContinue
+    cooldownMs: 5000      # Optional. Cooldown after this rule fires.
+    reflectionMaxRounds: 2 # Optional. Max reflection rounds (only for Switch with prompt).
+    on_error: skip        # Optional. "skip" | "escalate" | "retry". Default: "skip".
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `priority` | Yes | Integer priority. Lower = higher priority. Must be unique within the rule set. |
+| `name` | Yes | Unique name for tracing and debugging. |
+| `if` | No | Condition evaluator. If omitted, rule always matches. Same schema as Condition node `eval`. |
+| `then` | Yes | Action to take. Can be an inline command, a `Switch`, a `When`, or a `Pipeline`. |
+| `cooldownMs` | No | Cooldown duration in milliseconds after this rule fires successfully. |
+| `reflectionMaxRounds` | No | Maximum reflection rounds (only meaningful when `then` is a `Switch` with `on: prompt`). |
+| `on_error` | No | Error handling behavior: `skip` (default, try next rule), `escalate` (escalate to human), `retry` (retry the rule once). |
+
+### 2.2 Inline Command Shorthand
+
+When `then` is a simple command, you can inline it directly:
+
+```yaml
+# Full form
+then:
+  kind: Action
+  name: emit_retry
+  command:
+    RetryTool:
+      tool_name: "{{ last_tool_call.name }}"
+      max_attempts: 3
+
+# Inline shorthand (equivalent)
+then:
+  command:
+    RetryTool:
+      tool_name: "{{ last_tool_call.name }}"
+      max_attempts: 3
+```
+
+### 2.3 Rule Desugaring
+
+A `DecisionRules` spec desugars to a BehaviorTree:
+
+```
+DecisionRules { rules: [R1, R2, ..., Rn] }
+  ↓
+BehaviorTree { root: Selector(children: [R1.desugar(), R2.desugar(), ..., Rn.desugar()]) }
+
+Rule { if: C, then: T, cooldownMs: D, reflectionMaxRounds: R, on_error: E }
+  ↓
+if cooldownMs:  Cooldown(durationMs: D, child: Sequence(Condition(C), T.desugar()))
+if reflectionMaxRounds:  ReflectionGuard(maxRounds: R, child: Sequence(Condition(C), T.desugar()))
+otherwise:  Sequence(Condition(C), T.desugar())
+```
+
+---
+
+## 3. High-Level Node Types
+
+These node types are shorthands that desugar to low-level behavior tree nodes. They cover the most common decision patterns with minimal YAML.
+
+### 3.1 Switch
+
+The `Switch` node replaces the verbose Prompt+Selector+Condition+Action pattern. It evaluates a condition (a prompt or a blackboard variable) and dispatches to the matching case.
+
+#### Switch on Prompt
+
+```yaml
+kind: Switch
+name: completion_decision
+on:
+  kind: prompt
+  model: thinking            # Optional. "standard" (default) or "thinking".
+  timeoutMs: 30000           # Optional. Default: 30000.
+  template: |
+    Should we REFLECT or CONFIRM?
+    Reply with exactly one word.
+  parser:
+    kind: enum
+    values: [REFLECT, CONFIRM]
+    caseSensitive: false
+cases:
+  REFLECT:
+    command:
+      Reflect:
+        prompt: "Review your work carefully"
+  CONFIRM:
+    command: ConfirmCompletion
+  _default:                  # Optional. Fires if no case matches.
+    command: ApproveAndContinue
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `on` | Yes | Switch condition. Use `on: { kind: prompt, ... }` or `on: { kind: variable, key: ... }`. |
+| `cases` | Yes | Map of match value → action. Values come from the parser's `decision` field. |
+| `_default` | No | Default case. If omitted, Switch returns Failure on unrecognized values. |
+
+**Desugaring**: `Switch(on: Prompt) → Sequence(Prompt(on), Selector(for each case: When(if: var==case, then: case.command), DefaultCase))`
+
+#### Switch on Variable
+
+```yaml
+kind: Switch
+name: route_by_strategy
+on:
+  kind: variable
+  key: error_strategy       # Reads from blackboard
+cases:
+  RETRY:
+    command:
+      RetryTool:
+        tool_name: "{{ last_tool_call.name }}"
+        max_attempts: 3
+  FIX:
+    command:
+      SendCustomInstruction:
+        prompt: "Fix the error and retry"
+        target_agent: "{{ agent_id }}"
+  ESCALATE:
+    command:
+      EscalateToHuman:
+        reason: "Error recovery required"
+```
+
+No LLM call is made. The variable is read directly from the blackboard.
+
+### 3.2 When
+
+The `When` node is a guarded action: "if condition is true, execute this command."
+
+```yaml
+kind: When
+name: handle_rate_limit
+if:
+  kind: regex
+  pattern: "(429|rate.?limit)"
+then:
+  command:
+    RetryTool:
+      tool_name: "{{ last_tool_call.name }}"
+      max_attempts: 3
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `if` | Yes | Condition evaluator. Same schema as the Condition node `eval` field. |
+| `then` | Yes | The action to take. Can be an inline command, a Switch, or a Pipeline. |
+| `on_error` | No | Error handling: `skip` (default), `escalate`, or `retry`. |
+
+**Desugaring**: `When → Sequence(Condition(if), Action(then.command))`
+
+### 3.3 Pipeline
+
+The `Pipeline` node chains multiple guarded steps sequentially. All steps must succeed for the pipeline to succeed.
+
+```yaml
+kind: Pipeline
+name: safe_commit_check
+steps:
+  - if:
+      kind: outputContains
+      pattern: "all tests passing"
+  - if:
+      kind: script
+      expression: "file_changes.length() < 10"
+  - then:
+      command:
+        SuggestCommit:
+          message: "Safe checkpoint"
+          mandatory: false
+          reason: "Tests pass, small change set"
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `steps` | Yes | Ordered list of steps. Each step has `if` (guard) or `then` (unguarded action). |
+
+**Desugaring**: `Pipeline → Sequence(for each step: if → Condition; then → Action)`
+
+---
+
+## 4. Low-Level Node Types
+
+The following node types are the compilation target for high-level constructs. Use them directly only for complex scenarios that don't fit the rules model.
+
+### 4.1 Common Fields
 
 Every node has these common fields:
 
@@ -63,12 +390,14 @@ name: my_node       # Unique name within the tree
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `kind` | Yes | Node type. See tables below. |
+| `kind` | Yes | Node type. |
 | `name` | Yes | Unique name for tracing and debugging. |
 
-### 2.2 Composite Nodes
+### 4.2 Composite Nodes
 
 #### Selector
+
+Tries children left-to-right. Returns Success on the first child that succeeds. Returns Failure if all children fail. Used for priority-ordered fallback.
 
 ```yaml
 kind: Selector
@@ -91,35 +420,18 @@ children:
 
 #### Sequence
 
+Executes children left-to-right. Returns Failure on the first child that fails. Returns Success if all children succeed. Used for sequential guard-then-act patterns.
+
 ```yaml
 kind: Sequence
-name: reflect_loop
+name: guarded_action
 children:
   - kind: Condition
-    name: is_claims_completion
-    eval:
-      kind: outputContains
-      pattern: "claims_completion"
-  - kind: Prompt
-    name: ask_reflect_or_confirm
-    template: |
-      Should the agent reflect or confirm?
-      Reply: REFLECT or CONFIRM
-    parser:
-      kind: enum
-      values: [REFLECT, CONFIRM]
-    sets:
-      - key: next_action
-        field: decision
+    name: guard
+    eval: { kind: outputContains, pattern: "pattern" }
   - kind: Action
-    name: emit_reflect
-    command:
-      Reflect:
-        prompt: "Review your work carefully"
-    when:
-      kind: variableIs
-      key: next_action
-      value: REFLECT
+    name: act
+    command: SomeCommand
 ```
 
 | Field | Required | Description |
@@ -128,17 +440,19 @@ children:
 
 #### Parallel
 
+Executes all children concurrently. Result depends on the policy.
+
 ```yaml
 kind: Parallel
 name: safety_checks
 policy: allSuccess          # or anySuccess, majority
 children:
   - kind: Condition
-    name: check_dangerous
-    eval: { kind: script, script: "is_dangerous(provider_output)" }
+    name: check_a
+    eval: { kind: script, expression: "check_a()" }
   - kind: Condition
-    name: check_main_branch
-    eval: { kind: script, script: "branch == 'main'" }
+    name: check_b
+    eval: { kind: script, expression: "check_b()" }
 ```
 
 | Field | Required | Description |
@@ -146,9 +460,13 @@ children:
 | `policy` | Yes | `allSuccess`, `anySuccess`, or `majority`. |
 | `children` | Yes | List of child nodes. Executed concurrently. |
 
-### 2.3 Decorator Nodes
+### 4.3 Decorator Nodes
+
+Decorators wrap a single child node and modify its behavior.
 
 #### Inverter
+
+Inverts the child's status: Success → Failure, Failure → Success. Running passes through.
 
 ```yaml
 kind: Inverter
@@ -159,11 +477,9 @@ child:
   eval: { kind: outputContains, pattern: "429" }
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `child` | Yes | Single child node. |
-
 #### Repeater
+
+Repeats the child up to `maxAttempts` times. Returns Success if the child succeeds within the limit; Failure if it fails.
 
 ```yaml
 kind: Repeater
@@ -176,12 +492,9 @@ child:
   parser: { kind: enum, values: [SUCCESS, FAIL] }
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `maxAttempts` | Yes | Maximum number of repetitions. |
-| `child` | Yes | Single child node. |
-
 #### Cooldown
+
+Enforces a minimum interval between successful executions of the child. Returns Failure if still on cooldown.
 
 ```yaml
 kind: Cooldown
@@ -192,16 +505,13 @@ child:
   name: retry_tool
   command:
     RetryTool:
-      tool_name: "{{last_tool_name}}"
-      cooldown_ms: 5000
+      tool_name: "{{ last_tool_call.name }}"
+      max_attempts: 3
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `durationMs` | Yes | Cooldown duration in milliseconds. |
-| `child` | Yes | Single child node. |
-
 #### ReflectionGuard
+
+Limits the number of times a child can succeed. Tracks `reflection_round` on the blackboard. Returns Failure when the max is reached.
 
 ```yaml
 kind: ReflectionGuard
@@ -213,12 +523,9 @@ child:
   template: "..."
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `maxRounds` | Yes | Maximum reflection rounds. |
-| `child` | Yes | Single child node. |
-
 #### ForceHuman
+
+Wraps a child and forces an `EscalateToHuman` command after it succeeds.
 
 ```yaml
 kind: ForceHuman
@@ -227,18 +534,15 @@ reason: "PR submission requires human approval"
 child:
   kind: Prompt
   name: confirm_pr
-  template: "Should we submit this PR? YES/NO"
+  template: "Submit PR? YES/NO"
   parser: { kind: enum, values: [YES, NO] }
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `reason` | Yes | Reason shown to the human. |
-| `child` | Yes | Single child node. |
-
-### 2.4 Leaf Nodes
+### 4.4 Leaf Nodes
 
 #### Condition
+
+Evaluates a condition against the blackboard. Returns Success if true, Failure if false.
 
 ```yaml
 kind: Condition
@@ -246,45 +550,14 @@ name: is_rate_limit
 eval:
   kind: outputContains
   pattern: "429"
+  caseSensitive: false
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `eval` | Yes | Evaluator specification. See Condition Evaluators below. |
-
-**Condition Evaluators**:
-
-```yaml
-# OutputContains — checks if provider_output contains a pattern
-kind: outputContains
-pattern: "429"
-caseSensitive: false          # default: false
-
-# SituationIs — checks if context_summary contains the situation type
-kind: situationIs
-type: claims_completion
-
-# ReflectionRoundUnder — checks if reflection_round < max
-kind: reflectionRoundUnder
-max: 2
-
-# VariableIs — checks a custom blackboard variable
-kind: variableIs
-key: next_action
-value: REFLECT
-
-# Script — evaluates a Rhai script
-kind: script
-script: |
-  blackboard.reflection_round < 2 &&
-  blackboard.provider_output.contains("claims_completion")
-
-# Regex — matches provider_output against a regex
-kind: regex
-pattern: "ACTION:\\s*(\\w+)"
-```
+See [decision-dsl-evaluators.md](decision-dsl-evaluators.md) for the full evaluator catalog.
 
 #### Action
+
+Emits a `DecisionCommand`. Optionally guarded by a `when` condition.
 
 ```yaml
 kind: Action
@@ -292,126 +565,53 @@ name: emit_reflect
 command:
   Reflect:
     prompt: "Review your work carefully"
+when:                        # Optional
+  kind: variableIs
+  key: next_action
+  value: REFLECT
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `command` | Yes | A `DecisionCommand` variant. See Command Reference below. |
-| `when` | No | Optional condition. Action only executes if condition is true. |
-
-**Command Reference** (full `DecisionCommand` enum):
-
-```yaml
-# Escalate to human
-command:
-  EscalateToHuman:
-    reason: "Need human approval"
-    context: "The agent wants to delete files"
-
-# Retry a failed tool
-command:
-  RetryTool:
-    tool_name: "Bash"
-    args: null
-    max_attempts: 3
-
-# Send custom instruction
-command:
-  SendCustomInstruction:
-    prompt: "Focus on fixing the tests"
-    target_agent: "agent-42"
-
-# Approve and continue
-command: ApproveAndContinue
-
-# Confirm completion
-command: ConfirmCompletion
-
-# Reflect
-command:
-  Reflect:
-    prompt: "Review your changes for bugs"
-
-# Stop if complete
-command:
-  StopIfComplete:
-    reason: "All tasks finished"
-
-# Prepare task start
-command:
-  PrepareTaskStart:
-    task_id: "TASK-123"
-    task_description: "Implement user authentication"
-
-# Suggest commit
-command:
-  SuggestCommit:
-    message: "Add auth module"
-    mandatory: false
-    reason: "Good checkpoint"
-
-# Commit changes
-command:
-  CommitChanges:
-    message: "WIP: auth"
-    is_wip: true
-    worktree_path: null
-
-# Create task branch
-command:
-  CreateTaskBranch:
-    branch_name: "feature/auth"
-    base_branch: "main"
-    worktree_path: null
-
-# Rebase to main
-command:
-  RebaseToMain:
-    base_branch: "main"
-```
+See [Command Reference](#command-reference) below for all command variants.
 
 #### Prompt
 
+Sends a template to the LLM within the same agent session. Parses the reply and stores values on the blackboard.
+
 ```yaml
 kind: Prompt
-name: reflect_or_confirm
-model: standard          # or "thinking" for reasoning models
-timeoutMs: 30000
+name: classify_error
+model: thinking              # Optional. "standard" (default) or "thinking".
+timeoutMs: 45000             # Optional. Default: 30000.
 template: |
-  You are a decision helper for a software development agent.
-
-  ## Task
-  {{ task_description }}
-
-  ## Recent Work
-  {{ context_summary }}
-
-  ## Current Output
-  {{ provider_output }}
-
-  ## Reflection Round
-  {{ reflection_round }} / {{ max_reflection_rounds }}
-
-  Should the agent reflect on its work or confirm completion?
-  Reply with exactly one word: REFLECT or CONFIRM.
+  Classify this error:
+  {{ provider_output | truncate(600) }}
+  Reply: CLASS: <type> RECOMMEND: <action>
 parser:
-  kind: enum
-  values: [REFLECT, CONFIRM]
-  caseSensitive: false
+  kind: structured
+  pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)"
+  fields:
+    - { name: classification, group: 1 }
+    - { name: recommendation, group: 2 }
 sets:
-  - key: next_action
-    field: decision
+  - key: error_class
+    field: classification
+  - key: error_recommendation
+    field: recommendation
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `model` | No | LLM model tier: `standard` (default) or `thinking`. |
 | `timeoutMs` | No | Timeout in milliseconds. Default: 30000. |
-| `template` | Yes | Jinja2-style template. See Template Syntax below. |
-| `parser` | Yes | Output parser specification. See Output Parsers below. |
+| `template` | Yes | minijinja template. See [Template Syntax](#template-syntax). |
+| `parser` | Yes | Output parser specification. |
 | `sets` | No | List of `(blackboard_key, parser_field)` mappings. |
 
+**Lifecycle**: On first tick, Prompt sends the rendered template to the session and returns `Running`. On the next tick, it receives the reply, parses it, stores values, and returns `Success` or `Failure`.
+
 #### SetVar
+
+Writes a value to the blackboard.
 
 ```yaml
 kind: SetVar
@@ -422,27 +622,13 @@ value:
   value: 0
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `key` | Yes | Blackboard variable name. |
-| `value` | Yes | Typed value. See Value Types below. |
-
 **Value Types**:
 
 ```yaml
-# String
 value: { kind: string, value: "hello" }
-
-# Integer
 value: { kind: integer, value: 42 }
-
-# Float
 value: { kind: float, value: 0.85 }
-
-# Boolean
 value: { kind: boolean, value: true }
-
-# List
 value:
   kind: list
   items:
@@ -450,11 +636,13 @@ value:
     - { kind: string, value: "b" }
 ```
 
-### 2.5 SubTree Reference
+### 4.5 SubTree Reference
+
+References a reusable sub-tree. SubTrees preserve their identity in traces (unlike the previous design which inlined them).
 
 ```yaml
 kind: SubTree
-name: use_reflect_loop
+name: reflect_handler
 ref: reflect_loop              # References subtrees/reflect_loop.yaml
 ```
 
@@ -464,29 +652,151 @@ ref: reflect_loop              # References subtrees/reflect_loop.yaml
 
 ---
 
-## 3. Blackboard Variables
+## 5. Command Reference
 
-### 3.1 Built-in Variables
+Commands are grouped into five categories for clarity.
 
-These variables are automatically populated by the executor before each tick:
+### Agent Commands
+
+```yaml
+command: ApproveAndContinue
+
+command:
+  Reflect:
+    prompt: "Review your work carefully"
+
+command:
+  SendCustomInstruction:
+    prompt: "Focus on fixing the tests"
+    target_agent: "agent-42"
+
+command:
+  TerminateAgent:
+    reason: "Task complete"
+```
+
+### Git Commands
+
+```yaml
+command:
+  CommitChanges:
+    message: "Add auth module"
+    is_wip: true
+    worktree_path: null
+
+command:
+  CreateTaskBranch:
+    branch_name: "feature/auth"
+    base_branch: "main"
+    worktree_path: null
+
+command:
+  RebaseToMain:
+    base_branch: "main"
+
+command:
+  StashChanges:
+    description: "WIP before context switch"
+    include_untracked: true
+
+command:
+  DiscardChanges:
+    worktree_path: null
+```
+
+### Task Commands
+
+```yaml
+command: ConfirmCompletion
+
+command:
+  StopIfComplete:
+    reason: "All tasks finished"
+
+command:
+  PrepareTaskStart:
+    task_id: "TASK-123"
+    task_description: "Implement user authentication"
+```
+
+### Human Commands
+
+```yaml
+command:
+  EscalateToHuman:
+    reason: "Need human approval"
+    context: "The agent wants to delete files"
+
+command:
+  SelectOption:
+    option_id: "0"
+```
+
+### Provider Commands
+
+```yaml
+command:
+  RetryTool:
+    tool_name: "Bash"
+    max_attempts: 3
+
+command:
+  SwitchProvider:
+    provider_type: "claude"
+
+command:
+  SuggestCommit:
+    message: "Good checkpoint"
+    mandatory: false
+    reason: "Tests passing, small diff"
+
+command:
+  PreparePr:
+    title: "Add auth module"
+    description: "Implements JWT-based authentication"
+    base_branch: "main"
+    as_draft: false
+```
+
+### Command Interpolation
+
+String fields in commands support template interpolation:
+
+```yaml
+command:
+  RetryTool:
+    tool_name: "{{ last_tool_call.name }}"
+    args: "{{ last_tool_call.input }}"
+    max_attempts: 3
+```
+
+Interpolation happens at Action execution time, not at DSL load time.
+
+---
+
+## 6. Blackboard Variables
+
+### 6.1 Built-in Variables
+
+These variables are automatically populated before each decision cycle:
 
 | Variable | Type | Description |
 |----------|------|-------------|
 | `task_description` | string | The task description given to the work agent. |
-| `provider_output` | string | Raw output from the LLM provider (Claude/Codex). |
+| `provider_output` | string | Raw output from the LLM provider. |
 | `context_summary` | string | Condensed summary of recent tool calls and file changes. |
 | `reflection_round` | integer | Current reflection round (0, 1, 2, ...). |
 | `max_reflection_rounds` | integer | Maximum allowed reflection rounds. |
 | `confidence_accumulator` | float | Accumulated confidence score. |
 | `last_tool_call` | object | Structured record of the last tool call (name, input, output). |
 | `file_changes` | list | List of recent file changes (path, change_type). |
-| `project_rules` | object | Parsed project rules from CLAUDE.md / AGENTS.md. |
-| `decision_history` | list | List of recent decision records. |
 | `agent_id` | string | ID of the work agent being decided for. |
 | `current_task_id` | string | Current task ID, if any. |
 | `current_story_id` | string | Current story ID, if any. |
+| `decision_history` | list | List of recent decision records. |
+| `project_rules` | object | Parsed project rules from CLAUDE.md / AGENTS.md. |
 
-### 3.2 Custom Variables
+### 6.2 Custom Variables
 
 Nodes can read and write custom variables via `SetVar` and `sets`:
 
@@ -497,8 +807,7 @@ name: set_flag
 key: needs_review
 value: { kind: boolean, value: true }
 
-# Read in template
-# {{ variables.needs_review }}
+# Read in template: {{ needs_review }}
 
 # Read in condition
 kind: Condition
@@ -509,11 +818,22 @@ eval:
   value: true
 ```
 
-Custom variables are scoped to the current decision cycle. They do not persist between ticks.
+### 6.3 Variable Scoping
 
-### 3.3 Variable Interpolation in Commands
+SubTree execution creates a new scope. Variables written inside a sub-tree do not leak to the parent. Variables from parent scopes are visible (read-only) to child scopes.
 
-Commands can interpolate blackboard variables using `{{variable}}` syntax:
+```yaml
+# Parent tree sets:       variables.phase = "coding"
+# SubTree reads:          {{ phase }} → "coding"        (visible)
+# SubTree writes:         variables.local_decision = "X" (scoped)
+# Parent after SubTree:   variables.local_decision → undefined
+```
+
+This prevents accidental cross-tree variable pollution.
+
+### 6.4 Variable Interpolation in Commands
+
+Commands can interpolate blackboard variables using `{{ variable }}` syntax:
 
 ```yaml
 kind: Action
@@ -525,30 +845,30 @@ command:
     max_attempts: 3
 ```
 
-Interpolation happens at Action node execution time, not at DSL load time.
-
 ---
 
-## 4. Prompt Template Syntax
+## 7. Template Syntax
 
-Prompt templates use **Jinja2-style** syntax with the Blackboard as the template context.
+Templates use **minijinja** syntax with the Blackboard as the template context.
 
-### 4.1 Variable Interpolation
+### 7.1 Variable Interpolation
 
 ```text
 {{ task_description }}
 {{ provider_output }}
 {{ reflection_round }}
-{{ variables.my_custom_var }}
+{{ last_tool_call.name }}
 ```
 
-### 4.2 Filters
+### 7.2 Filters
 
 ```text
 {{ provider_output | truncate(500) }}
 {{ file_changes | length }}
 {{ task_description | upper }}
 {{ context_summary | default("No summary available") }}
+{{ current_task_id | slugify }}
+{{ file_changes | json }}
 ```
 
 | Filter | Description |
@@ -558,45 +878,40 @@ Prompt templates use **Jinja2-style** syntax with the Blackboard as the template
 | `upper` / `lower` | Case conversion. |
 | `default(val)` | Use default if variable is missing or empty. |
 | `join(sep)` | Join list elements with separator. |
+| `json` | Serialize value to JSON string. |
+| `slugify` | Convert to lowercase-hyphenated slug. |
 
-### 4.3 Conditionals
+Additional filters are provided by minijinja's built-in set. See [minijinja documentation](https://docs.rs/minijinja) for the full catalog.
+
+### 7.3 Conditionals and Loops
 
 ```text
 {% if reflection_round > 0 %}
-This is reflection round {{ reflection_round }}.
+  This is reflection round {{ reflection_round }}.
 {% else %}
-This is the initial decision.
+  This is the initial decision.
 {% endif %}
 
 {% if file_changes | length > 0 %}
-Recent changes:
-{% for change in file_changes %}
-- {{ change.path }} ({{ change.change_type }})
-{% endfor %}
+  Recent changes:
+  {% for change in file_changes %}
+    - {{ change.path }} ({{ change.change_type }})
+  {% endfor %}
 {% endif %}
 ```
 
-### 4.4 Whitespace Control
-
-```text
-{%- if true -%}  {#- strips leading/trailing whitespace -#}
-no extra whitespace
-{%- endif -%}
-```
-
-### 4.5 Best Practices
+### 7.4 Best Practices
 
 1. **Always include output format instructions**: Tell the LLM exactly what to return.
 2. **Use `truncate` on large inputs**: `provider_output` can be very long.
 3. **Use `default` for optional variables**: Prevent template errors.
 4. **Keep templates under 2000 tokens**: The executor warns if a rendered prompt exceeds the budget.
-5. **Use comments for complex logic**: `{# This prompt asks the LLM to choose a strategy #}`
 
 ---
 
-## 5. Output Parsers
+## 8. Output Parsers
 
-### 5.1 Enum Parser
+### 8.1 Enum Parser
 
 Parse a single value from a constrained set:
 
@@ -608,54 +923,43 @@ parser:
 ```
 
 **Input**: `"  reflect  "` → **Parsed**: `{ decision: "REFLECT" }`
-**Input**: `"maybe"` → **Failure**: Unexpected value
 
-### 5.2 Structured Parser
+### 8.2 Structured Parser
 
 Parse fields from text using regex:
 
 ```yaml
 parser:
   kind: structured
-  pattern: "ACTION:\\s*(\\w+)\\s*CONFIDENCE:\\s*(\\d+\\.\\d+)"
+  pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)"
   fields:
-    - name: action
-      group: 1
-    - name: confidence
-      group: 2
-      type: float
+    - { name: classification, group: 1 }
+    - { name: recommendation, group: 2, type: string }
 ```
 
-**Input**: `ACTION: reflect CONFIDENCE: 0.85` → **Parsed**: `{ action: "reflect", confidence: 0.85 }`
+Supported field types: `string` (default), `integer`, `float`, `boolean`.
 
-### 5.3 JSON Parser
+### 8.3 JSON Parser
 
-Parse JSON responses:
+Parse JSON responses with optional schema validation:
 
 ```yaml
 parser:
   kind: json
-  schema:            # Optional JSON Schema for validation
+  schema:            # Optional JSON Schema
     type: object
     properties:
       decision:
         type: string
         enum: [reflect, confirm]
-      reasoning:
-        type: string
       confidence:
         type: number
-        minimum: 0
-        maximum: 1
     required: [decision]
 ```
 
-**Input**: `{"decision": "reflect", "reasoning": "Need to verify tests", "confidence": 0.82}`
-→ **Parsed**: `{ decision: "reflect", reasoning: "Need to verify tests", confidence: 0.82 }`
+### 8.4 Command Parser
 
-### 5.4 Command Parser
-
-Parse directly into a `DecisionCommand`:
+Parse LLM output directly into a DecisionCommand (for use with low-level Prompt nodes):
 
 ```yaml
 parser:
@@ -667,593 +971,420 @@ parser:
         prompt: "Review your work"
     CONFIRM:
       command: ConfirmCompletion
-    ESCALATE:
-      command: EscalateToHuman
-      params:
-        reason: "LLM chose escalation"
 ```
-
-This parser is special: it does not write to the Blackboard. It directly appends a `DecisionCommand` to `blackboard.commands`.
 
 ---
 
-## 6. Complete Examples
+## 9. Complete Examples
 
-### Example 1: Default Decision Tree
-
-This is the root tree that handles all common scenarios. It uses a Selector to try handlers in priority order.
+### Example 1: Default Decision Rules (Recommended)
 
 ```yaml
-# trees/default.yaml
+# rules.d/default.yaml
+apiVersion: decision.agile-agent.io/v1
+kind: DecisionRules
+metadata:
+  name: default_decisions
+  description: "Handles rate limits, dangerous actions, claims completion, errors, and defaults"
+spec:
+  rules:
+    - priority: 1
+      name: rate_limit
+      if:
+        kind: regex
+        pattern: "(429|rate.?limit|quota.?exceeded)"
+      then:
+        command:
+          RetryTool:
+            tool_name: "{{ last_tool_call.name }}"
+            max_attempts: 3
+      cooldownMs: 5000
+
+    - priority: 2
+      name: dangerous_action
+      if:
+        kind: script
+        expression: "is_dangerous(provider_output)"
+      then:
+        command:
+          EscalateToHuman:
+            reason: "Dangerous action detected"
+            context: "{{ provider_output | truncate(200) }}"
+
+    - priority: 3
+      name: claims_completion
+      if:
+        kind: outputContains
+        pattern: "claims_completion"
+      then:
+        kind: Switch
+        name: reflect_or_confirm
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            ## Task: {{ task_description }}
+
+            ## Agent Output
+            {{ provider_output | truncate(500) }}
+
+            ## Reflection Round
+            {{ reflection_round }} / {{ max_reflection_rounds }}
+
+            Should we REFLECT or CONFIRM?
+            Reply with exactly one word.
+          parser:
+            kind: enum
+            values: [REFLECT, CONFIRM]
+        cases:
+          REFLECT:
+            command:
+              Reflect:
+                prompt: |
+                  Please review your work carefully:
+                  1. Are all tests passing?
+                  2. Have you reviewed all changed files?
+                  3. Does the code follow project conventions?
+          CONFIRM:
+            command: ConfirmCompletion
+      reflectionMaxRounds: 2
+
+    - priority: 4
+      name: error_recovery
+      if:
+        kind: outputContains
+        pattern: "error"
+      then:
+        kind: Switch
+        name: classify_and_recover
+        on:
+          kind: prompt
+          model: thinking
+          timeoutMs: 45000
+          template: |
+            Classify this error and recommend recovery.
+
+            Error output:
+            {{ provider_output | truncate(600) }}
+
+            Last tool: {{ last_tool_call.name }}
+            Tool output: {{ last_tool_call.output | default("N/A") | truncate(300) }}
+
+            Classify: SYNTAX, TEST, PERMISSION, TIMEOUT, RATE_LIMIT, LOGIC, UNKNOWN
+            Recommend: RETRY, FIX, SKIP, or ESCALATE
+
+            Reply format:
+            CLASS: <classification>
+            RECOMMEND: <recommendation>
+            REASON: <one sentence>
+          parser:
+            kind: structured
+            pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)\\s*REASON:\\s*(.*)"
+            fields:
+              - { name: classification, group: 1 }
+              - { name: recommendation, group: 2 }
+              - { name: reason, group: 3 }
+        cases:
+          RETRY:
+            command:
+              RetryTool:
+                tool_name: "{{ last_tool_call.name }}"
+                max_attempts: 3
+          FIX:
+            command:
+              SendCustomInstruction:
+                prompt: |
+                  Error type: {{ recommendation }}
+                  Reason: {{ reason }}
+                  Please fix this issue and retry.
+                target_agent: "{{ agent_id }}"
+          ESCALATE:
+            command:
+              EscalateToHuman:
+                reason: "Error recovery: {{ recommendation }}"
+                context: "{{ reason }}"
+          SKIP:
+            command:
+              EscalateToHuman:
+                reason: "Cannot recover from error"
+                context: "{{ reason }}"
+
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
+```
+
+### Example 2: Using BehaviorTree for Complex Logic
+
+```yaml
+# trees/complex-recovery.yaml
 apiVersion: decision.agile-agent.io/v1
 kind: BehaviorTree
 metadata:
-  name: default_decision_tree
-  description: "Handles rate limits, human escalation, reflect loops, errors, and defaults"
+  name: complex_recovery
+  description: "Complex error recovery with custom parallel checks"
 spec:
   root:
     kind: Selector
-    name: root_handler
+    name: root
     children:
-      # Priority 1: Rate limit
-      - kind: Sequence
-        name: handle_rate_limit
-        children:
-          - kind: Condition
-            name: is_rate_limit
-            eval:
-              kind: outputContains
-              pattern: "429"
-          - kind: Cooldown
-            name: rate_limit_cooldown
-            durationMs: 5000
-            child:
-              kind: Action
-              name: retry_with_backoff
-              command:
-                RetryTool:
-                  tool_name: "{{ last_tool_call.name }}"
-                  args: null
-                  max_attempts: 3
+      - kind: SubTree
+        name: rate_limit_handler
+        ref: rate_limit_handler
 
-      # Priority 2: Dangerous action → human
-      - kind: Sequence
-        name: handle_dangerous
-        children:
-          - kind: Condition
-            name: is_dangerous
-            eval:
-              kind: script
-              script: |
-                let dangerous = ["delete_files", "force_push", "drop_database"];
-                dangerous.any(|d| blackboard.provider_output.contains(d))
-          - kind: Action
-            name: escalate_human
+      - kind: Switch
+        name: decide_recovery
+        on:
+          kind: prompt
+          model: thinking
+          template: |
+            Error: {{ provider_output | truncate(500) }}
+            Choose: RETRY, FIX, or ESCALATE
+          parser:
+            kind: enum
+            values: [RETRY, FIX, ESCALATE]
+        cases:
+          RETRY:
+            command:
+              RetryTool:
+                tool_name: "{{ last_tool_call.name }}"
+                max_attempts: 3
+          FIX:
+            command:
+              SendCustomInstruction:
+                prompt: "Fix the error"
+                target_agent: "{{ agent_id }}"
+          ESCALATE:
             command:
               EscalateToHuman:
-                reason: "Dangerous action detected"
-                context: "{{ provider_output | truncate(200) }}"
+                reason: "LLM chose escalation"
 
-      # Priority 3: Claims completion → reflect loop
-      - kind: SubTree
-        name: use_reflect_loop
-        ref: reflect_loop
-
-      # Priority 4: Error recovery
-      - kind: Sequence
-        name: handle_error
-        children:
-          - kind: Condition
-            name: is_error
-            eval:
-              kind: outputContains
-              pattern: "error"
-          - kind: Prompt
-            name: error_strategy
-            model: standard
-            template: |
-              The agent encountered an error:
-              {{ provider_output | truncate(500) }}
-
-              What should we do?
-              Reply with one: RETRY, ESCALATE, or CONTINUE
-            parser:
-              kind: enum
-              values: [RETRY, ESCALATE, CONTINUE]
-            sets:
-              - key: error_strategy
-                field: decision
-          - kind: Selector
-            name: branch_on_strategy
-            children:
-              - kind: Sequence
-                name: do_retry
-                children:
-                  - kind: Condition
-                    name: strategy_is_retry
-                    eval:
-                      kind: variableIs
-                      key: error_strategy
-                      value: RETRY
-                  - kind: Action
-                    name: emit_retry
-                    command:
-                      RetryTool:
-                        tool_name: "{{ last_tool_call.name }}"
-                        args: null
-                        max_attempts: 3
-              - kind: Sequence
-                name: do_escalate
-                children:
-                  - kind: Condition
-                    name: strategy_is_escalate
-                    eval:
-                      kind: variableIs
-                      key: error_strategy
-                      value: ESCALATE
-                  - kind: Action
-                    name: emit_escalate
-                    command:
-                      EscalateToHuman:
-                        reason: "Error recovery chose escalation"
-                        context: "{{ provider_output | truncate(300) }}"
-              - kind: Sequence
-                name: do_continue
-                children:
-                  - kind: Condition
-                    name: strategy_is_continue
-                    eval:
-                      kind: variableIs
-                      key: error_strategy
-                      value: CONTINUE
-                  - kind: Action
-                    name: emit_continue
-                    command: ApproveAndContinue
-
-      # Priority 5: Default
       - kind: Action
         name: default_continue
         command: ApproveAndContinue
 ```
 
-### Example 2: Reflect Loop Sub-Tree
+### Example 3: Task Lifecycle with Pipeline
 
 ```yaml
-# subtrees/reflect_loop.yaml
+# rules.d/task-lifecycle.yaml
 apiVersion: decision.agile-agent.io/v1
-kind: SubTree
+kind: DecisionRules
 metadata:
-  name: reflect_loop
-  description: "Handles claims_completion with up to 2 reflection rounds"
+  name: task_lifecycle
+  description: "Task start and completion flows"
 spec:
-  root:
-    kind: Sequence
-    name: reflect_loop
-    children:
-      - kind: Condition
-        name: is_claims_completion
-        eval:
-          kind: outputContains
-          pattern: "claims_completion"
+  rules:
+    - priority: 1
+      name: task_starting
+      if:
+        kind: outputContains
+        pattern: "task_starting"
+      then:
+        kind: Switch
+        name: git_strategy
+        on:
+          kind: prompt
+          model: standard
+          template: |
+            Starting task: {{ current_task_id }}
+            Description: {{ task_description | truncate(300) }}
 
-      - kind: ReflectionGuard
-        name: max_2_reflections
-        maxRounds: 2
-        child:
-          kind: Prompt
-          name: ask_reflect_or_confirm
-            model: thinking
-            template: |
-              You are a decision helper for a software development agent.
-
-              ## Task
-              {{ task_description }}
-
-              ## Recent Work Summary
-              {{ context_summary | truncate(800) }}
-
-              ## Agent's Claim
-              {{ provider_output | truncate(500) }}
-
-              ## Reflection Round
-              {{ reflection_round }} / {{ max_reflection_rounds }}
-
-              The agent claims the task is complete.
-              Should we:
-              - REFLECT: Ask the agent to review its work more carefully
-              - CONFIRM: Accept the completion and move on
-
-              Consider: Are tests passing? Are all requirements met? Is the code clean?
-              Reply with exactly one word: REFLECT or CONFIRM.
-            parser:
-              kind: enum
-              values: [REFLECT, CONFIRM]
-              caseSensitive: false
-            sets:
-              - key: next_action
-                field: decision
-
-      - kind: Selector
-        name: branch_on_decision
-        children:
-          - kind: Sequence
-            name: do_reflect
-            children:
-              - kind: Condition
-                name: decision_is_reflect
-                eval:
-                  kind: variableIs
-                  key: next_action
-                  value: REFLECT
-              - kind: Action
-                name: emit_reflect
-                command:
-                  Reflect:
-                    prompt: |
-                      Please review your work carefully before confirming completion:
-                      1. Are all tests passing?
-                      2. Have you reviewed all changed files?
-                      3. Does the code follow project conventions?
-
-          - kind: Sequence
-            name: do_confirm
-            children:
-              - kind: Condition
-                name: decision_is_confirm
-                eval:
-                  kind: variableIs
-                  key: next_action
-                  value: CONFIRM
-              - kind: Action
-                name: emit_confirm
-                command: ConfirmCompletion
-```
-
-### Example 3: Rate Limit Handler Sub-Tree
-
-```yaml
-# subtrees/rate_limit.yaml
-apiVersion: decision.agile-agent.io/v1
-kind: SubTree
-metadata:
-  name: rate_limit_handler
-  description: "Handles 429/rate-limit responses with exponential backoff"
-spec:
-  root:
-    kind: Sequence
-    name: rate_limit_handler
-    children:
-      - kind: Condition
-        name: is_rate_limit
-        eval:
-          kind: regex
-          pattern: "(429|rate.?limit|quota.?exceeded)"
-
-      - kind: SetVar
-        name: set_backoff
-        key: backoff_ms
-        value:
-          kind: integer
-          value: 5000
-
-      - kind: Cooldown
-        name: wait_before_retry
-        durationMs: "{{ variables.backoff_ms }}"
-        child:
-          kind: Action
-          name: emit_retry
-          command:
-            RetryTool:
-              tool_name: "{{ last_tool_call.name | default('unknown') }}"
-              args: null
-              max_attempts: 1
-```
-
-### Example 4: Human Escalation Sub-Tree
-
-```yaml
-# subtrees/human_escalation.yaml
-apiVersion: decision.agile-agent.io/v1
-kind: SubTree
-metadata:
-  name: human_escalation
-  description: "Escalates to human with context"
-spec:
-  root:
-    kind: Sequence
-    name: human_escalation
-    children:
-      - kind: Prompt
-        name: summarize_for_human
-        model: standard
-        template: |
-          Summarize the current situation for a human reviewer in 2 sentences:
-
-          Task: {{ task_description | truncate(200) }}
-          Agent output: {{ provider_output | truncate(300) }}
-          Recent changes: {{ context_summary | truncate(200) }}
-        parser:
-          kind: structured
-          pattern: "(.*)"
-          fields:
-            - name: summary
-              group: 1
-        sets:
-          - key: human_summary
-            field: summary
-
-      - kind: Action
-        name: escalate
-        command:
-          EscalateToHuman:
-            reason: "Decision tree escalated"
-            context: "{{ variables.human_summary }}"
-```
-
-### Example 5: Task Start Sub-Tree
-
-```yaml
-# subtrees/task_start.yaml
-apiVersion: decision.agile-agent.io/v1
-kind: SubTree
-metadata:
-  name: task_start
-  description: "Prepares git branch and worktree for a new task"
-spec:
-  root:
-    kind: Sequence
-    name: task_start
-    children:
-      - kind: Condition
-        name: is_task_starting
-        eval:
-          kind: outputContains
-          pattern: "task_starting"
-
-      - kind: Prompt
-        name: choose_git_strategy
-        model: standard
-        template: |
-          Starting task: {{ current_task_id }}
-          Description: {{ task_description | truncate(300) }}
-
-          Choose git strategy:
-          - NEW_BRANCH: Create a new feature branch
-          - EXISTING: Use existing branch if available
-          Reply: NEW_BRANCH or EXISTING
-        parser:
-          kind: enum
-          values: [NEW_BRANCH, EXISTING]
-        sets:
-          - key: git_strategy
-            field: decision
-
-      - kind: Selector
-        name: branch_on_strategy
-        children:
-          - kind: Sequence
-            name: new_branch_flow
-            children:
-              - kind: Condition
-                name: strategy_is_new
-                eval:
-                  kind: variableIs
-                  key: git_strategy
-                  value: NEW_BRANCH
-              - kind: Action
-                name: create_branch
-                command:
-                  CreateTaskBranch:
-                    branch_name: "feature/{{ current_task_id | slugify }}"
-                    base_branch: "main"
-                    worktree_path: null
-              - kind: Action
-                name: prepare_start
-                command:
-                  PrepareTaskStart:
-                    task_id: "{{ current_task_id }}"
-                    task_description: "{{ task_description }}"
-
-          - kind: Sequence
+            Choose git strategy:
+            - NEW_BRANCH: Create a new feature branch
+            - EXISTING: Use existing branch
+            Reply: NEW_BRANCH or EXISTING
+          parser:
+            kind: enum
+            values: [NEW_BRANCH, EXISTING]
+        cases:
+          NEW_BRANCH:
+            kind: Pipeline
+            name: create_branch_flow
+            steps:
+              - then:
+                  command:
+                    CreateTaskBranch:
+                      branch_name: "feature/{{ current_task_id | slugify }}"
+                      base_branch: "main"
+              - then:
+                  command:
+                    PrepareTaskStart:
+                      task_id: "{{ current_task_id }}"
+                      task_description: "{{ task_description }}"
+          EXISTING:
+            kind: Pipeline
             name: existing_branch_flow
-            children:
-              - kind: Condition
-                name: strategy_is_existing
-                eval:
-                  kind: variableIs
-                  key: git_strategy
-                  value: EXISTING
-              - kind: Action
-                name: rebase
-                command:
-                  RebaseToMain:
-                    base_branch: "main"
-              - kind: Action
-                name: prepare_start
-                command:
-                  PrepareTaskStart:
-                    task_id: "{{ current_task_id }}"
-                    task_description: "{{ task_description }}"
-```
+            steps:
+              - then:
+                  command:
+                    RebaseToMain:
+                      base_branch: "main"
+              - then:
+                  command:
+                    PrepareTaskStart:
+                      task_id: "{{ current_task_id }}"
+                      task_description: "{{ task_description }}"
 
-### Example 6: Complex Error Recovery
-
-```yaml
-# trees/error_recovery.yaml
-apiVersion: decision.agile-agent.io/v1
-kind: BehaviorTree
-metadata:
-  name: error_recovery
-  description: "Analyzes errors deeply and chooses recovery strategy"
-spec:
-  root:
-    kind: Sequence
-    name: error_recovery
-    children:
-      - kind: Condition
-        name: is_error
-        eval:
-          kind: outputContains
-          pattern: "error"
-
-      - kind: Prompt
-        name: classify_error
-        model: thinking
-        template: |
-          The agent encountered an error. Classify it:
-
-          Error output:
-          {{ provider_output | truncate(600) }}
-
-          Last tool call: {{ last_tool_call.name }}
-          Tool input: {{ last_tool_call.input | default("N/A") }}
-          Tool output: {{ last_tool_call.output | default("N/A") | truncate(300) }}
-
-          Classify as one of:
-          - SYNTAX: Code compilation/syntax error
-          - TEST: Test failure
-          - PERMISSION: File/network permission denied
-          - TIMEOUT: Operation timed out
-          - RATE_LIMIT: API rate limited
-          - LOGIC: Logic bug in implementation
-          - UNKNOWN: Cannot determine
-
-          Then recommend: RETRY, FIX, SKIP, or ESCALATE
-
-          Reply in this exact format:
-          CLASS: <classification>
-          RECOMMEND: <recommendation>
-          REASON: <one sentence>
-        parser:
-          kind: structured
-          pattern: "CLASS:\\s*(\\w+)\\s*RECOMMEND:\\s*(\\w+)\\s*REASON:\\s*(.*)"
-          fields:
-            - name: classification
-              group: 1
-            - name: recommendation
-              group: 2
-            - name: reason
-              group: 3
-        sets:
-          - key: error_class
-            field: classification
-          - key: error_recommendation
-            field: recommendation
-          - key: error_reason
-            field: reason
-
-      - kind: Selector
-        name: act_on_recommendation
-        children:
-          - kind: Sequence
-            name: retry_flow
-            children:
-              - kind: Condition
-                name: recommend_retry
-                eval:
-                  kind: variableIs
-                  key: error_recommendation
-                  value: RETRY
-              - kind: Action
-                name: emit_retry
-                command:
-                  RetryTool:
-                    tool_name: "{{ last_tool_call.name }}"
-                    args: null
-                    max_attempts: 3
-
-          - kind: Sequence
-            name: fix_flow
-            children:
-              - kind: Condition
-                name: recommend_fix
-                eval:
-                  kind: variableIs
-                  key: error_recommendation
-                  value: FIX
-              - kind: Action
-                name: emit_custom_instruction
-                command:
-                  SendCustomInstruction:
-                    prompt: |
-                      The agent encountered a {{ variables.error_class }} error.
-                      Reason: {{ variables.error_reason }}
-                      Please fix this issue and retry.
-                    target_agent: "{{ agent_id }}"
-
-          - kind: Sequence
-            name: escalate_flow
-            children:
-              - kind: Condition
-                name: recommend_escalate
-                eval:
-                  kind: or
-                  conditions:
-                    - kind: variableIs
-                      key: error_recommendation
-                      value: ESCALATE
-                    - kind: variableIs
-                      key: error_recommendation
-                      value: SKIP
-              - kind: Action
-                name: emit_escalate
-                command:
-                  EscalateToHuman:
-                    reason: "Error recovery: {{ variables.error_recommendation }}"
-                    context: "{{ variables.error_reason }}"
+    - priority: 99
+      name: default_continue
+      then:
+        command: ApproveAndContinue
 ```
 
 ---
 
-## 7. DSL Loading & Validation
+## 10. DSL Loading & Validation
 
-### 7.1 Loader
+### 10.1 Loader
 
 ```rust
 pub struct DslLoader {
     base_path: PathBuf,
-    schema_validator: jsonschema::Validator,
+    evaluator_registry: EvaluatorRegistry,
+    parser_registry: OutputParserRegistry,
 }
 
 impl DslLoader {
-    pub fn load_tree(&self, name: &str) -> Result<BehaviorTree, DslError> {
-        let path = self.base_path.join("trees").join(format!("{}.yaml", name));
+    pub fn load_rules(&self, name: &str) -> Result<BehaviorTree, DslError> {
+        let path = self.base_path.join("rules.d").join(format!("{}.yaml", name));
         let raw = std::fs::read_to_string(&path)?;
         let doc: DslDocument = serde_yaml::from_str(&raw)?;
 
-        // Validate against JSON Schema
-        self.schema_validator.validate(&serde_json::to_value(&doc)?)?;
-
-        // Check apiVersion
+        // Validate apiVersion
         if doc.api_version != "decision.agile-agent.io/v1" {
             return Err(DslError::UnsupportedVersion(doc.api_version));
         }
 
+        // Desugar DecisionRules → BehaviorTree AST
+        let tree = self.desugar_rules(doc)?;
+
         // Resolve sub-tree references
-        let tree = self.resolve_sub_trees(doc)?;
+        let tree = self.resolve_sub_trees(tree)?;
 
         // Validate node names are unique
         tree.validate_unique_names()?;
 
-        // Validate all conditions reference known evaluators
-        tree.validate_evaluators()?;
+        // Validate all evaluators and parsers reference known kinds
+        tree.validate_all(&self.evaluator_registry, &self.parser_registry)?;
 
         Ok(tree)
+    }
+
+    fn desugar_rules(&self, doc: DslDocument) -> Result<BehaviorTree, DslError> {
+        match doc.kind {
+            DslKind::DecisionRules => {
+                let rules = doc.spec.rules.ok_or(DslError::MissingRules)?;
+                let mut children = Vec::new();
+                for rule in rules {
+                    children.push(self.desugar_rule(rule)?);
+                }
+                Ok(BehaviorTree {
+                    api_version: doc.api_version,
+                    kind: TreeKind::BehaviorTree,
+                    metadata: doc.metadata,
+                    spec: Spec {
+                        root: Node::Selector(SelectorNode {
+                            name: format!("{}_rules", doc.metadata.name),
+                            children,
+                            active_child: None,
+                        }),
+                    },
+                })
+            }
+            DslKind::BehaviorTree => {
+                // Parse directly as BT
+                self.parse_behavior_tree(doc)
+            }
+            DslKind::SubTree => {
+                self.parse_sub_tree(doc)
+            }
+        }
     }
 }
 ```
 
-### 7.2 Validation Rules
+### 10.2 Desugaring Rules
+
+```rust
+impl DslLoader {
+    fn desugar_rule(&self, rule: Rule) -> Result<Node, DslError> {
+        // Build the inner action from `then`
+        let inner = self.desugar_then(rule.then)?;
+
+        // Build the condition from `if` (if present)
+        let guarded = if let Some(condition) = rule.if {
+            Node::Sequence(SequenceNode {
+                name: format!("{}_guard", rule.name),
+                children: vec![
+                    Node::Condition(ConditionNode {
+                        name: format!("{}_cond", rule.name),
+                        evaluator: self.evaluator_registry.create(&condition.kind, &condition.props)?,
+                    }),
+                    inner,
+                ],
+                active_child: None,
+            })
+        } else {
+            inner
+        };
+
+        // Wrap in Cooldown if specified
+        let with_cooldown = if let Some(ms) = rule.cooldown_ms {
+            Node::Cooldown(CooldownNode {
+                name: format!("{}_cooldown", rule.name),
+                duration: Duration::from_millis(ms),
+                child: Box::new(guarded),
+                last_success: None,
+            })
+        } else {
+            guarded
+        };
+
+        // Wrap in ReflectionGuard if specified
+        let with_reflection = if let Some(max_rounds) = rule.reflection_max_rounds {
+            Node::ReflectionGuard(ReflectionGuardNode {
+                name: format!("{}_reflection", rule.name),
+                max_rounds,
+                child: Box::new(with_cooldown),
+            })
+        } else {
+            with_cooldown
+        };
+
+        Ok(with_reflection)
+    }
+
+    fn desugar_then(&self, then: ThenSpec) -> Result<Node, DslError> {
+        match then {
+            ThenSpec::InlineCommand { command } => {
+                Ok(Node::Action(ActionNode {
+                    name: "emit".into(),
+                    command,
+                    when: None,
+                }))
+            }
+            ThenSpec::Switch(switch) => self.desugar_switch(switch),
+            ThenSpec::When(when) => self.desugar_when(when),
+            ThenSpec::Pipeline(pipeline) => self.desugar_pipeline(pipeline),
+        }
+    }
+}
+```
+
+### 10.3 Validation Rules
 
 1. **apiVersion must be supported**: The loader rejects unknown versions.
-2. **All node names must be unique** within a tree.
-3. **SubTree refs must resolve**: The referenced sub-tree file must exist.
-4. **Condition evaluators must be registered**: Unknown `kind` values are rejected.
-5. **Command variants must be valid**: Unknown `DecisionCommand` variants are rejected.
-6. **Template variables must be resolvable**: The loader warns (not errors) on unknown variables.
-7. **No circular SubTree references**: A → B → C → A is rejected.
+2. **All names must be unique** within a tree or rule set.
+3. **Rule priorities must be unique** within a DecisionRules spec.
+4. **SubTree refs must resolve**: The referenced sub-tree file must exist.
+5. **All evaluator kinds must be registered**: Unknown `kind` values are rejected at load time.
+6. **All parser kinds must be registered**: Unknown `kind` values are rejected at load time.
+7. **Command variants must be valid**: Unknown command variants are rejected.
+8. **No circular SubTree references**: A → B → C → A is rejected.
 
-### 7.3 Hot Reload
+### 10.4 Hot Reload
 
 ```rust
 pub struct DslWatcher {
@@ -1278,7 +1409,7 @@ impl DslWatcher {
     }
 
     fn reload(&self) {
-        match self.loader.load_tree("default") {
+        match self.loader.load_rules("default") {
             Ok(new_tree) => {
                 *self.current_tree.write() = new_tree;
                 tracing::info!("DSL hot-reloaded successfully");
@@ -1299,36 +1430,33 @@ impl DslWatcher {
 
 ---
 
-## 8. Extending the DSL
+## 11. Extending the DSL
 
-### 8.1 Custom Condition Evaluators
+### 11.1 Custom Condition Evaluators
 
-Register a custom evaluator in Rust:
+Register a custom evaluator:
 
 ```rust
 pub struct JiraTicketExists;
 
-impl ConditionEvaluator for JiraTicketExists {
-    fn evaluate(&self, blackboard: &Blackboard) -> bool {
-        // Call Jira API, check cache, etc.
-        check_jira_for_task(&blackboard.current_task_id)
+impl Evaluator for JiraTicketExists {
+    fn evaluate(&self, bb: &Blackboard) -> Result<bool, RuntimeError> {
+        check_jira_for_task(&bb.current_task_id)
     }
 }
 
 // Register at startup
-registry.register_condition("jiraTicketExists", || Box::new(JiraTicketExists));
+registry.register("jiraTicketExists", JiraTicketExists::new);
 ```
 
 Use in DSL:
 
 ```yaml
-kind: Condition
-name: check_jira
-eval:
+if:
   kind: jiraTicketExists
 ```
 
-### 8.2 Custom Output Parsers
+### 11.2 Custom Output Parsers
 
 ```rust
 pub struct XmlParser {
@@ -1338,13 +1466,12 @@ pub struct XmlParser {
 impl OutputParser for XmlParser {
     fn parse(&self, raw: &str) -> Result<HashMap<String, BlackboardValue>, ParseError> {
         let doc = roxmltree::Document::parse(raw)?;
-        let mut result = HashMap::new();
         // XPath evaluation...
         Ok(result)
     }
 }
 
-registry.register_parser("xml", |params| Box::new(XmlParser { xpath: params["xpath"].clone() }));
+registry.register("xml", XmlParser::new);
 ```
 
 Use in DSL:
@@ -1355,63 +1482,45 @@ parser:
   xpath: "/response/decision"
 ```
 
-### 8.3 Custom Decorators
+### 11.3 Custom Template Filters
 
 ```rust
-pub struct RateLimiter {
-    pub max_per_minute: u32,
-    pub counter: AtomicU32,
-    pub window_start: Mutex<Instant>,
-}
-
-impl BehaviorNode for RateLimiter {
-    fn tick(&mut self, blackboard: &mut Blackboard) -> NodeStatus {
-        // Check rate limit, then delegate to child
-        // ...
-        self.child.tick(blackboard)
-    }
-}
-```
-
-Use in DSL:
-
-```yaml
-kind: RateLimiter
-name: limit_prompt_calls
-maxPerMinute: 10
-child:
-  kind: Prompt
-  name: expensive_prompt
-  template: "..."
-```
-
-### 8.4 Custom Template Filters
-
-```rust
-registry.register_filter("slugify", |input| {
-    input.to_lowercase().replace(" ", "-").replace("_", "-")
+registry.register_filter("kebab_case", |input: &str| {
+    input.to_lowercase().replace(' ', "-")
 });
 ```
 
-Use in DSL:
+---
 
-```text
-branch_name: "feature/{{ current_task_id | slugify }}"
-```
+## 12. DSL Design Principles
+
+1. **Simple things simple**: Common decisions (if X then Y) are one rule. No ceremony.
+2. **Progressive disclosure**: Start with DecisionRules. Use BehaviorTree nodes only when needed.
+3. **Explicit over implicit**: Every node type and rule field is explicit. No hidden defaults.
+4. **Fail fast at load time**: Invalid DSL is rejected when loaded, not when executed.
+5. **Composability**: Sub-trees are first-class. Complex logic is built from simple blocks with scoped state.
+6. **Human-readable**: YAML is chosen for readability. Rule lists map to how humans think about decision logic.
+7. **LLM-friendly**: Prompt templates are first-class. The DSL makes it easy to write, version, and test prompts.
+8. **Backward compatible**: `apiVersion` enables migration. The AST compilation target remains stable.
+9. **Observable**: Every rule and node produces traces. SubTree identity is preserved for debugging.
+10. **Portable**: The DSL engine is zero-dependency. It compiles to the same AST regardless of authoring style.
 
 ---
 
-## 9. DSL Design Principles
+## Appendix: Desugaring Reference
 
-1. **Explicit over implicit**: Every node type is explicit. No hidden defaults.
-2. **Fail fast at load time**: Invalid DSL is rejected when loaded, not when executed.
-3. **Composability**: Sub-trees are first-class. Complex logic is built from simple blocks.
-4. **Human-readable**: YAML is chosen for readability. The tree structure maps to English logic.
-5. **LLM-friendly**: Prompt templates are first-class. The DSL makes it easy to write, version, and test prompts.
-6. **Backward compatible**: `apiVersion` enables migration. Old trees continue to work during transition.
+| High-Level Construct | Desugars To |
+|---------------------|-------------|
+| `DecisionRules { rules }` | `Selector(rule[1], rule[2], ..., rule[n])` |
+| `Rule { if, then, cooldownMs }` | `Cooldown(Sequence(Condition(if), then.desugar()))` (cooldown omitted if 0) |
+| `Rule { if, then, reflectionMaxRounds }` | `ReflectionGuard(Sequence(Condition(if), then.desugar()))` (guard omitted if 0) |
+| `Switch { on: prompt, cases }` | `Sequence(Prompt(on), Selector(for each case: When(if: var==case, then: case.command), DefaultCase))` |
+| `Switch { on: variable, cases }` | `Selector(for each case: When(if: var==case, then: case.command), DefaultCase)` |
+| `When { if, then }` | `Sequence(Condition(if), Action(then.command))` |
+| `Pipeline { steps }` | `Sequence(for each step: if → Condition; then → Action)` |
+| `then: { command: ... }` (inline) | `Action(command)` |
 
 ---
 
-> Document version: v1.0
-> Last updated: 2026-04-20
-> Related document: `docs/decision-layer-design.md`
+> Document version: 2.0
+> Last updated: 2026-04-24
