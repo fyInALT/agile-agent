@@ -28,63 +28,71 @@ impl std::error::Error for SessionError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
-    InvalidYaml { detail: String },
-    MissingField { field: String, node: String },
-    UnknownNodeType { kind: String },
-    DuplicateTreeId { id: String },
-    InvalidTemplate { detail: String },
-    InvalidRegex { detail: String },
-    InvalidTimeout { value: String },
-    InvalidEvaluator { name: String },
-    MissingSubtree { id: String },
-    CycleDetected { ids: Vec<String> },
-    InvalidPath { path: String },
-    InvalidCaseKey { key: String },
-    MixedCaseTypes,
-    InvalidEnumCase { case: String, allowed: Vec<String> },
-    MissingDefaultCase,
-    InvalidBundleFormat { detail: String },
-    InvalidApiVersion { version: String },
-    InvalidDesugaring { detail: String },
-    MissingOnErrorHandler { node: String },
+    YamlSyntax(String),
+    UnknownNodeKind { kind: String },
+    UnknownEvaluatorKind { kind: String },
+    UnknownParserKind { kind: String },
+    MissingProperty(&'static str),
+    MissingRules,
+    DuplicatePriority { priority: u32 },
+    InvalidProperty { key: String, value: String, reason: String },
+    UnresolvedSubTree { name: String },
+    CircularSubTreeRef { name: String },
+    DuplicateName { name: String },
+    UnexpectedValue { got: String, expected: Vec<String> },
+    NoMatch { pattern: String },
+    MissingCaptureGroup { group: usize, pattern: String },
+    TypeMismatch { field: String, expected: &'static str, got: String },
+    JsonSyntax(String),
+    UnsupportedVersion(String),
+    Custom(String),
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::InvalidYaml { detail } => write!(f, "invalid YAML: {detail}"),
-            ParseError::MissingField { field, node } => {
-                write!(f, "missing field '{field}' in node '{node}'")
+            ParseError::YamlSyntax(s) => write!(f, "YAML syntax error: {}", s),
+            ParseError::UnknownNodeKind { kind } => write!(f, "unknown node kind: {}", kind),
+            ParseError::UnknownEvaluatorKind { kind } => {
+                write!(f, "unknown evaluator kind: {}", kind)
             }
-            ParseError::UnknownNodeType { kind } => write!(f, "unknown node type: {kind}"),
-            ParseError::DuplicateTreeId { id } => write!(f, "duplicate tree id: {id}"),
-            ParseError::InvalidTemplate { detail } => write!(f, "invalid template: {detail}"),
-            ParseError::InvalidRegex { detail } => write!(f, "invalid regex: {detail}"),
-            ParseError::InvalidTimeout { value } => write!(f, "invalid timeout value: {value}"),
-            ParseError::InvalidEvaluator { name } => write!(f, "invalid evaluator: {name}"),
-            ParseError::MissingSubtree { id } => write!(f, "missing subtree definition: {id}"),
-            ParseError::CycleDetected { ids } => {
-                let joined = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-                write!(f, "cycle detected in tree references: [{joined}]")
+            ParseError::UnknownParserKind { kind } => {
+                write!(f, "unknown parser kind: {}", kind)
             }
-            ParseError::InvalidPath { path } => write!(f, "invalid blackboard path: {path}"),
-            ParseError::InvalidCaseKey { key } => write!(f, "invalid case key: '{key}'"),
-            ParseError::MixedCaseTypes => {
-                write!(f, "mixed case types in switch (string/int)")
+            ParseError::MissingProperty(p) => write!(f, "missing required property: {}", p),
+            ParseError::MissingRules => {
+                write!(f, "DecisionRules must have at least one rule")
             }
-            ParseError::InvalidEnumCase { case, allowed } => {
-                let joined = allowed.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-                write!(f, "invalid enum case '{case}', allowed: [{joined}]")
+            ParseError::DuplicatePriority { priority } => {
+                write!(f, "duplicate rule priority: {}", priority)
             }
-            ParseError::MissingDefaultCase => write!(f, "switch missing default case"),
-            ParseError::InvalidBundleFormat { detail } => {
-                write!(f, "invalid bundle format: {detail}")
+            ParseError::InvalidProperty { key, value, reason } => {
+                write!(f, "invalid property '{}' = '{}': {}", key, value, reason)
             }
-            ParseError::InvalidApiVersion { version } => write!(f, "invalid API version: {version}"),
-            ParseError::InvalidDesugaring { detail } => write!(f, "invalid desugaring: {detail}"),
-            ParseError::MissingOnErrorHandler { node } => {
-                write!(f, "missing on_error handler in node '{node}'")
+            ParseError::UnresolvedSubTree { name } => {
+                write!(f, "unresolved subtree reference: {}", name)
             }
+            ParseError::CircularSubTreeRef { name } => {
+                write!(f, "circular subtree reference: {}", name)
+            }
+            ParseError::DuplicateName { name } => write!(f, "duplicate node name: {}", name),
+            ParseError::UnexpectedValue { got, expected } => {
+                write!(f, "unexpected value '{}', expected one of: {:?}", got, expected)
+            }
+            ParseError::NoMatch { pattern } => write!(f, "no match for pattern: {}", pattern),
+            ParseError::MissingCaptureGroup { group, pattern } => {
+                write!(f, "missing capture group {} in pattern: {}", group, pattern)
+            }
+            ParseError::TypeMismatch { field, expected, got } => {
+                write!(
+                    f,
+                    "type mismatch for field '{}': expected {}, got {}",
+                    field, expected, got
+                )
+            }
+            ParseError::JsonSyntax(s) => write!(f, "JSON syntax error: {}", s),
+            ParseError::UnsupportedVersion(v) => write!(f, "unsupported api version: {}", v),
+            ParseError::Custom(msg) => write!(f, "{}", msg),
         }
     }
 }
@@ -92,10 +100,8 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 impl From<serde_yaml::Error> for ParseError {
-    fn from(err: serde_yaml::Error) -> Self {
-        ParseError::InvalidYaml {
-            detail: err.to_string(),
-        }
+    fn from(e: serde_yaml::Error) -> Self {
+        ParseError::YamlSyntax(e.to_string())
     }
 }
 
@@ -103,44 +109,51 @@ impl From<serde_yaml::Error> for ParseError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeError {
-    NodeNotFound { path: Vec<usize> },
-    InvalidBlackboardAccess { path: String },
-    EvaluatorFailure { name: String, detail: String },
-    TemplateRenderFailure { detail: String },
-    PromptTimeout { node: String, timeout_ms: u64 },
-    SessionError { kind: SessionErrorKind, message: String },
-    MaxReflectionExceeded,
-    CooldownActive { node: String, remaining_ms: u64 },
+    MissingVariable { key: String },
+    UnknownFilter { filter: String },
+    FilterError(String),
+    TypeMismatch { key: String, expected: &'static str, got: String },
+    Session { kind: SessionErrorKind, message: String },
+    MaxRecursion,
+    SubTreeNotResolved { name: String },
+    Custom(String),
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RuntimeError::NodeNotFound { path } => write!(f, "node not found at path {path:?}"),
-            RuntimeError::InvalidBlackboardAccess { path } => {
-                write!(f, "invalid blackboard access: {path}")
+            RuntimeError::MissingVariable { key } => write!(f, "missing variable: {}", key),
+            RuntimeError::UnknownFilter { filter } => write!(f, "unknown filter: {}", filter),
+            RuntimeError::FilterError(msg) => write!(f, "filter error: {}", msg),
+            RuntimeError::TypeMismatch { key, expected, got } => {
+                write!(
+                    f,
+                    "type mismatch for '{}': expected {}, got {}",
+                    key, expected, got
+                )
             }
-            RuntimeError::EvaluatorFailure { name, detail } => {
-                write!(f, "evaluator '{name}' failed: {detail}")
+            RuntimeError::Session { kind, message } => {
+                write!(f, "session error ({:?}): {}", kind, message)
             }
-            RuntimeError::TemplateRenderFailure { detail } => {
-                write!(f, "template render failure: {detail}")
+            RuntimeError::MaxRecursion => write!(f, "maximum recursion depth exceeded"),
+            RuntimeError::SubTreeNotResolved { name } => {
+                write!(f, "subtree '{}' not resolved", name)
             }
-            RuntimeError::PromptTimeout { node, timeout_ms } => {
-                write!(f, "prompt node '{node}' timed out after {timeout_ms}ms")
-            }
-            RuntimeError::SessionError { kind, message } => {
-                write!(f, "session error ({kind:?}): {message}")
-            }
-            RuntimeError::MaxReflectionExceeded => write!(f, "max reflection rounds exceeded"),
-            RuntimeError::CooldownActive { node, remaining_ms } => {
-                write!(f, "cooldown active on node '{node}', {remaining_ms}ms remaining")
-            }
+            RuntimeError::Custom(msg) => write!(f, "{}", msg),
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+impl From<SessionError> for RuntimeError {
+    fn from(e: SessionError) -> Self {
+        RuntimeError::Session {
+            kind: e.kind,
+            message: e.message,
+        }
+    }
+}
 
 // ── DslError ────────────────────────────────────────────────────────────────
 
@@ -153,8 +166,8 @@ pub enum DslError {
 impl fmt::Display for DslError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DslError::Parse(p) => write!(f, "parse error: {p}"),
-            DslError::Runtime(r) => write!(f, "runtime error: {r}"),
+            DslError::Parse(p) => write!(f, "parse error: {}", p),
+            DslError::Runtime(r) => write!(f, "runtime error: {}", r),
         }
     }
 }
@@ -177,15 +190,6 @@ impl From<RuntimeError> for DslError {
     }
 }
 
-impl From<SessionError> for RuntimeError {
-    fn from(err: SessionError) -> Self {
-        RuntimeError::SessionError {
-            kind: err.kind,
-            message: err.message,
-        }
-    }
-}
-
 impl From<SessionError> for DslError {
     fn from(err: SessionError) -> Self {
         DslError::Runtime(err.into())
@@ -200,8 +204,6 @@ impl From<serde_yaml::Error> for DslError {
 
 impl From<serde_json::Error> for DslError {
     fn from(err: serde_json::Error) -> Self {
-        DslError::Parse(ParseError::InvalidYaml {
-            detail: err.to_string(),
-        })
+        DslError::Parse(ParseError::JsonSyntax(err.to_string()))
     }
 }

@@ -4,196 +4,225 @@ use std::error::Error;
 // ── ParseError ──────────────────────────────────────────────────────────────
 
 #[test]
-fn parse_error_display_invalid_yaml() {
-    let e = ParseError::InvalidYaml { detail: "bad indent".into() };
-    assert_eq!(e.to_string(), "invalid YAML: bad indent");
+fn parse_error_yaml_syntax() {
+    let e = ParseError::YamlSyntax("bad indent".into());
+    assert_eq!(e.to_string(), "YAML syntax error: bad indent");
 }
 
 #[test]
-fn parse_error_display_missing_field() {
-    let e = ParseError::MissingField { field: "name".into(), node: "selector".into() };
-    assert_eq!(e.to_string(), "missing field 'name' in node 'selector'");
+fn parse_error_unknown_node_kind() {
+    let e = ParseError::UnknownNodeKind { kind: "foo".into() };
+    assert_eq!(e.to_string(), "unknown node kind: foo");
 }
 
 #[test]
-fn parse_error_display_unknown_node_type() {
-    let e = ParseError::UnknownNodeType { kind: "foo".into() };
-    assert_eq!(e.to_string(), "unknown node type: foo");
+fn parse_error_unknown_evaluator_kind() {
+    let e = ParseError::UnknownEvaluatorKind { kind: "bar".into() };
+    assert_eq!(e.to_string(), "unknown evaluator kind: bar");
 }
 
 #[test]
-fn parse_error_display_duplicate_tree_id() {
-    let e = ParseError::DuplicateTreeId { id: "root".into() };
-    assert_eq!(e.to_string(), "duplicate tree id: root");
+fn parse_error_unknown_parser_kind() {
+    let e = ParseError::UnknownParserKind { kind: "baz".into() };
+    assert_eq!(e.to_string(), "unknown parser kind: baz");
 }
 
 #[test]
-fn parse_error_display_invalid_template() {
-    let e = ParseError::InvalidTemplate { detail: "unclosed".into() };
-    assert_eq!(e.to_string(), "invalid template: unclosed");
+fn parse_error_missing_property() {
+    let e = ParseError::MissingProperty("name");
+    assert_eq!(e.to_string(), "missing required property: name");
 }
 
 #[test]
-fn parse_error_display_invalid_regex() {
-    let e = ParseError::InvalidRegex { detail: "missing )".into() };
-    assert_eq!(e.to_string(), "invalid regex: missing )");
+fn parse_error_missing_rules() {
+    let e = ParseError::MissingRules;
+    assert_eq!(e.to_string(), "DecisionRules must have at least one rule");
 }
 
 #[test]
-fn parse_error_display_invalid_timeout() {
-    let e = ParseError::InvalidTimeout { value: "abc".into() };
-    assert_eq!(e.to_string(), "invalid timeout value: abc");
+fn parse_error_duplicate_priority() {
+    let e = ParseError::DuplicatePriority { priority: 5 };
+    assert_eq!(e.to_string(), "duplicate rule priority: 5");
 }
 
 #[test]
-fn parse_error_display_invalid_evaluator() {
-    let e = ParseError::InvalidEvaluator { name: "bar".into() };
-    assert_eq!(e.to_string(), "invalid evaluator: bar");
+fn parse_error_invalid_property() {
+    let e = ParseError::InvalidProperty {
+        key: "timeout".into(),
+        value: "abc".into(),
+        reason: "not a number".into(),
+    };
+    assert_eq!(
+        e.to_string(),
+        "invalid property 'timeout' = 'abc': not a number"
+    );
 }
 
 #[test]
-fn parse_error_display_missing_subtree() {
-    let e = ParseError::MissingSubtree { id: "sub".into() };
-    assert_eq!(e.to_string(), "missing subtree definition: sub");
+fn parse_error_unresolved_subtree() {
+    let e = ParseError::UnresolvedSubTree { name: "reflect".into() };
+    assert_eq!(e.to_string(), "unresolved subtree reference: reflect");
 }
 
 #[test]
-fn parse_error_display_cycle_detected() {
-    let e = ParseError::CycleDetected { ids: vec!["a".into(), "b".into(), "a".into()] };
-    assert_eq!(e.to_string(), "cycle detected in tree references: [a, b, a]");
+fn parse_error_circular_subtree_ref() {
+    let e = ParseError::CircularSubTreeRef { name: "loop".into() };
+    assert_eq!(e.to_string(), "circular subtree reference: loop");
 }
 
 #[test]
-fn parse_error_display_invalid_path() {
-    let e = ParseError::InvalidPath { path: "...".into() };
-    assert_eq!(e.to_string(), "invalid blackboard path: ...");
+fn parse_error_duplicate_name() {
+    let e = ParseError::DuplicateName { name: "root".into() };
+    assert_eq!(e.to_string(), "duplicate node name: root");
 }
 
 #[test]
-fn parse_error_display_invalid_case_key() {
-    let e = ParseError::InvalidCaseKey { key: "".into() };
-    assert_eq!(e.to_string(), "invalid case key: ''");
+fn parse_error_unexpected_value() {
+    let e = ParseError::UnexpectedValue {
+        got: "MAYBE".into(),
+        expected: vec!["YES".into(), "NO".into()],
+    };
+    assert_eq!(
+        e.to_string(),
+        "unexpected value 'MAYBE', expected one of: [\"YES\", \"NO\"]"
+    );
 }
 
 #[test]
-fn parse_error_display_mixed_case_types() {
-    let e = ParseError::MixedCaseTypes;
-    assert_eq!(e.to_string(), "mixed case types in switch (string/int)");
+fn parse_error_no_match() {
+    let e = ParseError::NoMatch { pattern: "CLASS:".into() };
+    assert_eq!(e.to_string(), "no match for pattern: CLASS:");
 }
 
 #[test]
-fn parse_error_display_invalid_enum_case() {
-    let e = ParseError::InvalidEnumCase { case: "Foo".into(), allowed: vec!["A".into(), "B".into()] };
-    assert_eq!(e.to_string(), "invalid enum case 'Foo', allowed: [A, B]");
+fn parse_error_missing_capture_group() {
+    let e = ParseError::MissingCaptureGroup {
+        group: 2,
+        pattern: "(\\w+)".into(),
+    };
+    assert_eq!(
+        e.to_string(),
+        "missing capture group 2 in pattern: (\\w+)"
+    );
 }
 
 #[test]
-fn parse_error_display_missing_default_case() {
-    let e = ParseError::MissingDefaultCase;
-    assert_eq!(e.to_string(), "switch missing default case");
+fn parse_error_type_mismatch() {
+    let e = ParseError::TypeMismatch {
+        field: "max_attempts".into(),
+        expected: "integer",
+        got: "foo".into(),
+    };
+    assert_eq!(
+        e.to_string(),
+        "type mismatch for field 'max_attempts': expected integer, got foo"
+    );
 }
 
 #[test]
-fn parse_error_display_invalid_bundle_format() {
-    let e = ParseError::InvalidBundleFormat { detail: "not a map".into() };
-    assert_eq!(e.to_string(), "invalid bundle format: not a map");
+fn parse_error_json_syntax() {
+    let e = ParseError::JsonSyntax("unexpected token".into());
+    assert_eq!(e.to_string(), "JSON syntax error: unexpected token");
 }
 
 #[test]
-fn parse_error_display_invalid_api_version() {
-    let e = ParseError::InvalidApiVersion { version: "v0".into() };
-    assert_eq!(e.to_string(), "invalid API version: v0");
+fn parse_error_unsupported_version() {
+    let e = ParseError::UnsupportedVersion("v99".into());
+    assert_eq!(e.to_string(), "unsupported api version: v99");
 }
 
 #[test]
-fn parse_error_display_invalid_desugaring() {
-    let e = ParseError::InvalidDesugaring { detail: "x".into() };
-    assert_eq!(e.to_string(), "invalid desugaring: x");
-}
-
-#[test]
-fn parse_error_display_missing_on_error_handler() {
-    let e = ParseError::MissingOnErrorHandler { node: "X".into() };
-    assert_eq!(e.to_string(), "missing on_error handler in node 'X'");
+fn parse_error_custom() {
+    let e = ParseError::Custom("something went wrong".into());
+    assert_eq!(e.to_string(), "something went wrong");
 }
 
 // ── RuntimeError ────────────────────────────────────────────────────────────
 
 #[test]
-fn runtime_error_display_node_not_found() {
-    let e = RuntimeError::NodeNotFound { path: vec![0, 1] };
-    assert_eq!(e.to_string(), "node not found at path [0, 1]");
+fn runtime_error_missing_variable() {
+    let e = RuntimeError::MissingVariable { key: "foo".into() };
+    assert_eq!(e.to_string(), "missing variable: foo");
 }
 
 #[test]
-fn runtime_error_display_invalid_blackboard_access() {
-    let e = RuntimeError::InvalidBlackboardAccess { path: "a.b".into() };
-    assert_eq!(e.to_string(), "invalid blackboard access: a.b");
+fn runtime_error_unknown_filter() {
+    let e = RuntimeError::UnknownFilter { filter: "bad".into() };
+    assert_eq!(e.to_string(), "unknown filter: bad");
 }
 
 #[test]
-fn runtime_error_display_evaluator_failure() {
-    let e = RuntimeError::EvaluatorFailure { name: "eq".into(), detail: "type mismatch".into() };
-    assert_eq!(e.to_string(), "evaluator 'eq' failed: type mismatch");
+fn runtime_error_filter_error() {
+    let e = RuntimeError::FilterError("template error".into());
+    assert_eq!(e.to_string(), "filter error: template error");
 }
 
 #[test]
-fn runtime_error_display_template_render_failure() {
-    let e = RuntimeError::TemplateRenderFailure { detail: "missing var".into() };
-    assert_eq!(e.to_string(), "template render failure: missing var");
+fn runtime_error_type_mismatch() {
+    let e = RuntimeError::TypeMismatch {
+        key: "count".into(),
+        expected: "integer",
+        got: "string".into(),
+    };
+    assert_eq!(
+        e.to_string(),
+        "type mismatch for 'count': expected integer, got string"
+    );
 }
 
 #[test]
-fn runtime_error_display_prompt_timeout() {
-    let e = RuntimeError::PromptTimeout { node: "ask".into(), timeout_ms: 5000 };
-    assert_eq!(e.to_string(), "prompt node 'ask' timed out after 5000ms");
+fn runtime_error_session() {
+    let e = RuntimeError::Session {
+        kind: SessionErrorKind::Timeout,
+        message: "timed out".into(),
+    };
+    assert_eq!(
+        e.to_string(),
+        "session error (Timeout): timed out"
+    );
 }
 
 #[test]
-fn runtime_error_display_session_error() {
-    let e = RuntimeError::SessionError { kind: SessionErrorKind::SendFailed, message: "closed".into() };
-    assert_eq!(e.to_string(), "session error (SendFailed): closed");
+fn runtime_error_max_recursion() {
+    let e = RuntimeError::MaxRecursion;
+    assert_eq!(e.to_string(), "maximum recursion depth exceeded");
 }
 
 #[test]
-fn runtime_error_display_max_reflection_exceeded() {
-    let e = RuntimeError::MaxReflectionExceeded;
-    assert_eq!(e.to_string(), "max reflection rounds exceeded");
+fn runtime_error_subtree_not_resolved() {
+    let e = RuntimeError::SubTreeNotResolved { name: "nested".into() };
+    assert_eq!(e.to_string(), "subtree 'nested' not resolved");
 }
 
 #[test]
-fn runtime_error_display_cooldown_active() {
-    let e = RuntimeError::CooldownActive { node: "cool".into(), remaining_ms: 42 };
-    assert_eq!(e.to_string(), "cooldown active on node 'cool', 42ms remaining");
+fn runtime_error_custom() {
+    let e = RuntimeError::Custom("oops".into());
+    assert_eq!(e.to_string(), "oops");
 }
 
 // ── DslError union ──────────────────────────────────────────────────────────
 
 #[test]
 fn dsl_error_from_parse() {
-    let p = ParseError::InvalidYaml { detail: "bad".into() };
+    let p = ParseError::MissingRules;
     let d: DslError = p.into();
-    assert_eq!(d.to_string(), "parse error: invalid YAML: bad");
+    assert_eq!(
+        d.to_string(),
+        "parse error: DecisionRules must have at least one rule"
+    );
 }
 
 #[test]
 fn dsl_error_from_runtime() {
-    let r = RuntimeError::NodeNotFound { path: vec![0] };
+    let r = RuntimeError::MissingVariable { key: "x".into() };
     let d: DslError = r.into();
-    assert_eq!(d.to_string(), "runtime error: node not found at path [0]");
+    assert_eq!(d.to_string(), "runtime error: missing variable: x");
 }
 
 #[test]
-fn dsl_error_source_parse() {
-    let p = ParseError::MissingField { field: "f".into(), node: "n".into() };
+fn dsl_error_source() {
+    let p = ParseError::YamlSyntax("bad".into());
     let d = DslError::Parse(p);
-    assert!(d.source().is_none());
-}
-
-#[test]
-fn dsl_error_source_runtime() {
-    let r = RuntimeError::EvaluatorFailure { name: "e".into(), detail: "d".into() };
-    let d = DslError::Runtime(r);
     assert!(d.source().is_none());
 }
 
@@ -203,14 +232,43 @@ fn dsl_error_source_runtime() {
 fn from_serde_yaml_error() {
     let yaml_err = serde_yaml::from_str::<i32>("not a number").unwrap_err();
     let dsl: DslError = yaml_err.into();
-    assert!(dsl.to_string().starts_with("parse error: invalid YAML:"));
+    assert!(dsl
+        .to_string()
+        .starts_with("parse error: YAML syntax error:"));
 }
 
 #[test]
 fn from_serde_json_error() {
     let json_err = serde_json::from_str::<i32>("bad").unwrap_err();
     let dsl: DslError = json_err.into();
-    assert!(dsl.to_string().starts_with("parse error: invalid YAML:"));
+    assert!(dsl.to_string().starts_with("parse error: JSON syntax error:"));
+}
+
+#[test]
+fn from_session_error_to_runtime() {
+    use decision_dsl::ext::error::SessionError;
+    let se = SessionError {
+        kind: SessionErrorKind::SendFailed,
+        message: "closed".into(),
+    };
+    let re: RuntimeError = se.into();
+    assert_eq!(
+        re.to_string(),
+        "session error (SendFailed): closed"
+    );
+}
+
+#[test]
+fn from_session_error_to_dsl() {
+    use decision_dsl::ext::error::SessionError;
+    let se = SessionError {
+        kind: SessionErrorKind::Unavailable,
+        message: "no reply".into(),
+    };
+    let de: DslError = se.into();
+    assert!(de
+        .to_string()
+        .starts_with("runtime error: session error (Unavailable)"));
 }
 
 // ── Error trait ─────────────────────────────────────────────────────────────

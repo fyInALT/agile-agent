@@ -11,57 +11,72 @@ pub enum DecisionCommand {
     Provider(ProviderCommand),
 }
 
-// ── AgentCommand ────────────────────────────────────────────────────────────
+// ── AgentCommand ───────────────────────────────────────────────────────────
 
+// serde rename mapping:
+//   SendInstruction → SendCustomInstruction
+//   Terminate → TerminateAgent
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum AgentCommand {
-    WakeUp,
+    ApproveAndContinue,
+    Reflect { prompt: String },
     #[serde(rename = "SendCustomInstruction")]
-    SendCustomInstruction { content: String },
+    SendInstruction { prompt: String, target_agent: String },
     #[serde(rename = "TerminateAgent")]
-    TerminateAgent { status: String },
-    RequestSkill { skill: String },
-    Transfer { target_agent: String },
+    Terminate { reason: String },
+    WakeUp,
 }
 
 // ── GitCommand ──────────────────────────────────────────────────────────────
 
+// serde rename mapping:
+//   Commit { wip } → CommitChanges { is_wip }
+//   CreateBranch { name, base } → CreateTaskBranch { branch_name, base_branch }
+//   Rebase { base } → RebaseToMain { base_branch }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum GitCommand {
-    CommitChanges { is_wip: bool },
+    #[serde(rename = "CommitChanges")]
+    Commit { message: String, #[serde(rename = "is_wip")] wip: bool },
+    #[serde(rename = "StashChanges")]
+    Stash { description: String, include_untracked: bool },
+    #[serde(rename = "DiscardChanges")]
+    Discard,
+    #[serde(rename = "CreateTaskBranch")]
     CreateBranch {
-        branch_name: String,
-        base_branch: String,
+        #[serde(rename = "branch_name")]
+        name: String,
+        #[serde(rename = "base_branch")]
+        base: String,
     },
-    Rebase { base_branch: String },
-    Push { force: bool },
-    StageAll,
+    #[serde(rename = "RebaseToMain")]
+    Rebase { #[serde(rename = "base_branch")] base: String },
 }
 
 // ── TaskCommand ─────────────────────────────────────────────────────────────
 
+// serde rename mapping:
+//   PrepareStart → PrepareTaskStart
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum TaskCommand {
+    ConfirmCompletion,
+    StopIfComplete { reason: String },
     #[serde(rename = "PrepareTaskStart")]
-    PrepareTaskStart,
-    StartTask { task_id: String },
-    FinishTask { task_id: String },
+    PrepareStart { task_id: String, description: String },
 }
 
-// ── HumanCommand ────────────────────────────────────────────────────────────
+// ── HumanCommand ───────────────────────────────────────────────────────────
 
+// serde rename mapping:
+//   Escalate → EscalateToHuman
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum HumanCommand {
     #[serde(rename = "EscalateToHuman")]
-    EscalateToHuman { reason: String },
-    SelectOption {
-        options: Vec<String>,
-        default: Option<usize>,
-    },
+    Escalate { reason: String, context: Option<String> },
+    SelectOption { option_id: String },
     SkipDecision,
 }
 
@@ -72,13 +87,10 @@ pub enum HumanCommand {
 pub enum ProviderCommand {
     RetryTool {
         tool_name: String,
-        #[serde(default)]
-        args: Vec<String>,
+        args: Option<String>,
+        max_attempts: u32,
     },
-    SwitchProvider { provider: String },
-    SuggestCommit,
-    PreparePr {
-        title: String,
-        description: String,
-    },
+    SwitchProvider { provider_type: String },
+    SuggestCommit { message: String, mandatory: bool, reason: String },
+    PreparePr { title: String, description: String, base: String, draft: bool },
 }

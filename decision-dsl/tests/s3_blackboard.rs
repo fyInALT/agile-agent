@@ -307,7 +307,7 @@ fn set_bool() {
 fn push_and_drain_commands() {
     let mut bb = Blackboard::default();
     let cmd1 = DecisionCommand::Agent(AgentCommand::WakeUp);
-    let cmd2 = DecisionCommand::Human(HumanCommand::EscalateToHuman { reason: "r".into() });
+    let cmd2 = DecisionCommand::Human(HumanCommand::Escalate { reason: "r".into(), context: None });
     bb.push_command(cmd1.clone());
     bb.push_command(cmd2.clone());
     let drained = bb.drain_commands();
