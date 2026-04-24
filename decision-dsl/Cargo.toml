@@ -1,0 +1,15 @@
+[package]
+name = "decision-dsl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+serde_json = { workspace = true }
+regex = "1.10"
+minijinja = "2"
+enum_dispatch = "0.3"
+
+[dev-dependencies]

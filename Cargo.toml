@@ -15,6 +15,7 @@ members = [
     "cli",
     "core",
     "decision",
+    "decision-dsl",
     "kanban",
     "llm-provider",
     "test-support",
