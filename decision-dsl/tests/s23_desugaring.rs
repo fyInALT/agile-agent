@@ -41,7 +41,7 @@ fn simple_rules_doc() -> DslDocument {
 #[test]
 fn decision_rules_desugars_to_selector() {
     let doc = simple_rules_doc();
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     assert_eq!(tree.api_version, "decision.agile-agent.io/v1");
     assert!(matches!(tree.kind, TreeKind::BehaviorTree));
     assert!(matches!(tree.spec.root, Node::Selector(_)));
@@ -50,7 +50,7 @@ fn decision_rules_desugars_to_selector() {
 #[test]
 fn decision_rules_adds_no_match_fallback() {
     let doc = simple_rules_doc();
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         assert_eq!(sel.children.len(), 2); // rule + fallback
         let last = &sel.children[1];
@@ -84,7 +84,7 @@ fn rule_with_condition_desugars_to_sequence() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Sequence(_)));
@@ -117,7 +117,7 @@ fn rule_cooldown_wraps_outermost() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         // Outermost should be Cooldown
@@ -156,7 +156,7 @@ fn rule_on_error_escalate_desugars_to_selector() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Selector(_)));
@@ -187,7 +187,7 @@ fn rule_on_error_retry_desugars_to_repeater() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Repeater(_)));
@@ -216,7 +216,7 @@ fn rule_on_error_skip_is_pass_through() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         // Skip should not add any wrapping
@@ -271,7 +271,7 @@ fn switch_on_prompt_desugars_to_sequence_prompt_selector() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Sequence(_)));
@@ -315,7 +315,7 @@ fn switch_on_variable_desugars_to_selector() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Selector(_)));
@@ -363,7 +363,7 @@ fn switch_result_key_defaults_to_decision() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         if let Node::Sequence(seq) = rule_node {
@@ -426,7 +426,7 @@ fn switch_custom_result_key_stored_correctly() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         if let Node::Sequence(seq) = rule_node {
@@ -494,7 +494,7 @@ fn switch_default_supports_nested_when() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         if let Node::Selector(branch_sel) = rule_node {
@@ -553,7 +553,7 @@ fn switch_default_supports_nested_switch() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         if let Node::Selector(branch_sel) = rule_node {
@@ -612,7 +612,7 @@ fn switch_default_supports_nested_pipeline() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         if let Node::Selector(branch_sel) = rule_node {
@@ -655,7 +655,7 @@ fn when_desugars_to_when_node() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::When(_)));
@@ -691,7 +691,7 @@ fn when_on_error_escalate_desugars_to_selector() {
             on_error: None,
         }],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         // Should be Selector wrapping WhenNode + Escalate fallback
@@ -729,7 +729,7 @@ fn when_on_error_retry_desugars_to_repeater() {
             on_error: None,
         }],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Repeater(_)));
@@ -772,7 +772,7 @@ fn pipeline_desugars_to_sequence() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::Sequence(_)));
@@ -803,7 +803,7 @@ fn subtree_ref_desugars_to_subtree_node() {
             },
         ],
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     if let Node::Selector(sel) = tree.spec.root {
         let rule_node = &sel.children[0];
         assert!(matches!(rule_node, Node::SubTree(_)));
@@ -822,7 +822,7 @@ fn behavior_tree_desugar_passthrough() {
         metadata: Metadata { name: "bt".into(), description: None },
         root: make_action("act", DecisionCommand::Agent(AgentCommand::WakeUp)),
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     assert_eq!(tree.api_version, "v1");
     assert!(matches!(tree.kind, TreeKind::BehaviorTree));
     assert!(matches!(tree.spec.root, Node::Action(_)));
@@ -837,7 +837,7 @@ fn subtree_desugar_passthrough() {
         metadata: Metadata { name: "st".into(), description: None },
         root: make_action("act", DecisionCommand::Agent(AgentCommand::WakeUp)),
     };
-    let tree = doc.desugar().unwrap();
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
     assert_eq!(tree.api_version, "v1");
     assert!(matches!(tree.kind, TreeKind::SubTree));
     assert!(matches!(tree.spec.root, Node::Action(_)));

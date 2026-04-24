@@ -7,14 +7,14 @@ use super::document::{
     DslDocument, OnError, PipelineSpec, PipelineStep, RuleSpec, Spec, SwitchOn, SwitchSpec,
     ThenSpec, Tree, TreeKind, WhenSpec,
 };
-use super::eval::Evaluator;
+use super::eval::{Evaluator, EvaluatorRegistry};
 use super::node::{
     ActionNode, ConditionNode, CooldownNode, Node, PromptNode, ReflectionGuardNode, RepeaterNode,
     SelectorNode, SequenceNode, SetMapping, SubTreeNode, WhenNode,
 };
 
 impl DslDocument {
-    pub fn desugar(self) -> Result<Tree, ParseError> {
+    pub fn desugar(self, registry: &EvaluatorRegistry) -> Result<Tree, ParseError> {
         match self {
             DslDocument::DecisionRules {
                 api_version,
@@ -23,7 +23,7 @@ impl DslDocument {
             } => {
                 let mut children = Vec::new();
                 for rule in rules {
-                    children.push(desugar_rule(rule)?);
+                    children.push(desugar_rule(rule, registry)?);
                 }
                 // NoMatch fallback
                 children.push(Node::Action(ActionNode {
@@ -69,8 +69,8 @@ impl DslDocument {
     }
 }
 
-fn desugar_rule(rule: RuleSpec) -> Result<Node, ParseError> {
-    let inner = desugar_then(rule.action)?;
+fn desugar_rule(rule: RuleSpec, registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
+    let inner = desugar_then(rule.action, registry)?;
 
     // Wrap in Sequence + Condition if `if` is present
     let mut node = if let Some(evaluator) = rule.condition {
@@ -137,16 +137,16 @@ fn desugar_rule(rule: RuleSpec) -> Result<Node, ParseError> {
     Ok(node)
 }
 
-fn desugar_then(then: ThenSpec) -> Result<Node, ParseError> {
+fn desugar_then(then: ThenSpec, registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
     match then {
         ThenSpec::InlineCommand { command } => Ok(Node::Action(ActionNode {
             name: "emit".into(),
             command,
             when: None,
         })),
-        ThenSpec::Switch(switch) => desugar_switch(switch),
-        ThenSpec::When(when) => desugar_when(*when),
-        ThenSpec::Pipeline(pipeline) => desugar_pipeline(pipeline),
+        ThenSpec::Switch(switch) => desugar_switch(switch, registry),
+        ThenSpec::When(when) => desugar_when(*when, registry),
+        ThenSpec::Pipeline(pipeline) => desugar_pipeline(pipeline, registry),
         ThenSpec::SubTree { ref_name } => Ok(Node::SubTree(SubTreeNode {
             name: ref_name.clone(),
             ref_name,
@@ -155,7 +155,7 @@ fn desugar_then(then: ThenSpec) -> Result<Node, ParseError> {
     }
 }
 
-fn desugar_switch(switch: SwitchSpec) -> Result<Node, ParseError> {
+fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
     match switch.on {
         SwitchOn::Prompt {
             model,
@@ -188,13 +188,13 @@ fn desugar_switch(switch: SwitchSpec) -> Result<Node, ParseError> {
                         key: result_key.clone(),
                         expected: BlackboardValue::String(value),
                     },
-                    action: Box::new(desugar_then(*action)?),
+                    action: Box::new(desugar_then(*action, registry)?),
                 });
                 case_nodes.push(when);
             }
 
             if let Some(default_action) = switch.default {
-                case_nodes.push(desugar_then(*default_action)?);
+                case_nodes.push(desugar_then(*default_action, registry)?);
             }
 
             Ok(Node::Sequence(SequenceNode {
@@ -219,12 +219,12 @@ fn desugar_switch(switch: SwitchSpec) -> Result<Node, ParseError> {
                         key: key.clone(),
                         expected: BlackboardValue::String(value),
                     },
-                    action: Box::new(desugar_then(*action)?),
+                    action: Box::new(desugar_then(*action, registry)?),
                 });
                 case_nodes.push(when);
             }
             if let Some(default_action) = switch.default {
-                case_nodes.push(desugar_then(*default_action)?);
+                case_nodes.push(desugar_then(*default_action, registry)?);
             }
             Ok(Node::Selector(SelectorNode {
                 name: format!("{}_branch", switch.name),
@@ -235,11 +235,11 @@ fn desugar_switch(switch: SwitchSpec) -> Result<Node, ParseError> {
     }
 }
 
-fn desugar_when(when: WhenSpec) -> Result<Node, ParseError> {
+fn desugar_when(when: WhenSpec, registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
     let mut node = Node::When(WhenNode {
         name: when.name.clone(),
         condition: when.condition,
-        action: Box::new(desugar_then(when.then)?),
+        action: Box::new(desugar_then(when.then, registry)?),
     });
 
     node = match when.on_error {
@@ -270,7 +270,7 @@ fn desugar_when(when: WhenSpec) -> Result<Node, ParseError> {
     Ok(node)
 }
 
-fn desugar_pipeline(pipeline: PipelineSpec) -> Result<Node, ParseError> {
+fn desugar_pipeline(pipeline: PipelineSpec, _registry: &EvaluatorRegistry) -> Result<Node, ParseError> {
     let mut children = Vec::new();
     for step in pipeline.steps {
         match step {

@@ -7,7 +7,7 @@ use crate::ext::command::DecisionCommand;
 use super::eval::Evaluator;
 use super::parser_out::OutputParser;
 
-// ── NodeStatus ──────────────────────────────────────────────────────────────
+// ── Node enum ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeStatus {

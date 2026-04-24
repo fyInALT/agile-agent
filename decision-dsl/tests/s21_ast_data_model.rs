@@ -356,3 +356,145 @@ fn node_can_clone() {
     });
     let _ = n.clone();
 }
+
+// ── YAML serde rename round-trip ───────────────────────────────────────────
+
+#[test]
+fn repeater_serializes_max_attempts_camel() {
+    let node = Node::Repeater(RepeaterNode {
+        name: "rep".into(),
+        max_attempts: 3,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+        current: 0,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    assert!(yaml.contains("maxAttempts"), "expected maxAttempts in YAML, got: {}", yaml);
+    assert!(!yaml.contains("max_attempts"), "should not contain snake_case");
+}
+
+#[test]
+fn cooldown_serializes_duration_ms_camel() {
+    let node = Node::Cooldown(CooldownNode {
+        name: "cool".into(),
+        duration_ms: 5000,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+        last_success: None,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    assert!(yaml.contains("durationMs"), "expected durationMs in YAML, got: {}", yaml);
+    assert!(!yaml.contains("duration_ms"), "should not contain snake_case");
+}
+
+#[test]
+fn reflection_guard_serializes_max_rounds_camel() {
+    let node = Node::ReflectionGuard(ReflectionGuardNode {
+        name: "rg".into(),
+        max_rounds: 3,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    assert!(yaml.contains("maxRounds"), "expected maxRounds in YAML, got: {}", yaml);
+    assert!(!yaml.contains("max_rounds"), "should not contain snake_case");
+}
+
+#[test]
+fn prompt_serializes_timeout_ms_camel() {
+    let node = Node::Prompt(PromptNode {
+        name: "p".into(),
+        model: None,
+        template: "test".into(),
+        parser: decision_dsl::ast::OutputParser::Enum {
+            values: vec!["a".into(), "b".into()],
+            case_sensitive: false,
+        },
+        sets: vec![],
+        timeout_ms: 30000,
+        pending: false,
+        sent_at: None,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    assert!(yaml.contains("timeoutMs"), "expected timeoutMs in YAML, got: {}", yaml);
+    assert!(!yaml.contains("timeout_ms"), "should not contain snake_case");
+}
+
+#[test]
+fn rename_roundtrip_repeater_preserves_max_attempts() {
+    let node = Node::Repeater(RepeaterNode {
+        name: "rep".into(),
+        max_attempts: 5,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+        current: 0,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    let back: Node = serde_yaml::from_str(&yaml).unwrap();
+    assert!(matches!(back, Node::Repeater(r) if r.max_attempts == 5));
+}
+
+#[test]
+fn rename_roundtrip_cooldown_preserves_duration_ms() {
+    let node = Node::Cooldown(CooldownNode {
+        name: "cool".into(),
+        duration_ms: 10000,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+        last_success: None,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    let back: Node = serde_yaml::from_str(&yaml).unwrap();
+    assert!(matches!(back, Node::Cooldown(c) if c.duration_ms == 10000));
+}
+
+#[test]
+fn rename_roundtrip_reflection_guard_preserves_max_rounds() {
+    let node = Node::ReflectionGuard(ReflectionGuardNode {
+        name: "rg".into(),
+        max_rounds: 4,
+        child: Box::new(Node::Action(ActionNode {
+            name: "act".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    let back: Node = serde_yaml::from_str(&yaml).unwrap();
+    assert!(matches!(back, Node::ReflectionGuard(rg) if rg.max_rounds == 4));
+}
+
+#[test]
+fn rename_roundtrip_prompt_preserves_timeout_ms() {
+    let node = Node::Prompt(PromptNode {
+        name: "p".into(),
+        model: Some("claude".into()),
+        template: "test".into(),
+        parser: decision_dsl::ast::OutputParser::Enum {
+            values: vec!["a".into()],
+            case_sensitive: true,
+        },
+        sets: vec![],
+        timeout_ms: 60000,
+        pending: false,
+        sent_at: None,
+    });
+    let yaml = serde_yaml::to_string(&node).unwrap();
+    let back: Node = serde_yaml::from_str(&yaml).unwrap();
+    assert!(matches!(back, Node::Prompt(p) if p.timeout_ms == 60000));
+}
