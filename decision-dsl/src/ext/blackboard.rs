@@ -69,7 +69,7 @@ impl Default for Blackboard {
             provider_output: String::new(),
             context_summary: String::new(),
             reflection_round: 0,
-            max_reflection_rounds: 0,
+            max_reflection_rounds: 2,
             confidence_accumulator: 0.0,
             agent_id: String::new(),
             current_task_id: String::new(),
@@ -90,8 +90,12 @@ impl Blackboard {
         Self::default()
     }
 
-    pub fn with_capacity(_n: usize) -> Self {
-        Self::default()
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            scopes: vec![HashMap::with_capacity(n)],
+            commands: Vec::with_capacity(8),
+            ..Default::default()
+        }
     }
 
     // --- Scope management ---

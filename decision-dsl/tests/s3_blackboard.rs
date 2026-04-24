@@ -37,7 +37,7 @@ fn blackboard_default_is_empty() {
     assert_eq!(bb.task_description, "");
     assert_eq!(bb.provider_output, "");
     assert_eq!(bb.reflection_round, 0);
-    assert_eq!(bb.max_reflection_rounds, 0);
+    assert_eq!(bb.max_reflection_rounds, 2);
     assert_eq!(bb.confidence_accumulator, 0.0);
     assert_eq!(bb.agent_id, "");
     assert_eq!(bb.current_task_id, "");
@@ -57,9 +57,12 @@ fn blackboard_new() {
 
 #[test]
 fn blackboard_with_capacity() {
-    let bb = Blackboard::with_capacity(16);
-    assert_eq!(bb.task_description, "");
-    // Just ensure it compiles and doesn't panic
+    let mut bb = Blackboard::with_capacity(16);
+    // Root scope should accept variables without push_scope
+    bb.set("x", BlackboardValue::Integer(42));
+    assert_eq!(bb.get("x"), Some(&BlackboardValue::Integer(42)));
+    // Commands Vec should be pre-allocated
+    assert!(bb.commands.capacity() >= 8);
 }
 
 // ── Scope push/pop ──────────────────────────────────────────────────────────
