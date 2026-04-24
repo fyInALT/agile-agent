@@ -1,7 +1,11 @@
+pub mod blackboard;
 pub mod command;
 pub mod error;
 pub mod traits;
 
+pub use blackboard::{
+    Blackboard, BlackboardValue, DecisionRecord, FileChangeRecord, ProjectRules, ToolCallRecord,
+};
 pub use command::{
     AgentCommand, DecisionCommand, GitCommand, HumanCommand, ProviderCommand, TaskCommand,
 };
