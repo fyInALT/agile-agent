@@ -1,9 +1,8 @@
 use decision_dsl::ast::{
-    validate_bundle, ActionNode, Bundle, DslParser, Evaluator, Metadata, Node, OutputParser, Spec,
-    SubTreeNode, Tree, TreeKind,
+    validate_bundle, validate_unique_priorities, ActionNode, Bundle, DslParser, Evaluator,
+    Metadata, Node, OutputParser, RuleSpec, Spec, SubTreeNode, ThenSpec, Tree, TreeKind,
 };
 use decision_dsl::ast::parser::YamlParser;
-use decision_dsl::ext::blackboard::BlackboardValue;
 use decision_dsl::ext::command::{AgentCommand, DecisionCommand};
 use decision_dsl::ext::error::ParseError;
 use decision_dsl::ext::traits::{Fs, FsError};
@@ -163,6 +162,43 @@ fn direct_cycle_detected() {
     );
     let err = decision_dsl::ast::detect_circular_subtree_refs(&bundle).unwrap_err();
     assert!(matches!(err, ParseError::CircularSubTreeRef { .. }));
+}
+
+// ── validate_unique_priorities ─────────────────────────────────────────────
+
+fn make_rule(priority: u32, name: &str) -> RuleSpec {
+    RuleSpec {
+        priority,
+        name: name.into(),
+        condition: None,
+        action: ThenSpec::InlineCommand {
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+        },
+        cooldown_ms: None,
+        reflection_max_rounds: None,
+        on_error: None,
+    }
+}
+
+#[test]
+fn unique_priorities_ok() {
+    let rules = vec![
+        make_rule(1, "a"),
+        make_rule(2, "b"),
+        make_rule(3, "c"),
+    ];
+    assert!(validate_unique_priorities(&rules).is_ok());
+}
+
+#[test]
+fn duplicate_priority_fails() {
+    let rules = vec![
+        make_rule(1, "a"),
+        make_rule(2, "b"),
+        make_rule(1, "c"),
+    ];
+    let err = validate_unique_priorities(&rules).unwrap_err();
+    assert!(matches!(err, ParseError::DuplicatePriority { priority: 1 }));
 }
 
 // ── validate_bundle integration ─────────────────────────────────────────────

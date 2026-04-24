@@ -362,6 +362,80 @@ fn when_desugars_to_when_node() {
     }
 }
 
+#[test]
+fn when_on_error_escalate_desugars_to_selector() {
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![decision_dsl::ast::RuleSpec {
+            priority: 1,
+            name: "rule1".into(),
+            condition: None,
+            action: ThenSpec::When(Box::new(WhenSpec {
+                name: "when1".into(),
+                condition: Evaluator::VariableIs {
+                    key: "x".into(),
+                    expected: BlackboardValue::Boolean(true),
+                },
+                then: ThenSpec::InlineCommand {
+                    command: DecisionCommand::Agent(AgentCommand::WakeUp),
+                },
+                on_error: Some(OnError::Escalate),
+            })),
+            cooldown_ms: None,
+            reflection_max_rounds: None,
+            on_error: None,
+        }],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        // Should be Selector wrapping WhenNode + Escalate fallback
+        assert!(matches!(rule_node, Node::Selector(_)));
+        if let Node::Selector(err_sel) = rule_node {
+            assert_eq!(err_sel.children.len(), 2);
+            assert!(matches!(err_sel.children[0], Node::When(_)));
+            assert!(matches!(err_sel.children[1], Node::Action(_)));
+        }
+    }
+}
+
+#[test]
+fn when_on_error_retry_desugars_to_repeater() {
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![decision_dsl::ast::RuleSpec {
+            priority: 1,
+            name: "rule1".into(),
+            condition: None,
+            action: ThenSpec::When(Box::new(WhenSpec {
+                name: "when1".into(),
+                condition: Evaluator::VariableIs {
+                    key: "x".into(),
+                    expected: BlackboardValue::Boolean(true),
+                },
+                then: ThenSpec::InlineCommand {
+                    command: DecisionCommand::Agent(AgentCommand::WakeUp),
+                },
+                on_error: Some(OnError::Retry),
+            })),
+            cooldown_ms: None,
+            reflection_max_rounds: None,
+            on_error: None,
+        }],
+    };
+    let tree = doc.desugar().unwrap();
+    if let Node::Selector(sel) = tree.spec.root {
+        let rule_node = &sel.children[0];
+        assert!(matches!(rule_node, Node::Repeater(_)));
+        if let Node::Repeater(rep) = rule_node {
+            assert_eq!(rep.max_attempts, 2);
+            assert!(matches!(rep.child.as_ref(), Node::When(_)));
+        }
+    }
+}
+
 // ── Pipeline desugaring ─────────────────────────────────────────────────────
 
 #[test]

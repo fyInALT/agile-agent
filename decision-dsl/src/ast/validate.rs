@@ -110,6 +110,20 @@ fn detect_cycle_in_node(
     None
 }
 
+// ── validate_unique_priorities ─────────────────────────────────────────────
+
+pub fn validate_unique_priorities(rules: &[super::document::RuleSpec]) -> Result<(), ParseError> {
+    let mut seen = HashSet::new();
+    for rule in rules {
+        if !seen.insert(rule.priority) {
+            return Err(ParseError::DuplicatePriority {
+                priority: rule.priority,
+            });
+        }
+    }
+    Ok(())
+}
+
 // ── validate_bundle ─────────────────────────────────────────────────────────
 
 pub fn validate_bundle(bundle: &Bundle) -> Result<(), ParseError> {
