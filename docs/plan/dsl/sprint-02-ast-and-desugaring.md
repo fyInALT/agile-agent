@@ -1,0 +1,240 @@
+# Sprint 2: AST & Desugaring
+
+## Metadata
+
+- Sprint ID: `dsl-sprint-02`
+- Title: `AST & Desugaring`
+- Duration: 2 weeks
+- Priority: P0 (Critical)
+- Status: `Backlog`
+- Created: 2026-04-20
+
+## Sprint Goal
+
+Build the complete AST data model, YAML parser, and desugaring pass. DecisionRules YAML compiles to BehaviorTree AST; BehaviorTree and SubTree YAML parse directly. All documents are validated at load time.
+
+## Dependencies
+
+- **Sprint 1** (`dsl-sprint-01`): Blackboard, Command enum, Error types, External traits.
+
+## Non-goals
+
+- No evaluator or parser implementation (Sprint 3).
+- No template engine (Sprint 3).
+- No execution engine (Sprint 4).
+- No hot reload (Sprint 5).
+
+---
+
+## Stories
+
+### Story 2.1: AST Data Model
+
+**Priority**: P0
+**Effort**: 5 points
+**Status**: Backlog
+
+Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost node behavior abstraction.
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T2.1.1 | Define `Tree`, `Metadata`, `Spec`, `Bundle` structs | Todo | - |
+| T2.1.2 | Define `TreeKind` enum (`BehaviorTree`, `SubTree`) | Todo | - |
+| T2.1.3 | Define `NodeBehavior` trait with `enum_dispatch` | Todo | - |
+| T2.1.4 | Define `Node` enum with 14 variants | Todo | - |
+| T2.1.5 | Define all node-specific structs with serde attributes | Todo | - |
+| T2.1.6 | Mark runtime-state fields with `#[serde(skip)]` | Todo | - |
+| T2.1.7 | Add `#[serde(rename = "...")]` for camelCase YAML fields | Todo | - |
+| T2.1.8 | Define `SetMapping` struct | Todo | - |
+| T2.1.9 | Define `ParallelPolicy` enum | Todo | - |
+| T2.1.10 | Write unit tests for Node serialization round-trip | Todo | - |
+
+#### Acceptance Criteria
+
+- `Node` enum derives `Clone`, `Debug`, and serde traits.
+- `enum_dispatch` auto-generates match arms for `tick`, `reset`, `name`, `children`.
+- Runtime fields (`active_child`, `pending`, `sent_at`, `last_success`, `current`, `resolved_root`) are skipped during serde.
+
+#### Technical Notes
+
+```rust
+#[enum_dispatch]
+pub(crate) trait NodeBehavior {
+    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError>;
+    fn reset(&mut self);
+    fn name(&self) -> &str;
+    fn children(&self) -> Vec<&Node>;
+    fn children_mut(&mut self) -> Vec<&mut Node>;
+}
+
+#[enum_dispatch(NodeBehavior)]
+pub(crate) enum Node {
+    Selector(SelectorNode),
+    Sequence(SequenceNode),
+    Parallel(ParallelNode),
+    Inverter(InverterNode),
+    Repeater(RepeaterNode),
+    Cooldown(CooldownNode),
+    ReflectionGuard(ReflectionGuardNode),
+    ForceHuman(ForceHumanNode),
+    When(WhenNode),
+    Condition(ConditionNode),
+    Action(ActionNode),
+    Prompt(PromptNode),
+    SetVar(SetVarNode),
+    SubTree(SubTreeNode),
+}
+```
+
+---
+
+### Story 2.2: YAML Parser & DslDocument
+
+**Priority**: P0
+**Effort**: 5 points
+**Status**: Backlog
+
+Implement the YAML parser that produces `DslDocument` (a parse-time representation mirroring raw YAML).
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T2.2.1 | Define `DslParser` trait (`parse_document`, `parse_bundle`) | Todo | - |
+| T2.2.2 | Define `DslDocument` enum (`DecisionRules`, `BehaviorTree`, `SubTree`) | Todo | - |
+| T2.2.3 | Define `RuleSpec` struct with serde renames | Todo | - |
+| T2.2.4 | Define `ThenSpec` enum (`InlineCommand`, `Switch`, `When`, `Pipeline`, `SubTree`) | Todo | - |
+| T2.2.5 | Define `SwitchSpec`, `SwitchOn`, `WhenSpec`, `PipelineSpec` | Todo | - |
+| T2.2.6 | Define `OnError` enum (`Skip`, `Escalate`, `Retry`) | Todo | - |
+| T2.2.7 | Implement `YamlParser` struct with evaluator/parser registries | Todo | - |
+| T2.2.8 | Implement `parse_document` using `serde_yaml` | Todo | - |
+| T2.2.9 | Implement `parse_bundle` using `Fs` trait | Todo | - |
+| T2.2.10 | Write unit tests for DecisionRules parsing | Todo | - |
+| T2.2.11 | Write unit tests for BehaviorTree parsing | Todo | - |
+| T2.2.12 | Write unit tests for SubTree parsing | Todo | - |
+
+#### Acceptance Criteria
+
+- `YamlParser::parse_document` handles all three `kind` values.
+- `serde(rename = "...")` correctly maps camelCase YAML to snake_case Rust.
+- `parse_bundle` recursively reads `rules.d/`, `trees/`, `subtrees/` directories.
+
+#### Technical Notes
+
+```rust
+pub trait DslParser {
+    fn parse_document(&self, yaml: &str) -> Result<DslDocument, ParseError>;
+    fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError>;
+}
+
+pub struct YamlParser {
+    pub evaluator_registry: EvaluatorRegistry,
+    pub parser_registry: OutputParserRegistry,
+}
+```
+
+---
+
+### Story 2.3: Desugaring Pass
+
+**Priority**: P0
+**Effort**: 5 points
+**Status**: Backlog
+
+Implement the desugaring pass that compiles high-level constructs to low-level BehaviorTree AST nodes.
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T2.3.1 | Implement `DslDocument::desugar()` entry point | Todo | - |
+| T2.3.2 | Implement `desugar_rule` (Sequence + Condition + decorators + on_error) | Todo | - |
+| T2.3.3 | Implement `desugar_then` (InlineCommand, Switch, When, Pipeline, SubTree) | Todo | - |
+| T2.3.4 | Implement `desugar_switch` for `SwitchOn::Prompt` (Sequence + Prompt + Selector) | Todo | - |
+| T2.3.5 | Implement `desugar_switch` for `SwitchOn::Variable` (Selector + When) | Todo | - |
+| T2.3.6 | Handle `result_key` configuration in Switch prompt desugaring | Todo | - |
+| T2.3.7 | Handle `default` case in Switch (any ThenSpec, not just command) | Todo | - |
+| T2.3.8 | Implement `desugar_when` | Todo | - |
+| T2.3.9 | Implement `desugar_pipeline` | Todo | - |
+| T2.3.10 | Add automatic `NoMatchFallback` (`ApproveAndContinue`) to DecisionRules | Todo | - |
+| T2.3.11 | Write unit tests for DecisionRules → Selector desugaring | Todo | - |
+| T2.3.12 | Write unit tests for Switch prompt desugaring | Todo | - |
+| T2.3.13 | Write unit tests for on_error wrapping (Escalate, Retry, Skip) | Todo | - |
+
+#### Acceptance Criteria
+
+- `DecisionRules` desugars to `Selector(children..., NoMatchFallback)`.
+- Decorator wrapping order: `Cooldown` (outer) → `ReflectionGuard` → `on_error` (inner).
+- `Switch on Prompt` produces `Sequence(Prompt, Selector(When...))`.
+- `_default` supports nested Switch / When / Pipeline.
+
+#### Technical Notes
+
+Desugaring table:
+
+| High-Level Construct | Desugars To |
+|---------------------|-------------|
+| `DecisionRules { rules }` | `Selector(rule[1], ..., rule[n], NoMatchFallback)` |
+| `Rule { if, then }` | `Sequence(Condition(if), then.desugar())` |
+| `Rule { ..., cooldownMs }` | `Cooldown(...)` |
+| `Rule { ..., reflectionMaxRounds }` | `ReflectionGuard(...)` |
+| `Rule { ..., on_error: escalate }` | `Selector(Rule.desugar(), Action(EscalateToHuman))` |
+| `Rule { ..., on_error: retry }` | `Repeater(2, Rule.desugar())` |
+| `Switch on Prompt` | `Sequence(Prompt, Selector(When..., Default))` |
+| `Switch on Variable` | `Selector(When..., Default)` |
+| `When { if, then }` | `WhenNode(condition, then.desugar())` |
+| `Pipeline { steps }` | `Sequence(Condition/Action...)` |
+
+---
+
+### Story 2.4: Validation
+
+**Priority**: P1
+**Effort**: 3 points
+**Status**: Backlog
+
+Implement load-time validation to reject invalid DSL before execution.
+
+#### Tasks
+
+| ID | Task | Status | Assignee |
+|----|------|--------|----------|
+| T2.4.1 | Implement `validate_api_version` (reject unknown versions) | Todo | - |
+| T2.4.2 | Implement `validate_unique_names` within a tree | Todo | - |
+| T2.4.3 | Implement `validate_unique_priorities` for DecisionRules | Todo | - |
+| T2.4.4 | Implement `validate_evaluators` (all `kind` values registered) | Todo | - |
+| T2.4.5 | Implement `validate_parsers` (all `kind` values registered) | Todo | - |
+| T2.4.6 | Implement `validate_subtree_refs` (all refs resolve in Bundle) | Todo | - |
+| T2.4.7 | Implement `detect_circular_subtree_refs` | Todo | - |
+| T2.4.8 | Integrate validation into `parse_bundle` pipeline | Todo | - |
+| T2.4.9 | Write unit tests for each validation rule | Todo | - |
+
+#### Acceptance Criteria
+
+- Duplicate node names produce `ParseError::DuplicateName`.
+- Circular SubTree references produce `ParseError::CircularSubTreeRef`.
+- Unknown evaluator kind produces `ParseError::UnknownEvaluatorKind`.
+- Validation runs before desugaring in `parse_bundle`.
+
+#### Technical Notes
+
+Validation order:
+1. YAML syntax check
+2. apiVersion check
+3. Name uniqueness check
+4. Priority uniqueness check (DecisionRules)
+5. Evaluator kind registration check
+6. Parser kind registration check
+7. SubTree reference resolution check
+8. Circular reference detection
+
+---
+
+## Sprint Completion Criteria
+
+- [ ] `cargo check` passes for the `decision-dsl` crate.
+- [ ] `cargo test --lib` passes with ≥90% coverage on parser and AST modules.
+- [ ] All desugaring paths have unit tests with structural assertions.
+- [ ] Invalid DSL documents are rejected with clear `ParseError` messages.
