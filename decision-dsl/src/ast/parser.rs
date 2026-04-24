@@ -96,9 +96,9 @@ impl DslParser for YamlParser {
                 if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     let content = fs.read_to_string(&path)?;
                     let doc = self.parse_document(&content)?;
-                    if let DslDocument::BehaviorTree { metadata, root, .. } = doc {
+                    if let DslDocument::BehaviorTree { api_version, metadata, root, .. } = doc {
                         let tree = Tree {
-                            api_version: "decision.agile-agent.io/v1".into(),
+                            api_version,
                             kind: TreeKind::BehaviorTree,
                             metadata: metadata.clone(),
                             spec: super::document::Spec { root },
@@ -116,9 +116,9 @@ impl DslParser for YamlParser {
                 if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     let content = fs.read_to_string(&path)?;
                     let doc = self.parse_document(&content)?;
-                    if let DslDocument::SubTree { metadata, root, .. } = doc {
+                    if let DslDocument::SubTree { api_version, metadata, root, .. } = doc {
                         let tree = Tree {
-                            api_version: "decision.agile-agent.io/v1".into(),
+                            api_version,
                             kind: TreeKind::SubTree,
                             metadata: metadata.clone(),
                             spec: super::document::Spec { root },
@@ -167,6 +167,7 @@ impl DslParser for YamlParser {
             }
         }
 
+        super::validate::validate_bundle(&bundle)?;
         Ok(bundle)
     }
 }

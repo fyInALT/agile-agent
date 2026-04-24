@@ -4,12 +4,17 @@ pub mod eval;
 pub mod node;
 pub mod parser;
 pub mod parser_out;
+pub mod validate;
 
 pub use document::{
     Bundle, DslDocument, Metadata, OnError, PipelineSpec, PipelineStep, RuleSpec, Spec, SwitchOn,
     SwitchSpec, ThenSpec, Tree, TreeKind, WhenSpec,
 };
 pub use parser::{DslParser, YamlParser};
+pub use validate::{
+    detect_circular_subtree_refs, validate_api_version, validate_bundle, validate_subtree_refs,
+    validate_unique_names,
+};
 pub use eval::{Evaluator, EvaluatorRegistry};
 pub use node::{
     ActionNode, ConditionNode, CooldownNode, ForceHumanNode, InverterNode, Node, NodeBehavior,
