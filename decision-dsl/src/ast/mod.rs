@@ -1,3 +1,4 @@
+pub mod desugar;
 pub mod document;
 pub mod eval;
 pub mod node;
