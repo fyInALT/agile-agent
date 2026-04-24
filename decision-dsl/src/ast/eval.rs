@@ -5,6 +5,7 @@ use crate::ext::blackboard::BlackboardValue;
 
 /// Evaluator placeholder — full implementation in Sprint 3.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum Evaluator {
     OutputContains {
         pattern: String,

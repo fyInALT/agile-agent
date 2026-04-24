@@ -75,6 +75,7 @@ pub struct RuleSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum ThenSpec {
     InlineCommand { command: crate::ext::command::DecisionCommand },
     Switch(SwitchSpec),
@@ -86,7 +87,7 @@ pub enum ThenSpec {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OnError {
     Skip,
     Escalate,
@@ -135,6 +136,7 @@ pub struct PipelineSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum PipelineStep {
     Guard { condition: Evaluator },
     Action { command: crate::ext::command::DecisionCommand },

@@ -28,6 +28,7 @@ pub trait NodeBehavior {
 // ── Node enum ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum Node {
     Selector(SelectorNode),
     Sequence(SequenceNode),

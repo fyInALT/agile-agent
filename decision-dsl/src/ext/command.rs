@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 // ── DecisionCommand (grouped) ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub enum DecisionCommand {
     Agent(AgentCommand),
     Git(GitCommand, Option<String>),

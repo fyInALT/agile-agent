@@ -99,6 +99,12 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+impl From<super::traits::FsError> for ParseError {
+    fn from(err: super::traits::FsError) -> Self {
+        ParseError::YamlSyntax(err.to_string())
+    }
+}
+
 impl From<serde_yaml::Error> for ParseError {
     fn from(e: serde_yaml::Error) -> Self {
         ParseError::YamlSyntax(e.to_string())
