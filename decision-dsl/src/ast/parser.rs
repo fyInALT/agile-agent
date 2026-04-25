@@ -157,6 +157,9 @@ impl DslParser for YamlParser {
                     name: format!("{}_root", md.name),
                     children: vec![],
                     active_child: None,
+                    rule_name: None,
+                    rule_priority: None,
+                    matched: false,
                 });
                 let tree = Tree {
                     api_version: av,

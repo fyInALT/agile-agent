@@ -32,13 +32,29 @@ impl DslReloader {
         })
     }
 
+    /// Get the most recent modification time across all monitored directories.
+    fn get_latest_modified(&self) -> Option<SystemTime> {
+        let dirs = [
+            self.dir.join("trees"),
+            self.dir.join("subtrees"),
+            self.dir.join("rules.d"),
+        ];
+
+        let mut latest: Option<SystemTime> = None;
+        for dir in &dirs {
+            if let Ok(t) = self.fs.modified(dir) {
+                latest = Some(latest.map_or(t, |l| if t > l { t } else { l }));
+            }
+        }
+        latest
+    }
+
     /// Check if the underlying files have changed and reload if so.
     /// Returns `true` if a reload occurred.
     pub fn check_and_reload(&mut self) -> Result<bool, DslError> {
-        let trees_dir = self.dir.join("trees");
-        let current_modified = match self.fs.modified(&trees_dir) {
-            Ok(t) => t,
-            Err(_) => return Ok(false),
+        let current_modified = match self.get_latest_modified() {
+            Some(t) => t,
+            None => return Ok(false),
         };
 
         let changed = self

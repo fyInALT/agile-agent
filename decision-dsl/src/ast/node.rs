@@ -54,11 +54,22 @@ pub struct SelectorNode {
     pub children: Vec<Node>,
     #[serde(skip)]
     pub active_child: Option<usize>,
+    /// Rule name for DecisionRules selectors (used to emit RuleMatched/RulesSkipped trace events).
+    #[serde(skip)]
+    pub rule_name: Option<String>,
+    /// Rule priority for DecisionRules selectors (used to emit RuleMatched trace event).
+    #[serde(skip)]
+    pub rule_priority: Option<u32>,
+    /// Whether RuleMatched has already been emitted for the current tick cycle.
+    /// Cleared on selector reset.
+    #[serde(skip)]
+    pub matched: bool,
 }
 
 impl NodeBehavior for SelectorNode {
     fn reset(&mut self) {
         self.active_child = None;
+        self.matched = false;
         for child in &mut self.children {
             child.reset();
         }
@@ -112,10 +123,13 @@ pub struct ParallelNode {
     pub name: String,
     pub policy: ParallelPolicy,
     pub children: Vec<Node>,
+    #[serde(skip)]
+    pub active_child: Option<usize>,
 }
 
 impl NodeBehavior for ParallelNode {
     fn reset(&mut self) {
+        self.active_child = None;
         for child in &mut self.children {
             child.reset();
         }

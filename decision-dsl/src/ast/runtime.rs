@@ -300,13 +300,31 @@ fn tick_selector(
         match status {
             NodeStatus::Success => {
                 node.active_child = None;
+                if let Some(ref rule_name) = node.rule_name {
+                    if !node.matched {
+                        tracer.record_rule_matched(rule_name, node.rule_priority.unwrap_or(0));
+                        node.matched = true;
+                    }
+                    // Record skipped rules without executing them
+                    for _j in (i + 1)..node.children.len() {
+                        tracer.record_rule_skipped(rule_name, "lower priority rule not evaluated");
+                    }
+                }
                 return Ok(NodeStatus::Success);
             }
             NodeStatus::Running => {
                 node.active_child = Some(i);
                 return Ok(NodeStatus::Running);
             }
-            NodeStatus::Failure => continue,
+            NodeStatus::Failure => {
+                // Record skipped rules without executing them
+                if let Some(ref rule_name) = node.rule_name {
+                    for _j in (i + 1)..node.children.len() {
+                        tracer.record_rule_skipped(rule_name, "rule failed, trying next");
+                    }
+                }
+                continue;
+            }
         }
     }
     node.active_child = None;
@@ -448,20 +466,101 @@ fn tick_parallel(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // In a single-threaded tick model, we tick all children each cycle.
+    // For true concurrency, all children would tick simultaneously.
+    // Here we tick sequentially but treat results as concurrent.
     let mut successes = 0;
     let mut failures = 0;
+    let mut running = 0;
     let total = node.children.len();
 
-    for (i, child) in node.children.iter_mut().enumerate() {
+    for i in 0..total {
         tracer.enter(&node.name, i);
-        let status = child.tick(ctx, tracer)?;
+        let status = node.children[i].tick(ctx, tracer)?;
         tracer.exit(&node.name, i, status);
         match status {
             NodeStatus::Success => successes += 1,
             NodeStatus::Failure => failures += 1,
-            NodeStatus::Running => {}
+            NodeStatus::Running => running += 1,
         }
     }
+
+    node.active_child = None;
+
+    match node.policy {
+        ParallelPolicy::AllSuccess => {
+            if successes == total {
+                Ok(NodeStatus::Success)
+            } else if failures > 0 {
+                // Any failure means total failure for AllSuccess policy
+                Ok(NodeStatus::Failure)
+            } else if running > 0 {
+                Ok(NodeStatus::Running)
+            } else {
+                // All finished but not all success
+                Ok(NodeStatus::Failure)
+            }
+        }
+        ParallelPolicy::AnySuccess => {
+            if successes > 0 {
+                Ok(NodeStatus::Success)
+            } else if failures == total {
+                Ok(NodeStatus::Failure)
+            } else if running > 0 {
+                Ok(NodeStatus::Running)
+            } else {
+                // No success, no running, but not all failures
+                Ok(NodeStatus::Failure)
+            }
+        }
+        ParallelPolicy::Majority => {
+            let threshold = total / 2 + 1;
+            if successes >= threshold {
+                Ok(NodeStatus::Success)
+            } else if failures > total / 2 {
+                Ok(NodeStatus::Failure)
+            } else if running > 0 {
+                Ok(NodeStatus::Running)
+            } else {
+                // Not enough success or failure, and nothing running
+                Ok(NodeStatus::Failure)
+            }
+        }
+    }
+}
+
+fn resume_parallel(
+    node: &mut ParallelNode,
+    path: &[usize],
+    depth: usize,
+    ctx: &mut TickContext,
+    tracer: &mut Tracer,
+) -> Result<NodeStatus, RuntimeError> {
+    // Resume by ticking all children. The path indicates which child
+    // was deepest in the running state, but for concurrent semantics,
+    // we tick all children.
+    let mut successes = 0;
+    let mut failures = 0;
+    let mut running = 0;
+    let total = node.children.len();
+
+    for i in 0..total {
+        tracer.enter(&node.name, i);
+        let status = if i == path.get(depth).copied().unwrap_or(0) && depth + 1 < path.len() {
+            // Resume the specific child that was running
+            node.children[i].resume_at(path, depth + 1, ctx, tracer)?
+        } else {
+            node.children[i].tick(ctx, tracer)?
+        };
+        tracer.exit(&node.name, i, status);
+        match status {
+            NodeStatus::Success => successes += 1,
+            NodeStatus::Failure => failures += 1,
+            NodeStatus::Running => running += 1,
+        }
+    }
+
+    node.active_child = None;
 
     match node.policy {
         ParallelPolicy::AllSuccess => {
@@ -469,8 +568,10 @@ fn tick_parallel(
                 Ok(NodeStatus::Success)
             } else if failures > 0 {
                 Ok(NodeStatus::Failure)
-            } else {
+            } else if running > 0 {
                 Ok(NodeStatus::Running)
+            } else {
+                Ok(NodeStatus::Failure)
             }
         }
         ParallelPolicy::AnySuccess => {
@@ -478,8 +579,10 @@ fn tick_parallel(
                 Ok(NodeStatus::Success)
             } else if failures == total {
                 Ok(NodeStatus::Failure)
-            } else {
+            } else if running > 0 {
                 Ok(NodeStatus::Running)
+            } else {
+                Ok(NodeStatus::Failure)
             }
         }
         ParallelPolicy::Majority => {
@@ -488,65 +591,10 @@ fn tick_parallel(
                 Ok(NodeStatus::Success)
             } else if failures > total / 2 {
                 Ok(NodeStatus::Failure)
-            } else {
+            } else if running > 0 {
                 Ok(NodeStatus::Running)
-            }
-        }
-    }
-}
-
-fn resume_parallel(
-    _node: &mut ParallelNode,
-    _path: &[usize],
-    _depth: usize,
-    ctx: &mut TickContext,
-    tracer: &mut Tracer,
-) -> Result<NodeStatus, RuntimeError> {
-    // Parallel doesn't store running state per child, so we just re-tick all children
-    // For simplicity in resume, we re-run the whole parallel node
-    // This is acceptable because parallel children are independent
-    let mut successes = 0;
-    let mut failures = 0;
-    let total = _node.children.len();
-
-    for (i, child) in _node.children.iter_mut().enumerate() {
-        tracer.enter(&_node.name, i);
-        let status = child.tick(ctx, tracer)?;
-        tracer.exit(&_node.name, i, status);
-        match status {
-            NodeStatus::Success => successes += 1,
-            NodeStatus::Failure => failures += 1,
-            NodeStatus::Running => {}
-        }
-    }
-
-    match _node.policy {
-        ParallelPolicy::AllSuccess => {
-            if successes == total {
-                Ok(NodeStatus::Success)
-            } else if failures > 0 {
+            } else {
                 Ok(NodeStatus::Failure)
-            } else {
-                Ok(NodeStatus::Running)
-            }
-        }
-        ParallelPolicy::AnySuccess => {
-            if successes > 0 {
-                Ok(NodeStatus::Success)
-            } else if failures == total {
-                Ok(NodeStatus::Failure)
-            } else {
-                Ok(NodeStatus::Running)
-            }
-        }
-        ParallelPolicy::Majority => {
-            let threshold = total / 2 + 1;
-            if successes >= threshold {
-                Ok(NodeStatus::Success)
-            } else if failures > total / 2 {
-                Ok(NodeStatus::Failure)
-            } else {
-                Ok(NodeStatus::Running)
             }
         }
     }
@@ -598,11 +646,16 @@ fn tick_repeater(
                     node.current = 0;
                     return Ok(NodeStatus::Success);
                 }
+                // Continue retrying
             }
             NodeStatus::Running => return Ok(NodeStatus::Running),
             NodeStatus::Failure => {
-                node.current = 0;
-                return Ok(NodeStatus::Failure);
+                node.current += 1;
+                if node.current >= node.max_attempts {
+                    node.current = 0;
+                    return Ok(NodeStatus::Failure);
+                }
+                // Continue retrying
             }
         }
     }
@@ -631,8 +684,14 @@ fn resume_repeater(
         }
         NodeStatus::Running => Ok(NodeStatus::Running),
         NodeStatus::Failure => {
-            node.current = 0;
-            Ok(NodeStatus::Failure)
+            node.current += 1;
+            if node.current >= node.max_attempts {
+                node.current = 0;
+                Ok(NodeStatus::Failure)
+            } else {
+                // Continue retrying
+                tick_repeater(node, ctx, tracer)
+            }
         }
     }
 }
@@ -765,6 +824,10 @@ fn resume_when(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // Re-check condition on resume - if it changed, abort
+    if !node.condition.evaluate(ctx.blackboard)? {
+        return Ok(NodeStatus::Failure);
+    }
     node.action.resume_at(path, depth, ctx, tracer)
 }
 

@@ -35,12 +35,15 @@ impl DslDocument {
                 Ok(Tree {
                     api_version,
                     kind: TreeKind::BehaviorTree,
-                    metadata,
+                    metadata: metadata.clone(),
                     spec: Spec {
                         root: Node::Selector(SelectorNode {
                             name: root_name,
                             children,
                             active_child: None,
+                            rule_name: Some(metadata.name.clone()),
+                            rule_priority: None,
+                            matched: false,
                         }),
                     },
                 })
@@ -105,6 +108,9 @@ fn desugar_rule(rule: RuleSpec, registry: &EvaluatorRegistry) -> Result<Node, Pa
                 }),
             ],
             active_child: None,
+            rule_name: None,
+            rule_priority: None,
+            matched: false,
         }),
         Some(OnError::Retry) => Node::Repeater(RepeaterNode {
             name: format!("{}_retry", rule.name),
@@ -205,6 +211,9 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                         name: format!("{}_branch", switch.name),
                         children: case_nodes,
                         active_child: None,
+                        rule_name: None,
+                        rule_priority: None,
+                        matched: false,
                     }),
                 ],
                 active_child: None,
@@ -230,6 +239,9 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                 name: format!("{}_branch", switch.name),
                 children: case_nodes,
                 active_child: None,
+                rule_name: None,
+                rule_priority: None,
+                matched: false,
             }))
         }
     }
@@ -257,6 +269,9 @@ fn desugar_when(when: WhenSpec, registry: &EvaluatorRegistry) -> Result<Node, Pa
                 }),
             ],
             active_child: None,
+            rule_name: None,
+            rule_priority: None,
+            matched: false,
         }),
         Some(OnError::Retry) => Node::Repeater(RepeaterNode {
             name: format!("{}_retry", when.name),

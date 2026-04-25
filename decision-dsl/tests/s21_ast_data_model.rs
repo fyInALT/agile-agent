@@ -39,6 +39,9 @@ fn node_selector() {
         name: "sel".into(),
         children: vec![],
         active_child: None,
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
     });
     assert_eq!(n.name(), "sel");
 }
@@ -59,6 +62,7 @@ fn node_parallel() {
         name: "par".into(),
         policy: ParallelPolicy::AllSuccess,
         children: vec![],
+        active_child: None,
     });
     assert_eq!(n.name(), "par");
 }
@@ -227,6 +231,9 @@ fn selector_children() {
         name: "sel".into(),
         children: vec![child.clone()],
         active_child: None,
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
     });
     let kids = n.children();
     assert_eq!(kids.len(), 1);
@@ -267,6 +274,9 @@ fn selector_reset_clears_active_child() {
         name: "sel".into(),
         children: vec![],
         active_child: Some(0),
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
     });
     n.reset();
     if let Node::Selector(ref s) = n {

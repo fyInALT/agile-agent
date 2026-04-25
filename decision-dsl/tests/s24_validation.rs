@@ -56,6 +56,9 @@ fn unique_names_ok() {
                 name: "sel".into(),
                 children: vec![make_action("a1"), make_action("a2")],
                 active_child: None,
+                rule_name: None,
+                rule_priority: None,
+                matched: false,
             }),
         },
     };
@@ -73,6 +76,9 @@ fn duplicate_names_fails() {
                 name: "sel".into(),
                 children: vec![make_action("dup"), make_action("dup")],
                 active_child: None,
+                rule_name: None,
+                rule_priority: None,
+                matched: false,
             }),
         },
     };
