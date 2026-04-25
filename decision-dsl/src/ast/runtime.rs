@@ -318,12 +318,6 @@ fn tick_selector(
                 return Ok(NodeStatus::Running);
             }
             NodeStatus::Failure => {
-                // Record skipped rules without executing them
-                if let Some(ref rule_name) = node.rule_name {
-                    for _j in (i + 1)..node.children.len() {
-                        tracer.record_rule_skipped(rule_name, "rule failed, trying next");
-                    }
-                }
                 continue;
             }
         }
@@ -350,11 +344,20 @@ fn resume_selector(
     match status {
         NodeStatus::Success => {
             node.active_child = None;
+            if let Some(ref rule_name) = node.rule_name {
+                if !node.matched {
+                    tracer.record_rule_matched(rule_name, node.rule_priority.unwrap_or(0));
+                    node.matched = true;
+                }
+                // Record skipped for remaining children that were never tried
+                for _j in (child_idx + 1)..node.children.len() {
+                    tracer.record_rule_skipped(rule_name, "lower priority rule not evaluated");
+                }
+            }
             Ok(NodeStatus::Success)
         }
         NodeStatus::Running => {
             node.active_child = Some(child_idx);
-
             Ok(NodeStatus::Running)
         }
         NodeStatus::Failure => {
@@ -366,11 +369,19 @@ fn resume_selector(
                 match s {
                     NodeStatus::Success => {
                         node.active_child = None;
+                        if let Some(ref rule_name) = node.rule_name {
+                            if !node.matched {
+                                tracer.record_rule_matched(rule_name, node.rule_priority.unwrap_or(0));
+                                node.matched = true;
+                            }
+                            for _j in (i + 1)..node.children.len() {
+                                tracer.record_rule_skipped(rule_name, "lower priority rule not evaluated");
+                            }
+                        }
                         return Ok(NodeStatus::Success);
                     }
                     NodeStatus::Running => {
                         node.active_child = Some(i);
-            
                         return Ok(NodeStatus::Running);
                     }
                     NodeStatus::Failure => continue,
