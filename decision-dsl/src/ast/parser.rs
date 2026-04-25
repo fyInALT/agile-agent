@@ -6,9 +6,7 @@ use crate::ext::error::ParseError;
 use crate::ext::traits::Fs;
 
 use super::document::{Bundle, DslDocument, Metadata, Tree, TreeKind};
-use super::eval::EvaluatorRegistry;
 use super::node::Node;
-use super::parser_out::OutputParserRegistry;
 
 // ── DslParser trait ─────────────────────────────────────────────────────────
 
@@ -20,25 +18,13 @@ pub trait DslParser {
 // ── YamlParser ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
-pub struct YamlParser {
-    pub evaluator_registry: EvaluatorRegistry,
-    pub parser_registry: OutputParserRegistry,
-}
+pub struct YamlParser;
 
 impl YamlParser {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_registries(
-        evaluator_registry: EvaluatorRegistry,
-        parser_registry: OutputParserRegistry,
-    ) -> Self {
-        Self {
-            evaluator_registry,
-            parser_registry,
-        }
-    }
 }
 
 // Raw YAML representations for parse_document
