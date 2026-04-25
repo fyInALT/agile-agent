@@ -255,4 +255,9 @@ impl Blackboard {
     pub fn store_llm_response(&mut self, key: &str, value: &str) {
         self.llm_responses.insert(key.to_string(), value.to_string());
     }
+
+    /// Iterate over all scoped variables (outer to inner scope).
+    pub fn iter_variables(&self) -> impl Iterator<Item = (&String, &BlackboardValue)> {
+        self.scopes.iter().flat_map(|scope| scope.iter())
+    }
 }
