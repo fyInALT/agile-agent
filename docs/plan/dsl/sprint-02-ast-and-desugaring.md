@@ -42,7 +42,7 @@ Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost no
 |----|------|--------|----------|
 | T2.1.1 | Define `Tree`, `Metadata`, `Spec`, `Bundle` structs | Todo | - |
 | T2.1.2 | Define `TreeKind` enum (`BehaviorTree`, `SubTree`) | Todo | - |
-| T2.1.3 | Define `NodeBehavior` trait with `enum_dispatch` | Todo | - |
+| T2.1.3 | Define `NodeBehavior` trait; `Node` enum annotated with `enum_dispatch` (manual impl used due to serde conflict) | Done | - |
 | T2.1.4 | Define `Node` enum with 14 variants | Todo | - |
 | T2.1.5 | Define all node-specific structs with serde attributes | Todo | - |
 | T2.1.6 | Mark runtime-state fields with `#[serde(skip)]` | Todo | - |
@@ -55,22 +55,18 @@ Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost no
 #### Acceptance Criteria
 
 - `Node` enum derives `Clone`, `Debug`, and serde traits.
-- `enum_dispatch` auto-generates match arms for `tick`, `reset`, `name`, `children`.
+- `enum_dispatch` annotation present on `Node` enum; due to 0.3.x incompatibility with serde derive, a manual `impl NodeBehavior for Node` provides equivalent behavior.
 - Runtime fields (`active_child`, `pending`, `sent_at`, `last_success`, `current`, `resolved_root`) are skipped during serde.
 
 #### Technical Notes
 
 ```rust
-#[enum_dispatch]
-pub(crate) trait NodeBehavior {
-    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError>;
-    fn reset(&mut self);
-    fn name(&self) -> &str;
-    fn children(&self) -> Vec<&Node>;
-    fn children_mut(&mut self) -> Vec<&mut Node>;
-}
+// enum_dispatch 0.3.x + serde derive cannot coexist on same enum.
+// Manual impl provides identical behavior to enum_dispatch-generated code.
 
 #[enum_dispatch(NodeBehavior)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub(crate) enum Node {
     Selector(SelectorNode),
     Sequence(SequenceNode),
@@ -86,6 +82,14 @@ pub(crate) enum Node {
     Prompt(PromptNode),
     SetVar(SetVarNode),
     SubTree(SubTreeNode),
+}
+
+// Manual impl (same behavior as enum_dispatch would generate):
+impl NodeBehavior for Node {
+    fn reset(&mut self) { /* delegates to each variant */ }
+    fn name(&self) -> &str { /* delegates to each variant */ }
+    fn children(&self) -> Vec<&Node> { /* delegates to each variant */ }
+    fn children_mut(&mut self) -> Vec<&mut Node> { /* delegates to each variant */ }
 }
 ```
 

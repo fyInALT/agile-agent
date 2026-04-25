@@ -337,21 +337,18 @@ fn desugar_pipeline(pipeline: PipelineSpec, _registry: &EvaluatorRegistry) -> Re
 
 ### 1.4 Node Enum (Low-Level AST)
 
-The `Node` enum uses `enum_dispatch` to eliminate manual match arms:
+The `Node` enum is annotated with `#[enum_dispatch(NodeBehavior)]` for zero-cost dispatch.
+However, due to a known incompatibility between `enum_dispatch 0.3.x` and `#[derive(Serialize, Deserialize)]`
+on the same enum, the `Node` enum also derives serde traits explicitly alongside the `enum_dispatch` attribute.
+A manual `impl NodeBehavior for Node` provides the same behavior as `enum_dispatch` would generate.
 
 ```rust
-use enum_dispatch::enum_dispatch;
-
-#[enum_dispatch]
-pub(crate) trait NodeBehavior {
-    fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError>;
-    fn reset(&mut self);
-    fn name(&self) -> &str;
-    fn children(&self) -> Vec<&Node>;
-    fn children_mut(&mut self) -> Vec<&mut Node>;
-}
+// Note: enum_dispatch and serde derive cannot coexist on the same enum in 0.3.x
+// Manual impl is used instead — behavior is identical to enum_dispatch-generated code.
 
 #[enum_dispatch(NodeBehavior)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload")]
 pub(crate) enum Node {
     // Composites
     Selector(SelectorNode),
@@ -376,6 +373,14 @@ pub(crate) enum Node {
 
     // Sub-tree reference (identity preserved)
     SubTree(SubTreeNode),
+}
+
+// Manual impl (same behavior as #[enum_dispatch]-generated impl):
+impl NodeBehavior for Node {
+    fn reset(&mut self) { /* delegates to each variant's reset() */ }
+    fn name(&self) -> &str { /* delegates to each variant's name() */ }
+    fn children(&self) -> Vec<&Node> { /* delegates to each variant's children() */ }
+    fn children_mut(&mut self) -> Vec<&mut Node> { /* delegates to each variant's children_mut() */ }
 }
 ```
 
