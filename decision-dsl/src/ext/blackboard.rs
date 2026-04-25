@@ -13,6 +13,7 @@ pub enum BlackboardValue {
     Boolean(bool),
     List(Vec<BlackboardValue>),
     Map(HashMap<String, BlackboardValue>),
+    Command(DecisionCommand),
 }
 
 // ── Supporting types ────────────────────────────────────────────────────────
