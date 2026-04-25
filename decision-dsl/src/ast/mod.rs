@@ -23,4 +23,4 @@ pub use node::{
     SelectorNode, SequenceNode, SetMapping, SetVarNode, SubTreeNode, WhenNode,
 };
 pub use parser_out::{FieldType, OutputParser, OutputParserRegistry, StructuredField};
-pub use template::{render_prompt_template, BlackboardExt};
+pub use template::{render_command_templates, render_prompt_template, BlackboardExt};
