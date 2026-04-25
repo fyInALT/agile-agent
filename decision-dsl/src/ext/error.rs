@@ -122,6 +122,7 @@ pub enum RuntimeError {
     Session { kind: SessionErrorKind, message: String },
     MaxRecursion,
     SubTreeNotResolved { name: String },
+    ScopeDepthExceeded,
     Custom(String),
 }
 
@@ -145,6 +146,7 @@ impl fmt::Display for RuntimeError {
             RuntimeError::SubTreeNotResolved { name } => {
                 write!(f, "subtree '{}' not resolved", name)
             }
+            RuntimeError::ScopeDepthExceeded => write!(f, "maximum scope depth exceeded"),
             RuntimeError::Custom(msg) => write!(f, "{}", msg),
         }
     }
@@ -158,6 +160,12 @@ impl From<SessionError> for RuntimeError {
             kind: e.kind,
             message: e.message,
         }
+    }
+}
+
+impl From<super::blackboard::ScopeError> for RuntimeError {
+    fn from(_e: super::blackboard::ScopeError) -> Self {
+        RuntimeError::ScopeDepthExceeded
     }
 }
 

@@ -265,3 +265,27 @@ fn registry_create_enum_with_params() {
         panic!("expected Enum parser");
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Edge case tests: Null handling
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn json_parser_null_to_blackboard_null() {
+    let parser = OutputParser::Json { schema: None };
+    let result = parser.parse("{\"value\": null}").unwrap();
+    assert_eq!(result.get("value"), Some(&BlackboardValue::Null));
+}
+
+#[test]
+fn json_parser_nested_null() {
+    let parser = OutputParser::Json { schema: None };
+    let result = parser.parse("{\"data\": {\"inner\": null}}").unwrap();
+    let data = result.get("data").unwrap();
+    match data {
+        BlackboardValue::Map(m) => {
+            assert_eq!(m.get("inner"), Some(&BlackboardValue::Null));
+        }
+        _ => panic!("expected Map"),
+    }
+}

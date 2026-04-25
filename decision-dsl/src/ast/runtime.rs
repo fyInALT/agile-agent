@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::ast::node::{
-    ActionNode, ConditionNode, CooldownNode, ForceHumanNode, InverterNode, Node, NodeStatus,
-    ParallelNode, ParallelPolicy, PromptNode, RepeaterNode, ReflectionGuardNode, SelectorNode,
-    SequenceNode, SetVarNode, SubTreeNode, WhenNode,
+    ActionNode, ConditionNode, CooldownNode, ForceHumanNode, InverterNode, Node, NodeBehavior,
+    NodeStatus, ParallelNode, ParallelPolicy, PromptNode, RepeaterNode, ReflectionGuardNode,
+    SelectorNode, SequenceNode, SetVarNode, SubTreeNode, WhenNode,
 };
 use crate::ast::template::{render_command_templates, BlackboardExt};
 use crate::ext::blackboard::Blackboard;
@@ -169,7 +169,7 @@ pub trait DslRunner {
         tree: &mut crate::ast::document::Tree,
         ctx: &mut TickContext,
     ) -> Result<TickResult, RuntimeError>;
-    fn reset(&mut self);
+    fn reset(&mut self, tree: &mut crate::ast::document::Tree);
 }
 
 // ── Executor ────────────────────────────────────────────────────────────────
@@ -223,9 +223,10 @@ impl DslRunner for Executor {
         })
     }
 
-    fn reset(&mut self) {
+    fn reset(&mut self, tree: &mut crate::ast::document::Tree) {
         self.is_running = false;
         self.running_path.clear();
+        tree.spec.root.reset();
     }
 }
 
@@ -466,13 +467,26 @@ fn tick_parallel(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // Edge case: empty children
+    // - AllSuccess: Success (vacuously true - all zero children succeeded)
+    // - AnySuccess: Failure (no child to succeed)
+    // - Majority: Failure (no majority can be achieved)
+    let total = node.children.len();
+    if total == 0 {
+        node.active_child = None;
+        return match node.policy {
+            ParallelPolicy::AllSuccess => Ok(NodeStatus::Success),
+            ParallelPolicy::AnySuccess => Ok(NodeStatus::Failure),
+            ParallelPolicy::Majority => Ok(NodeStatus::Failure),
+        };
+    }
+
     // In a single-threaded tick model, we tick all children each cycle.
     // For true concurrency, all children would tick simultaneously.
     // Here we tick sequentially but treat results as concurrent.
     let mut successes = 0;
     let mut failures = 0;
     let mut running = 0;
-    let total = node.children.len();
 
     for i in 0..total {
         tracer.enter(&node.name, i);
@@ -536,13 +550,23 @@ fn resume_parallel(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // Edge case: empty children
+    let total = node.children.len();
+    if total == 0 {
+        node.active_child = None;
+        return match node.policy {
+            ParallelPolicy::AllSuccess => Ok(NodeStatus::Success),
+            ParallelPolicy::AnySuccess => Ok(NodeStatus::Failure),
+            ParallelPolicy::Majority => Ok(NodeStatus::Failure),
+        };
+    }
+
     // Resume by ticking all children. The path indicates which child
     // was deepest in the running state, but for concurrent semantics,
     // we tick all children.
     let mut successes = 0;
     let mut failures = 0;
     let mut running = 0;
-    let total = node.children.len();
 
     for i in 0..total {
         tracer.enter(&node.name, i);
@@ -637,6 +661,11 @@ fn tick_repeater(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // Edge case: max_attempts=0 means no attempts, immediate failure
+    if node.max_attempts == 0 {
+        return Ok(NodeStatus::Failure);
+    }
+
     while node.current < node.max_attempts {
         let status = node.child.tick(ctx, tracer)?;
         match status {
@@ -670,6 +699,11 @@ fn resume_repeater(
     ctx: &mut TickContext,
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
+    // Edge case: max_attempts=0 means no attempts, immediate failure
+    if node.max_attempts == 0 {
+        return Ok(NodeStatus::Failure);
+    }
+
     let status = node.child.resume_at(path, depth, ctx, tracer)?;
     match status {
         NodeStatus::Success => {
@@ -972,7 +1006,7 @@ fn tick_subtree(
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
     tracer.enter_subtree(&node.name, &node.ref_name);
-    ctx.blackboard.push_scope();
+    ctx.blackboard.push_scope().map_err(|_| RuntimeError::ScopeDepthExceeded)?;
     let status = match &mut node.resolved_root {
         Some(root) => root.tick(ctx, tracer)?,
         None => {
@@ -995,7 +1029,7 @@ fn resume_subtree(
     tracer: &mut Tracer,
 ) -> Result<NodeStatus, RuntimeError> {
     tracer.enter_subtree(&node.name, &node.ref_name);
-    ctx.blackboard.push_scope();
+    ctx.blackboard.push_scope().map_err(|_| RuntimeError::ScopeDepthExceeded)?;
     let status = match &mut node.resolved_root {
         Some(root) => root.resume_at(path, depth, ctx, tracer)?,
         None => {

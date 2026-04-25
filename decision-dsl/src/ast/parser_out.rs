@@ -198,7 +198,7 @@ fn json_to_blackboard(value: serde_json::Value) -> BlackboardValue {
             }
             BlackboardValue::Map(map)
         }
-        serde_json::Value::Null => BlackboardValue::String("".into()),
+        serde_json::Value::Null => BlackboardValue::Null,
     }
 }
 

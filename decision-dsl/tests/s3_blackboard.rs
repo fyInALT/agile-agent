@@ -15,6 +15,7 @@ fn blackboard_value_variants() {
     let _ = BlackboardValue::Boolean(true);
     let _ = BlackboardValue::List(vec![]);
     let _ = BlackboardValue::Map(HashMap::new());
+    let _ = BlackboardValue::Null;
 }
 
 #[test]
@@ -73,7 +74,7 @@ fn scope_isolation() {
     bb.set("x", BlackboardValue::Integer(1));
     assert_eq!(bb.get("x"), Some(&BlackboardValue::Integer(1)));
 
-    bb.push_scope();
+    bb.push_scope().unwrap();
     bb.set("x", BlackboardValue::Integer(2));
     assert_eq!(bb.get("x"), Some(&BlackboardValue::Integer(2)));
 
@@ -85,7 +86,7 @@ fn scope_isolation() {
 fn scope_inner_reads_outer() {
     let mut bb = Blackboard::default();
     bb.set("x", BlackboardValue::Integer(1));
-    bb.push_scope();
+    bb.push_scope().unwrap();
     // Inner scope can read outer scope
     assert_eq!(bb.get("x"), Some(&BlackboardValue::Integer(1)));
 }
@@ -100,7 +101,7 @@ fn scope_pop_does_not_underflow() {
 #[test]
 fn scope_new_variable_in_inner_scope() {
     let mut bb = Blackboard::default();
-    bb.push_scope();
+    bb.push_scope().unwrap();
     bb.set("inner", BlackboardValue::String("val".into()));
     assert_eq!(bb.get("inner"), Some(&BlackboardValue::String("val".into())));
     bb.pop_scope();
@@ -353,4 +354,18 @@ fn decision_record_creation() {
 fn project_rules_default() {
     let pr = ProjectRules::default();
     assert!(pr.rules.is_empty());
+}
+
+#[test]
+fn scope_depth_limit() {
+    use decision_dsl::ext::blackboard::ScopeError;
+    let mut bb = Blackboard::new();
+    // We start with 1 root scope, max is 64, so we can push 63 more
+    for _ in 0..63 {
+        bb.push_scope().unwrap();
+    }
+    // Push one more - should fail (would be scope 65)
+    let result = bb.push_scope();
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), ScopeError::MaxDepthExceeded);
 }

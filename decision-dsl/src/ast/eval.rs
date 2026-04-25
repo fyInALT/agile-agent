@@ -292,20 +292,61 @@ impl<'a> ScriptParser<'a> {
                 "expected string literal".into(),
             ));
         }
-        let start = self.pos;
+        let mut result = String::new();
         while let Some(ch) = self.peek() {
             if ch == '"' {
                 break;
             }
-            self.advance();
+            if ch == '\\' {
+                self.advance(); // consume backslash
+                match self.peek() {
+                    Some('n') => result.push('\n'),
+                    Some('t') => result.push('\t'),
+                    Some('r') => result.push('\r'),
+                    Some('"') => result.push('"'),
+                    Some('\\') => result.push('\\'),
+                    Some('/') => result.push('/'),
+                    Some('u') => {
+                        // Unicode escape: \uXXXX
+                        self.advance();
+                        let hex = &self.input[self.pos..self.pos.min(self.pos + 4)];
+                        if hex.len() < 4 {
+                            return Err(RuntimeError::FilterError(
+                                "invalid unicode escape: expected 4 hex digits".into(),
+                            ));
+                        }
+                        let code = u32::from_str_radix(hex, 16).map_err(|_| {
+                            RuntimeError::FilterError("invalid unicode escape: bad hex digits".into())
+                        })?;
+                        let c = char::from_u32(code).ok_or_else(|| {
+                            RuntimeError::FilterError("invalid unicode escape: invalid code point".into())
+                        })?;
+                        result.push(c);
+                        self.pos += 4;
+                        continue;
+                    }
+                    Some(c) => {
+                        // Unknown escape, keep the character literally
+                        result.push(c);
+                    }
+                    None => {
+                        return Err(RuntimeError::FilterError(
+                            "unterminated escape sequence".into(),
+                        ));
+                    }
+                }
+                self.advance();
+            } else {
+                result.push(ch);
+                self.advance();
+            }
         }
-        let s = self.input[start..self.pos].to_string();
         if !self.consume("\"") {
             return Err(RuntimeError::FilterError(
                 "unterminated string literal".into(),
             ));
         }
-        Ok(s)
+        Ok(result)
     }
 
     fn parse_number(&mut self) -> Result<BlackboardValue, RuntimeError> {
@@ -385,6 +426,7 @@ fn value_as_string(value: &BlackboardValue) -> Result<String, RuntimeError> {
         BlackboardValue::Integer(i) => Ok(i.to_string()),
         BlackboardValue::Float(f) => Ok(f.to_string()),
         BlackboardValue::Boolean(b) => Ok(b.to_string()),
+        BlackboardValue::Null => Ok("".into()),
         _ => Err(RuntimeError::FilterError(
             "expected scalar value".into(),
         )),
@@ -415,15 +457,57 @@ fn compare_values(
             ">=" => Ok(a >= b),
             _ => Err(RuntimeError::FilterError(format!("unknown operator: {op}"))),
         },
-        (BlackboardValue::Float(a), BlackboardValue::Float(b)) => match op {
-            "==" => Ok((a - b).abs() < f64::EPSILON),
-            "!=" => Ok((a - b).abs() >= f64::EPSILON),
-            "<" => Ok(a < b),
-            "<=" => Ok(a <= b),
-            ">" => Ok(a > b),
-            ">=" => Ok(a >= b),
-            _ => Err(RuntimeError::FilterError(format!("unknown operator: {op}"))),
-        },
+        (BlackboardValue::Float(a), BlackboardValue::Float(b)) => {
+            // Handle NaN: NaN comparisons are always false except !=
+            // NaN is not equal to anything, including itself
+            let a_is_nan = a.is_nan();
+            let b_is_nan = b.is_nan();
+            match op {
+                "==" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(false) // NaN never equals anything
+                    } else {
+                        Ok((a - b).abs() < f64::EPSILON)
+                    }
+                }
+                "!=" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(true) // NaN is not equal to anything
+                    } else {
+                        Ok((a - b).abs() >= f64::EPSILON)
+                    }
+                }
+                "<" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(false) // NaN comparisons are false
+                    } else {
+                        Ok(a < b)
+                    }
+                }
+                "<=" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(false)
+                    } else {
+                        Ok(a <= b)
+                    }
+                }
+                ">" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(false)
+                    } else {
+                        Ok(a > b)
+                    }
+                }
+                ">=" => {
+                    if a_is_nan || b_is_nan {
+                        Ok(false)
+                    } else {
+                        Ok(a >= b)
+                    }
+                }
+                _ => Err(RuntimeError::FilterError(format!("unknown operator: {op}"))),
+            }
+        }
         (BlackboardValue::Integer(a), BlackboardValue::Float(_b)) => {
             compare_values(&BlackboardValue::Float(*a as f64), op, right)
         }

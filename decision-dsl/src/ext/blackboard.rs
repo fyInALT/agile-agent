@@ -1,7 +1,27 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 use super::command::DecisionCommand;
+
+/// Maximum depth for scope nesting to prevent stack overflow from bugs or malicious input.
+const MAX_SCOPE_DEPTH: usize = 64;
+
+/// Error type for scope operations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScopeError {
+    MaxDepthExceeded,
+}
+
+impl fmt::Display for ScopeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScopeError::MaxDepthExceeded => write!(f, "maximum scope depth exceeded"),
+        }
+    }
+}
+
+impl std::error::Error for ScopeError {}
 
 // ── BlackboardValue ─────────────────────────────────────────────────────────
 
@@ -14,6 +34,7 @@ pub enum BlackboardValue {
     List(Vec<BlackboardValue>),
     Map(HashMap<String, BlackboardValue>),
     Command(DecisionCommand),
+    Null,
 }
 
 // ── Supporting types ────────────────────────────────────────────────────────
@@ -102,8 +123,14 @@ impl Blackboard {
 
     // --- Scope management ---
 
-    pub fn push_scope(&mut self) {
+    /// Push a new scope onto the stack.
+    /// Returns an error if the maximum scope depth is exceeded.
+    pub fn push_scope(&mut self) -> Result<(), ScopeError> {
+        if self.scopes.len() >= MAX_SCOPE_DEPTH {
+            return Err(ScopeError::MaxDepthExceeded);
+        }
         self.scopes.push(HashMap::new());
+        Ok(())
     }
 
     pub fn pop_scope(&mut self) {

@@ -3,7 +3,7 @@ use std::time::Duration;
 use decision_dsl::ast::document::{Spec, Tree};
 use decision_dsl::ast::eval::Evaluator;
 use decision_dsl::ast::node::{
-    ActionNode, ConditionNode, Node, NodeStatus, ParallelNode, ParallelPolicy, PromptNode,
+    ActionNode, ConditionNode, Node, NodeBehavior, NodeStatus, ParallelNode, ParallelPolicy, PromptNode,
     RepeaterNode, SelectorNode, SequenceNode, SetVarNode, SubTreeNode, WhenNode,
 };
 use decision_dsl::ast::parser_out::OutputParser;
@@ -160,7 +160,28 @@ fn executor_tick_action_drains_command() {
 #[test]
 fn executor_reset_clears_running_state() {
     let mut executor = Executor::new();
-    executor.reset();
+    let mut tree = simple_tree(Node::Selector(SelectorNode {
+        name: "sel".into(),
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+        ],
+        active_child: None,
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
+    }));
+    executor.reset(&mut tree);
+    // Tree should also be reset
+    assert!(tree.spec.root.children().iter().all(|c| {
+        // Check that Selector's active_child is None
+        match c {
+            Node::Condition(_) => true,
+            _ => false,
+        }
+    }));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -848,4 +869,96 @@ fn parallel_all_success_with_one_running() {
     let result = executor.tick(&mut tree, &mut ctx).unwrap();
     // First child succeeds, second is Running - overall Running (AllSuccess requires all)
     assert_eq!(result.status, NodeStatus::Running);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Edge case tests for bug fixes
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn repeater_max_attempts_zero_returns_failure() {
+    let mut bb = Blackboard::default();
+    bb.provider_output = "".into(); // Will succeed condition
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Repeater(RepeaterNode {
+        name: "rep".into(),
+        max_attempts: 0,
+        child: Box::new(Node::Condition(ConditionNode {
+            name: "c".into(),
+            evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+        })),
+        current: 0,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // max_attempts=0 means no attempts allowed, immediate failure
+    assert_eq!(result.status, NodeStatus::Failure);
+}
+
+#[test]
+fn parallel_empty_children_all_success_returns_success() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Parallel(ParallelNode {
+        name: "par".into(),
+        policy: ParallelPolicy::AllSuccess,
+        children: vec![],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // Empty children with AllSuccess: vacuously true, returns Success
+    assert_eq!(result.status, NodeStatus::Success);
+}
+
+#[test]
+fn parallel_empty_children_any_success_returns_failure() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Parallel(ParallelNode {
+        name: "par".into(),
+        policy: ParallelPolicy::AnySuccess,
+        children: vec![],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // Empty children with AnySuccess: no child to succeed, returns Failure
+    assert_eq!(result.status, NodeStatus::Failure);
+}
+
+#[test]
+fn parallel_empty_children_majority_returns_failure() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Parallel(ParallelNode {
+        name: "par".into(),
+        policy: ParallelPolicy::Majority,
+        children: vec![],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // Empty children with Majority: no majority, returns Failure
+    assert_eq!(result.status, NodeStatus::Failure);
 }

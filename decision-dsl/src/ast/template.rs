@@ -55,6 +55,7 @@ fn blackboard_value_to_minijinja(value: &BlackboardValue) -> Value {
             Value::from(map)
         }
         BlackboardValue::Command(_) => Value::from("<command>"),
+        BlackboardValue::Null => Value::from(()),
     }
 }
 
@@ -146,10 +147,18 @@ pub fn render_prompt_template(template_str: &str, context: &Value) -> Result<Str
     let env = get_template_env();
     let template = env
         .template_from_str(template_str)
-        .map_err(|e| RuntimeError::FilterError(format!("template syntax error: {e}")))?;
+        .map_err(|e| {
+            // Include template snippet for easier debugging
+            let snippet = if template_str.len() > 100 {
+                format!("{}...", &template_str[..100])
+            } else {
+                template_str.to_string()
+            };
+            RuntimeError::FilterError(format!("template syntax error in '{}': {}", snippet, e))
+        })?;
     template
         .render(context)
-        .map_err(|e| RuntimeError::FilterError(e.to_string()))
+        .map_err(|e| RuntimeError::FilterError(format!("template render error: {}", e)))
 }
 
 // ── Command template rendering ──────────────────────────────────────────────

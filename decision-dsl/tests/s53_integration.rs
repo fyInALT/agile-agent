@@ -223,23 +223,19 @@ fn integration_cooldown_with_mock_clock() {
 
     let mut executor = Executor::new();
 
-    // First tick: passes cooldown, action succeeds
+    // First tick: passes cooldown, action succeeds, sets last_success
     let mut ctx = tick_ctx(&mut bb, &mut session, &clock);
     let result = executor.tick(&mut tree, &mut ctx).unwrap();
     assert_eq!(result.status, NodeStatus::Success);
     assert_eq!(result.commands.len(), 1);
 
-    // Reset executor so we tick again from root
-    executor.reset();
-
-    // Second tick immediately: cooldown blocks
+    // Second tick immediately (without reset): cooldown blocks because last_success is set
     let mut ctx = tick_ctx(&mut bb, &mut session, &clock);
     let result = executor.tick(&mut tree, &mut ctx).unwrap();
     assert_eq!(result.status, NodeStatus::Failure);
 
-    // Advance clock past cooldown
+    // Advance clock past cooldown (100ms)
     clock.advance(Duration::from_millis(150));
-    executor.reset();
 
     // Third tick: cooldown expired, action succeeds again
     let mut ctx = tick_ctx(&mut bb, &mut session, &clock);

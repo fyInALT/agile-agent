@@ -442,3 +442,103 @@ fn registry_create_builtin() {
     let eval = reg.create("OutputContains", &[("pattern".into(), BlackboardValue::String("x".into()))]);
     assert!(eval.is_some());
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Edge case tests: escape characters and NaN handling
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_string_with_escape_characters() {
+    let mut bb = Blackboard::default();
+    bb.set("msg", BlackboardValue::String("hello\nworld".into()));
+    let eval = Evaluator::Script {
+        expression: r#"msg == "hello\nworld""#.into(),
+    };
+    assert!(eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_string_with_tab_escape() {
+    let mut bb = Blackboard::default();
+    bb.set("msg", BlackboardValue::String("hello\tworld".into()));
+    let eval = Evaluator::Script {
+        expression: r#"msg == "hello\tworld""#.into(),
+    };
+    assert!(eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_string_with_escaped_quotes() {
+    let mut bb = Blackboard::default();
+    bb.set("msg", BlackboardValue::String("say \"hello\"".into()));
+    // Test that escaped quotes in the string value match correctly
+    let eval = Evaluator::VariableIs {
+        key: "msg".into(),
+        expected: BlackboardValue::String("say \"hello\"".into()),
+    };
+    assert!(eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_string_with_backslash() {
+    let mut bb = Blackboard::default();
+    bb.set("path", BlackboardValue::String("C:\\Users\\test".into()));
+    let eval = Evaluator::Script {
+        expression: r#"path == "C:\\Users\\test""#.into(),
+    };
+    assert!(eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_float_nan_comparison() {
+    use std::f64::NAN;
+    let mut bb = Blackboard::default();
+    bb.set("val", BlackboardValue::Float(NAN));
+    // NaN == NaN should be false using VariableIs
+    let eval = Evaluator::VariableIs {
+        key: "val".into(),
+        expected: BlackboardValue::Float(NAN),
+    };
+    // NaN is not equal to anything, including itself
+    assert!(!eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_float_nan_not_equal() {
+    use std::f64::NAN;
+    let mut bb = Blackboard::default();
+    bb.set("val", BlackboardValue::Float(NAN));
+    // Use Or with Not to test != semantics
+    let eval = Evaluator::Not {
+        condition: Box::new(Evaluator::VariableIs {
+            key: "val".into(),
+            expected: BlackboardValue::Float(NAN),
+        }),
+    };
+    // NaN != NaN should be true
+    assert!(eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_float_nan_less_than() {
+    use std::f64::NAN;
+    let mut bb = Blackboard::default();
+    bb.set("nan_val", BlackboardValue::Float(NAN));
+    // NaN < 0 should be false (using literal on right side)
+    let eval = Evaluator::Script {
+        expression: "nan_val < 0.0".into(),
+    };
+    assert!(!eval.evaluate(&bb).unwrap());
+}
+
+#[test]
+fn script_float_nan_greater_than() {
+    use std::f64::NAN;
+    let mut bb = Blackboard::default();
+    bb.set("nan_val", BlackboardValue::Float(NAN));
+    // NaN > 0 should be false (using literal on right side)
+    let eval = Evaluator::Script {
+        expression: "nan_val > 0.0".into(),
+    };
+    assert!(!eval.evaluate(&bb).unwrap());
+}
