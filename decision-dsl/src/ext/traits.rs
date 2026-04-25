@@ -1,8 +1,10 @@
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::error::SessionError;
+use super::error::{SessionError, SessionErrorKind};
 
 // ── Session ─────────────────────────────────────────────────────────────────
 
@@ -182,5 +184,87 @@ impl Watcher for PollWatcher {
             .unwrap_or(true);
         self.last_modified = Some(current);
         Ok(changed)
+    }
+}
+
+// ── MockSession ─────────────────────────────────────────────────────────────
+
+pub struct MockSession {
+    replies: RefCell<VecDeque<String>>,
+    ready: RefCell<bool>,
+    sent_messages: RefCell<Vec<String>>,
+}
+
+impl MockSession {
+    pub fn new() -> Self {
+        Self {
+            replies: RefCell::new(VecDeque::new()),
+            ready: RefCell::new(false),
+            sent_messages: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn with_reply(reply: impl Into<String>) -> Self {
+        let s = Self::new();
+        s.push_reply(reply);
+        s.set_ready(true);
+        s
+    }
+
+    pub fn push_reply(&self, reply: impl Into<String>) {
+        self.replies.borrow_mut().push_back(reply.into());
+    }
+
+    pub fn set_ready(&self, ready: bool) {
+        *self.ready.borrow_mut() = ready;
+    }
+
+    pub fn sent_messages(&self) -> Vec<String> {
+        self.sent_messages.borrow().clone()
+    }
+}
+
+impl Session for MockSession {
+    fn send(&mut self, message: &str) -> Result<(), SessionError> {
+        self.sent_messages.borrow_mut().push(message.to_string());
+        Ok(())
+    }
+
+    fn is_ready(&self) -> bool {
+        *self.ready.borrow()
+    }
+
+    fn receive(&mut self) -> Result<String, SessionError> {
+        self.set_ready(false);
+        self.replies.borrow_mut().pop_front().ok_or(SessionError {
+            kind: SessionErrorKind::UnexpectedFormat,
+            message: "no reply queued".into(),
+        })
+    }
+}
+
+// ── CaptureLogger ───────────────────────────────────────────────────────────
+
+pub struct CaptureLogger {
+    entries: RefCell<Vec<(LogLevel, String, String)>>,
+}
+
+impl CaptureLogger {
+    pub fn new() -> Self {
+        Self {
+            entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn entries(&self) -> Vec<(LogLevel, String, String)> {
+        self.entries.borrow().clone()
+    }
+}
+
+impl Logger for CaptureLogger {
+    fn log(&self, level: LogLevel, target: &str, msg: &str) {
+        self.entries
+            .borrow_mut()
+            .push((level, target.to_string(), msg.to_string()));
     }
 }

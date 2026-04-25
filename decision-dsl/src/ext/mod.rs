@@ -11,6 +11,6 @@ pub use command::{
 };
 pub use error::{DslError, ParseError, RuntimeError, SessionError, SessionErrorKind};
 pub use traits::{
-    Clock, Fs, FsError, Logger, LogLevel, MockClock, NullLogger, PollWatcher, Session, StdFs,
-    StderrLogger, SystemClock, Watcher, WatcherError,
+    CaptureLogger, Clock, Fs, FsError, Logger, LogLevel, MockClock, MockSession, NullLogger,
+    PollWatcher, Session, StdFs, StderrLogger, SystemClock, Watcher, WatcherError,
 };
