@@ -4,6 +4,7 @@ pub mod eval;
 pub mod node;
 pub mod parser;
 pub mod parser_out;
+pub mod reload;
 pub mod runtime;
 pub mod template;
 pub mod validate;
@@ -24,4 +25,5 @@ pub use node::{
     SelectorNode, SequenceNode, SetMapping, SetVarNode, SubTreeNode, WhenNode,
 };
 pub use parser_out::{FieldType, OutputParser, OutputParserRegistry, StructuredField};
+pub use reload::DslReloader;
 pub use template::{render_command_templates, render_prompt_template, BlackboardExt};
