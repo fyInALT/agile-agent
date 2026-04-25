@@ -15,14 +15,17 @@ use crate::ext::traits::{Clock, Logger, Session};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TraceEntry {
-    Enter { name: String, child_index: usize },
-    Exit { name: String, child_index: usize, status: NodeStatus },
-    Action { name: String, command: DecisionCommand },
-    PromptSend { name: String, template: String },
-    PromptReceive { name: String, reply: String },
-    PromptFailure { name: String, reason: String },
+    Enter { name: String, child_index: usize, depth: usize },
+    Exit { name: String, status: NodeStatus, duration_ms: u64 },
+    Eval { node_name: String, evaluator: String, result: bool },
+    Action { node_name: String, command: String },
+    PromptSent { node_name: String },
+    PromptSuccess { node_name: String, response: String },
+    PromptFailure { node_name: String, error: String },
     EnterSubTree { name: String, ref_name: String },
     ExitSubTree { name: String, ref_name: String, status: NodeStatus },
+    RuleMatched { rule_name: String, priority: u32 },
+    RuleSkipped { rule_name: String, reason: String },
 }
 
 // ── Tracer ──────────────────────────────────────────────────────────────────
@@ -32,6 +35,7 @@ pub struct Tracer {
     entries: Vec<TraceEntry>,
     path_stack: Vec<usize>,
     running_path: Vec<usize>,
+    depth: usize,
 }
 
 impl Tracer {
@@ -44,15 +48,18 @@ impl Tracer {
         self.entries.push(TraceEntry::Enter {
             name: name.into(),
             child_index,
+            depth: self.depth,
         });
+        self.depth += 1;
     }
 
-    pub fn exit(&mut self, name: &str, child_index: usize, status: NodeStatus) {
+    pub fn exit(&mut self, name: &str, _child_index: usize, status: NodeStatus) {
+        self.depth = self.depth.saturating_sub(1);
         self.path_stack.pop();
         self.entries.push(TraceEntry::Exit {
             name: name.into(),
-            child_index,
             status,
+            duration_ms: 0,
         });
         if status == NodeStatus::Running {
             self.running_path = self.path_stack.clone();
@@ -61,29 +68,36 @@ impl Tracer {
 
     pub fn record_action(&mut self, name: &str, command: &DecisionCommand) {
         self.entries.push(TraceEntry::Action {
-            name: name.into(),
-            command: command.clone(),
+            node_name: name.into(),
+            command: format!("{command:?}"),
         });
     }
 
-    pub fn record_prompt_send(&mut self, name: &str, template: &str) {
-        self.entries.push(TraceEntry::PromptSend {
-            name: name.into(),
-            template: template.into(),
+    pub fn record_eval(&mut self, node_name: &str, evaluator: &str, result: bool) {
+        self.entries.push(TraceEntry::Eval {
+            node_name: node_name.into(),
+            evaluator: evaluator.into(),
+            result,
         });
     }
 
-    pub fn record_prompt_receive(&mut self, name: &str, reply: &str) {
-        self.entries.push(TraceEntry::PromptReceive {
-            name: name.into(),
-            reply: reply.into(),
+    pub fn record_prompt_sent(&mut self, node_name: &str) {
+        self.entries.push(TraceEntry::PromptSent {
+            node_name: node_name.into(),
         });
     }
 
-    pub fn record_prompt_failure(&mut self, name: &str, reason: &str) {
+    pub fn record_prompt_success(&mut self, node_name: &str, response: &str) {
+        self.entries.push(TraceEntry::PromptSuccess {
+            node_name: node_name.into(),
+            response: response.into(),
+        });
+    }
+
+    pub fn record_prompt_failure(&mut self, node_name: &str, error: &str) {
         self.entries.push(TraceEntry::PromptFailure {
-            name: name.into(),
-            reason: reason.into(),
+            node_name: node_name.into(),
+            error: error.into(),
         });
     }
 
@@ -99,6 +113,20 @@ impl Tracer {
             name: name.into(),
             ref_name: ref_name.into(),
             status,
+        });
+    }
+
+    pub fn record_rule_matched(&mut self, rule_name: &str, priority: u32) {
+        self.entries.push(TraceEntry::RuleMatched {
+            rule_name: rule_name.into(),
+            priority,
+        });
+    }
+
+    pub fn record_rule_skipped(&mut self, rule_name: &str, reason: &str) {
+        self.entries.push(TraceEntry::RuleSkipped {
+            rule_name: rule_name.into(),
+            reason: reason.into(),
         });
     }
 
@@ -802,7 +830,7 @@ fn tick_prompt(
             }
         })?;
         ctx.blackboard.store_llm_response(&node.name, &reply);
-        tracer.record_prompt_receive(&node.name, &reply);
+        tracer.record_prompt_success(&node.name, &reply);
 
         match node.parser.parse(&reply) {
             Ok(values) => {
@@ -830,7 +858,7 @@ fn tick_prompt(
     } else {
         // First tick: render template and send
         let rendered = crate::ast::template::render_prompt_template(&node.template, &ctx.blackboard.to_template_context())?;
-        tracer.record_prompt_send(&node.name, &rendered);
+        tracer.record_prompt_sent(&node.name);
         if let Some(ref model) = node.model {
             ctx.session
                 .send_with_hint(&rendered, model)
@@ -919,3 +947,51 @@ fn resume_subtree(
     Ok(status)
 }
 
+
+// ── Trace ASCII rendering ───────────────────────────────────────────────────
+
+pub fn render_trace_ascii(entries: &[TraceEntry]) -> String {
+    let mut lines = Vec::new();
+    let mut depth = 0usize;
+
+    for entry in entries {
+        match entry {
+            TraceEntry::Enter { name, child_index, depth: d } => {
+                depth = *d;
+                lines.push(format!("{:indent$}[{child_index}] Enter: {name}", "", indent = depth * 2));
+            }
+            TraceEntry::Exit { name, status, .. } => {
+                lines.push(format!("{:indent$}Exit: {name} -> {status:?}", "", indent = depth * 2));
+            }
+            TraceEntry::Eval { node_name, evaluator, result } => {
+                lines.push(format!("{:indent$}Eval: {node_name} ({evaluator}) = {result}", "", indent = depth * 2));
+            }
+            TraceEntry::Action { node_name, command } => {
+                lines.push(format!("{:indent$}Action: {node_name} -> {command}", "", indent = depth * 2));
+            }
+            TraceEntry::PromptSent { node_name } => {
+                lines.push(format!("{:indent$}Prompt sent: {node_name}", "", indent = depth * 2));
+            }
+            TraceEntry::PromptSuccess { node_name, response } => {
+                lines.push(format!("{:indent$}Prompt success: {node_name} -> {response}", "", indent = depth * 2));
+            }
+            TraceEntry::PromptFailure { node_name, error } => {
+                lines.push(format!("{:indent$}Prompt failure: {node_name} -> {error}", "", indent = depth * 2));
+            }
+            TraceEntry::EnterSubTree { name, ref_name } => {
+                lines.push(format!("{:indent$}--> SubTree: {name} ({ref_name})", "", indent = depth * 2));
+            }
+            TraceEntry::ExitSubTree { name, ref_name, status } => {
+                lines.push(format!("{:indent$}<-- SubTree: {name} ({ref_name}) -> {status:?}", "", indent = depth * 2));
+            }
+            TraceEntry::RuleMatched { rule_name, priority } => {
+                lines.push(format!("{:indent$}Rule matched: {rule_name} (priority {priority})", "", indent = depth * 2));
+            }
+            TraceEntry::RuleSkipped { rule_name, reason } => {
+                lines.push(format!("{:indent$}Rule skipped: {rule_name} ({reason})", "", indent = depth * 2));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
