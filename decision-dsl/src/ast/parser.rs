@@ -6,13 +6,19 @@ use crate::ext::error::ParseError;
 use crate::ext::traits::Fs;
 
 use super::document::{Bundle, DslDocument, Metadata, Tree, TreeKind};
+use super::eval::EvaluatorRegistry;
 use super::node::Node;
 
 // ── DslParser trait ─────────────────────────────────────────────────────────
 
 pub trait DslParser {
     fn parse_document(&self, yaml: &str) -> Result<DslDocument, ParseError>;
-    fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError>;
+    fn parse_bundle(
+        &self,
+        dir: &Path,
+        fs: &dyn Fs,
+        registry: &EvaluatorRegistry,
+    ) -> Result<Bundle, ParseError>;
 }
 
 // ── YamlParser ──────────────────────────────────────────────────────────────
@@ -86,7 +92,12 @@ impl DslParser for YamlParser {
         }
     }
 
-    fn parse_bundle(&self, dir: &Path, fs: &dyn Fs) -> Result<Bundle, ParseError> {
+    fn parse_bundle(
+        &self,
+        dir: &Path,
+        fs: &dyn Fs,
+        registry: &EvaluatorRegistry,
+    ) -> Result<Bundle, ParseError> {
         let mut bundle = Bundle::default();
 
         // Read trees/
@@ -96,14 +107,30 @@ impl DslParser for YamlParser {
                 if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     let content = fs.read_to_string(&path)?;
                     let doc = self.parse_document(&content)?;
-                    if let DslDocument::BehaviorTree { api_version, metadata, root, .. } = doc {
-                        let tree = Tree {
-                            api_version,
-                            kind: TreeKind::BehaviorTree,
-                            metadata: metadata.clone(),
-                            spec: super::document::Spec { root },
-                        };
-                        bundle.trees.insert(metadata.name, tree);
+                    match doc {
+                        DslDocument::BehaviorTree { api_version, metadata, root } => {
+                            let tree = Tree {
+                                api_version,
+                                kind: TreeKind::BehaviorTree,
+                                metadata: metadata.clone(),
+                                spec: super::document::Spec { root },
+                            };
+                            bundle.trees.insert(metadata.name, tree);
+                        }
+                        DslDocument::DecisionRules { api_version, metadata, rules } => {
+                            // DecisionRules in trees/ should be desugared
+                            super::validate::validate_unique_priorities(&rules)?;
+                            let doc = DslDocument::DecisionRules {
+                                api_version,
+                                metadata: metadata.clone(),
+                                rules,
+                            };
+                            let tree = doc.desugar(registry)?;
+                            bundle.trees.insert(metadata.name, tree);
+                        }
+                        DslDocument::SubTree { .. } => {
+                            // SubTree in trees/ is unusual but acceptable
+                        }
                     }
                 }
             }
@@ -116,7 +143,7 @@ impl DslParser for YamlParser {
                 if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     let content = fs.read_to_string(&path)?;
                     let doc = self.parse_document(&content)?;
-                    if let DslDocument::SubTree { api_version, metadata, root, .. } = doc {
+                    if let DslDocument::SubTree { api_version, metadata, root } = doc {
                         let tree = Tree {
                             api_version,
                             kind: TreeKind::SubTree,
@@ -129,7 +156,7 @@ impl DslParser for YamlParser {
             }
         }
 
-        // Read rules.d/ → DecisionRules
+        // Read rules.d/ → DecisionRules (merge all into one tree)
         let rules_dir = dir.join("rules.d");
         if let Ok(entries) = fs.read_dir(&rules_dir) {
             let mut all_rules = Vec::new();
@@ -153,20 +180,13 @@ impl DslParser for YamlParser {
             }
             if let (Some(av), Some(md)) = (api_version, metadata) {
                 super::validate::validate_unique_priorities(&all_rules)?;
-                let root = super::node::Node::Selector(super::node::SelectorNode {
-                    name: format!("{}_root", md.name),
-                    children: vec![],
-                    active_child: None,
-                    rule_name: None,
-                    rule_priority: None,
-                    matched: false,
-                });
-                let tree = Tree {
+                // Properly desugar DecisionRules into a Tree
+                let doc = DslDocument::DecisionRules {
                     api_version: av,
-                    kind: TreeKind::BehaviorTree,
                     metadata: md.clone(),
-                    spec: super::document::Spec { root },
+                    rules: all_rules,
                 };
+                let tree = doc.desugar(registry)?;
                 bundle.trees.insert(md.name, tree);
             }
         }

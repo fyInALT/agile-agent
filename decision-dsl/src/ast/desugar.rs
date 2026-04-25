@@ -187,14 +187,14 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
             });
 
             let mut case_nodes = Vec::new();
-            for (value, action) in switch.cases {
+            for case in switch.cases {
                 let when = Node::When(WhenNode {
-                    name: format!("{}_{}", switch.name, value.to_lowercase()),
+                    name: format!("{}_{}", switch.name, case.value.to_lowercase()),
                     condition: Evaluator::VariableIs {
                         key: result_key.clone(),
-                        expected: BlackboardValue::String(value),
+                        expected: BlackboardValue::String(case.value),
                     },
-                    action: Box::new(desugar_then(*action, registry)?),
+                    action: Box::new(desugar_then(*case.action, registry)?),
                 });
                 case_nodes.push(when);
             }
@@ -221,14 +221,14 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
         }
         SwitchOn::Variable { key } => {
             let mut case_nodes = Vec::new();
-            for (value, action) in switch.cases {
+            for case in switch.cases {
                 let when = Node::When(WhenNode {
-                    name: format!("{}_{}", switch.name, value.to_lowercase()),
+                    name: format!("{}_{}", switch.name, case.value.to_lowercase()),
                     condition: Evaluator::VariableIs {
                         key: key.clone(),
-                        expected: BlackboardValue::String(value),
+                        expected: BlackboardValue::String(case.value),
                     },
-                    action: Box::new(desugar_then(*action, registry)?),
+                    action: Box::new(desugar_then(*case.action, registry)?),
                 });
                 case_nodes.push(when);
             }

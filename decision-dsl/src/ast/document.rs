@@ -96,11 +96,20 @@ pub enum OnError {
 
 // ── Switch / When / Pipeline ────────────────────────────────────────────────
 
+/// A single case in a Switch statement.
+/// Using Vec instead of HashMap to preserve case order for switch semantics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwitchCase {
+    pub value: String,
+    pub action: Box<ThenSpec>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwitchSpec {
     pub name: String,
     pub on: SwitchOn,
-    pub cases: HashMap<String, Box<ThenSpec>>,
+    /// Ordered list of cases. Cases are evaluated in order; first match wins.
+    pub cases: Vec<SwitchCase>,
     #[serde(rename = "_default")]
     pub default: Option<Box<ThenSpec>>,
 }

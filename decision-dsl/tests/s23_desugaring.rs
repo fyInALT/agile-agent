@@ -1,6 +1,6 @@
 use decision_dsl::ast::{
     ActionNode, DslDocument, Evaluator, Metadata, Node, OnError, PipelineSpec, PipelineStep,
-    SwitchOn, SwitchSpec, ThenSpec, TreeKind, WhenSpec,
+    SwitchCase, SwitchOn, SwitchSpec, ThenSpec, TreeKind, WhenSpec,
 };
 use decision_dsl::ext::blackboard::BlackboardValue;
 use decision_dsl::ext::command::{AgentCommand, DecisionCommand};
@@ -228,19 +228,20 @@ fn rule_on_error_skip_is_pass_through() {
 
 #[test]
 fn switch_on_prompt_desugars_to_sequence_prompt_selector() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "yes".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
-    cases.insert(
-        "no".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "yes".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+        SwitchCase {
+            value: "no".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+            }),
+        },
+    ];
 
     let doc = DslDocument::DecisionRules {
         api_version: "v1".into(),
@@ -287,13 +288,14 @@ fn switch_on_prompt_desugars_to_sequence_prompt_selector() {
 
 #[test]
 fn switch_on_variable_desugars_to_selector() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "A".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "A".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
     let doc = DslDocument::DecisionRules {
         api_version: "v1".into(),
@@ -326,13 +328,14 @@ fn switch_on_variable_desugars_to_selector() {
 
 #[test]
 fn switch_result_key_defaults_to_decision() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "yes".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "yes".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
     let doc = DslDocument::DecisionRules {
         api_version: "v1".into(),
@@ -389,13 +392,14 @@ fn switch_result_key_defaults_to_decision() {
 
 #[test]
 fn switch_custom_result_key_stored_correctly() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "yes".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "yes".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
     let doc = DslDocument::DecisionRules {
         api_version: "v1".into(),
@@ -454,13 +458,14 @@ fn switch_custom_result_key_stored_correctly() {
 
 #[test]
 fn switch_default_supports_nested_when() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "A".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "A".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
     let default_action = ThenSpec::When(Box::new(WhenSpec {
         name: "default_when".into(),
@@ -510,21 +515,23 @@ fn switch_default_supports_nested_when() {
 
 #[test]
 fn switch_default_supports_nested_switch() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "A".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "A".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
-    let mut inner_cases = std::collections::HashMap::new();
-    inner_cases.insert(
-        "X".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
-        }),
-    );
+    let inner_cases = vec![
+        SwitchCase {
+            value: "X".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+            }),
+        },
+    ];
 
     let default_action = ThenSpec::Switch(SwitchSpec {
         name: "inner_switch".into(),
@@ -569,13 +576,14 @@ fn switch_default_supports_nested_switch() {
 
 #[test]
 fn switch_default_supports_nested_pipeline() {
-    let mut cases = std::collections::HashMap::new();
-    cases.insert(
-        "A".into(),
-        Box::new(ThenSpec::InlineCommand {
-            command: DecisionCommand::Agent(AgentCommand::WakeUp),
-        }),
-    );
+    let cases = vec![
+        SwitchCase {
+            value: "A".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+    ];
 
     let default_action = ThenSpec::Pipeline(PipelineSpec {
         name: "default_pipeline".into(),
@@ -841,4 +849,77 @@ fn subtree_desugar_passthrough() {
     assert_eq!(tree.api_version, "v1");
     assert!(matches!(tree.kind, TreeKind::SubTree));
     assert!(matches!(tree.spec.root, Node::Action(_)));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Bug fix tests: Switch case order preservation
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn switch_case_order_preserved_in_desugaring() {
+    // Cases are evaluated in order; first match wins.
+    // This test verifies that case order is preserved.
+    let cases = vec![
+        SwitchCase {
+            value: "approve".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            }),
+        },
+        SwitchCase {
+            value: "approve_with_notes".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::ApproveAndContinue),
+            }),
+        },
+        SwitchCase {
+            value: "reject".into(),
+            action: Box::new(ThenSpec::InlineCommand {
+                command: DecisionCommand::Agent(AgentCommand::Terminate {
+                    reason: "rejected".into(),
+                }),
+            }),
+        },
+    ];
+
+    let doc = DslDocument::DecisionRules {
+        api_version: "v1".into(),
+        metadata: Metadata { name: "test".into(), description: None },
+        rules: vec![
+            decision_dsl::ast::RuleSpec {
+                priority: 1,
+                name: "choose".into(),
+                condition: None,
+                action: ThenSpec::Switch(SwitchSpec {
+                    name: "choose".into(),
+                    on: SwitchOn::Variable { key: "decision".into() },
+                    cases,
+                    default: None,
+                }),
+                cooldown_ms: None,
+                reflection_max_rounds: None,
+                on_error: None,
+            },
+        ],
+    };
+
+    let tree = doc.desugar(&decision_dsl::ast::EvaluatorRegistry::new()).unwrap();
+    if let Node::Selector(root_sel) = tree.spec.root {
+        // First child is the rule node
+        if let Node::Selector(rule_sel) = &root_sel.children[0] {
+            // Should have 3 When nodes in the same order as cases
+            assert_eq!(rule_sel.children.len(), 3);
+
+            // Verify order: approve -> approve_with_notes -> reject
+            if let Node::When(when1) = &rule_sel.children[0] {
+                assert!(when1.name.contains("approve"));
+            }
+            if let Node::When(when2) = &rule_sel.children[1] {
+                assert!(when2.name.contains("approve_with_notes"));
+            }
+            if let Node::When(when3) = &rule_sel.children[2] {
+                assert!(when3.name.contains("reject"));
+            }
+        }
+    }
 }

@@ -10,8 +10,8 @@ pub mod template;
 pub mod validate;
 
 pub use document::{
-    Bundle, DslDocument, Metadata, OnError, PipelineSpec, PipelineStep, RuleSpec, Spec, SwitchOn,
-    SwitchSpec, ThenSpec, Tree, TreeKind, WhenSpec,
+    Bundle, DslDocument, Metadata, OnError, PipelineSpec, PipelineStep, RuleSpec, Spec, SwitchCase,
+    SwitchOn, SwitchSpec, ThenSpec, Tree, TreeKind, WhenSpec,
 };
 pub use parser::{DslParser, YamlParser};
 pub use validate::{

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use decision_dsl::ast::eval::EvaluatorRegistry;
 use decision_dsl::ast::reload::DslReloader;
 use decision_dsl::ext::traits::{Fs, FsError};
 
@@ -129,7 +130,8 @@ fn reloader_initial_parse_succeeds() {
     setup_bundle_fs(&fs, "test");
 
     let dir = PathBuf::from("/rules");
-    let reloader = DslReloader::new(dir, Box::new(fs.clone()));
+    let registry = EvaluatorRegistry::new();
+    let reloader = DslReloader::new(dir, Box::new(fs.clone()), registry);
     assert!(reloader.is_ok());
 }
 
@@ -139,7 +141,8 @@ fn reloader_current_returns_bundle() {
     setup_bundle_fs(&fs, "test");
 
     let dir = PathBuf::from("/rules");
-    let reloader = DslReloader::new(dir, Box::new(fs.clone())).unwrap();
+    let registry = EvaluatorRegistry::new();
+    let reloader = DslReloader::new(dir, Box::new(fs.clone()), registry).unwrap();
     let bundle = reloader.current();
     assert!(bundle.trees.contains_key("test"));
 }
@@ -150,7 +153,8 @@ fn reloader_reload_detects_change() {
     setup_bundle_fs(&fs, "test");
 
     let dir = PathBuf::from("/rules");
-    let mut reloader = DslReloader::new(dir.clone(), Box::new(fs.clone())).unwrap();
+    let registry = EvaluatorRegistry::new();
+    let mut reloader = DslReloader::new(dir.clone(), Box::new(fs.clone()), registry).unwrap();
 
     // First check_and_reload: baseline is None so it reports changed
     let changed = reloader.check_and_reload().unwrap();
@@ -167,7 +171,8 @@ fn reloader_reload_failure_keeps_old_bundle() {
     setup_bundle_fs(&fs, "test");
 
     let dir = PathBuf::from("/rules");
-    let mut reloader = DslReloader::new(dir.clone(), Box::new(fs.clone())).unwrap();
+    let registry = EvaluatorRegistry::new();
+    let mut reloader = DslReloader::new(dir.clone(), Box::new(fs.clone()), registry).unwrap();
 
     // Initial bundle loaded
     assert!(reloader.current().trees.contains_key("test"));

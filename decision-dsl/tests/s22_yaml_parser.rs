@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use decision_dsl::ast::{
-    DslDocument, DslParser, OnError, YamlParser,
+    DslDocument, DslParser, EvaluatorRegistry, OnError, YamlParser,
 };
 use decision_dsl::ext::traits::{Fs, FsError};
 
@@ -297,7 +297,8 @@ spec:
 
     let fs = MockFs { files };
     let parser = YamlParser::new();
-    let bundle = parser.parse_bundle(Path::new("/bundle"), &fs).unwrap();
+    let registry = EvaluatorRegistry::new();
+    let bundle = parser.parse_bundle(Path::new("/bundle"), &fs, &registry).unwrap();
     assert_eq!(bundle.trees.len(), 1);
     assert_eq!(bundle.subtrees.len(), 1);
     assert!(bundle.trees.contains_key("main"));

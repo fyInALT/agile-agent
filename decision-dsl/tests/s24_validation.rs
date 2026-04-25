@@ -259,7 +259,8 @@ spec:
 
     let fs = MockFs { files };
     let parser = YamlParser::new();
-    let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs);
+    let registry = EvaluatorRegistry::new();
+    let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs, &registry);
     match &result { Ok(b) => println!("bundle trees = {}", b.trees.len()), Err(e) => println!("err = {}", e) };
     assert!(result.is_err());
 }
@@ -299,7 +300,8 @@ rules:
 
     let fs = MockFs { files };
     let parser = YamlParser::new();
-    let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs);
+    let registry = EvaluatorRegistry::new();
+    let result = parser.parse_bundle(std::path::Path::new("/bundle"), &fs, &registry);
     match result {
         Err(err) => assert!(matches!(err, ParseError::DuplicatePriority { priority: 1 })),
         Ok(b) => panic!("expected error, got bundle with {} trees", b.trees.len()),
