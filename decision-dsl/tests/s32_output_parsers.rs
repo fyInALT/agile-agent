@@ -289,3 +289,139 @@ fn json_parser_nested_null() {
         _ => panic!("expected Map"),
     }
 }
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Structured parser type conversion failures
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn structured_parser_integer_parse_failure() {
+    let parser = OutputParser::Structured {
+        pattern: r"(\w+)".into(),
+        fields: vec![StructuredField {
+            name: "num".into(),
+            group: 1,
+            field_type: FieldType::Integer,
+        }],
+    };
+    let err = parser.parse("abc").unwrap_err();
+    assert!(err.to_string().contains("cannot parse integer"));
+}
+
+#[test]
+fn structured_parser_float_parse_failure() {
+    let parser = OutputParser::Structured {
+        pattern: r"(\w+)".into(),
+        fields: vec![StructuredField {
+            name: "num".into(),
+            group: 1,
+            field_type: FieldType::Float,
+        }],
+    };
+    let err = parser.parse("abc").unwrap_err();
+    assert!(err.to_string().contains("cannot parse float"));
+}
+
+#[test]
+fn structured_parser_boolean_parse_failure() {
+    let parser = OutputParser::Structured {
+        pattern: r"(\w+)".into(),
+        fields: vec![StructuredField {
+            name: "flag".into(),
+            group: 1,
+            field_type: FieldType::Boolean,
+        }],
+    };
+    let err = parser.parse("maybe").unwrap_err();
+    assert!(err.to_string().contains("cannot parse boolean"));
+}
+
+#[test]
+fn structured_parser_missing_capture_group() {
+    let parser = OutputParser::Structured {
+        pattern: r"(\w+)".into(),
+        fields: vec![StructuredField {
+            name: "extra".into(),
+            group: 5, // Group 5 doesn't exist
+            field_type: FieldType::String,
+        }],
+    };
+    let err = parser.parse("hello").unwrap_err();
+    assert!(err.to_string().contains("capture group 5 not found"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Command parser edge cases
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn command_parser_trims_input() {
+    let mut mapping = HashMap::new();
+    mapping.insert(
+        "wake".into(),
+        DecisionCommand::Agent(AgentCommand::WakeUp),
+    );
+    let parser = OutputParser::Command { mapping };
+    let result = parser.parse("  wake  \n").unwrap();
+    assert!(result.contains_key("__command"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Custom parser
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn custom_parser_returns_error() {
+    let parser = OutputParser::Custom {
+        name: "MyParser".into(),
+        params: HashMap::new(),
+    };
+    let result = parser.parse("anything");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("MyParser"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: OutputParserRegistry create Structured
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn registry_create_structured_with_params() {
+    let reg = OutputParserRegistry::with_builtins();
+    let params = vec![
+        ("pattern".into(), BlackboardValue::String(r"(\d+)".into())),
+        ("fields".into(), BlackboardValue::List(vec![
+            BlackboardValue::Map({
+                let mut m = HashMap::new();
+                m.insert("name".into(), BlackboardValue::String("id".into()));
+                m.insert("type".into(), BlackboardValue::String("Integer".into()));
+                m.insert("group".into(), BlackboardValue::Integer(1));
+                m
+            }),
+        ])),
+    ];
+    let parser = reg.create("Structured", &params).unwrap();
+    if let OutputParser::Structured { pattern, fields } = parser {
+        assert_eq!(pattern, r"(\d+)");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "id");
+        assert_eq!(fields[0].field_type, FieldType::Integer);
+        assert_eq!(fields[0].group, 1);
+    } else {
+        panic!("expected Structured parser");
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Json parser top-level non-object error
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn json_parser_top_level_array_fails() {
+    let parser = OutputParser::Json { schema: None };
+    let err = parser.parse("[1, 2, 3]").unwrap_err();
+    assert!(err.to_string().contains("expects a top-level object"));
+}
+
+

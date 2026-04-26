@@ -1,5 +1,6 @@
 use decision_dsl::ast::Evaluator;
 use decision_dsl::ext::blackboard::{Blackboard, BlackboardValue};
+use decision_dsl::ext::error::RuntimeError;
 
 fn bb_with_output(output: &str) -> Blackboard {
     let mut bb = Blackboard::default();
@@ -332,21 +333,21 @@ fn script_dot_notation_path() {
 
 #[test]
 fn or_short_circuits_on_first_true() {
-    let bb = Blackboard::default();
+    let bb = bb_with_output("abc");
     let eval = Evaluator::Or {
         conditions: vec![
             Evaluator::OutputContains {
-                pattern: "x".into(),
+                pattern: "a".into(),
                 case_sensitive: true,
             },
             Evaluator::OutputContains {
-                pattern: "y".into(),
+                pattern: "z".into(),
                 case_sensitive: true,
             },
         ],
     };
-    // Both false
-    assert_eq!(eval.evaluate(&bb).unwrap(), false);
+    // First condition is true, should short-circuit without evaluating second
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
 }
 
 #[test]
@@ -541,4 +542,291 @@ fn script_float_nan_greater_than() {
         expression: "nan_val > 0.0".into(),
     };
     assert!(!eval.evaluate(&bb).unwrap());
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Script operator combinations
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_numeric_less_than_or_equal() {
+    let mut bb = Blackboard::default();
+    bb.reflection_round = 2;
+    let eval = Evaluator::Script {
+        expression: "reflection_round <= 2".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+#[test]
+fn script_numeric_greater_than() {
+    let mut bb = Blackboard::default();
+    bb.confidence_accumulator = 0.95;
+    let eval = Evaluator::Script {
+        expression: "confidence_accumulator > 0.5".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+#[test]
+fn script_integer_not_equal() {
+    let mut bb = Blackboard::default();
+    bb.reflection_round = 3;
+    let eval = Evaluator::Script {
+        expression: "reflection_round != 2".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+#[test]
+fn script_integer_not_equal_false() {
+    let mut bb = Blackboard::default();
+    bb.reflection_round = 2;
+    let eval = Evaluator::Script {
+        expression: "reflection_round != 2".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), false);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Script parser error paths
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_invalid_operator_error() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Script {
+        expression: "provider_output @ \"x\"".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+#[test]
+fn script_unexpected_end_of_input() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Script {
+        expression: "provider_output ==".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+#[test]
+fn script_invalid_identifier() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Script {
+        expression: "123 == \"x\"".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+#[test]
+fn script_is_dangerous_missing_paren() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Script {
+        expression: "is_dangerous provider_output".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+#[test]
+fn script_contains_missing_paren() {
+    let bb = bb_with_output("hello world");
+    let eval = Evaluator::Script {
+        expression: "provider_output.contains \"world\"".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+#[test]
+fn script_unterminated_string() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Script {
+        expression: "provider_output == \"unterminated".into(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: is_dangerous edge cases
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_is_dangerous_empty_string() {
+    let bb = bb_with_output("");
+    let eval = Evaluator::Script {
+        expression: "is_dangerous(provider_output)".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), false);
+}
+
+#[test]
+fn script_is_dangerous_case_insensitive() {
+    let bb = bb_with_output("DELETE FROM users");
+    let eval = Evaluator::Script {
+        expression: "is_dangerous(provider_output)".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+#[test]
+fn script_is_dangerous_partial_match() {
+    let bb = bb_with_output("please do not delete this");
+    let eval = Evaluator::Script {
+        expression: "is_dangerous(provider_output)".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: VariableIs missing key
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn variable_is_missing_key_returns_error() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::VariableIs {
+        key: "nonexistent".into(),
+        expected: BlackboardValue::Integer(42),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(
+        matches!(result, Err(RuntimeError::MissingVariable { key }) if key == "nonexistent")
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: EvaluatorRegistry
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn registry_create_output_contains() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("OutputContains", &[
+        ("pattern".into(), BlackboardValue::String("test".into())),
+        ("caseSensitive".into(), BlackboardValue::Boolean(true)),
+    ]);
+    assert!(eval.is_some());
+    let bb = bb_with_output("test");
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+#[test]
+fn registry_create_situation_is() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("SituationIs", &[
+        ("situationType".into(), BlackboardValue::String("auth".into())),
+    ]);
+    assert!(eval.is_some());
+    let bb = bb_with_task("auth");
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+#[test]
+fn registry_create_reflection_round_under() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("ReflectionRoundUnder", &[
+        ("max".into(), BlackboardValue::Integer(5)),
+    ]);
+    assert!(eval.is_some());
+    let bb = bb_with_reflection(3);
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+#[test]
+fn registry_create_variable_is() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("VariableIs", &[
+        ("key".into(), BlackboardValue::String("status".into())),
+        ("expected".into(), BlackboardValue::String("ok".into())),
+    ]);
+    assert!(eval.is_some());
+    let bb = bb_with_var("status", BlackboardValue::String("ok".into()));
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+#[test]
+fn registry_create_regex_match() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("RegexMatch", &[
+        ("pattern".into(), BlackboardValue::String(r"\d+".into())),
+    ]);
+    assert!(eval.is_some());
+    let bb = bb_with_output("abc 123 def");
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+#[test]
+fn registry_create_unknown_returns_none() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let reg = EvaluatorRegistry::with_builtins();
+    let eval = reg.create("UnknownKind", &[]);
+    assert!(eval.is_none());
+}
+
+#[test]
+fn registry_register_custom() {
+    use decision_dsl::ast::eval::EvaluatorRegistry;
+    let mut reg = EvaluatorRegistry::with_builtins();
+    reg.register("AlwaysTrue", |_params| {
+        Ok(Evaluator::Script { expression: r#"provider_output == """#.into() })
+    });
+    let eval = reg.create("AlwaysTrue", &[]);
+    assert!(eval.is_some());
+    let bb = Blackboard::default();
+    assert!(eval.unwrap().evaluate(&bb).unwrap());
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Custom evaluator
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn custom_evaluator_returns_error() {
+    let bb = Blackboard::default();
+    let eval = Evaluator::Custom {
+        name: "MyCustom".into(),
+        params: std::collections::HashMap::new(),
+    };
+    let result = eval.evaluate(&bb);
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("MyCustom"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Float NaN comparisons via Script
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_float_nan_not_equal_literal() {
+    let mut bb = Blackboard::default();
+    bb.set("nan_val", BlackboardValue::Float(f64::NAN));
+    let eval = Evaluator::Script {
+        expression: "nan_val != 1.0".into(),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), true);
+}
+
+#[test]
+fn script_float_nan_equals_self_is_false() {
+    let mut bb = Blackboard::default();
+    bb.set("nan_val", BlackboardValue::Float(f64::NAN));
+    // Script parser only supports literal on RHS, so we use VariableIs for NaN == NaN
+    let eval = Evaluator::VariableIs {
+        key: "nan_val".into(),
+        expected: BlackboardValue::Float(f64::NAN),
+    };
+    assert_eq!(eval.evaluate(&bb).unwrap(), false);
 }
