@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::ast::node::{
-    ActionNode, ConditionNode, CooldownNode, ForceHumanNode, InverterNode, Node, NodeBehavior,
+    ActionNode, ConditionNode, CooldownNode, ForceHumanNode, InverterNode, Node,
     NodeStatus, ParallelNode, ParallelPolicy, PromptNode, RepeaterNode, ReflectionGuardNode,
     SelectorNode, SequenceNode, SetVarNode, SubTreeNode, WhenNode,
 };
@@ -169,7 +169,7 @@ pub trait DslRunner {
         tree: &mut crate::ast::document::Tree,
         ctx: &mut TickContext,
     ) -> Result<TickResult, RuntimeError>;
-    fn reset(&mut self, tree: &mut crate::ast::document::Tree);
+    fn reset(&mut self);
 }
 
 // ── Executor ────────────────────────────────────────────────────────────────
@@ -223,10 +223,9 @@ impl DslRunner for Executor {
         })
     }
 
-    fn reset(&mut self, tree: &mut crate::ast::document::Tree) {
+    fn reset(&mut self) {
         self.is_running = false;
         self.running_path.clear();
-        tree.spec.root.reset();
     }
 }
 

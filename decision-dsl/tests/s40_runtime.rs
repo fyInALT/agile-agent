@@ -173,8 +173,9 @@ fn executor_reset_clears_running_state() {
         rule_priority: None,
         matched: false,
     }));
-    executor.reset(&mut tree);
-    // Tree should also be reset
+    executor.reset();
+    // running_path and is_running are cleared by reset
+    // (tree reset is caller's responsibility per spec)
     assert!(tree.spec.root.children().iter().all(|c| {
         // Check that Selector's active_child is None
         match c {
