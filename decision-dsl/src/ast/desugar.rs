@@ -179,7 +179,7 @@ fn desugar_switch(switch: SwitchSpec, registry: &EvaluatorRegistry) -> Result<No
                 parser,
                 sets: vec![SetMapping {
                     key: result_key.clone(),
-                    field: "decision".into(),
+                    field: "value".into(),
                 }],
                 timeout_ms: timeout_ms.unwrap_or(30000),
                 pending: false,
