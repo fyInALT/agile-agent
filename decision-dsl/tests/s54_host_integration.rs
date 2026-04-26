@@ -5,7 +5,7 @@
 
 use decision_dsl::ast::eval::EvaluatorRegistry;
 use decision_dsl::ast::parser::{DslParser, YamlParser};
-use decision_dsl::ast::runtime::{DslRunner, Executor, TickContext};
+use decision_dsl::ast::runtime::{DslRunner, Executor, MetricsCollector, NullMetricsCollector, TickContext};
 use decision_dsl::ext::blackboard::Blackboard;
 use decision_dsl::ext::command::{DecisionCommand, HumanCommand};
 use decision_dsl::ext::traits::{MockClock, MockSession, NullLogger};
@@ -57,12 +57,7 @@ spec:
     let clock = MockClock::new();
     let mut executor = Executor::new();
 
-    let mut ctx = TickContext {
-        blackboard: &mut bb,
-        session: &mut session,
-        clock: &clock,
-        logger: &NullLogger,
-    };
+    let mut ctx = TickContext::new(&mut bb, &mut session, &clock, &NullLogger);
 
     let result = executor.tick(&mut tree, &mut ctx).unwrap();
 
@@ -82,4 +77,26 @@ fn host_integration_public_api_is_minimal() {
     let _parser = YamlParser::new();
     let _executor = Executor::new();
     let _bb = Blackboard::default();
+}
+
+#[test]
+fn tick_context_new_constructor() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+
+    let _ctx = TickContext::new(&mut bb, &mut session, &clock, &NullLogger);
+}
+
+#[test]
+fn null_metrics_collector_is_no_op() {
+    let metrics = NullMetricsCollector;
+    use std::time::Duration;
+    use decision_dsl::ast::node::NodeStatus;
+
+    metrics.record_tick("test_tree", Duration::from_millis(10));
+    metrics.record_rule_match("rule_1", 1, Duration::from_millis(5));
+    metrics.record_node("node_a", "Condition", NodeStatus::Success, Duration::from_millis(2));
+    metrics.record_prompt("ask", "standard", 100, 50, 25);
+    metrics.record_subtree("handler", Duration::from_millis(8), NodeStatus::Success);
 }

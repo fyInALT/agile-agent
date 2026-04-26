@@ -6,7 +6,7 @@
 - Title: `AST & Desugaring`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Done`
 - Created: 2026-04-20
 
 ## Sprint Goal
@@ -32,7 +32,7 @@ Build the complete AST data model, YAML parser, and desugaring pass. DecisionRul
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost node behavior abstraction.
 
@@ -40,17 +40,17 @@ Implement the complete AST type hierarchy using `enum_dispatch` for zero-cost no
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.1.1 | Define `Tree`, `Metadata`, `Spec`, `Bundle` structs | Todo | - |
-| T2.1.2 | Define `TreeKind` enum (`BehaviorTree`, `SubTree`) | Todo | - |
+| T2.1.1 | Define `Tree`, `Metadata`, `Spec`, `Bundle` structs | Done | - |
+| T2.1.2 | Define `TreeKind` enum (`BehaviorTree`, `SubTree`) | Done | - |
 | T2.1.3 | Define `NodeBehavior` trait; `Node` enum annotated with `enum_dispatch` (manual impl used due to serde conflict) | Done | - |
-| T2.1.4 | Define `Node` enum with 14 variants | Todo | - |
-| T2.1.5 | Define all node-specific structs with serde attributes | Todo | - |
-| T2.1.6 | Mark runtime-state fields with `#[serde(skip)]` | Todo | - |
-| T2.1.7 | Add `#[serde(rename = "...")]` for camelCase YAML fields | Todo | - |
-| T2.1.8 | Define `SetMapping` struct | Todo | - |
-| T2.1.9 | Define `ParallelPolicy` enum | Todo | - |
-| T2.1.10 | Define `NodeStatus` enum (`Success`, `Failure`, `Running`) | Todo | - |
-| T2.1.11 | Write unit tests for Node serialization round-trip | Todo | - |
+| T2.1.4 | Define `Node` enum with 14 variants | Done | - |
+| T2.1.5 | Define all node-specific structs with serde attributes | Done | - |
+| T2.1.6 | Mark runtime-state fields with `#[serde(skip)]` | Done | - |
+| T2.1.7 | Add `#[serde(rename = "...")]` for camelCase YAML fields | Done | - |
+| T2.1.8 | Define `SetMapping` struct | Done | - |
+| T2.1.9 | Define `ParallelPolicy` enum | Done | - |
+| T2.1.10 | Define `NodeStatus` enum (`Success`, `Failure`, `Running`) | Done | - |
+| T2.1.11 | Write unit tests for Node serialization round-trip | Done | - |
 
 #### Acceptance Criteria
 
@@ -99,7 +99,7 @@ impl NodeBehavior for Node {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the YAML parser that produces `DslDocument` (a parse-time representation mirroring raw YAML).
 
@@ -107,18 +107,18 @@ Implement the YAML parser that produces `DslDocument` (a parse-time representati
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.2.1 | Define `DslParser` trait (`parse_document`, `parse_bundle`) | Todo | - |
-| T2.2.2 | Define `DslDocument` enum (`DecisionRules`, `BehaviorTree`, `SubTree`) | Todo | - |
-| T2.2.3 | Define `RuleSpec` struct with serde renames | Todo | - |
-| T2.2.4 | Define `ThenSpec` enum (`InlineCommand`, `Switch`, `When`, `Pipeline`, `SubTree`) | Todo | - |
-| T2.2.5 | Define `SwitchSpec`, `SwitchOn`, `WhenSpec`, `PipelineSpec` | Todo | - |
-| T2.2.6 | Define `OnError` enum (`Skip`, `Escalate`, `Retry`) | Todo | - |
-| T2.2.7 | Implement `YamlParser` struct with evaluator/parser registries | Todo | - |
-| T2.2.8 | Implement `parse_document` using `serde_yaml` | Todo | - |
-| T2.2.9 | Implement `parse_bundle` using `Fs` trait | Todo | - |
-| T2.2.10 | Write unit tests for DecisionRules parsing | Todo | - |
-| T2.2.11 | Write unit tests for BehaviorTree parsing | Todo | - |
-| T2.2.12 | Write unit tests for SubTree parsing | Todo | - |
+| T2.2.1 | Define `DslParser` trait (`parse_document`, `parse_bundle`) | Done | - |
+| T2.2.2 | Define `DslDocument` enum (`DecisionRules`, `BehaviorTree`, `SubTree`) | Done | - |
+| T2.2.3 | Define `RuleSpec` struct with serde renames | Done | - |
+| T2.2.4 | Define `ThenSpec` enum (`InlineCommand`, `Switch`, `When`, `Pipeline`, `SubTree`) | Done | - |
+| T2.2.5 | Define `SwitchSpec`, `SwitchOn`, `WhenSpec`, `PipelineSpec` | Done | - |
+| T2.2.6 | Define `OnError` enum (`Skip`, `Escalate`, `Retry`) | Done | - |
+| T2.2.7 | Implement `YamlParser` struct with evaluator/parser registries | Done | - |
+| T2.2.8 | Implement `parse_document` using `serde_yaml` | Done | - |
+| T2.2.9 | Implement `parse_bundle` using `Fs` trait | Done | - |
+| T2.2.10 | Write unit tests for DecisionRules parsing | Done | - |
+| T2.2.11 | Write unit tests for BehaviorTree parsing | Done | - |
+| T2.2.12 | Write unit tests for SubTree parsing | Done | - |
 
 #### Acceptance Criteria
 
@@ -146,7 +146,7 @@ pub struct YamlParser {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the desugaring pass that compiles high-level constructs to low-level BehaviorTree AST nodes.
 
@@ -154,23 +154,23 @@ Implement the desugaring pass that compiles high-level constructs to low-level B
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.3.1 | Implement `DslDocument::desugar()` entry point | Todo | - |
-| T2.3.2 | Implement `desugar_rule` (Sequence + Condition + decorators + on_error) | Todo | - |
-| T2.3.3 | Implement `desugar_then` (InlineCommand, Switch, When, Pipeline, SubTree) | Todo | - |
-| T2.3.4 | Implement `desugar_switch` for `SwitchOn::Prompt` (Sequence + Prompt + Selector) | Todo | - |
-| T2.3.5 | Implement `desugar_switch` for `SwitchOn::Variable` (Selector + When) | Todo | - |
-| T2.3.6 | Handle `result_key` configuration in Switch prompt desugaring | Todo | - |
-| T2.3.7 | Handle `default` case in Switch (any ThenSpec, not just command) | Todo | - |
-| T2.3.8 | Implement `desugar_when` (without on_error) | Todo | - |
-| T2.3.8a | Handle `WhenSpec.on_error` wrapping: `skip` → no-op, `escalate` → Selector with EscalateToHuman fallback, `retry` → Repeater(2) | Todo | - |
-| T2.3.9 | Implement `desugar_pipeline` | Todo | - |
-| T2.3.10 | Add automatic `NoMatchFallback` (`ApproveAndContinue`) to DecisionRules | Todo | - |
-| T2.3.11 | Write unit tests for DecisionRules → Selector desugaring | Todo | - |
-| T2.3.12 | Write unit tests for Switch prompt desugaring | Todo | - |
-| T2.3.13 | Write unit tests for on_error wrapping (Escalate, Retry, Skip) on Rule | Todo | - |
-| T2.3.13a | Write unit tests for `When.on_error` wrapping (Escalate, Retry) | Todo | - |
-| T2.3.14 | Write unit tests for Switch `result_key` configuration (cases match against specified key, default `decision`) | Todo | - |
-| T2.3.15 | Write unit tests for `_default` case supporting nested Switch/When/Pipeline in ThenSpec | Todo | - |
+| T2.3.1 | Implement `DslDocument::desugar()` entry point | Done | - |
+| T2.3.2 | Implement `desugar_rule` (Sequence + Condition + decorators + on_error) | Done | - |
+| T2.3.3 | Implement `desugar_then` (InlineCommand, Switch, When, Pipeline, SubTree) | Done | - |
+| T2.3.4 | Implement `desugar_switch` for `SwitchOn::Prompt` (Sequence + Prompt + Selector) | Done | - |
+| T2.3.5 | Implement `desugar_switch` for `SwitchOn::Variable` (Selector + When) | Done | - |
+| T2.3.6 | Handle `result_key` configuration in Switch prompt desugaring | Done | - |
+| T2.3.7 | Handle `default` case in Switch (any ThenSpec, not just command) | Done | - |
+| T2.3.8 | Implement `desugar_when` (without on_error) | Done | - |
+| T2.3.8a | Handle `WhenSpec.on_error` wrapping: `skip` → no-op, `escalate` → Selector with EscalateToHuman fallback, `retry` → Repeater(2) | Done | - |
+| T2.3.9 | Implement `desugar_pipeline` | Done | - |
+| T2.3.10 | Add automatic `NoMatchFallback` (`ApproveAndContinue`) to DecisionRules | Done | - |
+| T2.3.11 | Write unit tests for DecisionRules → Selector desugaring | Done | - |
+| T2.3.12 | Write unit tests for Switch prompt desugaring | Done | - |
+| T2.3.13 | Write unit tests for on_error wrapping (Escalate, Retry, Skip) on Rule | Done | - |
+| T2.3.13a | Write unit tests for `When.on_error` wrapping (Escalate, Retry) | Done | - |
+| T2.3.14 | Write unit tests for Switch `result_key` configuration (cases match against specified key, default `decision`) | Done | - |
+| T2.3.15 | Write unit tests for `_default` case supporting nested Switch/When/Pipeline in ThenSpec | Done | - |
 
 #### Acceptance Criteria
 
@@ -209,7 +209,7 @@ Desugaring table:
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement load-time validation to reject invalid DSL before execution.
 
@@ -217,15 +217,15 @@ Implement load-time validation to reject invalid DSL before execution.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T2.4.1 | Implement `validate_api_version` (format: `decision.agile-agent.io/v{N}`) | Todo | - |
-| T2.4.2 | Implement `validate_unique_names` within a tree | Todo | - |
-| T2.4.3 | Implement `validate_unique_priorities` for DecisionRules | Todo | - |
-| T2.4.4 | Implement `validate_evaluators` (all `kind` values registered) | Todo | - |
-| T2.4.5 | Implement `validate_parsers` (all `kind` values registered) | Todo | - |
-| T2.4.6 | Implement `validate_subtree_refs` (all refs resolve in Bundle) | Todo | - |
-| T2.4.7 | Implement `detect_circular_subtree_refs` | Todo | - |
-| T2.4.8 | Integrate validation into `parse_bundle` pipeline | Todo | - |
-| T2.4.9 | Write unit tests for each validation rule | Todo | - |
+| T2.4.1 | Implement `validate_api_version` (format: `decision.agile-agent.io/v{N}`) | Done | - |
+| T2.4.2 | Implement `validate_unique_names` within a tree | Done | - |
+| T2.4.3 | Implement `validate_unique_priorities` for DecisionRules | Done | - |
+| T2.4.4 | Implement `validate_evaluators` (all `kind` values registered) | Done | - |
+| T2.4.5 | Implement `validate_parsers` (all `kind` values registered) | Done | - |
+| T2.4.6 | Implement `validate_subtree_refs` (all refs resolve in Bundle) | Done | - |
+| T2.4.7 | Implement `detect_circular_subtree_refs` | Done | - |
+| T2.4.8 | Integrate validation into `parse_bundle` pipeline | Done | - |
+| T2.4.9 | Write unit tests for each validation rule | Done | - |
 
 #### Acceptance Criteria
 
@@ -250,7 +250,7 @@ Validation order:
 
 ## Sprint Completion Criteria
 
-- [ ] `cargo check` passes for the `decision-dsl` crate.
-- [ ] `cargo test --lib` passes with ≥90% coverage on parser and AST modules.
-- [ ] All desugaring paths have unit tests with structural assertions.
-- [ ] Invalid DSL documents are rejected with clear `ParseError` messages.
+- [x] `cargo check` passes for the `decision-dsl` crate.
+- [x] `cargo test --lib` passes with ≥90% coverage on parser and AST modules.
+- [x] All desugaring paths have unit tests with structural assertions.
+- [x] Invalid DSL documents are rejected with clear `ParseError` messages.

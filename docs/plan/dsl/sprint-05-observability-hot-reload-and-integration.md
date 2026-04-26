@@ -6,7 +6,7 @@
 - Title: `Observability, Hot Reload & Integration`
 - Duration: 2 weeks
 - Priority: P1 (High)
-- Status: `Backlog`
+- Status: `Done`
 - Created: 2026-04-20
 
 ## Sprint Goal
@@ -34,7 +34,7 @@ Complete the operational layer: tracing for debugging, hot reload for zero-downt
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the trace system that records every node enter/exit, evaluation, action, and prompt event.
 
@@ -42,18 +42,18 @@ Implement the trace system that records every node enter/exit, evaluation, actio
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T5.1.1 | Define `TraceEntry` enum with 11 variants | Todo | - |
-| T5.1.2 | Implement `Tracer` struct (`entries`, `running_path`, `current_depth`) | Todo | - |
-| T5.1.3 | Implement `Tracer::enter` / `exit` for composite/decorator/leaf nodes | Todo | - |
-| T5.1.4 | Implement `Tracer::enter_subtree` / `exit_subtree` | Todo | - |
-| T5.1.5 | Implement `Tracer::record_eval` | Todo | - |
-| T5.1.6 | Implement `Tracer::record_action` | Todo | - |
-| T5.1.7 | Implement `Tracer::record_prompt_sent` / `success` / `failure` | Todo | - |
-| T5.1.8 | Implement `Tracer::record_rule_matched` / `skipped` | Todo | - |
-| T5.1.9 | Implement `Tracer::running_path()` (derive from enter/exit events) | Todo | - |
-| T5.1.10 | Implement `render_trace_ascii` for human-readable output | Todo | - |
-| T5.1.11 | Write unit tests for trace generation | Todo | - |
-| T5.1.12 | Write unit tests for ASCII rendering | Todo | - |
+| T5.1.1 | Define `TraceEntry` enum with 11 variants | Done | - |
+| T5.1.2 | Implement `Tracer` struct (`entries`, `running_path`, `current_depth`) | Done | - |
+| T5.1.3 | Implement `Tracer::enter` / `exit` for composite/decorator/leaf nodes | Done | - |
+| T5.1.4 | Implement `Tracer::enter_subtree` / `exit_subtree` | Done | - |
+| T5.1.5 | Implement `Tracer::record_eval` | Done | - |
+| T5.1.6 | Implement `Tracer::record_action` | Done | - |
+| T5.1.7 | Implement `Tracer::record_prompt_sent` / `success` / `failure` | Done | - |
+| T5.1.8 | Implement `Tracer::record_rule_matched` / `skipped` | Done | - |
+| T5.1.9 | Implement `Tracer::running_path()` (derive from enter/exit events) | Done | - |
+| T5.1.10 | Implement `render_trace_ascii` for human-readable output | Done | - |
+| T5.1.11 | Write unit tests for trace generation | Done | - |
+| T5.1.12 | Write unit tests for ASCII rendering | Done | - |
 
 #### Acceptance Criteria
 
@@ -86,7 +86,7 @@ pub enum TraceEntry {
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement zero-downtime rule reloading with `PollWatcher` (mtime-based, zero external deps).
 
@@ -94,17 +94,17 @@ Implement zero-downtime rule reloading with `PollWatcher` (mtime-based, zero ext
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T5.2.1 | Define `Watcher` trait (`has_changed`) | Todo | - |
-| T5.2.2 | Define `WatcherError` enum | Todo | - |
-| T5.2.3 | Implement `PollWatcher` using `Fs::modified()` | Todo | - |
-| T5.2.4 | Implement `DslReloader` struct (`parser`, `fs`, `watcher`, `dir`, `current_bundle`) | Todo | - |
-| T5.2.5 | Implement `DslReloader::new` (initial parse) | Todo | - |
-| T5.2.6 | Implement `DslReloader::check_and_reload` | Todo | - |
-| T5.2.7 | Implement `DslReloader::current` (read lock on bundle) | Todo | - |
-| T5.2.8 | Handle reload failures gracefully (keep old bundle, log error) | Todo | - |
-| T5.2.9 | Write unit tests for PollWatcher with MockFs | Todo | - |
-| T5.2.10 | Write unit tests for DslReloader reload cycle | Todo | - |
-| T5.2.11 | Write unit tests for reload failure recovery | Todo | - |
+| T5.2.1 | Define `Watcher` trait (`has_changed`) | Done | - |
+| T5.2.2 | Define `WatcherError` enum | Done | - |
+| T5.2.3 | Implement `PollWatcher` using `Fs::modified()` | Done | - |
+| T5.2.4 | Implement `DslReloader` struct (`parser`, `fs`, `watcher`, `dir`, `current_bundle`) | Done | - |
+| T5.2.5 | Implement `DslReloader::new` (initial parse) | Done | - |
+| T5.2.6 | Implement `DslReloader::check_and_reload` | Done | - |
+| T5.2.7 | Implement `DslReloader::current` (read lock on bundle) | Done | - |
+| T5.2.8 | Handle reload failures gracefully (keep old bundle, log error) | Done | - |
+| T5.2.9 | Write unit tests for PollWatcher with MockFs | Done | - |
+| T5.2.10 | Write unit tests for DslReloader reload cycle | Done | - |
+| T5.2.11 | Write unit tests for reload failure recovery | Done | - |
 
 #### Acceptance Criteria
 
@@ -143,7 +143,7 @@ impl DslReloader {
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Build mock trait implementations and golden tests for the entire engine.
 
@@ -151,17 +151,17 @@ Build mock trait implementations and golden tests for the entire engine.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T5.3.1 | Implement `MockSession` with `RefCell<VecDeque>` replies | Todo | - |
-| T5.3.2 | Implement `MockClock` with `advance(Duration)` | Todo | - |
-| T5.3.3 | Implement `CaptureLogger` | Todo | - |
-| T5.3.4 | Implement `MockFs` for in-memory file system testing | Todo | - |
-| T5.3.5 | Write integration test: DecisionRules → full tick → commands | Todo | - |
-| T5.3.6 | Write integration test: Switch on Prompt → 2 ticks → branch | Todo | - |
-| T5.3.7 | Write integration test: SubTree scope isolation | Todo | - |
-| T5.3.8 | Write integration test: Cooldown with MockClock | Todo | - |
-| T5.3.9 | Write golden tests: compare expected vs actual trace output | Todo | - |
-| T5.3.10 | Write property-based tests for evaluator combinations (or/and/not) | Todo | - |
-| T5.3.11 | Set coverage targets: Parser 95%, Desugaring 100%, Evaluators 100%, Parsers 100%, Executor 95%, Blackboard 100% | Todo | - |
+| T5.3.1 | Implement `MockSession` with `RefCell<VecDeque>` replies | Done | - |
+| T5.3.2 | Implement `MockClock` with `advance(Duration)` | Done | - |
+| T5.3.3 | Implement `CaptureLogger` | Done | - |
+| T5.3.4 | Implement `MockFs` for in-memory file system testing | Done | - |
+| T5.3.5 | Write integration test: DecisionRules → full tick → commands | Done | - |
+| T5.3.6 | Write integration test: Switch on Prompt → 2 ticks → branch | Done | - |
+| T5.3.7 | Write integration test: SubTree scope isolation | Done | - |
+| T5.3.8 | Write integration test: Cooldown with MockClock | Done | - |
+| T5.3.9 | Write golden tests: compare expected vs actual trace output | Done | - |
+| T5.3.10 | Write property-based tests for evaluator combinations (or/and/not) | Done | - |
+| T5.3.11 | Set coverage targets: Parser 95%, Desugaring 100%, Evaluators 100%, Parsers 100%, Executor 95%, Blackboard 100% | Done | - |
 
 #### Acceptance Criteria
 
@@ -197,7 +197,7 @@ impl Session for MockSession {
 
 **Priority**: P1
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Done
 
 Provide bridge implementations for integration into `agent-decision` and `agent-daemon`.
 
@@ -205,14 +205,14 @@ Provide bridge implementations for integration into `agent-decision` and `agent-
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T5.4.1 | Document `ProviderSessionBridge` (adapts agent-provider session to `decision_dsl::Session`) | Todo | - |
-| T5.4.2 | Document `StdFs` bridge (already implemented in Sprint 1) | Todo | - |
-| T5.4.3 | Document `TickContext` construction from host state | Todo | - |
-| T5.4.4 | Document `Blackboard` population from work agent state | Todo | - |
-| T5.4.5 | Document command consumption by `DecisionCommandInterpreter` | Todo | - |
-| T5.4.6 | Document `build_blackboard(agent_state)` helper for host state → Blackboard mapping | Todo | - |
-| T5.4.7 | Document `DslDecisionEngine::reload()` for hot reload integration | Todo | - |
-| T5.4.8 | Provide example integration test in `agent-decision` crate | Todo | - |
+| T5.4.1 | Document `ProviderSessionBridge` (adapts agent-provider session to `decision_dsl::Session`) | Done | - |
+| T5.4.2 | Document `StdFs` bridge (already implemented in Sprint 1) | Done | - |
+| T5.4.3 | Document `TickContext` construction from host state | Done | - |
+| T5.4.4 | Document `Blackboard` population from work agent state | Done | - |
+| T5.4.5 | Document command consumption by `DecisionCommandInterpreter` | Done | - |
+| T5.4.6 | Document `build_blackboard(agent_state)` helper for host state → Blackboard mapping | Done | - |
+| T5.4.7 | Document `DslDecisionEngine::reload()` for hot reload integration | Done | - |
+| T5.4.8 | Provide example integration test in `agent-decision` crate | Done | - |
 
 #### Acceptance Criteria
 
@@ -251,7 +251,7 @@ for cmd in result.commands {
 
 **Priority**: P2
 **Effort**: 2 points
-**Status**: Backlog
+**Status**: Done
 
 Add performance targets and optional metrics collection.
 
@@ -259,15 +259,15 @@ Add performance targets and optional metrics collection.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T5.5.1 | Define `MetricsCollector` trait | Todo | - |
-| T5.5.2 | Implement `Blackboard::with_capacity(n)` for pre-allocation | Todo | - |
-| T5.5.3 | Add benchmark for 1M evaluator calls/second target | Todo | - |
-| T5.5.4 | Add benchmark for Parser + Desugaring throughput | Todo | - |
-| T5.5.5 | Document memory footprint targets (20KB parse, 10KB AST, 2KB per tick) | Todo | - |
-| T5.5.6 | Document `Send + Sync` / `!Sync` executor semantics (Trees are Send+Sync; Executor is !Sync) | Todo | - |
-| T5.5.7 | Document Parallel Safety: one executor + blackboard per agent thread | Todo | - |
-| T5.5.8 | Write criterion benchmarks | Todo | - |
-| T5.5.9 | Write memory footprint verification tests (assert parse ≤ 20KB, AST ≤ 10KB, blackboard ≤ 2KB) | Todo | - |
+| T5.5.1 | Define `MetricsCollector` trait | Done | - |
+| T5.5.2 | Implement `Blackboard::with_capacity(n)` for pre-allocation | Done | - |
+| T5.5.3 | Add benchmark for 1M evaluator calls/second target | Done | - |
+| T5.5.4 | Add benchmark for Parser + Desugaring throughput | Done | - |
+| T5.5.5 | Document memory footprint targets (20KB parse, 10KB AST, 2KB per tick) | Done | - |
+| T5.5.6 | Document `Send + Sync` / `!Sync` executor semantics (Trees are Send+Sync; Executor is !Sync) | Done | - |
+| T5.5.7 | Document Parallel Safety: one executor + blackboard per agent thread | Done | - |
+| T5.5.8 | Write criterion benchmarks | Done | - |
+| T5.5.9 | Write memory footprint verification tests (assert parse ≤ 20KB, AST ≤ 10KB, blackboard ≤ 2KB) | Done | - |
 
 #### Acceptance Criteria
 
@@ -292,10 +292,10 @@ pub trait MetricsCollector {
 
 ## Sprint Completion Criteria
 
-- [ ] `cargo check` passes for the `decision-dsl` crate.
-- [ ] `cargo test --lib` passes with 100% coverage on trace and mock modules.
-- [ ] `cargo bench` runs without errors.
-- [ ] Hot reload test demonstrates atomic swap semantics.
-- [ ] Host integration example compiles in a separate test crate.
-- [ ] All public API types are documented with rustdoc.
-- [ ] README.md for `decision-dsl` crate is updated with quick-start.
+- [x] `cargo check` passes for the `decision-dsl` crate.
+- [x] `cargo test --lib` passes with 100% coverage on trace and mock modules.
+- [x] `cargo bench` runs without errors.
+- [x] Hot reload test demonstrates atomic swap semantics.
+- [x] Host integration example compiles in a separate test crate.
+- [x] All public API types are documented with rustdoc.
+- [x] README.md for `decision-dsl` crate is updated with quick-start.

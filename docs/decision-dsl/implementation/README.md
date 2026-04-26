@@ -12,7 +12,7 @@
 |----------|----------|
 | **This document** | Overview, package structure, public API, desugaring, integration, migration |
 | [`decision-dsl.md`](decision-dsl.md) | DSL language specification: DecisionRules, Switch, When, Pipeline, BehaviorTree nodes |
-| [`decision-dsl-ast.md`](decision-dsl-ast.md) | AST design, enum_dispatch Node, desugaring pass, scoped Blackboard, grouped Command |
+| [`decision-dsl-ast.md`](decision-dsl-ast.md) | AST design, manual enum-dispatch Node, desugaring pass, scoped Blackboard, grouped Command |
 | [`decision-dsl-runtime.md`](decision-dsl-runtime.md) | Executor tick loop, node implementations, SubTree scope isolation, Prompt node |
 | [`decision-dsl-evaluators.md`](decision-dsl-evaluators.md) | Evaluator and OutputParser enums, built-in evaluators, parsers |
 | [`decision-dsl-template.md`](decision-dsl-template.md) | minijinja template engine, command field rendering |
@@ -33,7 +33,7 @@
 | **Trait-based injection** | Session, Clock, Logger are traits. Testable with mocks. |
 | **Spec-compliant** | Every YAML construct from `decision-dsl.md` is implemented. |
 | **Lua-inspired** | Host loads → ticks → receives output. The engine is an embedded VM. |
-| **Dependency-aware** | `minijinja` for templates (not hand-rolled). `enum_dispatch` for Node (not manual matches). |
+| **Dependency-aware** | `minijinja` for templates (not hand-rolled). Manual trait dispatch for Node (serde-compatible). |
 | **Testable in isolation** | Every external dependency is mockable. |
 
 ### 1.2 Architecture Analogy: Lua
@@ -48,9 +48,9 @@
 
 ### 1.3 Divergence from Architecture Doc
 
-The architecture document (`docs/decision-layer-design.md`) defines nodes via `pub trait BehaviorNode` + `Box<dyn BehaviorNode>` (trait objects). This implementation intentionally uses `enum_dispatch` instead. Rationale:
+The architecture document (`docs/decision-layer-design.md`) defines nodes via `pub trait BehaviorNode` + `Box<dyn BehaviorNode>` (trait objects). This implementation intentionally uses a manual enum-dispatch `impl NodeBehavior for Node` instead. Rationale:
 
-| Aspect | `Box<dyn BehaviorNode>` (architecture) | `enum_dispatch NodeBehavior` (implementation) |
+| Aspect | `Box<dyn BehaviorNode>` (architecture) | Manual enum dispatch `NodeBehavior` (implementation) |
 |--------|--------------------------------------|----------------------------------------------|
 | Allocation | Heap per node | Stack-allocated enum, one allocation per `Vec<Node>` |
 | Clone | Requires `dyn_clone` crate | `#[derive(Clone)]` |
@@ -141,7 +141,6 @@ serde_yaml = "0.9"
 serde_json = "1.0"
 regex = "1.10"
 minijinja = "2"                  # Template engine (replaces hand-rolled)
-enum_dispatch = "0.3"            # Auto-generate Node match arms
 
 [dev-dependencies]
 # No agent-* crates. Only mock trait impls.
@@ -151,7 +150,7 @@ enum_dispatch = "0.3"            # Auto-generate Node match arms
 - `serde` ecosystem (serialization)
 - `regex` (pattern matching)
 - `minijinja` (templating — ~500 lines of hand-rolled engine replaced)
-- `enum_dispatch` (code generation — eliminates ~120 manual match arms)
+- No `enum_dispatch` (incompatible with serde derive; manual match arms used instead)
 
 Removed vs previous design: hand-rolled template engine (~500 lines), `dyn_clone` crate, manual visitor match arms, `serde_regex` (regex compilation moved to parse time).
 
@@ -173,7 +172,7 @@ decision-dsl/
     ├── ast/
     │   ├── mod.rs              # AST types
     │   ├── tree.rs             # Tree, Metadata, Spec, Bundle
-    │   ├── node.rs             # Node enum + enum_dispatch trait
+    │   ├── node.rs             # Node enum + NodeBehavior trait
     │   ├── command.rs          # DecisionCommand (grouped enum)
     │   └── spec.rs             # RuleSpec, ThenSpec, SwitchSpec, etc. (parse-time types)
     ├── runtime/
@@ -183,7 +182,7 @@ decision-dsl/
     │   ├── context.rs          # TickContext: per-tick injection
     │   └── trace.rs            # TraceEntry + Tracer + ASCII rendering
     ├── nodes/
-    │   ├── mod.rs              # NodeBehavior trait (enum_dispatch)
+    │   ├── mod.rs              # NodeBehavior trait (manual dispatch)
     │   ├── composite.rs        # Selector, Sequence, Parallel
     │   ├── decorator.rs        # Inverter, Repeater, Cooldown, ReflectionGuard, ForceHuman
     │   ├── high_level.rs       # When
@@ -543,7 +542,7 @@ fn build_blackboard(agent_state: &AgentState) -> Blackboard {
 Phase 1 — decision-dsl crate (standalone)
   - Implement enum-based AST, evaluators, parsers
   - Implement desugaring pass (DecisionRules → BT AST)
-  - Implement executor with enum_dispatch
+  - Implement executor with manual node dispatch
   - Implement hot reload (DslReloader + PollWatcher)
   - Unit tests + integration tests for all constructs
 

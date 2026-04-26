@@ -6,7 +6,7 @@
 - Title: `Runtime Executor`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Done`
 - Created: 2026-04-20
 
 ## Sprint Goal
@@ -33,7 +33,7 @@ Build the complete executor tick loop and all node behavior implementations. The
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the `DslRunner` trait, `Executor` struct, and `TickContext`.
 
@@ -41,17 +41,17 @@ Implement the `DslRunner` trait, `Executor` struct, and `TickContext`.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.1.1 | Define `DslRunner` trait (`tick`, `reset`) | Todo | - |
-| T4.1.2 | Define `TickResult` struct (`status`, `commands`, `trace`) | Todo | - |
-| T4.1.3 | Define `TickContext` struct (`blackboard`, `session`, `clock`, `logger`) | Todo | - |
-| T4.1.4 | Implement `Executor` struct (`running_path`, `is_running`) | Todo | - |
-| T4.1.5 | Implement `Executor::tick` with running-path management | Todo | - |
-| T4.1.6 | Implement `Executor::reset` | Todo | - |
-| T4.1.7 | Implement command draining from blackboard after tick | Todo | - |
-| T4.1.8 | Implement `Node::resume_at` for async Prompt continuation | Todo | - |
-| T4.1.9 | Write unit tests for basic tick loop | Todo | - |
-| T4.1.10 | Write unit tests for Running → Success resume | Todo | - |
-| T4.1.11 | Write unit tests for Running → Failure resume | Todo | - |
+| T4.1.1 | Define `DslRunner` trait (`tick`, `reset`) | Done | - |
+| T4.1.2 | Define `TickResult` struct (`status`, `commands`, `trace`) | Done | - |
+| T4.1.3 | Define `TickContext` struct (`blackboard`, `session`, `clock`, `logger`) | Done | - |
+| T4.1.4 | Implement `Executor` struct (`running_path`, `is_running`) | Done | - |
+| T4.1.5 | Implement `Executor::tick` with running-path management | Done | - |
+| T4.1.6 | Implement `Executor::reset` | Done | - |
+| T4.1.7 | Implement command draining from blackboard after tick | Done | - |
+| T4.1.8 | Implement `Node::resume_at` for async Prompt continuation | Done | - |
+| T4.1.9 | Write unit tests for basic tick loop | Done | - |
+| T4.1.10 | Write unit tests for Running → Success resume | Done | - |
+| T4.1.11 | Write unit tests for Running → Failure resume | Done | - |
 
 #### Acceptance Criteria
 
@@ -92,7 +92,7 @@ impl DslRunner for Executor {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement Selector, Sequence, and Parallel node behaviors.
 
@@ -100,15 +100,15 @@ Implement Selector, Sequence, and Parallel node behaviors.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.2.1 | Implement `SelectorNode::tick` (first Success wins, Failure falls through) | Todo | - |
-| T4.2.2 | Implement `SelectorNode::reset` | Todo | - |
-| T4.2.3 | Implement `SequenceNode::tick` (all must succeed, first Failure aborts) | Todo | - |
-| T4.2.4 | Implement `SequenceNode::reset` | Todo | - |
-| T4.2.5 | Implement `ParallelNode::tick` with `ParallelPolicy` | Todo | - |
-| T4.2.6 | Implement `ParallelNode::reset` | Todo | - |
-| T4.2.7 | Write unit tests for Selector | Todo | - |
-| T4.2.8 | Write unit tests for Sequence | Todo | - |
-| T4.2.9 | Write unit tests for Parallel (allSuccess, anySuccess, majority) | Todo | - |
+| T4.2.1 | Implement `SelectorNode::tick` (first Success wins, Failure falls through) | Done | - |
+| T4.2.2 | Implement `SelectorNode::reset` | Done | - |
+| T4.2.3 | Implement `SequenceNode::tick` (all must succeed, first Failure aborts) | Done | - |
+| T4.2.4 | Implement `SequenceNode::reset` | Done | - |
+| T4.2.5 | Implement `ParallelNode::tick` with `ParallelPolicy` | Done | - |
+| T4.2.6 | Implement `ParallelNode::reset` | Done | - |
+| T4.2.7 | Write unit tests for Selector | Done | - |
+| T4.2.8 | Write unit tests for Sequence | Done | - |
+| T4.2.9 | Write unit tests for Parallel (allSuccess, anySuccess, majority) | Done | - |
 
 #### Acceptance Criteria
 
@@ -145,7 +145,7 @@ impl NodeBehavior for SelectorNode {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement Inverter, Repeater, Cooldown, ReflectionGuard, and ForceHuman.
 
@@ -153,14 +153,14 @@ Implement Inverter, Repeater, Cooldown, ReflectionGuard, and ForceHuman.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.3.1 | Implement `InverterNode` (Success ↔ Failure) | Todo | - |
-| T4.3.2 | Implement `RepeaterNode` (loop up to `max_attempts`) | Todo | - |
-| T4.3.3 | Implement `CooldownNode` (clock-based gate) | Todo | - |
-| T4.3.4 | Implement `ReflectionGuardNode` (round counter) | Todo | - |
-| T4.3.5 | Implement `ForceHumanNode` (auto-escalate on success) | Todo | - |
-| T4.3.6 | Write unit tests for each decorator | Todo | - |
-| T4.3.7 | Write unit tests for Cooldown with MockClock | Todo | - |
-| T4.3.8 | Write unit tests for ReflectionGuard round counting | Todo | - |
+| T4.3.1 | Implement `InverterNode` (Success ↔ Failure) | Done | - |
+| T4.3.2 | Implement `RepeaterNode` (loop up to `max_attempts`) | Done | - |
+| T4.3.3 | Implement `CooldownNode` (clock-based gate) | Done | - |
+| T4.3.4 | Implement `ReflectionGuardNode` (round counter) | Done | - |
+| T4.3.5 | Implement `ForceHumanNode` (auto-escalate on success) | Done | - |
+| T4.3.6 | Write unit tests for each decorator | Done | - |
+| T4.3.7 | Write unit tests for Cooldown with MockClock | Done | - |
+| T4.3.8 | Write unit tests for ReflectionGuard round counting | Done | - |
 
 #### Acceptance Criteria
 
@@ -196,7 +196,7 @@ impl NodeBehavior for CooldownNode {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement Condition, Action, and SetVar.
 
@@ -204,16 +204,16 @@ Implement Condition, Action, and SetVar.
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.4.1 | Implement `ConditionNode::tick` (evaluator → Success/Failure) | Todo | - |
-| T4.4.2 | Implement `ActionNode::tick` (render templates + push command) | Todo | - |
-| T4.4.3 | Implement `ActionNode` optional `when` guard | Todo | - |
-| T4.4.4 | Implement `SetVarNode::tick` (write to blackboard scope) | Todo | - |
-| T4.4.5 | Write unit tests for Condition with all evaluator types | Todo | - |
-| T4.4.6 | Write unit tests for Action with template rendering | Todo | - |
-| T4.4.7 | Write unit tests for Action `when` guard | Todo | - |
-| T4.4.8 | Write unit tests for SetVar with all BlackboardValue types (string, integer, float, boolean, list, map) | Todo | - |
-| T4.4.9 | Write unit tests for SetVar with nested structures (List containing Maps, Map containing Lists) | Todo | - |
-| T4.4.10 | Write unit tests for command interpolation timing (template evaluated at Action tick, not at DSL load) | Todo | - |
+| T4.4.1 | Implement `ConditionNode::tick` (evaluator → Success/Failure) | Done | - |
+| T4.4.2 | Implement `ActionNode::tick` (render templates + push command) | Done | - |
+| T4.4.3 | Implement `ActionNode` optional `when` guard | Done | - |
+| T4.4.4 | Implement `SetVarNode::tick` (write to blackboard scope) | Done | - |
+| T4.4.5 | Write unit tests for Condition with all evaluator types | Done | - |
+| T4.4.6 | Write unit tests for Action with template rendering | Done | - |
+| T4.4.7 | Write unit tests for Action `when` guard | Done | - |
+| T4.4.8 | Write unit tests for SetVar with all BlackboardValue types (string, integer, float, boolean, list, map) | Done | - |
+| T4.4.9 | Write unit tests for SetVar with nested structures (List containing Maps, Map containing Lists) | Done | - |
+| T4.4.10 | Write unit tests for command interpolation timing (template evaluated at Action tick, not at DSL load) | Done | - |
 
 #### Acceptance Criteria
 
@@ -248,7 +248,7 @@ impl NodeBehavior for ActionNode {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the Prompt node's two-tick async lifecycle. This is the most complex leaf node.
 
@@ -256,18 +256,18 @@ Implement the Prompt node's two-tick async lifecycle. This is the most complex l
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.5.1 | Implement first-tick path: render template + `session.send_with_hint` | Todo | - |
-| T4.5.2 | Set `pending = true` and `sent_at = Some(now)` on first tick | Todo | - |
-| T4.5.3 | Implement second-tick path: check `session.is_ready()` | Todo | - |
-| T4.5.4 | Implement timeout check using `clock.now() - sent_at` | Todo | - |
-| T4.5.5 | Receive reply, parse with `OutputParser`, store `llm_responses` | Todo | - |
-| T4.5.6 | Handle `__command` magic key for CommandParser | Todo | - |
-| T4.5.7 | Apply `sets` mappings to blackboard | Todo | - |
-| T4.5.8 | Implement `PromptNode::reset` (clear pending + sent_at) | Todo | - |
-| T4.5.9 | Write unit tests for full Prompt lifecycle (tick 1 → tick 2 → Success) | Todo | - |
-| T4.5.10 | Write unit tests for timeout | Todo | - |
-| T4.5.11 | Write unit tests for parse failure | Todo | - |
-| T4.5.12 | Write unit tests for CommandParser | Todo | - |
+| T4.5.1 | Implement first-tick path: render template + `session.send_with_hint` | Done | - |
+| T4.5.2 | Set `pending = true` and `sent_at = Some(now)` on first tick | Done | - |
+| T4.5.3 | Implement second-tick path: check `session.is_ready()` | Done | - |
+| T4.5.4 | Implement timeout check using `clock.now() - sent_at` | Done | - |
+| T4.5.5 | Receive reply, parse with `OutputParser`, store `llm_responses` | Done | - |
+| T4.5.6 | Handle `__command` magic key for CommandParser | Done | - |
+| T4.5.7 | Apply `sets` mappings to blackboard | Done | - |
+| T4.5.8 | Implement `PromptNode::reset` (clear pending + sent_at) | Done | - |
+| T4.5.9 | Write unit tests for full Prompt lifecycle (tick 1 → tick 2 → Success) | Done | - |
+| T4.5.10 | Write unit tests for timeout | Done | - |
+| T4.5.11 | Write unit tests for parse failure | Done | - |
+| T4.5.12 | Write unit tests for CommandParser | Done | - |
 
 #### Acceptance Criteria
 
@@ -312,7 +312,7 @@ impl NodeBehavior for PromptNode {
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement SubTree execution with identity-preserving traces and scoped variable isolation.
 
@@ -320,13 +320,13 @@ Implement SubTree execution with identity-preserving traces and scoped variable 
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T4.6.1 | Implement `SubTreeNode::tick` with `push_scope` / `pop_scope` | Todo | - |
-| T4.6.2 | Emit `EnterSubTree` / `ExitSubTree` trace entries | Todo | - |
-| T4.6.3 | Handle unresolved SubTree (`resolved_root: None`) as error | Todo | - |
-| T4.6.4 | Implement `SubTreeNode::reset` (delegate to resolved root) | Todo | - |
-| T4.6.5 | Write unit tests for scope isolation | Todo | - |
-| T4.6.6 | Write unit tests for identity-preserving traces | Todo | - |
-| T4.6.7 | Write unit tests for unresolved SubTree error | Todo | - |
+| T4.6.1 | Implement `SubTreeNode::tick` with `push_scope` / `pop_scope` | Done | - |
+| T4.6.2 | Emit `EnterSubTree` / `ExitSubTree` trace entries | Done | - |
+| T4.6.3 | Handle unresolved SubTree (`resolved_root: None`) as error | Done | - |
+| T4.6.4 | Implement `SubTreeNode::reset` (delegate to resolved root) | Done | - |
+| T4.6.5 | Write unit tests for scope isolation | Done | - |
+| T4.6.6 | Write unit tests for identity-preserving traces | Done | - |
+| T4.6.7 | Write unit tests for unresolved SubTree error | Done | - |
 
 #### Acceptance Criteria
 
@@ -357,8 +357,8 @@ impl NodeBehavior for SubTreeNode {
 
 ## Sprint Completion Criteria
 
-- [ ] `cargo check` passes for the `decision-dsl` crate.
-- [ ] `cargo test --lib` passes with ≥95% coverage on runtime and node modules.
-- [ ] All node types have dedicated unit tests.
-- [ ] Prompt node async lifecycle is tested with `MockSession`.
-- [ ] SubTree scope isolation is tested with nested variable reads/writes.
+- [x] `cargo check` passes for the `decision-dsl` crate.
+- [x] `cargo test --lib` passes with ≥95% coverage on runtime and node modules.
+- [x] All node types have dedicated unit tests.
+- [x] Prompt node async lifecycle is tested with `MockSession`.
+- [x] SubTree scope isolation is tested with nested variable reads/writes.

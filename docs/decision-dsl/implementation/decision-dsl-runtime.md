@@ -1,6 +1,6 @@
 # Decision DSL: Runtime Execution
 
-> Runtime execution specification for the decision DSL engine. Covers the Executor tick loop, node implementations (via `enum_dispatch`), the scoped SubTree execution model, and the Prompt node's async lifecycle.
+> Runtime execution specification for the decision DSL engine. Covers the Executor tick loop, node implementations (via manual trait dispatch), the scoped SubTree execution model, and the Prompt node's async lifecycle.
 
 ---
 
@@ -93,12 +93,11 @@ Each decision cycle follows a 6-phase lifecycle, matching the architecture in `d
 
 This lifecycle is driven by the host (e.g., `agent-decision`'s `DslDecisionEngine`). The host calls `build_blackboard()` → `executor.reset()` → `executor.tick()` → persists state → returns commands. See the Host Integration example in `README.md` §5.
 
-### 1.4 `enum_dispatch` Node Trait
+### 1.4 NodeBehavior Trait
 
-All node structs implement the `NodeBehavior` trait. `enum_dispatch` auto-generates the `Node::tick()` and `Node::reset()` match arms:
+All node structs implement the `NodeBehavior` trait. A manual `impl NodeBehavior for Node` delegates to each variant:
 
 ```rust
-#[enum_dispatch]
 pub(crate) trait NodeBehavior {
     fn tick(&mut self, ctx: &mut TickContext, tracer: &mut Tracer) -> Result<NodeStatus, RuntimeError>;
     fn reset(&mut self);
@@ -108,7 +107,7 @@ pub(crate) trait NodeBehavior {
 }
 ```
 
-Adding a new node type requires: (1) define the struct, (2) impl `NodeBehavior`, (3) add to the `Node` enum. No other code changes needed.
+Adding a new node type requires: (1) define the struct, (2) impl `NodeBehavior`, (3) add to the `Node` enum, (4) update the manual `impl NodeBehavior for Node`. `enum_dispatch` was considered but incompatible with serde derive on the same enum.
 
 ---
 

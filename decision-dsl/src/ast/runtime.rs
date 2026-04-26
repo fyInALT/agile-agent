@@ -152,6 +152,22 @@ pub struct TickContext<'a> {
     pub logger: &'a dyn Logger,
 }
 
+impl<'a> TickContext<'a> {
+    pub fn new(
+        blackboard: &'a mut Blackboard,
+        session: &'a mut dyn Session,
+        clock: &'a dyn Clock,
+        logger: &'a dyn Logger,
+    ) -> Self {
+        Self {
+            blackboard,
+            session,
+            clock,
+            logger,
+        }
+    }
+}
+
 // ── TickResult ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1101,4 +1117,43 @@ pub fn render_trace_ascii(entries: &[TraceEntry]) -> String {
     }
 
     lines.join("\n")
+}
+
+// ── MetricsCollector ────────────────────────────────────────────────────────
+
+/// Optional trait for collecting runtime performance and decision metrics.
+/// Hosts can implement this to feed metrics into their observability stack.
+pub trait MetricsCollector {
+    /// Record a completed tick cycle.
+    fn record_tick(&self, tree_name: &str, duration: std::time::Duration);
+
+    /// Record a rule match event.
+    fn record_rule_match(&self, rule_name: &str, priority: u32, duration: std::time::Duration);
+
+    /// Record a node execution.
+    fn record_node(&self, node_name: &str, node_type: &str, status: NodeStatus, duration: std::time::Duration);
+
+    /// Record a prompt interaction.
+    fn record_prompt(
+        &self,
+        node_name: &str,
+        model: &str,
+        latency_ms: u64,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+    );
+
+    /// Record a subtree execution.
+    fn record_subtree(&self, ref_name: &str, duration: std::time::Duration, status: NodeStatus);
+}
+
+/// A no-op metrics collector for hosts that don't need metrics.
+pub struct NullMetricsCollector;
+
+impl MetricsCollector for NullMetricsCollector {
+    fn record_tick(&self, _tree_name: &str, _duration: std::time::Duration) {}
+    fn record_rule_match(&self, _rule_name: &str, _priority: u32, _duration: std::time::Duration) {}
+    fn record_node(&self, _node_name: &str, _node_type: &str, _status: NodeStatus, _duration: std::time::Duration) {}
+    fn record_prompt(&self, _node_name: &str, _model: &str, _latency_ms: u64, _prompt_tokens: u32, _completion_tokens: u32) {}
+    fn record_subtree(&self, _ref_name: &str, _duration: std::time::Duration, _status: NodeStatus) {}
 }

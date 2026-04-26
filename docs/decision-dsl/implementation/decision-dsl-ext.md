@@ -287,6 +287,7 @@ pub enum RuntimeError {
     Session { kind: SessionErrorKind, message: String },
     MaxRecursion,
     SubTreeNotResolved { name: String },
+    ScopeDepthExceeded,
     Custom(String),
 }
 
@@ -302,6 +303,7 @@ impl std::fmt::Display for RuntimeError {
             RuntimeError::Session { kind, message } => write!(f, "session error ({:?}): {}", kind, message),
             RuntimeError::MaxRecursion => write!(f, "maximum recursion depth exceeded"),
             RuntimeError::SubTreeNotResolved { name } => write!(f, "subtree '{}' not resolved", name),
+            RuntimeError::ScopeDepthExceeded => write!(f, "maximum scope depth exceeded"),
             RuntimeError::Custom(msg) => write!(f, "{}", msg),
         }
     }
@@ -656,37 +658,48 @@ Trees are `Send + Sync`. The executor is `!Sync` (mutates running_path). One exe
 pub struct DslReloader {
     parser: YamlParser,
     fs: Box<dyn Fs>,
-    watcher: Box<dyn Watcher>,
     dir: PathBuf,
+    registry: EvaluatorRegistry,
+    last_modified: Option<SystemTime>,
     current_bundle: Arc<RwLock<Bundle>>,
 }
 
 impl DslReloader {
     pub fn new(
-        parser: YamlParser,
-        fs: Box<dyn Fs>,
         dir: PathBuf,
+        fs: Box<dyn Fs>,
+        registry: EvaluatorRegistry,
     ) -> Result<Self, DslError> {
-        let watcher = Box::new(PollWatcher::new(dir.clone(), fs.duplicate()?)?);
-        let bundle = parser.parse_bundle(&dir, fs.as_ref())?;
+        let parser = YamlParser::new();
+        let bundle = parser.parse_bundle(&dir, fs.as_ref(), &registry)?;
         Ok(Self {
             parser,
             fs,
-            watcher,
             dir,
+            registry,
+            last_modified: None,
             current_bundle: Arc::new(RwLock::new(bundle)),
         })
     }
 
-    /// Check for changes and reload if necessary.
+    /// Check for changes using `Fs::modified()` and reload if necessary.
+    /// Gracefully keeps the old bundle on parse failure.
     pub fn check_and_reload(&mut self) -> Result<bool, DslError> {
-        if self.watcher.has_changed()? {
-            let new_bundle = self.parser.parse_bundle(&self.dir, self.fs.as_ref())?;
-            let mut guard = self.current_bundle.write().unwrap();
-            *guard = new_bundle;
-            Ok(true)
-        } else {
-            Ok(false)
+        // Compute latest mtime across trees/, subtrees/, rules.d/
+        let current_modified = /* ... */;
+        let changed = self.last_modified.map(|last| current_modified > last).unwrap_or(true);
+        if !changed { return Ok(false); }
+
+        match self.parser.parse_bundle(&self.dir, self.fs.as_ref(), &self.registry) {
+            Ok(new_bundle) => {
+                self.last_modified = Some(current_modified);
+                *self.current_bundle.write().unwrap() = new_bundle;
+                Ok(true)
+            }
+            Err(_) => {
+                self.last_modified = Some(current_modified); // Don't retry forever
+                Ok(false)
+            }
         }
     }
 

@@ -337,16 +337,12 @@ fn desugar_pipeline(pipeline: PipelineSpec, _registry: &EvaluatorRegistry) -> Re
 
 ### 1.4 Node Enum (Low-Level AST)
 
-The `Node` enum is annotated with `#[enum_dispatch(NodeBehavior)]` for zero-cost dispatch.
-However, due to a known incompatibility between `enum_dispatch 0.3.x` and `#[derive(Serialize, Deserialize)]`
-on the same enum, the `Node` enum also derives serde traits explicitly alongside the `enum_dispatch` attribute.
-A manual `impl NodeBehavior for Node` provides the same behavior as `enum_dispatch` would generate.
+The `Node` enum uses a **manual `impl NodeBehavior for Node`** rather than `enum_dispatch`.
+`enum_dispatch` 0.3.x is incompatible with `#[derive(Serialize, Deserialize)]` on the same enum,
+so the match arms are written by hand. Adding a new node type requires updating this impl,
+but the set of node types is fixed by the DSL spec, so this is a one-time cost.
 
 ```rust
-// Note: enum_dispatch and serde derive cannot coexist on the same enum in 0.3.x
-// Manual impl is used instead — behavior is identical to enum_dispatch-generated code.
-
-#[enum_dispatch(NodeBehavior)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub(crate) enum Node {
@@ -375,7 +371,7 @@ pub(crate) enum Node {
     SubTree(SubTreeNode),
 }
 
-// Manual impl (same behavior as #[enum_dispatch]-generated impl):
+// Manual impl (same behavior as enum_dispatch-generated impl):
 impl NodeBehavior for Node {
     fn reset(&mut self) { /* delegates to each variant's reset() */ }
     fn name(&self) -> &str { /* delegates to each variant's name() */ }

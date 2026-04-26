@@ -6,7 +6,7 @@
 - Title: `Evaluators, Parsers & Templates`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Done`
 - Created: 2026-04-20
 
 ## Sprint Goal
@@ -31,7 +31,7 @@ Implement the expression evaluation engine, output parsers, and template renderi
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the `Evaluator` enum and all 9 built-in evaluators. Evaluators are pure functions from `&Blackboard` to `Result<bool, RuntimeError>`.
 
@@ -39,26 +39,26 @@ Implement the `Evaluator` enum and all 9 built-in evaluators. Evaluators are pur
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.1.1 | Define `Evaluator` enum (9 variants) with serde attributes | Todo | - |
-| T3.1.2 | Implement `OutputContains` evaluator (case-sensitive/insensitive) | Todo | - |
-| T3.1.3 | Implement `SituationIs` evaluator | Todo | - |
-| T3.1.4 | Implement `ReflectionRoundUnder` evaluator | Todo | - |
-| T3.1.5 | Implement `VariableIs` evaluator with dot-notation support | Todo | - |
-| T3.1.6 | Implement `RegexMatch` evaluator (compile regex at parse time) | Todo | - |
-| T3.1.7 | Implement `Script` evaluator with grammar: `comparison (('&&' | '\|\|') comparison)*` where comparison supports `path op literal`, `is_dangerous(path)`, and `path.contains(string)` | Todo | - |
-| T3.1.7a | Implement `is_dangerous(provider_output)` — checks for known dangerous keywords ("delete", "drop", "rm -rf", "truncate table", etc.) | Todo | - |
-| T3.1.7b | Implement `path.contains(string)` dot-call syntax | Todo | - |
-| T3.1.7c | Implement short-circuit evaluation for `&&` and `\|\|` | Todo | - |
-| T3.1.8 | Implement `Or` / `And` composite evaluators with short-circuit | Todo | - |
-| T3.1.9 | Implement `Not` evaluator | Todo | - |
-| T3.1.10 | Define `EvaluatorRegistry` with `register` / `create` methods | Todo | - |
-| T3.1.11 | Implement `with_builtins()` constructor | Todo | - |
-| T3.1.12 | Implement `Custom` evaluator dispatch through registry | Todo | - |
-| T3.1.12 | Write unit tests for all 9 evaluators | Todo | - |
-| T3.1.13 | Write unit tests for Script evaluator comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) | Todo | - |
-| T3.1.14 | Write unit tests for Script evaluator nested expressions (`reflection_round < 2 && provider_output.contains("error")`) | Todo | - |
-| T3.1.15 | Write unit tests for Script evaluator short-circuit correctness (`&&` stops on first false, `||` stops on first true) | Todo | - |
-| T3.1.16 | Write unit tests for Script evaluator path resolution with dot-notation (`last_tool_call.name`, `file_changes.0.path`) | Todo | - |
+| T3.1.1 | Define `Evaluator` enum (9 variants) with serde attributes | Done | - |
+| T3.1.2 | Implement `OutputContains` evaluator (case-sensitive/insensitive) | Done | - |
+| T3.1.3 | Implement `SituationIs` evaluator | Done | - |
+| T3.1.4 | Implement `ReflectionRoundUnder` evaluator | Done | - |
+| T3.1.5 | Implement `VariableIs` evaluator with dot-notation support | Done | - |
+| T3.1.6 | Implement `RegexMatch` evaluator (compile regex at parse time) | Done | - |
+| T3.1.7 | Implement `Script` evaluator with grammar: `comparison (('&&' | '\|\|') comparison)*` where comparison supports `path op literal`, `is_dangerous(path)`, and `path.contains(string)` | Done | - |
+| T3.1.7a | Implement `is_dangerous(provider_output)` — checks for known dangerous keywords ("delete", "drop", "rm -rf", "truncate table", etc.) | Done | - |
+| T3.1.7b | Implement `path.contains(string)` dot-call syntax | Done | - |
+| T3.1.7c | Implement short-circuit evaluation for `&&` and `\|\|` | Done | - |
+| T3.1.8 | Implement `Or` / `And` composite evaluators with short-circuit | Done | - |
+| T3.1.9 | Implement `Not` evaluator | Done | - |
+| T3.1.10 | Define `EvaluatorRegistry` with `register` / `create` methods | Done | - |
+| T3.1.11 | Implement `with_builtins()` constructor | Done | - |
+| T3.1.12 | Implement `Custom` evaluator dispatch through registry | Done | - |
+| T3.1.12 | Write unit tests for all 9 evaluators | Done | - |
+| T3.1.13 | Write unit tests for Script evaluator comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) | Done | - |
+| T3.1.14 | Write unit tests for Script evaluator nested expressions (`reflection_round < 2 && provider_output.contains("error")`) | Done | - |
+| T3.1.15 | Write unit tests for Script evaluator short-circuit correctness (`&&` stops on first false, `||` stops on first true) | Done | - |
+| T3.1.16 | Write unit tests for Script evaluator path resolution with dot-notation (`last_tool_call.name`, `file_changes.0.path`) | Done | - |
 
 #### Acceptance Criteria
 
@@ -104,7 +104,7 @@ pub(crate) enum Evaluator {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the `OutputParser` enum and all 4 built-in parsers. Parsers convert raw LLM text into `HashMap<String, BlackboardValue>`.
 
@@ -112,17 +112,17 @@ Implement the `OutputParser` enum and all 4 built-in parsers. Parsers convert ra
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.2.1 | Define `OutputParser` enum (5 variants) with serde attributes | Todo | - |
-| T3.2.2 | Define `StructuredField` and `FieldType` | Todo | - |
-| T3.2.3 | Implement `Enum` parser (case-sensitive/insensitive match) | Todo | - |
-| T3.2.4 | Implement `Structured` parser (regex capture groups + typed fields) | Todo | - |
-| T3.2.5 | Implement `Json` parser (optional schema validation) | Todo | - |
-| T3.2.6 | Implement `Command` parser (`__command` magic key for direct command emission) | Todo | - |
-| T3.2.7 | Define `OutputParserRegistry` with `register` / `create` methods | Todo | - |
-| T3.2.8 | Implement `with_builtins()` constructor | Todo | - |
-| T3.2.9 | Implement `Custom` parser dispatch through registry | Todo | - |
-| T3.2.9 | Write unit tests for all 4 parsers | Todo | - |
-| T3.2.10 | Write unit tests for missing capture group error | Todo | - |
+| T3.2.1 | Define `OutputParser` enum (5 variants) with serde attributes | Done | - |
+| T3.2.2 | Define `StructuredField` and `FieldType` | Done | - |
+| T3.2.3 | Implement `Enum` parser (case-sensitive/insensitive match) | Done | - |
+| T3.2.4 | Implement `Structured` parser (regex capture groups + typed fields) | Done | - |
+| T3.2.5 | Implement `Json` parser (optional schema validation) | Done | - |
+| T3.2.6 | Implement `Command` parser (`__command` magic key for direct command emission) | Done | - |
+| T3.2.7 | Define `OutputParserRegistry` with `register` / `create` methods | Done | - |
+| T3.2.8 | Implement `with_builtins()` constructor | Done | - |
+| T3.2.9 | Implement `Custom` parser dispatch through registry | Done | - |
+| T3.2.9 | Write unit tests for all 4 parsers | Done | - |
+| T3.2.10 | Write unit tests for missing capture group error | Done | - |
 
 #### Acceptance Criteria
 
@@ -156,7 +156,7 @@ pub(crate) struct StructuredField {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Integrate `minijinja` for Jinja2-compatible template rendering. All Prompt templates and Action command field interpolations share the same environment.
 
@@ -164,16 +164,16 @@ Integrate `minijinja` for Jinja2-compatible template rendering. All Prompt templ
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.3.1 | Create global `Environment` via `std::sync::OnceLock` | Todo | - |
-| T3.3.2 | Register custom `slugify` filter | Todo | - |
-| T3.3.3 | Register custom `truncate` filter | Todo | - |
-| T3.3.4 | Implement `render_prompt_template(template_str, &Value) -> Result<String, RuntimeError>` | Todo | - |
-| T3.3.5 | Implement `blackboard_value_to_minijinja` conversion | Todo | - |
-| T3.3.6 | Implement `Blackboard::to_template_context()` | Todo | - |
-| T3.3.7 | Write unit tests for template rendering with variables | Todo | - |
-| T3.3.8 | Write unit tests for template filters | Todo | - |
-| T3.3.9 | Write unit tests for template syntax validation at load time (detect invalid `{% if %}` tags, unclosed braces) | Todo | - |
-| T3.3.10 | Write unit tests for template runtime error handling (missing variable with `default`, invalid filter) | Todo | - |
+| T3.3.1 | Create global `Environment` via `std::sync::OnceLock` | Done | - |
+| T3.3.2 | Register custom `slugify` filter | Done | - |
+| T3.3.3 | Register custom `truncate` filter | Done | - |
+| T3.3.4 | Implement `render_prompt_template(template_str, &Value) -> Result<String, RuntimeError>` | Done | - |
+| T3.3.5 | Implement `blackboard_value_to_minijinja` conversion | Done | - |
+| T3.3.6 | Implement `Blackboard::to_template_context()` | Done | - |
+| T3.3.7 | Write unit tests for template rendering with variables | Done | - |
+| T3.3.8 | Write unit tests for template filters | Done | - |
+| T3.3.9 | Write unit tests for template syntax validation at load time (detect invalid `{% if %}` tags, unclosed braces) | Done | - |
+| T3.3.10 | Write unit tests for template runtime error handling (missing variable with `default`, invalid filter) | Done | - |
 
 #### Acceptance Criteria
 
@@ -206,7 +206,7 @@ fn get_template_env() -> &'static Environment<'static> {
 
 **Priority**: P1
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement recursive template interpolation for all string fields in `DecisionCommand` variants.
 
@@ -214,15 +214,15 @@ Implement recursive template interpolation for all string fields in `DecisionCom
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T3.4.1 | Implement `render_command_templates(cmd, bb) -> Result<DecisionCommand, RuntimeError>` | Todo | - |
-| T3.4.2 | Cover all AgentCommand string fields | Todo | - |
-| T3.4.3 | Cover all GitCommand string fields | Todo | - |
-| T3.4.4 | Cover all TaskCommand string fields | Todo | - |
-| T3.4.5 | Cover all HumanCommand string fields | Todo | - |
-| T3.4.6 | Cover all ProviderCommand string fields | Todo | - |
-| T3.4.7 | Handle `Option<String>` fields with `map` + `transpose` | Todo | - |
-| T3.4.8 | Pass-through commands with no string fields unchanged | Todo | - |
-| T3.4.9 | Write unit tests for command template rendering | Todo | - |
+| T3.4.1 | Implement `render_command_templates(cmd, bb) -> Result<DecisionCommand, RuntimeError>` | Done | - |
+| T3.4.2 | Cover all AgentCommand string fields | Done | - |
+| T3.4.3 | Cover all GitCommand string fields | Done | - |
+| T3.4.4 | Cover all TaskCommand string fields | Done | - |
+| T3.4.5 | Cover all HumanCommand string fields | Done | - |
+| T3.4.6 | Cover all ProviderCommand string fields | Done | - |
+| T3.4.7 | Handle `Option<String>` fields with `map` + `transpose` | Done | - |
+| T3.4.8 | Pass-through commands with no string fields unchanged | Done | - |
+| T3.4.9 | Write unit tests for command template rendering | Done | - |
 
 #### Acceptance Criteria
 
@@ -251,7 +251,7 @@ pub(crate) fn render_command_templates(
 
 ## Sprint Completion Criteria
 
-- [ ] `cargo check` passes for the `decision-dsl` crate.
-- [ ] `cargo test --lib` passes with 100% coverage on evaluators and output parsers.
-- [ ] Template rendering tests cover variable interpolation, filters, and nested object access.
-- [ ] Command template rendering tests cover at least one variant per command category.
+- [x] `cargo check` passes for the `decision-dsl` crate.
+- [x] `cargo test --lib` passes with 100% coverage on evaluators and output parsers.
+- [x] Template rendering tests cover variable interpolation, filters, and nested object access.
+- [x] Command template rendering tests cover at least one variant per command category.

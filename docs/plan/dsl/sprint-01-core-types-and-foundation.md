@@ -6,7 +6,7 @@
 - Title: `Core Types & Parser Foundation`
 - Duration: 2 weeks
 - Priority: P0 (Critical)
-- Status: `Backlog`
+- Status: `Done`
 - Created: 2026-04-20
 
 ## Sprint Goal
@@ -32,7 +32,7 @@ Establish the foundational type system for the decision DSL engine: error handli
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Define the complete error hierarchy used across the DSL engine. Every error path must be representable without panics.
 
@@ -40,14 +40,14 @@ Define the complete error hierarchy used across the DSL engine. Every error path
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T1.1.1 | Create `ParseError` enum with all 18 variants | Todo | - |
-| T1.1.2 | Create `RuntimeError` enum with all 8 variants | Todo | - |
-| T1.1.3 | Create `DslError` union enum (`Parse` \| `Runtime`) | Todo | - |
-| T1.1.4 | Implement `Display` for all error types | Todo | - |
-| T1.1.5 | Implement `std::error::Error` for all error types | Todo | - |
-| T1.1.6 | Add `From<serde_yaml::Error>` for `ParseError` | Todo | - |
-| T1.1.7 | Add `From<SessionError>` for `RuntimeError` | Todo | - |
-| T1.1.8 | Write unit tests for error Display messages | Todo | - |
+| T1.1.1 | Create `ParseError` enum with all 18 variants | Done | - |
+| T1.1.2 | Create `RuntimeError` enum with all 9 variants | Done | - |
+| T1.1.3 | Create `DslError` union enum (`Parse` \| `Runtime`) | Done | - |
+| T1.1.4 | Implement `Display` for all error types | Done | - |
+| T1.1.5 | Implement `std::error::Error` for all error types | Done | - |
+| T1.1.6 | Add `From<serde_yaml::Error>` for `ParseError` | Done | - |
+| T1.1.7 | Add `From<SessionError>` for `RuntimeError` | Done | - |
+| T1.1.8 | Write unit tests for error Display messages | Done | - |
 
 #### Acceptance Criteria
 
@@ -87,6 +87,7 @@ pub enum RuntimeError {
     Session { kind: SessionErrorKind, message: String },
     MaxRecursion,
     SubTreeNotResolved { name: String },
+    ScopeDepthExceeded,
     Custom(String),
 }
 ```
@@ -97,7 +98,7 @@ pub enum RuntimeError {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement all injectable host-capability traits. The engine must not depend on any `agent-*` crate; all IO comes through these traits.
 
@@ -105,16 +106,16 @@ Implement all injectable host-capability traits. The engine must not depend on a
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T1.2.1 | Define `Session` trait (`send`, `send_with_hint`, `is_ready`, `receive`) | Todo | - |
-| T1.2.2 | Define `SessionError` + `SessionErrorKind` | Todo | - |
-| T1.2.3 | Define `Clock` trait + `SystemClock` + `MockClock` | Todo | - |
-| T1.2.4 | Define `Logger` trait + `LogLevel` enum | Todo | - |
-| T1.2.5 | Implement `NullLogger` and `StderrLogger` | Todo | - |
-| T1.2.6 | Define `Fs` trait (`read_to_string`, `read_dir`, `modified`) | Todo | - |
-| T1.2.7 | Define `FsError` enum | Todo | - |
-| T1.2.8 | Implement `StdFs` using `std::fs` | Todo | - |
-| T1.2.9 | Write unit tests for `MockClock` | Todo | - |
-| T1.2.10 | Write unit tests for `NullLogger` / `StderrLogger` | Todo | - |
+| T1.2.1 | Define `Session` trait (`send`, `send_with_hint`, `is_ready`, `receive`) | Done | - |
+| T1.2.2 | Define `SessionError` + `SessionErrorKind` | Done | - |
+| T1.2.3 | Define `Clock` trait + `SystemClock` + `MockClock` | Done | - |
+| T1.2.4 | Define `Logger` trait + `LogLevel` enum | Done | - |
+| T1.2.5 | Implement `NullLogger` and `StderrLogger` | Done | - |
+| T1.2.6 | Define `Fs` trait (`read_to_string`, `read_dir`, `modified`) | Done | - |
+| T1.2.7 | Define `FsError` enum | Done | - |
+| T1.2.8 | Implement `StdFs` using `std::fs` | Done | - |
+| T1.2.9 | Write unit tests for `MockClock` | Done | - |
+| T1.2.10 | Write unit tests for `NullLogger` / `StderrLogger` | Done | - |
 
 #### Acceptance Criteria
 
@@ -154,7 +155,7 @@ pub trait Fs {
 
 **Priority**: P0
 **Effort**: 5 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the scoped typed state store. All nodes read from and write to the blackboard during execution.
 
@@ -162,18 +163,18 @@ Implement the scoped typed state store. All nodes read from and write to the bla
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T1.3.1 | Define `BlackboardValue` enum (String, Integer, Float, Boolean, List, Map) | Todo | - |
-| T1.3.2 | Define `Blackboard` struct with built-in typed fields | Todo | - |
-| T1.3.3 | Implement `Blackboard::new()` and `Default` | Todo | - |
-| T1.3.4 | Implement `Blackboard::with_capacity(n)` | Todo | - |
-| T1.3.5 | Implement `push_scope()` / `pop_scope()` for variable scoping | Todo | - |
-| T1.3.6 | Implement `set()` / `get()` for scoped variable access | Todo | - |
-| T1.3.7 | Implement `get_path()` with dot-notation (built-in fields + scoped vars) | Todo | - |
-| T1.3.8 | Implement typed getters (`get_string`, `get_bool`, `get_u8`, `get_f64`) | Todo | - |
-| T1.3.9 | Implement `push_command()` / `drain_commands()` | Todo | - |
-| T1.3.10 | Implement `store_llm_response()` | Todo | - |
-| T1.3.11 | Write unit tests for scoped variable read/write | Todo | - |
-| T1.3.12 | Write unit tests for `get_path()` dot-notation | Todo | - |
+| T1.3.1 | Define `BlackboardValue` enum (String, Integer, Float, Boolean, List, Map) | Done | - |
+| T1.3.2 | Define `Blackboard` struct with built-in typed fields | Done | - |
+| T1.3.3 | Implement `Blackboard::new()` and `Default` | Done | - |
+| T1.3.4 | Implement `Blackboard::with_capacity(n)` | Done | - |
+| T1.3.5 | Implement `push_scope()` / `pop_scope()` for variable scoping | Done | - |
+| T1.3.6 | Implement `set()` / `get()` for scoped variable access | Done | - |
+| T1.3.7 | Implement `get_path()` with dot-notation (built-in fields + scoped vars) | Done | - |
+| T1.3.8 | Implement typed getters (`get_string`, `get_bool`, `get_u8`, `get_f64`) | Done | - |
+| T1.3.9 | Implement `push_command()` / `drain_commands()` | Done | - |
+| T1.3.10 | Implement `store_llm_response()` | Done | - |
+| T1.3.11 | Write unit tests for scoped variable read/write | Done | - |
+| T1.3.12 | Write unit tests for `get_path()` dot-notation | Done | - |
 
 #### Acceptance Criteria
 
@@ -212,7 +213,7 @@ pub struct Blackboard {
 
 **Priority**: P0
 **Effort**: 3 points
-**Status**: Backlog
+**Status**: Done
 
 Implement the `DecisionCommand` hierarchy. Commands are the only output of the DSL engine.
 
@@ -220,14 +221,14 @@ Implement the `DecisionCommand` hierarchy. Commands are the only output of the D
 
 | ID | Task | Status | Assignee |
 |----|------|--------|----------|
-| T1.4.1 | Define `DecisionCommand` grouped enum | Todo | - |
-| T1.4.2 | Define `AgentCommand` (5 variants) with serde renames | Todo | - |
-| T1.4.3 | Define `GitCommand` (5 variants) with serde renames | Todo | - |
-| T1.4.4 | Define `TaskCommand` (3 variants) with serde renames | Todo | - |
-| T1.4.5 | Define `HumanCommand` (3 variants: Escalate, SelectOption, SkipDecision) with serde renames | Todo | - |
-| T1.4.6 | Define `ProviderCommand` (4 variants: RetryTool, SwitchProvider, SuggestCommit, PreparePr) | Todo | - |
-| T1.4.7 | Derive `Debug`, `Clone`, `PartialEq`, `Eq`, `Serialize`, `Deserialize` | Todo | - |
-| T1.4.8 | Write unit tests for YAML round-trip serialization | Todo | - |
+| T1.4.1 | Define `DecisionCommand` grouped enum | Done | - |
+| T1.4.2 | Define `AgentCommand` (5 variants) with serde renames | Done | - |
+| T1.4.3 | Define `GitCommand` (5 variants) with serde renames | Done | - |
+| T1.4.4 | Define `TaskCommand` (3 variants) with serde renames | Done | - |
+| T1.4.5 | Define `HumanCommand` (3 variants: Escalate, SelectOption, SkipDecision) with serde renames | Done | - |
+| T1.4.6 | Define `ProviderCommand` (4 variants: RetryTool, SwitchProvider, SuggestCommit, PreparePr) | Done | - |
+| T1.4.7 | Derive `Debug`, `Clone`, `PartialEq`, `Eq`, `Serialize`, `Deserialize` | Done | - |
+| T1.4.8 | Write unit tests for YAML round-trip serialization | Done | - |
 
 #### Acceptance Criteria
 
@@ -265,7 +266,7 @@ Serde rename mapping:
 
 ## Sprint Completion Criteria
 
-- [ ] `cargo check` passes for the `decision-dsl` crate.
-- [ ] `cargo test --lib` passes with ≥90% coverage on error, blackboard, and command modules.
-- [ ] All traits have mock implementations usable in downstream tests.
-- [ ] No dependency on any `agent-*` crate.
+- [x] `cargo check` passes for the `decision-dsl` crate.
+- [x] `cargo test --lib` passes with ≥90% coverage on error, blackboard, and command modules.
+- [x] All traits have mock implementations usable in downstream tests.
+- [x] No dependency on any `agent-*` crate.

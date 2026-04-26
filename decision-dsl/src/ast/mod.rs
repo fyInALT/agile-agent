@@ -26,4 +26,5 @@ pub use node::{
 };
 pub use parser_out::{FieldType, OutputParser, OutputParserRegistry, StructuredField};
 pub use reload::DslReloader;
+pub use runtime::{DslRunner, Executor, MetricsCollector, NullMetricsCollector, TickContext, TickResult, TraceEntry, Tracer, render_trace_ascii};
 pub use template::{render_command_templates, render_prompt_template, BlackboardExt};
