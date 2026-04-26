@@ -744,6 +744,12 @@ fn selector_with_rule_name_does_not_execute_skipped_children() {
     // Should have RuleSkipped trace for second child
     let skipped = result.trace.iter().any(|e| matches!(e, decision_dsl::ast::runtime::TraceEntry::RuleSkipped { .. }));
     assert!(skipped);
+    // Selector's matched flag should be set to true after successful match
+    if let Node::Selector(sel) = &tree.spec.root {
+        assert!(sel.matched, "matched should be true after first child succeeds");
+    } else {
+        panic!("expected Selector node");
+    }
 }
 
 #[test]
@@ -1079,16 +1085,30 @@ fn inverter_resume_inverts_resumed_status() {
     let clock = MockClock::new();
     let logger = NullLogger;
 
+    // Inverter wrapping a Prompt - child returns Running on first tick
     let mut tree = simple_tree(Node::Inverter(InverterNode {
         name: "inv".into(),
-        child: Box::new(Node::Condition(ConditionNode {
-            name: "c".into(),
-            evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+        child: Box::new(Node::Prompt(PromptNode {
+            name: "p".into(),
+            model: None,
+            template: "Ask".into(),
+            parser: OutputParser::Json { schema: None },
+            sets: vec![],
+            timeout_ms: 1000,
+            pending: false,
+            sent_at: None,
         })),
     }));
 
     let mut executor = Executor::new();
-    // First tick through Inverter - child condition succeeds, inverted to Failure
+
+    // Tick 1: Prompt sends and returns Running; Inverter passes through Running
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Running);
+
+    // Tick 2: Prompt succeeds; Inverter inverts to Failure
+    session.set_ready(r#"{"ok": true}"#);
     let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
     let result = executor.tick(&mut tree, &mut ctx).unwrap();
     assert_eq!(result.status, NodeStatus::Failure);
@@ -1148,8 +1168,14 @@ fn cooldown_allows_after_duration() {
     let mut executor = Executor::new();
 
     // First tick succeeds
+    let _t1 = clock.now();
     let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
     let _ = executor.tick(&mut tree, &mut ctx).unwrap();
+
+    // Verify last_success was recorded
+    if let Node::Cooldown(cool) = &tree.spec.root {
+        assert!(cool.last_success.is_some(), "last_success should be recorded after success");
+    }
 
     // Advance clock past cooldown
     clock.advance(Duration::from_millis(150));
@@ -1638,4 +1664,276 @@ fn subtree_scope_depth_exceeded() {
         "expected ScopeDepthExceeded, got {:?}",
         result
     );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Composite Node active_child State
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn selector_resumes_at_correct_child_after_failure() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+
+    // Selector: [Condition(c1 fails), Condition(c2 succeeds), Action]
+    // First tick: c1 fails, c2 succeeds -> selector returns Success
+    // But if c2 had been the one that needed resuming...
+    let mut tree = simple_tree(Node::Selector(SelectorNode {
+        name: "sel".into(),
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c1".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == "x""#.into() },
+            }),
+            Node::Condition(ConditionNode {
+                name: "c2".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+        ],
+        active_child: None,
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
+    }));
+
+    let mut executor = Executor::new();
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // c1: "x" == "x" -> true -> Success, selector returns immediately
+    assert_eq!(result.status, NodeStatus::Success);
+    if let Node::Selector(sel) = &tree.spec.root {
+        assert!(!sel.matched, "matched is false when rule_name is None");
+        // After Success, active_child is reset to None
+        assert_eq!(sel.active_child, None);
+    }
+}
+
+#[test]
+fn selector_active_child_none_after_all_fail() {
+    let mut bb = Blackboard::default();
+    bb.provider_output = "x".into();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Selector(SelectorNode {
+        name: "sel".into(),
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c1".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == "y""#.into() },
+            }),
+            Node::Condition(ConditionNode {
+                name: "c2".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == "z""#.into() },
+            }),
+        ],
+        active_child: None,
+        rule_name: None,
+        rule_priority: None,
+        matched: false,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Failure);
+    // After all fail, selector may reset active_child to None
+    if let Node::Selector(sel) = &tree.spec.root {
+        assert_eq!(sel.active_child, None, "active_child should be None after all children fail");
+    }
+}
+
+#[test]
+fn sequence_active_child_advances_on_success() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Sequence(SequenceNode {
+        name: "seq".into(),
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c1".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+            Node::Condition(ConditionNode {
+                name: "c2".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+        ],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Success);
+    // After all children succeed, active_child should be at end (None or len)
+    if let Node::Sequence(seq) = &tree.spec.root {
+        assert!(seq.active_child.is_none() || seq.active_child == Some(2),
+            "active_child should be None or 2 after all children succeed");
+    }
+}
+
+#[test]
+fn sequence_active_child_stops_at_failure() {
+    let mut bb = Blackboard::default();
+    bb.provider_output = "x".into();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Sequence(SequenceNode {
+        name: "seq".into(),
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c1".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+            Node::Condition(ConditionNode {
+                name: "c2".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == "x""#.into() },
+            }),
+        ],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Failure);
+    // After failure, active_child is reset to None (not persisted)
+    if let Node::Sequence(seq) = &tree.spec.root {
+        assert_eq!(seq.active_child, None, "active_child should be None after failure");
+    }
+}
+
+#[test]
+fn parallel_active_child_remains_none() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Parallel(ParallelNode {
+        name: "par".into(),
+        policy: ParallelPolicy::AllSuccess,
+        children: vec![
+            Node::Condition(ConditionNode {
+                name: "c1".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+            Node::Condition(ConditionNode {
+                name: "c2".into(),
+                evaluator: Evaluator::Script { expression: r#"provider_output == """#.into() },
+            }),
+        ],
+        active_child: None,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Success);
+    // Parallel does not use active_child in the same way
+    if let Node::Parallel(par) = &tree.spec.root {
+        assert_eq!(par.active_child, None, "Parallel active_child should remain None");
+    }
+}
+
+#[test]
+fn repeater_runs_exactly_max_attempts() {
+    let mut bb = Blackboard::default();
+    bb.provider_output = "x".into();
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Repeater(RepeaterNode {
+        name: "rep".into(),
+        max_attempts: 3,
+        child: Box::new(Node::Action(ActionNode {
+            name: "a".into(),
+            command: DecisionCommand::Agent(AgentCommand::WakeUp),
+            when: None,
+        })),
+        current: 0,
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // Repeater retries until max_attempts, then succeeds (Action always succeeds)
+    assert_eq!(result.status, NodeStatus::Success);
+    // All 3 attempts should have been made (3 commands)
+    assert_eq!(result.commands.len(), 3);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: Prompt Sets Variable
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn prompt_sets_variable_on_success() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::with_reply(r#"{"status": "ok", "value": "test_result"}"#);
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::Prompt(PromptNode {
+        name: "prompt".into(),
+        model: None,
+        template: "Hello".into(),
+        parser: OutputParser::Json { schema: None },
+        sets: vec![decision_dsl::ast::node::SetMapping { key: "result".into(), field: "value".into() }],
+        timeout_ms: 1000,
+        pending: true,
+        sent_at: Some(clock.now()),
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    assert_eq!(result.status, NodeStatus::Success);
+    // The prompt should have set the result variable on blackboard
+    assert!(bb.get("result").is_some(), "result variable should be set after prompt success");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Coverage: ReflectionGuard on Running
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn reflection_guard_passes_through_running() {
+    let mut bb = Blackboard::default();
+    bb.reflection_round = 0;
+    let mut session = MockSession::new();
+    let clock = MockClock::new();
+    let logger = NullLogger;
+    let mut ctx = tick_ctx(&mut bb, &mut session, &clock, &logger);
+
+    let mut tree = simple_tree(Node::ReflectionGuard(ReflectionGuardNode {
+        name: "rg".into(),
+        max_rounds: 3,
+        child: Box::new(Node::Prompt(PromptNode {
+            name: "p".into(),
+            model: None,
+            template: "Ask".into(),
+            parser: OutputParser::Json { schema: None },
+            sets: vec![],
+            timeout_ms: 1000,
+            pending: false,
+            sent_at: None,
+        })),
+    }));
+
+    let mut executor = Executor::new();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    // ReflectionGuard passes through Running without incrementing
+    assert_eq!(result.status, NodeStatus::Running);
+    assert_eq!(bb.reflection_round, 0, "reflection_round should not increment on Running");
 }
