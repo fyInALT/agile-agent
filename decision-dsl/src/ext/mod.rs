@@ -16,6 +16,7 @@ pub use session_impl::{
     ConversationMessage, InMemorySession, MessageRole, ProviderSession,
 };
 pub use traits::{
-    CaptureLogger, Clock, Fs, FsError, Logger, LogLevel, MockClock, MockSession, NullLogger,
-    PollWatcher, Session, StdFs, StderrLogger, SystemClock, Watcher, WatcherError,
+    CaptureLogger, Clock, Fs, FsError, LLMProvider, Logger, LogLevel, MockClock, MockSession,
+    NullLogger, PollWatcher, ProviderError, ProviderErrorKind, Session, StdFs, StderrLogger,
+    SystemClock, Watcher, WatcherError,
 };

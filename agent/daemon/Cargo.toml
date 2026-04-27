@@ -34,6 +34,7 @@ agent-events = { path = "../events" }
 agent-core = { path = "../../core" }
 agent-decision = { path = "../../decision" }
 agent-behavior-infra = { path = "../behavior-infra" }
+agent-provider = { path = "../provider" }
 decision-dsl = { path = "../../decision-dsl" }
 
 [dev-dependencies]

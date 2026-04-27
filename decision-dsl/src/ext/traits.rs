@@ -21,6 +21,50 @@ pub trait Session {
     fn receive(&mut self) -> Result<String, SessionError>;
 }
 
+// ── LLM Provider Trait ───────────────────────────────────────────────────────
+
+/// Trait for real LLM provider integration.
+///
+/// External crates (agent-provider, agent-daemon) implement this
+/// to connect decision-dsl to actual Claude/Codex calls.
+pub trait LLMProvider: Send {
+    /// Call the LLM with a prompt, returning the response.
+    ///
+    /// `cwd` - working directory for the provider
+    /// `timeout_ms` - maximum time to wait for response
+    fn call(&mut self, prompt: &str, cwd: &Path, timeout_ms: u64) -> Result<String, ProviderError>;
+
+    /// Get provider kind label for logging.
+    fn provider_label(&self) -> &str;
+
+    /// Check if provider is healthy/available.
+    fn is_healthy(&self) -> bool;
+}
+
+/// Error type for LLM provider calls.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderError {
+    pub kind: ProviderErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderErrorKind {
+    Timeout,
+    Unavailable,
+    ParseError,
+    RateLimited,
+    InternalError,
+}
+
+impl fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "provider error ({:?}): {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for ProviderError {}
+
 // ── Clock ───────────────────────────────────────────────────────────────────
 
 pub trait Clock {

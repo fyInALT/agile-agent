@@ -13,6 +13,15 @@ pub mod event_pump;
 pub mod handler;
 pub mod health;
 pub mod lifecycle;
+pub mod real_provider;
 pub mod router;
 pub mod server;
+pub mod session_interpreter;
 pub mod session_mgr;
+
+// Re-export key types for external use
+pub use decision_agent_slot::{
+    DecisionAgentSlot, DecisionCommandInterpreter, DecisionSlotConfig, MockCommandInterpreter,
+};
+pub use real_provider::{RealLLMProvider, create_real_provider};
+pub use session_interpreter::{SessionManagerInterpreter, EscalationHandler, LogEscalationHandler};
