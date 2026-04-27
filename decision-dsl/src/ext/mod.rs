@@ -5,7 +5,8 @@ pub mod session_impl;
 pub mod traits;
 
 pub use blackboard::{
-    Blackboard, BlackboardValue, DecisionRecord, FileChangeRecord, ProjectRules, ToolCallRecord,
+    Blackboard, BlackboardValue, DecisionEntry, DecisionRecord, FileChangeRecord,
+    ProjectRules, ReflectionEntry, SprintGoal, ToolCallRecord,
 };
 pub use command::{
     AgentCommand, DecisionCommand, GitCommand, HumanCommand, ProviderCommand, TaskCommand,
