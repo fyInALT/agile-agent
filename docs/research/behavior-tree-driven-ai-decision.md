@@ -1,37 +1,232 @@
-# Behavior Tree Driven AI Decision Flow
+# Behavior Tree Driven AI Decision Flow - Design Document
 
-## Overview
+## Executive Summary
 
-The goal is to use behavior trees as **process skeletons** that guide AI (Codex/Claude) through structured decision workflows. Each node in the tree represents a decision point where AI analyzes Work Agent output and determines the next action.
-
-**Key insight**: Behavior tree defines *when* and *what* to ask AI; AI determines *how* to respond and *what command* to send to Work Agent.
+This document defines how behavior trees in `decision-dsl` become the **process skeleton** that guides AI (Claude/Codex) through structured decision workflows, outputting commands to Work Agent. Behavior trees define *when* and *what* to ask; AI determines *how* to respond and *what command* to send.
 
 ---
 
-## 1. Core Concept
+## 1. Problem Statement
 
-### 1.1 Behavior Tree as Decision Flow Skeleton
+### 1.1 Current Workflow Gap
+
+**Scenario**: Work Agent completes 2 of 4 sprints, stops early.
+
+Current decision layer approach:
+- Human reviews output, decides manually
+- Or: Rule-based conditions miss nuance ("is it really complete?")
+- No structured reflection flow
+- No retry with alternative strategy
+
+**What we need**:
+1. AI judges completion quality (not human)
+2. Structured reflection flow (multiple angles)
+3. Retry with learning (adjust strategy on failure)
+4. All 4 sprints verified before completion
+
+### 1.2 Why Behavior Trees
+
+Behavior trees provide:
+- **Structured flow control**: Sequence, Selector, Repeater
+- **Decision points**: PromptNode as AI invocation
+- **State management**: Blackboard stores AI outputs
+- **Routing logic**: Selector routes based on AI JSON output
+- **Retry loops**: Repeater with max_attempts
+- **Human escalation**: ForceHuman for unrecoverable cases
+
+This is exactly what we need for decision workflows.
+
+---
+
+## 2. Architecture Overview
+
+### 2.1 Layer Integration
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              Behavior Tree = Process Skeleton                │
-│                                                              │
-│  Defines:                                                    │
-│  - When to invoke AI (at each PromptNode)                   │
-│  - What to ask AI (prompt template)                         │
-│  - How to route based on AI response (Selector/Sequence)    │
-│  - What to retry (Repeater)                                 │
-│  - When to escalate (ForceHuman)                            │
-│                                                              │
-│  AI Determines:                                              │
-│  - Whether task is complete                                 │
-│  - What command to send to Work Agent                       │
-│  - Whether to retry or proceed                              │
-│  - Whether situation needs human intervention               │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                      Decision System Architecture                       │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  Layer 1: Work Agent (Claude/Codex CLI)                               │
+│  ├─ Executes tasks, produces output                                   │
+│  ├─ provider_output → stored in Blackboard                            │
+│  └──────────────────────────────────────────────────────────────────┤│
+│                                                                        │
+│  Layer 2: Decision Agent (decision-dsl)                               │
+│  ├─ Behavior Tree defines decision flow                               │
+│  ├─ PromptNode invokes AI for judgment                                │
+│  ├─ Blackboard stores AI outputs                                      │
+│  ├─ ActionNode outputs DecisionCommand                                │
+│  └──────────────────────────────────────────────────────────────────┤│
+│                                                                        │
+│  Layer 3: AI Session (Claude API / Codex)                             │
+│  ├─ Receives prompts from PromptNode                                  │
+│  ├─ Returns structured JSON decisions                                 │
+│  ├─ Provides reasoning for trace                                      │
+│  └──────────────────────────────────────────────────────────────────┤│
+│                                                                        │
+│  Layer 4: Work Agent Controller                                       │
+│  ├─ Receives DecisionCommand                                          │
+│  ├─ Executes: SendInstruction, WakeUp, Reflect, etc.                  │
+│  ├─ Returns to Layer 1                                                │
+│                                                                        │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Example: Sprint Completion Flow
+### 2.2 Data Flow
+
+```
+Work Agent Output
+       │
+       ▼
+┌──────────────┐
+│  Blackboard  │  provider_output, file_changes, task_description
+└──────────────┘
+       │
+       ▼
+┌──────────────┐
+│ Behavior Tree│  Executor.tick(tree, ctx)
+│   Executor   │
+└──────────────┘
+       │
+       ├──── PromptNode ──► AI Session ──► JSON Response
+       │                           │
+       │                           ▼
+       │                    ┌──────────────┐
+       │                    │  Blackboard  │  store AI decision
+       │                    └──────────────┘
+       │                           │
+       │                           ▼
+       │                    Selector routes
+       │                           │
+       │                           ▼
+       │                    ActionNode
+       │                           │
+       │                           ▼
+       │                    ┌──────────────────┐
+       │                    │ DecisionCommand  │  SendInstruction, etc.
+       │                    └──────────────────┘
+       │                           │
+       └───────────────────────────┘
+                                   │
+                                   ▼
+                           Work Agent Controller
+                                   │
+                                   ▼
+                           Work Agent executes
+```
+
+---
+
+## 3. Current Implementation Analysis
+
+### 3.1 Existing Components
+
+#### Blackboard (`decision-dsl/src/ext/blackboard.rs`)
+
+```rust
+pub struct Blackboard {
+    // Work Agent context
+    pub provider_output: String,
+    pub file_changes: Vec<FileChangeRecord>,
+    pub last_tool_call: Option<ToolCallRecord>,
+    
+    // Decision context
+    pub task_description: String,
+    pub reflection_round: u8,
+    pub confidence_accumulator: f64,
+    
+    // AI outputs (stored by PromptNode.sets)
+    scopes: Vec<HashMap<String, BlackboardValue>>,
+    
+    // Commands for Work Agent
+    pub commands: Vec<DecisionCommand>,
+    
+    // AI conversation history
+    pub llm_responses: HashMap<String, String>,
+}
+```
+
+**What's available**:
+- Work Agent output storage
+- AI response history
+- Command queue for Work Agent
+- Scope-based variable storage
+
+**What's needed**:
+- Sprint tracking (current_sprint, total_sprints)
+- Reflection chain storage
+- Outcome history for learning
+
+#### PromptNode (`decision-dsl/src/ast/node.rs`)
+
+```rust
+pub struct PromptNode {
+    pub name: String,
+    pub template: String,
+    pub parser: OutputParser,  // Json parser for structured output
+    pub sets: Vec<SetMapping>,  // Store AI output in blackboard
+    pub timeout_ms: u64,
+}
+```
+
+**Execution flow** (`runtime.rs:tick_prompt`):
+1. First tick: render template, send to session, return Running
+2. Second tick: check timeout, receive response, parse JSON
+3. Store parsed values via `sets` mapping
+4. If `__command` in output, push to command queue
+5. Return Success/Failure
+
+**This is the AI decision point**.
+
+#### Session Trait (`decision-dsl/src/ext/traits.rs`)
+
+```rust
+pub trait Session {
+    fn send(&mut self, message: &str) -> Result<(), SessionError>;
+    fn send_with_hint(&mut self, message: &str, model: &str) -> Result<(), SessionError>;
+    fn is_ready(&self) -> bool;
+    fn receive(&mut self) -> Result<String, SessionError>;
+}
+```
+
+**Implementation needed**: `AiDecisionSession` connecting to Claude/Codex.
+
+#### DecisionCommand (`decision-dsl/src/ext/command.rs`)
+
+```rust
+pub enum DecisionCommand {
+    Agent(AgentCommand),  // SendInstruction, WakeUp, Reflect, Terminate
+    Git(GitCommand, Option<String>),  // Commit, Stash, etc.
+    Task(TaskCommand),  // ConfirmCompletion, StopIfComplete
+    Human(HumanCommand),  // Escalate, SelectOption
+    Provider(ProviderCommand),  // RetryTool, SwitchProvider
+}
+```
+
+**Key commands for Work Agent**:
+- `SendInstruction { prompt, target_agent }` - Tell Work Agent what to do
+- `WakeUp` - Restart stalled agent
+- `Reflect { prompt }` - Ask agent to self-review
+- `Terminate { reason }` - Stop agent
+
+---
+
+## 4. Design: Behavior Tree as Decision Flow Skeleton
+
+### 4.1 Core Concept
+
+**Behavior Tree = Structured Decision Workflow**
+
+Each traversal through the tree represents one decision cycle:
+1. Sequence → ordered steps (plan → execute → reflect → verify)
+2. Selector → branching based on AI output
+3. Repeater → retry loops with max attempts
+4. PromptNode → AI judgment at each decision point
+
+### 4.2 Sprint Completion Flow Example
+
+**Requirement**: Complete 4 sprints, verify each, retry if incomplete.
 
 ```yaml
 apiVersion: decision.agile-agent.io/v1
@@ -40,776 +235,231 @@ metadata:
   name: sprint-completion-flow
 spec:
   root:
-    kind: Repeater
-    payload:
-      name: complete_all_sprints
-      maxAttempts: 4  # Up to 4 sprint iterations
-      child:
-        kind: Sequence
-        payload:
-          name: sprint_cycle
-          children:
-            # Step 1: Ask Work Agent to complete current sprint
-            - kind: Prompt
-              payload:
-                name: do_sprint
-                template: |
-                  Complete sprint {{ current_sprint }} of {{ total_sprints }}.
-                  Focus on: {{ sprint_goal }}
-                  
-                  Report your progress when done.
-                parser:
-                  kind: Json
-                  payload:
-                    schema: null
-                sets:
-                  - key: sprint_result
-                    field: status
-                timeoutMs: 60000
-                
-            # Step 2: AI reflects on completion
-            - kind: Prompt
-              payload:
-                name: reflect_completion
-                template: |
-                  Work Agent reported: {{ sprint_result }}
-                  
-                  Analyze:
-                  1. Was this sprint actually completed?
-                  2. Are there incomplete tasks?
-                  3. Should we retry or proceed to next sprint?
-                  
-                  Output:
-                  {"completed": bool, "incomplete_tasks": [], "action": "proceed|retry"}
-                parser:
-                  kind: Json
-                  payload:
-                    schema: null
-                sets:
-                  - key: reflection_result
-                    field: action
-                    
-            # Step 3: Route based on AI reflection
-            - kind: Selector
-              payload:
-                name: route_after_reflection
-                children:
-                  # If completed, proceed
-                  - kind: Condition
-                    payload:
-                      name: is_completed
-                      evaluator:
-                        kind: VariableIs
-                        payload:
-                          key: reflection_result.action
-                          expected: "proceed"
-                  # If not completed, increment sprint counter and retry
-                  - kind: Sequence
-                    payload:
-                      name: retry_cycle
-                      children:
-                        - kind: SetVar
-                          payload:
-                            name: note_incomplete
-                            key: incomplete_sprints
-                            value: "{{ incomplete_sprints }} + 1"
-                        - kind: Action
-                          payload:
-                            name: retry_sprint
-                            command:
-                              kind: Agent
-                              payload:
-                                kind: SendInstruction
-                                payload:
-                                  prompt: "Previous sprint incomplete. Re-attempt."
-                                  target_agent: "{{ work_agent_id }}"
-                                
-            # Step 4: Alternative reflection angle
-            - kind: Prompt
-              payload:
-                name: alternative_reflection
-                template: |
-                  Before moving on, verify from different perspective:
-                  
-                  Sprint {{ current_sprint }} goal: {{ sprint_goal }}
-                  Work done: {{ file_changes }}
-                  
-                  Are we missing anything critical?
-                  
-                  Output:
-                  {"missing": bool, "critical_items": [], "should_pause": bool}
-                parser:
-                  kind: Json
-                  payload:
-                    schema: null
-                    
-            # Step 5: Finalize or escalate
-            - kind: Selector
-              payload:
-                name: finalize_or_escalate
-                children:
-                  - kind: Condition
-                    payload:
-                      name: no_missing_items
-                      evaluator:
-                        kind: VariableIs
-                        payload:
-                          key: alternative_reflection.missing
-                          expected: false
-                  - kind: ForceHuman
-                    payload:
-                      name: escalate_missing
-                      reason: "Critical items detected: {{ alternative_reflection.critical_items }}"
-                      child:
-                        kind: Action
-                        payload:
-                          name: pause_for_review
-                          command:
-                            kind: Human
-                            payload:
-                              kind: EscalateToHuman
-                              payload:
-                                reason: "Critical items missing after sprint"
-```
-
-This tree defines:
-1. **Flow structure**: Sequence of steps → reflection → routing → alternative check → finalize
-2. **AI decision points**: Each PromptNode asks AI to analyze
-3. **Routing logic**: Selector routes based on AI's JSON output
-4. **Retry behavior**: Repeater allows up to 4 sprint cycles
-
----
-
-## 2. Key Patterns
-
-### 2.1 Task Completion Verification
-
-**Problem**: Work Agent says "done" but might be incomplete.
-
-**Solution**: Behavior tree forces AI to verify:
-
-```yaml
-# Step 1: Work Agent completes task
-- kind: Prompt
-  payload:
-    name: execute_task
-    template: "Complete {{ task_description }}"
-    parser: { kind: Json }
-    sets: [{ key: task_output, field: result }]
-
-# Step 2: AI verifies completion
-- kind: Prompt
-  payload:
-    name: verify_completion
-    template: |
-      Task: {{ task_description }}
-      Agent output: {{ task_output }}
-      
-      Has this task been genuinely completed?
-      Check for:
-      - All requirements addressed
-      - Tests passing (if applicable)
-      - No TODOs or partial implementations
-      
-      Output: {"completed": bool, "missing": [], "confidence": float}
-```
-
-AI does the verification, not human.
-
-### 2.2 Multi-Iteration Flow Control
-
-**Problem**: Work Agent needs to complete 4 sprints, but might stop at 2.
-
-**Solution**: Repeater + reflection loop:
-
-```yaml
-- kind: Repeater
-  payload:
-    name: complete_all
-    maxAttempts: {{ total_sprints }}
-    child:
-      kind: Sequence
-      payload:
-        children:
-          - Prompt: "Complete sprint {{ current }}"
-          - Prompt: "Did you complete sprint {{ current }}?"
-          - Selector:
-              - Condition: reflection.complete → proceed
-              - Action: retry this sprint
-```
-
-The tree ensures all sprints are addressed, with AI deciding each iteration's success.
-
-### 2.3 Multi-Angle Reflection
-
-**Problem**: Single reflection might miss issues.
-
-**Solution**: Sequential reflection prompts:
-
-```yaml
-children:
-  - Prompt: 
-      name: primary_reflection
-      template: "Verify completion from implementation perspective"
-  - Prompt:
-      name: test_reflection  
-      template: "Verify from testing perspective"
-  - Prompt:
-      name: edge_case_reflection
-      template: "Check for edge cases and error handling"
-```
-
-Each prompt asks AI to examine from different angle.
-
-### 2.4 Adaptive Retry Strategy
-
-**Problem**: Simple retry might repeat the same mistake.
-
-**Solution**: Reflection-driven retry:
-
-```yaml
-- kind: Sequence
-  payload:
-    children:
-      - Prompt:
-          name: analyze_failure
-          template: |
-            Previous attempt: {{ last_output }}
-            Why did it fail? What approach should we try differently?
-            
-            Output: {"failure_reason": str, "alternative_approach": str}
-      - Prompt:
-          name: retry_with_strategy
-          template: |
-            Retry with this approach: {{ analyze_failure.alternative_approach }}
-            
-            Original goal: {{ task_description }}
-```
-
-AI analyzes failure and suggests alternative approach for retry.
-
----
-
-## 3. PromptNode as Decision Engine
-
-### 3.1 Current PromptNode Behavior
-
-```rust
-pub struct PromptNode {
-    pub name: String,
-    pub template: String,
-    pub parser: OutputParser,
-    pub sets: Vec<SetMapping>,
-    pub timeout_ms: u64,
-}
-```
-
-Execution:
-1. Render template with Blackboard context
-2. Send to Session (LLM)
-3. Parse response with OutputParser
-4. Store result via SetMapping
-5. Return Success/Running/Failure
-
-### 3.2 Decision Flow Integration
-
-The `PromptNode` is the **decision point** in the flow:
-
-```
-PromptNode execution:
-          │
-          ▼
-    ┌───────────┐
-    │ Render    │  template + blackboard → prompt
-    │ Template  │
-    └───────────┘
-          │
-          ▼
-    ┌───────────┐
-    │ Send to   │  prompt → Codex/Claude
-    │ AI        │
-    └───────────┘
-          │
-          ▼
-    ┌───────────┐
-    │ Parse     │  raw response → JSON
-    │ Response  │  {"completed": true, "action": "proceed"}
-    └───────────┘
-          │
-          ▼
-    ┌───────────┐
-    │ Store in  │  JSON → blackboard variables
-    │ Blackboard│  reflection_result = "proceed"
-    └───────────┘
-          │
-          ▼
-    ┌───────────┐
-    │ Next Node │  Selector reads blackboard, routes
-    │ Execution │
-    └───────────┘
-```
-
-### 3.3 OutputParser for Structured Decisions
-
-Use JSON parser for AI decisions:
-
-```yaml
-parser:
-  kind: Json
-  payload:
-    schema:
-      type: object
-      properties:
-        completed:
-          type: boolean
-        action:
-          type: string
-          enum: [proceed, retry, escalate]
-        reasoning:
-          type: string
-      required: [completed, action]
-```
-
-Structured output enables programmatic routing.
-
----
-
-## 4. Blackboard as Decision State
-
-### 4.1 Key Fields for Decision Flow
-
-```rust
-pub struct Blackboard {
-    // Task context (from Work Agent)
-    pub provider_output: String,
-    pub file_changes: Vec<FileChangeRecord>,
-    pub last_tool_call: Option<ToolCallRecord>,
-    
-    // Decision flow state
-    pub current_sprint: u8,
-    pub total_sprints: u8,
-    pub sprint_goal: String,
-    pub incomplete_sprints: u8,
-    
-    // AI reflections (stored by PromptNode.sets)
-    // sprint_result, reflection_result, alternative_reflection, etc.
-}
-```
-
-### 4.2 Template Context Injection
-
-Prompt templates access decision state:
-
-```yaml
-template: |
-  Sprint {{ current_sprint }} of {{ total_sprints }}
-  
-  Goal: {{ sprint_goal }}
-  Work done: {{ file_changes }}
-  Previous reflection: {{ reflection_result }}
-```
-
-AI receives full context to make informed decision.
-
-### 4.3 Decision Chain State
-
-Each PromptNode stores its result, enabling chain reasoning:
-
-```
-Prompt 1: do_sprint        → sprint_result = {"status": "partial"}
-Prompt 2: reflect          → reflection_result = {"action": "retry"}
-Prompt 3: alternative_check → alternative_reflection = {"missing": true}
-Prompt 4: escalate         → (uses alternative_reflection.missing)
-```
-
-Later prompts can reference earlier AI decisions.
-
----
-
-## 5. Work Agent Command Flow
-
-### 5.1 ActionNode for Command Output
-
-After AI decides, `ActionNode` sends command to Work Agent:
-
-```yaml
-- kind: Action
-  payload:
-    name: send_instruction
-    command:
-      kind: Agent
-      payload:
-        kind: SendInstruction
-        payload:
-          prompt: "{{ reflection_result.next_instruction }}"
-          target_agent: "{{ work_agent_id }}"
-```
-
-The command content comes from AI's reflection output.
-
-### 5.2 Command Types
-
-| Command | Purpose | When Used |
-|---------|---------|-----------|
-| `SendInstruction` | Tell Work Agent what to do | After AI decides next step |
-| `WakeUp` | Restart paused agent | Agent stalled |
-| `Reflect` | Ask agent to self-review | After sprint completion |
-| `Terminate` | Stop agent | Task complete or unrecoverable |
-
-### 5.3 Dynamic Command Construction
-
-AI output can construct commands dynamically:
-
-```yaml
-# AI outputs: {"command": "commit", "files": ["a.rs", "b.rs"]}
-- kind: Action
-  payload:
-    name: execute_ai_command
-    command:
-      kind: Git
-      payload:
-        kind: CommitChanges
-        payload:
-          message: "{{ ai_output.commit_message }}"
-          is_wip: "{{ ai_output.is_wip }}"
-```
-
----
-
-## 6. Complete Example: Feature Implementation Flow
-
-```yaml
-apiVersion: decision.agile-agent.io/v1
-kind: BehaviorTree
-metadata:
-  name: feature-implementation
-spec:
-  root:
     kind: Sequence
     payload:
-      name: feature_flow
+      name: complete_all_sprints
       children:
-        # Phase 1: Planning
-        - kind: Prompt
+        # Step 1: Initialize sprint counter
+        - kind: SetVar
           payload:
-            name: plan_feature
-            template: |
-              Feature: {{ feature_description }}
-              Existing code: {{ codebase_summary }}
-              
-              Create implementation plan with:
-              - Files to modify
-              - Test files needed
-              - Expected steps
-              
-              Output: {"plan": {"steps": [], "files": [], "tests": []}}
-            parser: { kind: Json }
-            sets: [{ key: impl_plan, field: plan }]
+            name: init_counter
+            key: current_sprint
+            value: 1
             
-        # Phase 2: Implementation Loop
+        # Step 2: Main sprint loop
         - kind: Repeater
           payload:
-            name: implement_all_steps
-            maxAttempts: "{{ impl_plan.steps | length }}"
+            name: sprint_loop
+            maxAttempts: 4  # 4 sprints
             child:
               kind: Sequence
               payload:
+                name: sprint_cycle
                 children:
-                  # Step execution
+                  # 2.1: Execute sprint
                   - kind: Prompt
                     payload:
-                      name: do_step
+                      name: execute_sprint
                       template: |
-                        Step {{ current_step }}: {{ impl_plan.steps[current_step] }}
+                        Complete sprint {{ current_sprint }} of 4.
+                        Current task: {{ task_description }}
+                        Previous work: {{ file_changes }}
                         
-                        Implement this step. Report progress.
-                      parser: { kind: Json }
-                      sets: [{ key: step_result, field: status }]
+                        When done, report status.
+                      parser:
+                        kind: Json
+                        payload:
+                          schema:
+                            type: object
+                            properties:
+                              status: { type: string }
+                              completed_items: { type: array }
+                              output: { type: string }
+                            required: [status]
+                      sets:
+                        - key: sprint_status
+                          field: status
+                        - key: sprint_output
+                          field: output
+                      timeoutMs: 60000
                       
-                  # Step verification
+                  # 2.2: Reflect on completion
                   - kind: Prompt
                     payload:
-                      name: verify_step
+                      name: reflect_completion
                       template: |
-                        Step: {{ impl_plan.steps[current_step] }}
-                        Result: {{ step_result }}
-                        Files changed: {{ file_changes }}
+                        Sprint {{ current_sprint }} reported: {{ sprint_status }}
+                        Output: {{ sprint_output }}
                         
-                        Was this step correctly implemented?
+                        Analyze:
+                        1. Was this sprint genuinely completed?
+                        2. Are there incomplete items?
+                        3. Should we proceed or retry?
                         
-                        Output: {"correct": bool, "issues": [], "retry": bool}
-                      parser: { kind: Json }
-                      
-                  # Retry or proceed
+                        Output format:
+                        {
+                          "completed": boolean,
+                          "incomplete": ["item1", ...],
+                          "action": "proceed|retry|escalate",
+                          "reasoning": "brief explanation"
+                        }
+                      parser:
+                        kind: Json
+                      sets:
+                        - key: reflection_result
+                          field: action
+                        - key: reflection_reasoning
+                          field: reasoning
+                          
+                  # 2.3: Route based on reflection
                   - kind: Selector
                     payload:
+                      name: route_after_reflection
                       children:
-                        - Condition: verify_step.correct == true
-                        - Action:
-                            command:
-                              kind: Agent
+                        # Proceed if completed
+                        - kind: Condition
+                          payload:
+                            name: check_completed
+                            evaluator:
+                              kind: VariableIs
                               payload:
-                                kind: SendInstruction
+                                key: reflection_result
+                                expected: "proceed"
+                                
+                        # Retry if incomplete
+                        - kind: Sequence
+                          payload:
+                            name: retry_cycle
+                            children:
+                              - kind: Action
                                 payload:
-                                  prompt: "Retry step {{ current_step }}: {{ verify_step.issues }}"
-                                  
-        # Phase 3: Testing
-        - kind: Prompt
-          payload:
-            name: run_tests
-            template: "Run all tests for this feature. Report results."
-            parser: { kind: Json }
-            sets: [{ key: test_result, field: status }]
-            
-        # Phase 4: Test Reflection
-        - kind: Selector
-          payload:
-            children:
-              - Condition: test_result.passed == true
-              - Sequence:
-                  children:
-                    - Prompt:
-                        name: analyze_test_failure
-                        template: |
-                          Test failures: {{ test_result.failures }}
-                          
-                          What's wrong? How to fix?
-                          
-                          Output: {"root_cause": str, "fixes": []}
-                    - Action:
-                        command:
-                          kind: Agent
+                                  name: send_retry_instruction
+                                  command:
+                                    kind: Agent
+                                    payload:
+                                      kind: SendInstruction
+                                      payload:
+                                        prompt: |
+                                          Previous sprint incomplete.
+                                          Missing: {{ sprint_status.incomplete }}
+                                          Reason: {{ reflection_reasoning }}
+                                          
+                                          Retry with adjusted approach.
+                                        target_agent: "{{ agent_id }}"
+                                        
+                        # Escalate if stuck
+                        - kind: ForceHuman
                           payload:
-                            kind: SendInstruction
-                            payload:
-                              prompt: "Fix test failures: {{ analyze_test_failure.fixes }}"
-                              
-        # Phase 5: Final Review
+                            name: escalate_stuck
+                            reason: "Sprint {{ current_sprint }} stuck after reflection"
+                            
+                  # 2.4: Increment sprint counter if proceeding
+                  - kind: SetVar
+                    payload:
+                      name: increment_sprint
+                      key: current_sprint
+                      value: "{{ current_sprint + 1 }}"
+                      
+        # Step 3: Alternative reflection angle
         - kind: Prompt
           payload:
-            name: final_review
+            name: alternative_reflection
             template: |
-              Feature: {{ feature_description }}
-              All steps done, tests passing.
+              All 4 sprints reported complete.
               
-              Final verification:
-              - Are all requirements met?
-              - Is code quality acceptable?
-              - Any remaining TODOs?
+              Verify from different perspective:
+              - Are all requirements addressed?
+              - Is there any technical debt left?
+              - Any hidden blockers?
               
-              Output: {"complete": bool, "remaining": [], "quality": str}
-            parser: { kind: Json }
-            
-        # Phase 6: Commit or Continue
+              Output:
+              {
+                "verified": boolean,
+                "issues": ["issue1", ...],
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: verification_result
+                field: verified
+                
+        # Step 4: Final action
         - kind: Selector
           payload:
+            name: finalize
             children:
-              - Sequence:
-                  condition: final_review.complete == true
+              - kind: Sequence
+                payload:
+                  name: complete_flow
                   children:
-                    - Action:
-                        command:
-                          kind: Git
+                    - kind: Condition
+                      payload:
+                        evaluator:
+                          kind: VariableIs
                           payload:
-                            kind: CommitChanges
-                            payload:
-                              message: "feat: {{ feature_description }}"
-                              is_wip: false
-                    - Action:
+                            key: verification_result
+                            expected: true
+                    - kind: Action
+                      payload:
+                        name: confirm_completion
                         command:
                           kind: Task
                           payload:
                             kind: ConfirmCompletion
-              - ForceHuman:
-                  reason: "{{ final_review.remaining }}"
+                            
+              - kind: Action
+                payload:
+                  name: request_review
+                  command:
+                    kind: Human
+                    payload:
+                      kind: EscalateToHuman
+                      payload:
+                        reason: "Verification found issues: {{ alternative_reflection.issues }}"
 ```
 
-This tree:
-1. Plans with AI
-2. Implements step-by-step with AI verification
-3. Tests with AI failure analysis
-4. Final review with AI
-5. Routes to commit or escalate
+### 4.3 Key Patterns
 
----
+#### Pattern 1: PromptNode as Decision Point
 
-## 7. Integration Architecture
-
-### 7.1 Decision Layer + Behavior Tree
-
-```
-┌───────────────────────────────────────────────────────────────┐
-│                    Integration Architecture                     │
-│                                                                │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐       │
-│  │ Work Agent  │───▶│  Blackboard │───▶│ Behavior    │       │
-│  │ (Codex)     │    │  (State)    │    │ Tree        │       │
-│  └─────────────┘    └─────────────┘    │ Executor    │       │
-│         │                              └─────────────┘       │
-│         │                                    │               │
-│         ▼                                    ▼               │
-│  ┌─────────────┐                       ┌─────────────┐       │
-│  │ Provider    │◀──────────────────────│ PromptNode  │       │
-│  │ Output      │    Commands            │ (AI Call)   │       │
-│  └─────────────┘                       └─────────────┘       │
-│                                               │               │
-│                                               ▼               │
-│                                        ┌─────────────┐       │
-│                                        │ AI Session  │       │
-│                                        │ (Claude)    │       │
-│                                        └─────────────┘       │
-│                                               │               │
-│                                               ▼               │
-│  ┌─────────────┐                       ┌─────────────┐       │
-│  │ Decision    │◀──────────────────────│ AI Response │       │
-│  │ Command     │    Structured output   │ (JSON)      │       │
-│  └─────────────┘                       └─────────────┘       │
-│         │                                    │               │
-│         ▼                                    ▼               │
-│  ┌─────────────┐                       ┌─────────────┐       │
-│  │ Back to     │◀──────────────────────│ Store in    │       │
-│  │ Work Agent  │    Next instruction    │ Blackboard  │       │
-│  └─────────────┘                       └─────────────┘       │
-└───────────────────────────────────────────────────────────────┘
-```
-
-### 7.2 Session Implementation
-
-```rust
-pub struct AiDecisionSession {
-    /// Underlying Claude/Codex connection
-    llm_client: Box<dyn LlmClient>,
-}
-
-impl Session for AiDecisionSession {
-    fn send(&mut self, message: &str) -> Result<(), SessionError> {
-        // Send prompt to Claude/Codex
-        self.llm_client.send(message)
-    }
-    
-    fn is_ready(&self) -> bool {
-        // Check if AI response is available
-        self.llm_client.has_response()
-    }
-    
-    fn receive(&mut self) -> Result<String, SessionError> {
-        // Get AI response
-        self.llm_client.receive()
-    }
-}
-```
-
-### 7.3 TickContext Configuration
-
-```rust
-let mut ctx = TickContext {
-    blackboard: &mut bb,
-    session: &mut ai_decision_session,  // AI connection
-    clock: &clock,
-    logger: &logger,
-};
-```
-
-`session` is the AI connection (Claude/Codex) for decision prompts.
-
----
-
-## 8. Prompt Design Guidelines
-
-### 8.1 Structured Output Request
-
-Always request structured output for routing:
+Each PromptNode is where AI makes a judgment:
 
 ```yaml
-template: |
-  Analyze: {{ situation }}
-  
-  Output format:
-  {
-    "decision": "proceed|retry|escalate",
-    "reasoning": "brief explanation",
-    "confidence": 0.0-1.0,
-    "next_instruction": "optional instruction for work agent"
-  }
+- kind: Prompt
+  payload:
+    template: |
+      Context: {{ provider_output }}
+      
+      Decision required: [describe what to decide]
+      
+      Output format:
+      {
+        "decision": "option1|option2|option3",
+        "reasoning": "...",
+        "confidence": 0.0-1.0
+      }
+    parser:
+      kind: Json
+    sets:
+      - key: decision_output
+        field: decision
 ```
 
-Structured output enables:
-- Selector routing based on `decision`
-- ActionNode using `next_instruction`
-- Trace logging with `reasoning`
+The structured JSON enables programmatic routing.
 
-### 8.2 Context Injection Best Practices
-
-Include relevant context, not everything:
-
-```yaml
-# Good: Relevant context for decision
-template: |
-  Task: {{ task_description }}
-  Current step: {{ current_step }}
-  Recent work: {{ file_changes | truncate(5) }}
-  
-  Is this step complete?
-
-# Bad: Too much context
-template: |
-  Full history: {{ conversation_history }}
-  All decisions: {{ decision_history }}
-  Every file: {{ file_changes }}
-```
-
-### 8.3 Decision Prompts vs Action Prompts
-
-| Type | Purpose | Output |
-|------|---------|--------|
-| Decision Prompt | AI judges situation | `{"decision": "...", "reasoning": "..."}` |
-| Action Prompt | AI instructs Work Agent | `{"instruction": "...", "context": "..."}` |
-
-```yaml
-# Decision prompt
-- Prompt:
-    name: judge_completion
-    template: "Is task done? Output: {completed: bool, reasoning: str}"
-
-# Action prompt  
-- Prompt:
-    name: plan_next
-    template: "What should Work Agent do next? Output: {instruction: str}"
-```
-
----
-
-## 9. Error Handling
-
-### 9.1 AI Timeout → Retry
+#### Pattern 2: Selector Routes Based on AI Output
 
 ```yaml
 - kind: Selector
-  payload:
-    children:
-      - Prompt:  # Primary AI call
-          timeoutMs: 30000
-      - Prompt:  # Fallback with shorter timeout
-          timeoutMs: 10000
-          template: "Quick check: {{ provider_output }}. Is this OK?"
+  children:
+    - Condition: decision_output == "proceed"
+    - Condition: decision_output == "retry"
+      then: Action(RetryInstruction)
+    - ForceHuman: (fallback for unexpected output)
 ```
 
-### 9.2 Parse Failure → Escalate
-
-```yaml
-- kind: Sequence
-  payload:
-    children:
-      - Prompt:
-          parser: { kind: Json }
-      - Selector:
-          children:
-            - Condition: prompt_output.valid == true
-            - ForceHuman:
-                reason: "AI response couldn't be parsed: {{ raw_response }}"
-```
-
-### 9.3 Repeater for Retry
+#### Pattern 3: Repeater for Retry Loop
 
 ```yaml
 - kind: Repeater
@@ -818,34 +468,657 @@ template: |
     child:
       kind: Sequence
       children:
-        - Prompt: "Try again with clearer instructions"
-        - Condition: success == true
+        - Prompt: "Try again with feedback"
+        - Condition: "success == true"
+```
+
+#### Pattern 4: Multi-Angle Reflection
+
+```yaml
+children:
+  - Prompt:  # Primary reflection
+      template: "Verify from implementation perspective"
+  - Prompt:  # Test perspective
+      template: "Verify from testing perspective"  
+  - Prompt:  # Edge case perspective
+      template: "Check for edge cases"
+```
+
+#### Pattern 5: ActionNode Outputs to Work Agent
+
+```yaml
+- kind: Action
+  payload:
+    command:
+      kind: Agent
+      payload:
+        kind: SendInstruction
+        payload:
+          prompt: "{{ ai_decision.next_instruction }}"
+          target_agent: "{{ work_agent_id }}"
 ```
 
 ---
 
-## 10. Summary
+## 5. Integration Design
 
-The behavior tree drives AI decision flow:
+### 5.1 Decision Session Implementation
 
-| Component | Role |
-|-----------|------|
-| **Behavior Tree** | Defines decision flow skeleton (when to ask, how to route) |
-| **PromptNode** | Invokes AI at each decision point |
-| **Blackboard** | Stores decision state and AI outputs |
-| **Selector/Sequence** | Routes based on AI's structured output |
-| **ActionNode** | Sends AI-decided commands to Work Agent |
-| **Repeater** | Enables retry loops with AI guidance |
-| **ForceHuman** | Escalates when AI cannot decide |
+Implement `Session` trait for AI connection:
 
-**Key workflow**:
-1. Work Agent produces output → stored in Blackboard
-2. Behavior Tree Executor reaches PromptNode
-3. PromptNode sends context to AI
-4. AI analyzes and returns structured decision
-5. Parser extracts decision, stores in Blackboard
-6. Selector routes to next node based on decision
-7. ActionNode sends AI-decided command to Work Agent
-8. Loop continues until task completion
+```rust
+// In agent-decision crate or agent-daemon
 
-This architecture replaces human verification with AI judgment, enabling autonomous decision cycles while maintaining structured process control through behavior trees.
+use decision_dsl::ext::traits::{Session, SessionError, SessionErrorKind};
+
+pub struct ClaudeDecisionSession {
+    /// Claude API client
+    client: ClaudeClient,
+    
+    /// Conversation history for context
+    history: Vec<Message>,
+    
+    /// Pending response
+    pending_response: Option<String>,
+    
+    /// Max history tokens
+    max_history_tokens: usize,
+}
+
+impl Session for ClaudeDecisionSession {
+    fn send(&mut self, message: &str) -> Result<(), SessionError> {
+        // Add to history
+        self.history.push(Message::user(message));
+        
+        // Send to Claude
+        let response = self.client.send_with_history(&self.history)?;
+        
+        // Store pending response
+        self.pending_response = Some(response);
+        
+        Ok(())
+    }
+    
+    fn send_with_hint(&mut self, message: &str, model: &str) -> Result<(), SessionError> {
+        // Use specific model (sonnet for speed, opus for complexity)
+        self.client.set_model(model);
+        self.send(message)
+    }
+    
+    fn is_ready(&self) -> bool {
+        self.pending_response.is_some()
+    }
+    
+    fn receive(&mut self) -> Result<String, SessionError> {
+        self.pending_response.take()
+            .ok_or(SessionError {
+                kind: SessionErrorKind::UnexpectedFormat,
+                message: "no response available".into(),
+            })
+    }
+}
+```
+
+### 5.2 Decision Agent Slot Integration
+
+In `agent-daemon`, the Decision Agent slot runs behavior tree:
+
+```rust
+// In agent-daemon/src/decision_agent_slot.rs
+
+pub struct DecisionAgentSlot {
+    /// Behavior tree to execute
+    tree: Tree,
+    
+    /// Tree executor
+    executor: Executor,
+    
+    /// Decision session (Claude connection)
+    session: ClaudeDecisionSession,
+    
+    /// Blackboard (shared with Work Agent output)
+    blackboard: Blackboard,
+    
+    /// Clock for timeouts
+    clock: SystemClock,
+}
+
+impl DecisionAgentSlot {
+    /// Execute one decision cycle
+    pub fn tick(&mut self) -> Result<TickResult, DecisionError> {
+        let logger = NullLogger;
+        
+        // Sync Work Agent output to blackboard
+        self.sync_work_agent_output();
+        
+        // Execute behavior tree
+        let mut ctx = TickContext {
+            blackboard: &mut self.blackboard,
+            session: &mut self.session,
+            clock: &self.clock,
+            logger: &logger,
+        };
+        
+        let result = self.executor.tick(&mut self.tree, &mut ctx)?;
+        
+        // Drain commands and send to Work Agent
+        let commands = self.blackboard.drain_commands();
+        for cmd in commands {
+            self.send_to_work_agent(cmd)?;
+        }
+        
+        Ok(result)
+    }
+    
+    /// Sync Work Agent's latest output
+    fn sync_work_agent_output(&mut self) {
+        if let Some(output) = self.get_work_agent_output() {
+            self.blackboard.provider_output = output;
+        }
+        if let Some(changes) = self.get_work_agent_file_changes() {
+            self.blackboard.file_changes = changes;
+        }
+    }
+    
+    /// Send command to Work Agent controller
+    fn send_to_work_agent(&self, cmd: DecisionCommand) -> Result<(), DecisionError> {
+        match cmd {
+            DecisionCommand::Agent(AgentCommand::SendInstruction { prompt, target_agent }) => {
+                self.work_agent_controller.send_instruction(prompt, target_agent);
+            }
+            DecisionCommand::Agent(AgentCommand::WakeUp) => {
+                self.work_agent_controller.wake_up();
+            }
+            DecisionCommand::Agent(AgentCommand::Reflect { prompt }) => {
+                self.work_agent_controller.request_reflection(prompt);
+            }
+            DecisionCommand::Task(TaskCommand::ConfirmCompletion) => {
+                self.work_agent_controller.confirm_completion();
+            }
+            DecisionCommand::Human(HumanCommand::Escalate { reason, context }) => {
+                self.human_interface.escalate(reason, context);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+```
+
+### 5.3 Event Loop Integration
+
+The daemon's EventLoop triggers decision ticks:
+
+```rust
+// In agent-daemon/src/event_loop.rs
+
+fn handle_provider_event(&mut self, event: ProviderEvent) {
+    // Work Agent produced output
+    if let ProviderEvent::Output { content, .. } = event {
+        // Store in shared state
+        self.work_agent_output = content;
+        
+        // Trigger decision agent
+        if let Some(decision_slot) = &mut self.decision_agent_slot {
+            decision_slot.blackboard.provider_output = content.clone();
+            
+            // Tick behavior tree
+            let result = decision_slot.tick();
+            
+            // Process result
+            match result.status {
+                NodeStatus::Success => {
+                    // Decision cycle complete
+                    self.record_decision(result);
+                }
+                NodeStatus::Running => {
+                    // Waiting for AI response, poll later
+                    self.schedule_decision_poll();
+                }
+                NodeStatus::Failure => {
+                    // Decision failed, handle escalation
+                    self.handle_decision_failure(result);
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+## 6. Prompt Template Design
+
+### 6.1 Decision Prompt Template
+
+```yaml
+template: |
+  ## Context
+  
+  Task: {{ task_description }}
+  Sprint: {{ current_sprint }} / {{ total_sprints }}
+  
+  ## Work Agent Output
+  
+  {{ provider_output }}
+  
+  ## Recent Changes
+  
+  {% for change in file_changes %}
+  - {{ change.path }}: {{ change.change_type }}
+  {% endfor %}
+  
+  ## Previous Reflections
+  
+  {% if reflection_history %}
+  Earlier analysis: {{ reflection_history | last }}
+  {% endif %}
+  
+  ## Decision Required
+  
+  [Specific question to answer]
+  
+  ## Output Format
+  
+  {
+    "decision": "<option>",
+    "reasoning": "<brief explanation>",
+    "confidence": <0.0-1.0>,
+    "next_instruction": "<optional instruction for work agent>"
+  }
+```
+
+### 6.2 Context Injection Strategy
+
+| Context | When to Include |
+|---------|----------------|
+| `task_description` | Always |
+| `provider_output` | Always |
+| `file_changes` | When checking completion |
+| `reflection_history` | When retrying |
+| `decision_history` | When analyzing patterns |
+| `sprint_context` | In multi-sprint flows |
+
+### 6.3 JSON Schema for Structured Output
+
+```yaml
+parser:
+  kind: Json
+  payload:
+    schema:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [proceed, retry, escalate, reflect]
+        reasoning:
+          type: string
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        next_instruction:
+          type: string
+        missing_items:
+          type: array
+          items:
+            type: string
+      required: [decision, reasoning, confidence]
+```
+
+---
+
+## 7. Blackboard Extensions
+
+### 7.1 New Fields for Decision Flow
+
+```rust
+pub struct Blackboard {
+    // Existing fields...
+    
+    // Sprint tracking
+    pub current_sprint: u8,
+    pub total_sprints: u8,
+    pub sprint_goals: Vec<String>,
+    
+    // Reflection chain
+    pub reflection_chain: Vec<ReflectionEntry>,
+    
+    // Decision history
+    pub decision_chain: Vec<DecisionEntry>,
+    
+    // Outcome tracking
+    pub recent_outcomes: Vec<NodeOutcome>,
+    
+    // Work Agent ID (for SendInstruction)
+    pub work_agent_id: String,
+}
+
+pub struct ReflectionEntry {
+    pub sprint: u8,
+    pub result: String,  // proceed/retry/escalate
+    pub reasoning: String,
+    pub timestamp: Instant,
+}
+
+pub struct DecisionEntry {
+    pub node_name: String,
+    pub decision: String,
+    pub outcome: NodeStatus,
+}
+```
+
+### 7.2 Template Access
+
+Update `BlackboardExt::to_template_context`:
+
+```rust
+impl BlackboardExt for Blackboard {
+    fn to_template_context(&self) -> Value {
+        let mut ctx = HashMap::new();
+        
+        // Sprint context
+        ctx.insert("current_sprint", Value::from(self.current_sprint as i64));
+        ctx.insert("total_sprints", Value::from(self.total_sprints as i64));
+        ctx.insert("sprint_goal", Value::from(
+            self.sprint_goals.get(self.current_sprint as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("")
+        ));
+        
+        // Reflection chain
+        let reflections: Vec<Value> = self.reflection_chain.iter()
+            .map(|r| {
+                let mut map = HashMap::new();
+                map.insert("sprint", Value::from(r.sprint as i64));
+                map.insert("result", Value::from(r.result.as_str()));
+                map.insert("reasoning", Value::from(r.reasoning.as_str()));
+                Value::from(map)
+            })
+            .collect();
+        ctx.insert("reflection_chain", Value::from(reflections));
+        
+        // Work Agent ID
+        ctx.insert("work_agent_id", Value::from(self.work_agent_id.as_str()));
+        
+        // ... existing fields
+    }
+}
+```
+
+---
+
+## 8. Error Handling
+
+### 8.1 Prompt Timeout
+
+Behavior tree already handles timeout:
+
+```yaml
+- kind: Prompt
+  payload:
+    timeoutMs: 30000  # 30 second timeout
+```
+
+On timeout, PromptNode returns Failure, Selector routes to fallback.
+
+### 8.2 Parse Failure
+
+```yaml
+- kind: Sequence
+  children:
+    - kind: Prompt
+      payload:
+        parser:
+          kind: Json
+    - kind: Selector
+      children:
+        - Condition: "parsed_output.valid == true"
+        - ForceHuman:
+            reason: "AI response couldn't be parsed"
+```
+
+### 8.3 AI Uncertainty
+
+Prompt AI to output confidence:
+
+```yaml
+template: |
+  Output confidence level:
+  - 0.9+: Certain decision
+  - 0.7-0.9: Likely correct
+  - 0.5-0.7: Uncertain, use fallback
+  
+  Output: {"decision": "...", "confidence": <number>}
+```
+
+Selector routes based on confidence:
+
+```yaml
+- kind: Selector
+  children:
+    - Condition: "confidence >= 0.7"
+      then: proceed
+    - Action: use fallback rules
+```
+
+### 8.4 Retry with Strategy Adjustment
+
+```yaml
+- kind: Repeater
+  payload:
+    maxAttempts: 3
+    child:
+      kind: Sequence
+      children:
+        - kind: Prompt
+          payload:
+            name: analyze_failure
+            template: |
+              Previous attempt failed: {{ previous_output }}
+              
+              Why did it fail? What different approach should we try?
+              
+              Output:
+              {
+                "failure_reason": "...",
+                "alternative_strategy": "...",
+                "adjusted_instruction": "..."
+              }
+        - kind: Prompt
+          payload:
+            name: retry_with_strategy
+            template: |
+              Retry with adjusted approach.
+              
+              Strategy: {{ analyze_failure.alternative_strategy }}
+              Instruction: {{ analyze_failure.adjusted_instruction }}
+```
+
+---
+
+## 9. Conversation History Management
+
+### 9.1 Session-Level History
+
+`ClaudeDecisionSession` maintains conversation history:
+
+```rust
+pub struct ClaudeDecisionSession {
+    history: Vec<Message>,
+    max_history_tokens: usize,
+}
+
+impl ClaudeDecisionSession {
+    fn prune_history(&mut self) {
+        // When approaching token limit
+        while self.estimate_tokens() > self.max_history_tokens {
+            // Summarize oldest messages
+            let summary = self.summarize_old_messages();
+            self.history = vec![
+                Message::system(format!("Previous context: {}", summary)),
+                // Keep recent messages
+            ];
+            self.history.extend(self.recent_messages.drain(..));
+        }
+    }
+}
+```
+
+### 9.2 Decision-Level History
+
+Blackboard stores key decisions:
+
+```rust
+pub struct Blackboard {
+    pub decision_chain: Vec<DecisionEntry>,
+}
+```
+
+Template includes previous decisions:
+
+```yaml
+template: |
+  Previous decisions in this cycle:
+  {% for entry in decision_chain %}
+  - {{ entry.node_name }}: {{ entry.decision }} → {{ entry.outcome }}
+  {% endfor %}
+```
+
+---
+
+## 10. Implementation Roadmap
+
+### 10.1 Phase 1: Session Implementation (Week 1)
+
+1. Implement `ClaudeDecisionSession` in `agent-daemon`
+2. Connect to Claude API with conversation history
+3. Add timeout handling and retry logic
+4. Test with simple PromptNode scenarios
+
+### 10.2 Phase 2: Blackboard Extensions (Week 1)
+
+1. Add sprint tracking fields
+2. Add reflection/decision chain storage
+3. Update `BlackboardExt` for template access
+4. Test template rendering with new fields
+
+### 10.3 Phase 3: Decision Agent Slot (Week 2)
+
+1. Implement `DecisionAgentSlot` in `agent-daemon`
+2. Integrate behavior tree executor
+3. Connect Session to executor
+4. Implement command dispatch to Work Agent
+
+### 10.4 Phase 4: Event Loop Integration (Week 2)
+
+1. Trigger decision tick on Work Agent output
+2. Handle Running status (poll for AI response)
+3. Handle Success/Failure routing
+4. Add escalation path to human interface
+
+### 10.5 Phase 5: Flow Templates (Week 3)
+
+1. Create sprint-completion-flow tree template
+2. Create task-verification-flow template
+3. Create error-recovery-flow template
+4. Test full decision cycles
+
+### 10.6 Phase 6: Production Integration (Week 3)
+
+1. Deploy to main agent workflow
+2. Monitor decision quality metrics
+3. Adjust prompt templates based on results
+4. Add human override capabilities
+
+---
+
+## 11. Testing Strategy
+
+### 11.1 Unit Tests
+
+Test each component independently:
+
+```rust
+#[test]
+fn prompt_node_routes_based_on_ai_output() {
+    let mut bb = Blackboard::default();
+    let mut session = MockSession::with_reply(
+        r#"{"decision": "proceed", "confidence": 0.9}"#
+    );
+    
+    let mut tree = simple_tree(Node::Prompt(...));
+    let mut executor = Executor::new();
+    
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    
+    assert_eq!(result.status, NodeStatus::Success);
+    assert_eq!(bb.get("decision_output"), Some(&"proceed"));
+}
+
+#[test]
+fn selector_routes_to_retry_on_low_confidence() {
+    let mut bb = Blackboard::default();
+    bb.set("confidence", BlackboardValue::Float(0.5));
+    
+    let mut tree = selector_with_confidence_routing();
+    let result = executor.tick(&mut tree, &mut ctx).unwrap();
+    
+    // Should route to retry branch
+    assert!(result.commands.contains(&DecisionCommand::Agent(AgentCommand::SendInstruction { ... })));
+}
+```
+
+### 11.2 Integration Tests
+
+Test full decision flow with mock AI:
+
+```rust
+#[test]
+fn sprint_completion_flow_verifies_all_sprints() {
+    let mut session = MockDecisionSession::new();
+    session.set_responses([
+        "Sprint 1 complete",
+        r#"{"decision": "proceed", "confidence": 0.8}"#,
+        "Sprint 2 complete",
+        r#"{"decision": "proceed", "confidence": 0.85}"#,
+        // ... 4 sprints
+    ]);
+    
+    let mut slot = DecisionAgentSlot::new(sprint_completion_tree(), session);
+    
+    for _ in 0..8 {  // 4 sprints × 2 prompts each
+        slot.tick();
+    }
+    
+    // Verify all sprints processed
+    assert_eq!(slot.blackboard.current_sprint, 5);  // incremented past 4
+    assert!(slot.blackboard.commands.contains(&TaskCommand::ConfirmCompletion));
+}
+```
+
+---
+
+## 12. Summary
+
+This design enables:
+
+| Capability | Implementation |
+|------------|----------------|
+| AI judges completion | PromptNode asks AI, returns structured decision |
+| Structured reflection flow | Sequence of PromptNodes for multi-angle reflection |
+| Retry with learning | Repeater + failure analysis PromptNode |
+| Sprint verification | Behavior tree defines 4-sprint flow with checks |
+| Command output | ActionNode sends AI-decided instruction to Work Agent |
+| Human escalation | ForceHuman for unrecoverable cases |
+
+**Key architectural decisions**:
+
+1. Behavior tree is process skeleton, not execution engine
+2. PromptNode is the AI decision point
+3. Selector routes based on AI's structured JSON output
+4. Blackboard stores AI outputs for chain reasoning
+5. ActionNode outputs DecisionCommand to Work Agent
+6. Session maintains conversation history for context
+
+This transforms behavior trees from static rule systems into AI-driven decision flows, enabling autonomous verification, reflection, and retry without human intervention.
