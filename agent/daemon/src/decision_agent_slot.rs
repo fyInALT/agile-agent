@@ -147,6 +147,11 @@ impl DecisionAgentSlot {
         self.blackboard.agent_id = agent_id.into();
     }
 
+    /// Check if the session has a response ready.
+    pub fn is_session_ready(&self) -> bool {
+        self.session.is_ready()
+    }
+
     /// Sync Work Agent output to Blackboard.
     pub fn sync_work_agent_output(&mut self, output: impl Into<String>) {
         self.blackboard.provider_output = output.into();
