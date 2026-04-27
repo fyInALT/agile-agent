@@ -297,12 +297,82 @@ impl DecisionIntegration {
                 "Dispatching decision command"
             );
 
-            // In a real implementation, these would be routed to:
-            // - Work Agent controller for AgentCommands
-            // - Human interface for HumanCommands
-            // - Task manager for TaskCommands
+            // Interpret each command
+            match &cmd {
+                DecisionCommand::Agent(AgentCommand::SendInstruction { prompt, target_agent }) => {
+                    tracing::debug!(
+                        target = %target_agent,
+                        prompt_len = prompt.len(),
+                        "SendInstruction queued"
+                    );
+                }
+                DecisionCommand::Agent(AgentCommand::WakeUp) => {
+                    tracing::debug!("WakeUp command queued");
+                }
+                DecisionCommand::Agent(AgentCommand::Reflect { prompt }) => {
+                    tracing::debug!(
+                        prompt_len = prompt.len(),
+                        "Reflect command queued"
+                    );
+                }
+                DecisionCommand::Agent(AgentCommand::Terminate { reason }) => {
+                    tracing::debug!(
+                        reason = %reason,
+                        "Terminate command queued"
+                    );
+                }
+                DecisionCommand::Agent(AgentCommand::ApproveAndContinue) => {
+                    tracing::debug!("ApproveAndContinue command queued");
+                }
+                DecisionCommand::Task(TaskCommand::ConfirmCompletion) => {
+                    tracing::info!("ConfirmCompletion - task verified complete");
+                }
+                DecisionCommand::Task(TaskCommand::StopIfComplete { reason }) => {
+                    tracing::info!(
+                        reason = %reason,
+                        "StopIfComplete"
+                    );
+                }
+                DecisionCommand::Task(TaskCommand::PrepareStart { task_id, description }) => {
+                    tracing::debug!(
+                        task_id = %task_id,
+                        "PrepareStart queued"
+                    );
+                }
+                DecisionCommand::Human(HumanCommand::Escalate { reason, context }) => {
+                    tracing::warn!(
+                        reason = %reason,
+                        context = ?context,
+                        "Human escalation required"
+                    );
+                    // Broadcast escalation event
+                    let _ = self.event_tx.send(Event {
+                        seq: 0,
+                        payload: agent_protocol::events::EventPayload::Error(
+                            agent_protocol::events::ErrorData {
+                                message: reason.clone(),
+                                source: Some(state.work_agent_id.clone()),
+                            }
+                        ),
+                    });
+                }
+                DecisionCommand::Human(HumanCommand::SelectOption { option_id }) => {
+                    tracing::debug!(
+                        option_id = %option_id,
+                        "SelectOption queued"
+                    );
+                }
+                DecisionCommand::Human(HumanCommand::SkipDecision) => {
+                    tracing::debug!("SkipDecision");
+                }
+                DecisionCommand::Git(_, _) => {
+                    tracing::debug!("Git command queued");
+                }
+                DecisionCommand::Provider(_) => {
+                    tracing::debug!("Provider command queued");
+                }
+            }
 
-            // For now, store as pending for the interpreter
             state.pending_commands.push(cmd);
         }
 

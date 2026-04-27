@@ -69,7 +69,7 @@ impl BlackboardExt for Blackboard {
     fn to_template_context(&self) -> Value {
         let mut ctx = HashMap::new();
 
-        // Built-in fields
+        // --- Work Agent context ---
         ctx.insert(
             "task_description".into(),
             Value::from(self.task_description.as_str()),
@@ -81,24 +81,6 @@ impl BlackboardExt for Blackboard {
         ctx.insert(
             "context_summary".into(),
             Value::from(self.context_summary.as_str()),
-        );
-        ctx.insert("reflection_round".into(), Value::from(self.reflection_round as i64));
-        ctx.insert(
-            "max_reflection_rounds".into(),
-            Value::from(self.max_reflection_rounds as i64),
-        );
-        ctx.insert(
-            "confidence_accumulator".into(),
-            Value::from(self.confidence_accumulator),
-        );
-        ctx.insert("agent_id".into(), Value::from(self.agent_id.as_str()));
-        ctx.insert(
-            "current_task_id".into(),
-            Value::from(self.current_task_id.as_str()),
-        );
-        ctx.insert(
-            "current_story_id".into(),
-            Value::from(self.current_story_id.as_str()),
         );
 
         // last_tool_call as nested object
@@ -125,14 +107,89 @@ impl BlackboardExt for Blackboard {
             .collect();
         ctx.insert("file_changes".into(), Value::from(file_changes));
 
-        // llm_responses as map
+        // --- Reflection tracking ---
+        ctx.insert("reflection_round".into(), Value::from(self.reflection_round as i64));
+        ctx.insert(
+            "max_reflection_rounds".into(),
+            Value::from(self.max_reflection_rounds as i64),
+        );
+        ctx.insert(
+            "confidence_accumulator".into(),
+            Value::from(self.confidence_accumulator),
+        );
+
+        // --- Agent identification ---
+        ctx.insert("agent_id".into(), Value::from(self.agent_id.as_str()));
+        ctx.insert("work_agent_id".into(), Value::from(self.work_agent_id.as_str()));
+        ctx.insert(
+            "current_task_id".into(),
+            Value::from(self.current_task_id.as_str()),
+        );
+        ctx.insert(
+            "current_story_id".into(),
+            Value::from(self.current_story_id.as_str()),
+        );
+
+        // --- Sprint tracking ---
+        ctx.insert("current_sprint".into(), Value::from(self.current_sprint as i64));
+        ctx.insert("total_sprints".into(), Value::from(self.total_sprints as i64));
+
+        // Current sprint goal
+        let sprint_goal = self.current_sprint_goal()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        ctx.insert("sprint_goal".into(), Value::from(sprint_goal.as_str()));
+
+        // Sprint goals list
+        let sprint_goals: Vec<Value> = self
+            .sprint_goals
+            .iter()
+            .map(|sg| {
+                let mut map: HashMap<&str, Value> = HashMap::new();
+                map.insert("sprint_number", Value::from(sg.sprint_number as i64));
+                map.insert("description", Value::from(sg.description.as_str()));
+                Value::from(map)
+            })
+            .collect();
+        ctx.insert("sprint_goals".into(), Value::from(sprint_goals));
+
+        // --- Decision flow tracking ---
+        // Reflection chain
+        let reflection_chain: Vec<Value> = self
+            .reflection_chain
+            .iter()
+            .map(|r| {
+                let mut map: HashMap<&str, Value> = HashMap::new();
+                map.insert("sprint", Value::from(r.sprint as i64));
+                map.insert("result", Value::from(r.result.as_str()));
+                map.insert("reasoning", Value::from(r.reasoning.as_str()));
+                Value::from(map)
+            })
+            .collect();
+        ctx.insert("reflection_chain".into(), Value::from(reflection_chain));
+
+        // Decision chain
+        let decision_chain: Vec<Value> = self
+            .decision_chain
+            .iter()
+            .map(|d| {
+                let mut map: HashMap<&str, Value> = HashMap::new();
+                map.insert("node_name", Value::from(d.node_name.as_str()));
+                map.insert("decision", Value::from(d.decision.as_str()));
+                map.insert("outcome", Value::from(d.outcome.as_str()));
+                Value::from(map)
+            })
+            .collect();
+        ctx.insert("decision_chain".into(), Value::from(decision_chain));
+
+        // --- LLM responses ---
         let mut llm_map = HashMap::new();
         for (k, v) in &self.llm_responses {
             llm_map.insert(k.clone(), Value::from(v.as_str()));
         }
         ctx.insert("llm_responses".into(), Value::from(llm_map));
 
-        // Scoped variables
+        // --- Scoped variables ---
         for (k, v) in self.iter_variables() {
             ctx.insert(k.clone(), blackboard_value_to_minijinja(v));
         }
@@ -307,5 +364,99 @@ pub fn render_command_templates(
                 draft: *draft,
             })),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ext::blackboard::{SprintGoal, ReflectionEntry, DecisionEntry};
+
+    #[test]
+    fn template_context_includes_sprint_fields() {
+        let mut bb = Blackboard::new();
+        bb.current_sprint = 2;
+        bb.total_sprints = 4;
+        bb.sprint_goals = vec![
+            SprintGoal::new(1, "first goal"),
+            SprintGoal::new(2, "second goal"),
+        ];
+
+        let ctx = bb.to_template_context();
+
+        // Check sprint fields are accessible
+        let rendered = render_prompt_template(
+            "Sprint {{ current_sprint }} of {{ total_sprints }}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered, "Sprint 2 of 4");
+
+        let rendered_goal = render_prompt_template(
+            "Goal: {{ sprint_goal }}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered_goal, "Goal: second goal");
+    }
+
+    #[test]
+    fn template_context_includes_work_agent_id() {
+        let mut bb = Blackboard::new();
+        bb.work_agent_id = "agent-123".to_string();
+
+        let ctx = bb.to_template_context();
+
+        let rendered = render_prompt_template(
+            "Target: {{ work_agent_id }}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered, "Target: agent-123");
+    }
+
+    #[test]
+    fn template_context_includes_reflection_chain() {
+        let mut bb = Blackboard::new();
+        bb.push_reflection(ReflectionEntry::new(1, "proceed", "done"));
+        bb.push_reflection(ReflectionEntry::new(2, "retry", "incomplete"));
+
+        let ctx = bb.to_template_context();
+
+        // Access reflection chain
+        let rendered = render_prompt_template(
+            "{% for r in reflection_chain %}{{ r.sprint }}: {{ r.result }}{% endfor %}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered, "1: proceed2: retry");
+    }
+
+    #[test]
+    fn template_context_includes_decision_chain() {
+        let mut bb = Blackboard::new();
+        bb.push_decision(DecisionEntry::new("node1", "proceed", "success"));
+        bb.push_decision(DecisionEntry::new("node2", "retry", "running"));
+
+        let ctx = bb.to_template_context();
+
+        let rendered = render_prompt_template(
+            "{% for d in decision_chain %}{{ d.node_name }}={{ d.decision }}{% endfor %}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered, "node1=proceednode2=retry");
+    }
+
+    #[test]
+    fn template_context_includes_sprint_goals_list() {
+        let mut bb = Blackboard::new();
+        bb.sprint_goals = vec![
+            SprintGoal::new(1, "auth"),
+            SprintGoal::new(2, "tests"),
+        ];
+
+        let ctx = bb.to_template_context();
+
+        let rendered = render_prompt_template(
+            "{% for sg in sprint_goals %}{{ sg.sprint_number }}: {{ sg.description }}{% endfor %}",
+            &ctx,
+        ).unwrap();
+        assert_eq!(rendered, "1: auth2: tests");
     }
 }
