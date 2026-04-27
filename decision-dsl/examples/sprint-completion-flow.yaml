@@ -1,0 +1,279 @@
+# Sprint Completion Flow
+#
+# A behavior tree that guides AI through sprint completion verification.
+# Ensures all sprints are genuinely completed before marking task done.
+#
+# Flow:
+# 1. Initialize sprint counter
+# 2. Loop through sprints with AI execution and reflection
+# 3. Multi-angle verification after all sprints
+# 4. Final confirmation or escalation
+
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: sprint-completion-flow
+  description: Verify sprint completion with AI-driven reflection
+spec:
+  root:
+    kind: Sequence
+    payload:
+      name: complete_all_sprints
+      children:
+        # Step 1: Initialize sprint tracking
+        - kind: SetVar
+          payload:
+            name: init_sprint_counter
+            key: sprint_index
+            value: 1
+
+        # Step 2: Main sprint loop
+        - kind: Repeater
+          payload:
+            name: sprint_loop
+            maxAttempts: "{{ total_sprints }}"
+            child:
+              kind: Sequence
+              payload:
+                name: sprint_cycle
+                children:
+                  # 2.1: Execute sprint (AI judges completion)
+                  - kind: Prompt
+                    payload:
+                      name: execute_sprint
+                      model: claude-sonnet-4.6
+                      template: |
+                        ## Sprint {{ sprint_index }} of {{ total_sprints }}
+
+                        Task: {{ task_description }}
+                        Current Goal: {{ sprint_goal }}
+
+                        Work Agent Output:
+                        {{ provider_output }}
+
+                        Recent Changes:
+                        {% for change in file_changes %}
+                        - {{ change.path }}: {{ change.change_type }}
+                        {% endfor %}
+
+                        ## Decision Required
+
+                        Has this sprint been genuinely completed?
+
+                        Output JSON:
+                        {
+                          "completed": boolean,
+                          "missing_items": ["item1", ...],
+                          "action": "proceed|retry|escalate",
+                          "reasoning": "brief explanation",
+                          "confidence": 0.0-1.0
+                        }
+                      parser:
+                        kind: Json
+                        payload:
+                          schema:
+                            type: object
+                            properties:
+                              completed:
+                                type: boolean
+                              missing_items:
+                                type: array
+                                items:
+                                  type: string
+                              action:
+                                type: string
+                                enum: [proceed, retry, escalate]
+                              reasoning:
+                                type: string
+                              confidence:
+                                type: number
+                                minimum: 0.0
+                                maximum: 1.0
+                            required: [completed, action, reasoning]
+                      sets:
+                        - key: sprint_result
+                          field: action
+                        - key: sprint_reasoning
+                          field: reasoning
+                        - key: sprint_confidence
+                          field: confidence
+                        - key: sprint_missing
+                          field: missing_items
+                      timeoutMs: 30000
+
+                  # 2.2: Route based on sprint result
+                  - kind: Selector
+                    payload:
+                      name: route_sprint_result
+                      children:
+                        # Proceed if completed
+                        - kind: Sequence
+                          payload:
+                            name: proceed_on_completion
+                            children:
+                              - kind: Condition
+                                payload:
+                                  name: check_proceed
+                                  evaluator:
+                                    kind: VariableIs
+                                    payload:
+                                      key: sprint_result
+                                      expected: "proceed"
+                              - kind: SetVar
+                                payload:
+                                  name: increment_sprint
+                                  key: sprint_index
+                                  value: "{{ sprint_index + 1 }}"
+
+                        # Retry with adjusted instruction
+                        - kind: Sequence
+                          payload:
+                            name: retry_incomplete_sprint
+                            children:
+                              - kind: Condition
+                                payload:
+                                  name: check_retry
+                                  evaluator:
+                                    kind: VariableIs
+                                    payload:
+                                      key: sprint_result
+                                      expected: "retry"
+                              - kind: Action
+                                payload:
+                                  name: send_retry_instruction
+                                  command:
+                                    kind: Agent
+                                    payload:
+                                      kind: SendInstruction
+                                      payload:
+                                        prompt: |
+                                          Sprint {{ sprint_index }} incomplete.
+                                          Missing items: {{ sprint_missing }}
+                                          Reason: {{ sprint_reasoning }}
+
+                                          Continue with adjusted approach.
+                                        target_agent: "{{ work_agent_id }}"
+                              # Don't increment sprint_index, will retry
+
+                        # Escalate if stuck
+                        - kind: Sequence
+                          payload:
+                            name: escalate_stuck_sprint
+                            children:
+                              - kind: Condition
+                                payload:
+                                  name: check_escalate
+                                  evaluator:
+                                    kind: VariableIs
+                                    payload:
+                                      key: sprint_result
+                                      expected: "escalate"
+                              - kind: ForceHuman
+                                payload:
+                                  name: request_human_help
+                                  reason: "Sprint {{ sprint_index }} stuck: {{ sprint_reasoning }}"
+
+        # Step 3: Multi-angle verification
+        - kind: Sequence
+          payload:
+            name: verification_phase
+            children:
+              # Implementation angle
+              - kind: Prompt
+                payload:
+                  name: verify_implementation
+                  model: claude-sonnet-4.6
+                  template: |
+                    ## Post-Sprint Verification
+
+                    All {{ total_sprints }} sprints reported complete.
+
+                    Verify from implementation perspective:
+                    - Are all requirements addressed?
+                    - Is there any technical debt?
+                    - Are edge cases handled?
+
+                    Output:
+                    {
+                      "verified": boolean,
+                      "issues": ["issue1", ...],
+                      "confidence": 0.0-1.0
+                    }
+                  parser:
+                    kind: Json
+                  sets:
+                    - key: impl_verified
+                      field: verified
+                    - key: impl_issues
+                      field: issues
+
+              # Testing angle
+              - kind: Prompt
+                payload:
+                  name: verify_testing
+                  model: claude-sonnet-4.6
+                  template: |
+                    ## Testing Verification
+
+                    Verify from testing perspective:
+                    - Are all tests passing?
+                    - Is coverage adequate?
+                    - Any integration issues?
+
+                    Output:
+                    {
+                      "verified": boolean,
+                      "issues": ["issue1", ...],
+                      "confidence": 0.0-1.0
+                    }
+                  parser:
+                    kind: Json
+                  sets:
+                    - key: test_verified
+                      field: verified
+                    - key: test_issues
+                      field: issues
+
+              # Check if both angles pass
+              - kind: Selector
+                payload:
+                  name: verification_result
+                  children:
+                    - kind: Sequence
+                      payload:
+                        name: both_verified
+                        children:
+                          - kind: Condition
+                            payload:
+                              name: impl_pass
+                              evaluator:
+                                kind: VariableIs
+                                payload:
+                                  key: impl_verified
+                                  expected: true
+                          - kind: Condition
+                            payload:
+                              name: test_pass
+                              evaluator:
+                                kind: VariableIs
+                                payload:
+                                  key: test_verified
+                                  expected: true
+                          - kind: Action
+                            payload:
+                              name: confirm_completion
+                              command:
+                                kind: Task
+                                payload:
+                                  kind: ConfirmCompletion
+
+                    - kind: Action
+                      payload:
+                        name: request_review
+                        command:
+                          kind: Human
+                          payload:
+                            kind: EscalateToHuman
+                            payload:
+                              reason: "Verification issues found"
+                              context: "Impl: {{ impl_issues }}\nTest: {{ test_issues }}"

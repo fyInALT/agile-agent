@@ -1,0 +1,312 @@
+# Task Verification Flow
+#
+# A behavior tree that verifies task completion before finalizing.
+# AI judges completion from multiple angles and ensures quality.
+#
+# Flow:
+# 1. Check if Work Agent reports completion
+# 2. Verify from requirements perspective
+# 3. Verify from implementation perspective
+# 4. Verify from testing perspective
+# 5. Final decision: confirm or request review
+
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: task-verification-flow
+  description: Verify task completion with multi-angle AI review
+spec:
+  root:
+    kind: Sequence
+    payload:
+      name: verification_sequence
+      children:
+        # Initial completion check
+        - kind: Prompt
+          payload:
+            name: check_initial_completion
+            model: claude-sonnet-4.6
+            template: |
+              ## Task Completion Check
+
+              Task: {{ task_description }}
+
+              Work Agent output:
+              {{ provider_output }}
+
+              Changes made:
+              {% for change in file_changes %}
+              - {{ change.path }}: {{ change.change_type }}
+              {% endfor %}
+
+              Does the Work Agent report completion?
+
+              Output:
+              {
+                "reported_complete": boolean,
+                "visible_output": "string summary",
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: reported_complete
+                field: reported_complete
+              - key: initial_confidence
+                field: confidence
+            timeoutMs: 15000
+
+        # Route: if not reported complete, wait or investigate
+        - kind: Selector
+          payload:
+            name: route_initial_status
+            children:
+              # Continue if reported complete
+              - kind: Condition
+                payload:
+                  name: check_reported_complete
+                  evaluator:
+                    kind: VariableIs
+                    payload:
+                      key: reported_complete
+                      expected: true
+
+              # Wake up agent if stalled
+              - kind: Sequence
+                payload:
+                  name: wake_if_stalled
+                  children:
+                    - kind: Action
+                      payload:
+                        name: send_wakeup
+                        command:
+                          kind: Agent
+                          payload:
+                            kind: WakeUp
+                    - kind: ForceHuman
+                      payload:
+                        name: investigate_stall
+                        reason: "Work Agent not reporting completion"
+
+        # Requirements verification
+        - kind: Prompt
+          payload:
+            name: verify_requirements
+            model: claude-sonnet-4.6
+            template: |
+              ## Requirements Verification
+
+              Task: {{ task_description }}
+
+              Verify that all requirements are addressed:
+
+              1. List the original requirements
+              2. Check if each is implemented
+              3. Identify any gaps
+
+              Output:
+              {
+                "requirements_met": boolean,
+                "met_requirements": ["req1", ...],
+                "unmet_requirements": ["req2", ...],
+                "gap_analysis": "string",
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: req_met
+                field: requirements_met
+              - key: req_unmet
+                field: unmet_requirements
+              - key: req_gap
+                field: gap_analysis
+            timeoutMs: 20000
+
+        # Implementation verification
+        - kind: Prompt
+          payload:
+            name: verify_implementation
+            model: claude-sonnet-4.6
+            template: |
+              ## Implementation Verification
+
+              Files changed:
+              {% for change in file_changes %}
+              - {{ change.path }}: {{ change.change_type }}
+              {% endfor %}
+
+              Verify implementation quality:
+
+              1. Are changes complete and correct?
+              2. Is there technical debt?
+              3. Are edge cases handled?
+              4. Is error handling adequate?
+
+              Output:
+              {
+                "implementation_quality": "high|medium|low",
+                "issues": ["issue1", ...],
+                "technical_debt": ["debt1", ...],
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: impl_quality
+                field: implementation_quality
+              - key: impl_issues
+                field: issues
+              - key: impl_debt
+                field: technical_debt
+            timeoutMs: 20000
+
+        # Testing verification
+        - kind: Prompt
+          payload:
+            name: verify_testing
+            model: claude-sonnet-4.6
+            template: |
+              ## Testing Verification
+
+              Task: {{ task_description }}
+
+              Verify testing coverage:
+
+              1. Are new tests added?
+              2. Do existing tests pass?
+              3. Is coverage adequate?
+              4. Are edge cases tested?
+
+              Output:
+              {
+                "tests_added": boolean,
+                "tests_passing": boolean,
+                "coverage_level": "adequate|needs_improvement|missing",
+                "missing_test_cases": ["case1", ...],
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: test_added
+                field: tests_added
+              - key: test_passing
+                field: tests_passing
+              - key: test_missing
+                field: missing_test_cases
+            timeoutMs: 20000
+
+        # Final decision
+        - kind: Prompt
+          payload:
+            name: final_decision
+            model: claude-sonnet-4.6
+            template: |
+              ## Final Verification Decision
+
+              Summary:
+              - Requirements: {{ req_met }} (gaps: {{ req_gap }})
+              - Implementation: {{ impl_quality }} (issues: {{ impl_issues }})
+              - Testing: added={{ test_added }} passing={{ test_passing }} (missing: {{ test_missing }})
+
+              Make final decision:
+
+              Output:
+              {
+                "final_decision": "confirm|request_review|continue_work",
+                "remaining_tasks": ["task1", ...],
+                "reasoning": "string",
+                "confidence": 0.0-1.0
+              }
+            parser:
+              kind: Json
+            sets:
+              - key: final_decision
+                field: final_decision
+              - key: remaining_tasks
+                field: remaining_tasks
+            timeoutMs: 15000
+
+        # Execute final decision
+        - kind: Selector
+          payload:
+            name: execute_final_decision
+            children:
+              # Confirm completion
+              - kind: Sequence
+                payload:
+                  name: confirm_and_complete
+                  children:
+                    - kind: Condition
+                      payload:
+                        name: check_confirm
+                        evaluator:
+                          kind: VariableIs
+                          payload:
+                            key: final_decision
+                            expected: "confirm"
+                    - kind: Action
+                      payload:
+                        name: finalize_task
+                        command:
+                          kind: Task
+                          payload:
+                            kind: ConfirmCompletion
+
+              # Request human review
+              - kind: Sequence
+                payload:
+                  name: request_review
+                  children:
+                    - kind: Condition
+                      payload:
+                        name: check_review
+                        evaluator:
+                          kind: VariableIs
+                          payload:
+                            key: final_decision
+                            expected: "request_review"
+                    - kind: Action
+                      payload:
+                        name: escalate_for_review
+                        command:
+                          kind: Human
+                          payload:
+                            kind: EscalateToHuman
+                            payload:
+                              reason: "Task needs human review"
+                              context: |
+                                Implementation: {{ impl_quality }}
+                                Issues: {{ impl_issues }}
+                                Technical debt: {{ impl_debt }}
+                                Missing tests: {{ test_missing }}
+
+              # Continue work
+              - kind: Sequence
+                payload:
+                  name: continue_work
+                  children:
+                    - kind: Condition
+                      payload:
+                        name: check_continue
+                        evaluator:
+                          kind: VariableIs
+                          payload:
+                            key: final_decision
+                            expected: "continue_work"
+                    - kind: Action
+                      payload:
+                        name: send_continue_instruction
+                        command:
+                          kind: Agent
+                          payload:
+                            kind: SendInstruction
+                            payload:
+                              prompt: |
+                                Task not yet complete.
+
+                                Remaining tasks: {{ remaining_tasks }}
+
+                                Continue work.
+                              target_agent: "{{ work_agent_id }}"

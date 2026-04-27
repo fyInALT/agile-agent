@@ -1,0 +1,210 @@
+# Error Recovery Flow
+#
+# A behavior tree that handles errors with AI-driven strategy adjustment.
+# Analyzes failure, proposes alternative approaches, and retries.
+#
+# Flow:
+# 1. Analyze failure cause
+# 2. Propose alternative strategy
+# 3. Retry with adjusted approach
+# 4. Escalate if max retries exhausted
+
+apiVersion: decision.agile-agent.io/v1
+kind: BehaviorTree
+metadata:
+  name: error-recovery-flow
+  description: Handle errors with AI-driven strategy adjustment
+spec:
+  root:
+    kind: Sequence
+    payload:
+      name: recovery_sequence
+      children:
+        # Initialize retry counter
+        - kind: SetVar
+          payload:
+            name: init_retry_counter
+            key: retry_count
+            value: 0
+
+        # Main recovery loop
+        - kind: Repeater
+          payload:
+            name: retry_loop
+            maxAttempts: 3
+            child:
+              kind: Sequence
+              payload:
+                name: recovery_cycle
+                children:
+                  # Analyze what failed
+                  - kind: Prompt
+                    payload:
+                      name: analyze_failure
+                      model: claude-sonnet-4.6
+                      template: |
+                        ## Error Analysis
+
+                        Previous attempt failed:
+                        {{ provider_output }}
+
+                        Task: {{ task_description }}
+
+                        ## Analysis Required
+
+                        1. What specifically failed?
+                        2. Why did it fail?
+                        3. What approach was used?
+                        4. What could work better?
+
+                        Output:
+                        {
+                          "failure_type": "tool_error|logic_error|timeout|resource_error",
+                          "root_cause": "string",
+                          "previous_strategy": "string",
+                          "alternative_strategy": "string",
+                          "adjusted_instruction": "string for Work Agent",
+                          "confidence": 0.0-1.0
+                        }
+                      parser:
+                        kind: Json
+                      sets:
+                        - key: failure_type
+                          field: failure_type
+                        - key: root_cause
+                          field: root_cause
+                        - key: alt_strategy
+                          field: alternative_strategy
+                        - key: adjusted_instruction
+                          field: adjusted_instruction
+                      timeoutMs: 20000
+
+                  # Increment retry count
+                  - kind: SetVar
+                    payload:
+                      name: increment_retry
+                      key: retry_count
+                      value: "{{ retry_count + 1 }}"
+
+                  # Send adjusted instruction to Work Agent
+                  - kind: Action
+                    payload:
+                      name: send_adjusted_instruction
+                      command:
+                        kind: Agent
+                        payload:
+                          kind: SendInstruction
+                          payload:
+                            prompt: |
+                              Previous approach failed.
+
+                              Root cause: {{ root_cause }}
+                              Alternative strategy: {{ alt_strategy }}
+
+                              New instruction: {{ adjusted_instruction }}
+                            target_agent: "{{ work_agent_id }}"
+
+                  # Wait for Work Agent response
+                  - kind: Prompt
+                    payload:
+                      name: check_retry_result
+                      model: claude-sonnet-4.6
+                      template: |
+                        ## Retry Result Check
+
+                        Retry #{{ retry_count }} of 3
+
+                        Work Agent response:
+                        {{ provider_output }}
+
+                        Did the alternative approach work?
+
+                        Output:
+                        {
+                          "success": boolean,
+                          "remaining_issues": ["issue1", ...],
+                          "needs_different_approach": boolean,
+                          "reasoning": "string"
+                        }
+                      parser:
+                        kind: Json
+                      sets:
+                        - key: retry_success
+                          field: success
+                        - key: needs_different_approach
+                          field: needs_different_approach
+                      timeoutMs: 20000
+
+                  # Route based on retry result
+                  - kind: Selector
+                    payload:
+                      name: route_retry_result
+                      children:
+                        # Success - exit retry loop
+                        - kind: Condition
+                          payload:
+                            name: check_retry_success
+                            evaluator:
+                              kind: VariableIs
+                              payload:
+                                key: retry_success
+                                expected: true
+
+                        # Need different approach - continue loop
+                        - kind: Sequence
+                          payload:
+                            name: try_different_approach
+                            children:
+                              - kind: Condition
+                                payload:
+                                  name: check_needs_different
+                                  evaluator:
+                                    kind: VariableIs
+                                    payload:
+                                      key: needs_different_approach
+                                      expected: true
+                              # Loop continues with new analysis
+
+                        # Default: assume failure, continue loop
+                        - kind: Noop
+
+        # After retry loop: check if we succeeded or need escalation
+        - kind: Selector
+          payload:
+            name: final_status
+            children:
+              # Success
+              - kind: Sequence
+                payload:
+                  name: recovery_succeeded
+                  children:
+                    - kind: Condition
+                      payload:
+                        name: check_success
+                        evaluator:
+                          kind: VariableIs
+                          payload:
+                            key: retry_success
+                            expected: true
+                    - kind: Action
+                      payload:
+                        name: report_recovery
+                        command:
+                          kind: Task
+                          payload:
+                            kind: ConfirmCompletion
+
+              # Max retries exhausted - escalate
+              - kind: Action
+                payload:
+                  name: escalate_failure
+                  command:
+                    kind: Human
+                    payload:
+                      kind: EscalateToHuman
+                      payload:
+                        reason: "Error recovery failed after 3 retries"
+                        context: |
+                          Root cause: {{ root_cause }}
+                          Strategies tried: {{ retry_count }}
+                          Last work output: {{ provider_output }}
